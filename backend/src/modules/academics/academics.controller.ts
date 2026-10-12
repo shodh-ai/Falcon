@@ -8,6 +8,7 @@ import {
   ParseIntPipe,
   Patch,
   Post,
+  Put,
   Query,
   Req,
   Res,
@@ -179,12 +180,14 @@ export class AcademicsController {
   async getFacultyAcademicTimetableToday(
     @Req() req: { user: AuthUser },
     @Query('deptId') deptIdRaw?: string,
+    @Query('date') date?: string,
   ) {
     const deptId = await this.resolveFacultyDeptId(req, deptIdRaw);
     return this.facultyAcademics.getFacultyAcademicTimetableToday(
       req.user.user_id,
       this.resolveTenantId(req.user),
       deptId,
+      date,
     );
   }
 
@@ -207,6 +210,7 @@ export class AcademicsController {
   getFacultyCourseStudents(
     @Param('courseId') courseId: string,
     @Query('timetableId') timetableId: string | undefined,
+    @Query('date') date: string | undefined,
     @Req() req: { user: AuthUser },
   ) {
     return this.facultyAcademics.getCourseStudents(
@@ -214,6 +218,49 @@ export class AcademicsController {
       req.user.user_id,
       this.resolveTenantId(req.user),
       timetableId,
+      date,
+    );
+  }
+
+  @Get('faculty/practical-batches')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  async listFacultyPracticalBatches(
+    @Req() req: { user: AuthUser },
+    @Query('deptId') deptIdRaw?: string,
+  ) {
+    const deptId = await this.resolveFacultyDeptId(req, deptIdRaw);
+    return this.facultyAcademics.listFacultyPracticalBatches(
+      req.user.user_id, this.resolveTenantId(req.user), deptId,
+    );
+  }
+
+  @Get('faculty/course/:courseId/practical-batch')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  getFacultyPracticalBatch(
+    @Param('courseId') courseId: string,
+    @Query('timetableId') timetableId: string,
+    @Req() req: { user: AuthUser },
+  ) {
+    if (!timetableId) throw new BadRequestException('timetableId is required');
+    return this.facultyAcademics.getPracticalBatch(
+      courseId, timetableId, req.user.user_id, this.resolveTenantId(req.user),
+    );
+  }
+
+  @Put('faculty/course/:courseId/practical-batch')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  saveFacultyPracticalBatch(
+    @Param('courseId') courseId: string,
+    @Query('timetableId') timetableId: string,
+    @Headers('if-match') ifMatch: string | undefined,
+    @Req() req: { user: AuthUser },
+    @Body() body: { student_ids?: string[] },
+  ) {
+    if (!timetableId) throw new BadRequestException('timetableId is required');
+    if (!ifMatch || !/^\d+$/.test(ifMatch)) throw new BadRequestException('If-Match batch revision is required');
+    return this.facultyAcademics.savePracticalBatch(
+      courseId, timetableId, req.user.user_id, this.resolveTenantId(req.user),
+      Number(ifMatch), body?.student_ids as string[],
     );
   }
 

@@ -26,9 +26,23 @@ function programsMatch(allocationProgram, studentProgram) {
   const prog = normalizeProgram(studentProgram);
   if (!prog || !alloc) return true;
   if (prog === alloc) return true;
+  // Keep this in step with allocation-semester.util.ts. A generic PHARM
+  // substring match enrolls B.Pharm, D.Pharm and M.Pharm students in one
+  // another's courses (and therefore exposes them on the wrong faculty roster).
+  const pharmacyProgram = (value) => {
+    const canonical = value.replace(/[^A-Z0-9]/g, '');
+    if (canonical === 'BPHARM' || canonical.startsWith('BPHARMLATERAL')) return 'BPHARM';
+    if (canonical === 'DPHARM' || canonical.startsWith('DPHARMREGULAR')) return 'DPHARM';
+    if (canonical.startsWith('MPHARMPHARMACEUTICS')) return 'MPHARMPHARMACEUTICS';
+    return null;
+  };
+  const allocPharmacy = pharmacyProgram(alloc);
+  const progPharmacy = pharmacyProgram(prog);
+  if (allocPharmacy || progPharmacy) {
+    return allocPharmacy != null && allocPharmacy === progPharmacy;
+  }
   if (alloc.includes('ME') && (prog.includes('MECHANICAL') || prog.includes('MECH'))) return true;
   if (alloc.includes('AGRI') && prog.includes('AGRI')) return true;
-  if (alloc.includes('PHARM') && prog.includes('PHARM')) return true;
   if (alloc.includes('CSE') && (prog.includes('COMPUTER') || prog.includes('CSE'))) return true;
   return false;
 }
@@ -189,4 +203,5 @@ module.exports = {
   syncStudentsByEmails,
   syncStudentSlot,
   allocationMatchesStudentSlot,
+  programsMatch,
 };

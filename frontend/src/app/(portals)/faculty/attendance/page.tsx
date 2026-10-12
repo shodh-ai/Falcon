@@ -56,6 +56,21 @@ type Student = {
   section_code?: string | null;
 };
 
+type PracticalBatch = {
+  section_code: string;
+  revision: number;
+  students: (Student & { selected: boolean; assigned_batch: string | null })[];
+};
+
+type PracticalBatchSlot = {
+  course_id: string;
+  course_code: string;
+  course_name: string;
+  section: string;
+  timetable_id: string;
+  scheduled_days: string;
+};
+
 type AttendanceAnalytics = {
   health: {
     scheduled_classes: number;
@@ -93,16 +108,46 @@ function MarkAttendanceContent() {
   const [selectedCourseId, setSelectedCourseId] = useState<string | null>(initialCourseId);
   const [selectedTimetableId, setSelectedTimetableId] = useState<string | null>(null);
   const [students, setStudents] = useState<Student[]>([]);
+  const [unmappedCourseStudents, setUnmappedCourseStudents] = useState<Student[]>([]);
   const [analytics, setAnalytics] = useState<AttendanceAnalytics | null>(null);
   const [attendance, setAttendance] = useState<Record<string, UiStatus>>({});
   const [selectedDate, setSelectedDate] = useState(todayIso());
   const [locked, setLocked] = useState(false);
+  const [hasSavedAttendance, setHasSavedAttendance] = useState(false);
   const [loading, setLoading] = useState(true);
   const [rosterLoading, setRosterLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [classesError, setClassesError] = useState<string | null>(null);
   const [rosterError, setRosterError] = useState<string | null>(null);
+  const [batchEditorOpen, setBatchEditorOpen] = useState(false);
+  const [batchRoster, setBatchRoster] = useState<PracticalBatch | null>(null);
+  const [batchSlots, setBatchSlots] = useState<PracticalBatchSlot[]>([]);
+  const [batchSlotsError, setBatchSlotsError] = useState<string | null>(null);
+  const [batchTarget, setBatchTarget] = useState<PracticalBatchSlot | null>(null);
+  const [batchSelection, setBatchSelection] = useState<string[]>([]);
+  const [batchSaving, setBatchSaving] = useState(false);
+  const [batchError, setBatchError] = useState<string | null>(null);
+  const [rosterRefresh, setRosterRefresh] = useState(0);
+
+  useEffect(() => {
+    if (deptLoading) return;
+    let cancelled = false;
+    void api.get<PracticalBatchSlot[]>(withTeachingDeptId('/api/academics/faculty/practical-batches', activeDeptId))
+      .then((slots) => {
+        if (!cancelled) {
+          setBatchSlots(Array.isArray(slots) ? slots : []);
+          setBatchSlotsError(null);
+        }
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setBatchSlots([]);
+          setBatchSlotsError(error instanceof Error ? error.message : 'Could not load practical batches');
+        }
+      });
+    return () => { cancelled = true; };
+  }, [api, activeDeptId, deptLoading]);
 
   const selectedClass = useMemo(
     () =>
@@ -143,14 +188,19 @@ function MarkAttendanceContent() {
 
   useEffect(() => {
     if (deptLoading) return;
-    setClassesError(null);
+    let cancelled = false;
     void api
-      .get<FacultyClass[]>(withTeachingDeptId('/api/academics/faculty/timetable/today', activeDeptId))
+      .get<FacultyClass[]>(withTeachingDeptId(`/api/academics/faculty/timetable/today?date=${selectedDate}`, activeDeptId))
       .then((data) => {
+        if (cancelled) return;
         if (!Array.isArray(data)) throw new Error('Timetable API returned an invalid response');
+        setClassesError(null);
         setClasses(data);
         if (data.length === 0) {
           setSelectedCourseId(null);
+          setSelectedTimetableId(null);
+          setStudents([]);
+          setUnmappedCourseStudents([]);
           return;
         }
         const fromUrl = initialCourseId
@@ -161,38 +211,51 @@ function MarkAttendanceContent() {
         setSelectedTimetableId(pick.timetable_id);
       })
       .catch((error: unknown) => {
+        if (cancelled) return;
         setClasses([]);
         setSelectedCourseId(null);
+        setSelectedTimetableId(null);
+        setStudents([]);
+        setUnmappedCourseStudents([]);
         setClassesError(error instanceof Error ? error.message : 'Failed to load classes');
       })
-      .finally(() => setLoading(false));
-  }, [api, initialCourseId, activeDeptId, deptLoading]);
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [api, initialCourseId, activeDeptId, deptLoading, selectedDate]);
 
   useEffect(() => {
-    if (!selectedCourseId) {
-      setStudents([]);
-      setRosterError(null);
-      return;
-    }
+    if (!selectedCourseId) return;
     let cancelled = false;
-    setRosterLoading(true);
-    setRosterError(null);
     const timetableId = selectedTimetableId ?? selectedClass?.timetable_id;
 
     function applyRoster(
       rosterResolved: Student[],
       stateResolved: { locked: boolean; attendance_data: { student_id: string; status: UiStatus }[] | null },
       analyticsResolved: AttendanceAnalytics | null,
+      unmappedResolved: Student[],
     ) {
       if (cancelled) return;
       setStudents(rosterResolved);
+      setUnmappedCourseStudents(unmappedResolved);
       setAnalytics(analyticsResolved);
       setLocked(Boolean(stateResolved.locked));
-      setAttendance(initializeAttendanceForm(rosterResolved, stateResolved.attendance_data));
+      setHasSavedAttendance(Boolean(stateResolved.attendance_data?.length));
+      setAttendance(
+        stateResolved.locked && !stateResolved.attendance_data?.length
+          ? {}
+          : initializeAttendanceForm(rosterResolved, stateResolved.attendance_data),
+      );
       setSearchQuery('');
     }
 
     (async () => {
+      setRosterLoading(true);
+      setRosterError(null);
+      setUnmappedCourseStudents([]);
       try {
         const timetableQuery = timetableId ? `&timetableId=${timetableId}` : '';
         const [roster, state] = await Promise.all([
@@ -210,10 +273,14 @@ function MarkAttendanceContent() {
           .catch(() => null);
         if (!Array.isArray(roster)) throw new Error('Student roster API returned an invalid response');
         if (!state || typeof state !== 'object') throw new Error('Attendance API returned an invalid response');
-        applyRoster(roster, state, courseAnalytics);
+        const unmapped = selectedClass?.is_practical && roster.length === 0
+          ? await api.get<Student[]>(`/api/academics/faculty/course/${selectedCourseId}/students`).catch(() => [])
+          : [];
+        applyRoster(roster, state, courseAnalytics, Array.isArray(unmapped) ? unmapped : []);
       } catch (error: unknown) {
         if (!cancelled) {
           setStudents([]);
+          setUnmappedCourseStudents([]);
           setRosterError(error instanceof Error ? error.message : 'Failed to load roster');
         }
       } finally {
@@ -223,7 +290,50 @@ function MarkAttendanceContent() {
     return () => {
       cancelled = true;
     };
-  }, [api, selectedCourseId, selectedDate, selectedTimetableId, selectedClass?.timetable_id]);
+  }, [api, selectedCourseId, selectedDate, selectedTimetableId, selectedClass?.timetable_id, selectedClass?.is_practical, rosterRefresh]);
+
+  async function openBatchEditor(target: PracticalBatchSlot) {
+    setBatchTarget(target);
+    setBatchError(null);
+    setBatchRoster(null);
+    setBatchEditorOpen(true);
+    document.getElementById('practical-batch-setup')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    try {
+      const batch = await api.get<PracticalBatch>(
+        `/api/academics/faculty/course/${target.course_id}/practical-batch?timetableId=${encodeURIComponent(target.timetable_id)}`,
+      );
+      setBatchRoster(batch);
+      setBatchSelection(batch.students.filter((student) => student.selected).map((student) => student.student_id));
+    } catch (error) {
+      setBatchError(error instanceof Error ? error.message : 'Could not load practical batch');
+    }
+  }
+
+  async function saveBatchRoster() {
+    if (!batchTarget || !batchRoster) return;
+    setBatchSaving(true);
+    setBatchError(null);
+    try {
+      await api.put(
+        `/api/academics/faculty/course/${batchTarget.course_id}/practical-batch?timetableId=${encodeURIComponent(batchTarget.timetable_id)}`,
+        { student_ids: batchSelection },
+        { 'If-Match': String(batchRoster.revision) },
+      );
+      setBatchEditorOpen(false);
+      setBatchRoster(null);
+      setRosterRefresh((value) => value + 1);
+      setClasses((current) => current.map((entry) =>
+        entry.course_id === batchTarget.course_id && entry.section === batchTarget.section
+          ? { ...entry, student_count: batchSelection.length }
+          : entry,
+      ));
+      toast.success('Practical batch saved. It will be reused for future sessions.');
+    } catch (error) {
+      setBatchError(error instanceof Error ? error.message : 'Could not save practical batch');
+    } finally {
+      setBatchSaving(false);
+    }
+  }
 
   async function copyPreviousAttendance() {
     if (!selectedCourseId || !selectedTimetableId || locked) return;
@@ -280,6 +390,7 @@ function MarkAttendanceContent() {
         `/api/academics/faculty/course/${selectedCourseId}/attendance?date=${selectedDate}${timetableId ? `&timetableId=${encodeURIComponent(timetableId)}` : ''}`,
       );
       setLocked(state.locked);
+      setHasSavedAttendance(true);
       const synced = result.attendance_updated?.length ?? 0;
       if (synced === 0) {
         toast.warning('Attendance saved to session log but no enrollment percentages were updated. Check student IDs.');
@@ -332,15 +443,99 @@ function MarkAttendanceContent() {
         }
       />
 
+      <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border/60 bg-card px-4 py-3">
+        <label htmlFor="faculty-attendance-date" className="text-sm font-medium text-sgvu-navy">
+          Class date
+        </label>
+        <input
+          id="faculty-attendance-date"
+          type="date"
+          max={todayIso()}
+          className="rounded-lg border border-input bg-background px-3 py-2 text-sm"
+          value={selectedDate}
+          onChange={(e) => {
+            if (!e.target.value) return;
+            setLoading(true);
+            setClassesError(null);
+            setSelectedDate(e.target.value);
+          }}
+        />
+        <p className="text-xs text-muted-foreground">
+          Select a scheduled date to mark attendance or review a locked record.
+        </p>
+      </div>
+
+      {batchSlotsError ? <FacultyErrorBanner message={`Practical batch setup: ${batchSlotsError}`} /> : null}
+      {batchSlots.length > 0 ? (
+        <section id="practical-batch-setup">
+        <FacultyPanel title="Practical batch setup" description="Create each roster once and edit it any day, independently of attendance dates.">
+          <div className="flex flex-wrap gap-2">
+            {batchSlots.map((slot) => (
+              <Button
+                key={`${slot.course_id}:${slot.section}`}
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => void openBatchEditor(slot)}
+              >
+                {slot.course_code} · {slot.section}
+              </Button>
+            ))}
+          </div>
+          {batchEditorOpen && batchTarget ? (
+            <div className="mt-3 space-y-3 rounded-lg border bg-background p-3 text-sm">
+              <p className="font-medium text-sgvu-navy">
+                {batchRoster?.revision ? 'Edit' : 'Create'} {batchTarget.course_code} · {batchTarget.section} roster
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Choose enrolled students for this practical batch. Saved attendance for earlier sessions will not change.
+              </p>
+              {batchError ? <FacultyErrorBanner message={batchError} /> : null}
+              {!batchRoster && !batchError ? <FacultyInlineLoading label="Loading course students…" /> : null}
+              {batchRoster ? (
+                <>
+                  <div className="max-h-72 space-y-1 overflow-auto">
+                    {batchRoster.students.length === 0 ? <p>No enrolled students are available for this course.</p> : null}
+                    {batchRoster.students.map((student) => (
+                      <label key={student.student_id} className="flex items-center gap-2 rounded px-2 py-1.5 hover:bg-muted/50">
+                        <input
+                          type="checkbox"
+                          checked={batchSelection.includes(student.student_id)}
+                          disabled={Boolean(student.assigned_batch && student.assigned_batch !== batchRoster.section_code)}
+                          onChange={(event) => setBatchSelection((current) => event.target.checked
+                            ? [...current, student.student_id]
+                            : current.filter((id) => id !== student.student_id))}
+                        />
+                        <span>{student.name} · {student.roll_number}</span>
+                        {student.assigned_batch && student.assigned_batch !== batchRoster.section_code
+                          ? <span className="text-xs text-muted-foreground">Assigned to {student.assigned_batch}</span>
+                          : null}
+                      </label>
+                    ))}
+                  </div>
+                  <div className="flex gap-2">
+                    <Button type="button" size="sm" onClick={() => void saveBatchRoster()} disabled={batchSaving}>
+                      {batchSaving ? 'Saving…' : 'Save batch roster'}
+                    </Button>
+                    <Button type="button" size="sm" variant="outline" onClick={() => setBatchEditorOpen(false)}>Cancel</Button>
+                  </div>
+                </>
+              ) : null}
+            </div>
+          ) : null}
+        </FacultyPanel>
+        </section>
+      ) : null}
+
       {classesError ? <FacultyErrorBanner message={classesError} /> : null}
       {!classesError && classes.length === 0 ? (
         <FacultyEmptyState
-          title="No classes today"
-          description="When you have sessions on the timetable, they will appear here for attendance marking."
+          title="No classes on this date"
+          description="Select another scheduled class date to review or mark attendance."
         />
       ) : (
         <div className="grid gap-4 lg:grid-cols-[minmax(0,15rem)_minmax(0,1fr)] xl:grid-cols-[minmax(0,17rem)_minmax(0,1fr)]">
-          <FacultyPanel title="Today's classes" count={classes.length}>
+          <FacultyPanel title="Classes on selected date" count={classes.length}>
             <ul className="space-y-1.5">
               {classes.map((c) => {
                 const active = selectedTimetableId === c.timetable_id;
@@ -349,6 +544,7 @@ function MarkAttendanceContent() {
                     <button
                       type="button"
                       onClick={() => {
+                        setRosterLoading(true);
                         setSelectedCourseId(c.course_id);
                         setSelectedTimetableId(c.timetable_id);
                       }}
@@ -384,12 +580,6 @@ function MarkAttendanceContent() {
             ) : (
               <div className="space-y-4">
                 <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
-                  <input
-                    type="date"
-                    className="rounded-lg border border-input bg-background px-3 py-2 text-sm"
-                    value={selectedDate}
-                    onChange={(e) => setSelectedDate(e.target.value)}
-                  />
                   <Input
                     type="search"
                     className="sm:max-w-xs"
@@ -398,7 +588,7 @@ function MarkAttendanceContent() {
                     onChange={(e) => setSearchQuery(e.target.value)}
                   />
                   <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
-                    {locked ? <Badge variant="secondary">Locked</Badge> : null}
+                    {locked ? <Badge variant="secondary">Locked · read-only</Badge> : null}
                     <FacultyMetricChip label="Present" value={presentCount} emphasis />
                     <FacultyMetricChip label="Absent" value={absentCount} />
                     <FacultyMetricChip label="Leave" value={leaveCount} />
@@ -406,10 +596,32 @@ function MarkAttendanceContent() {
                 </div>
 
                 {selectedClass.is_practical ? (
-                  <p className="rounded-lg border bg-muted/30 px-3 py-2 text-sm">
-                    <span className="font-medium text-sgvu-navy">Practical batch: </span>
-                    {selectedClass.section || 'Not mapped — contact your HOD'}.
-                    Select the scheduled batch session from the class list; attendance applies only to its mapped students.
+                  <div className="space-y-3 rounded-lg border bg-muted/30 px-3 py-3 text-sm">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p>
+                        <span className="font-medium text-sgvu-navy">Practical batch: </span>
+                        {selectedClass.section || 'Not named — contact your HOD'}.
+                        {' '}Assign students once; the same batch roster is used on future class days.
+                      </p>
+                      {selectedClass.section && selectedTimetableId ? (
+                        <Button type="button" size="sm" variant="outline" onClick={() => void openBatchEditor({
+                          course_id: selectedClass.course_id,
+                          course_code: selectedClass.course_code,
+                          course_name: selectedClass.course_name,
+                          section: selectedClass.section!,
+                          timetable_id: selectedTimetableId,
+                          scheduled_days: '',
+                        })}>
+                          Create or edit batch
+                        </Button>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
+
+                {locked && !hasSavedAttendance ? (
+                  <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                    This date is locked and no attendance was recorded for this session. Students are not counted as absent.
                   </p>
                 ) : null}
 
@@ -430,7 +642,24 @@ function MarkAttendanceContent() {
                 )}
 
                 {students.length === 0 ? (
-                  <FacultyEmptyState description="No students on the roster for this course." />
+                  <div className="space-y-3">
+                    <FacultyEmptyState description={selectedClass.is_practical
+                      ? 'No students are assigned to this practical batch. Use Create or edit batch to select enrolled students before marking attendance.'
+                      : 'No students on the roster for this course.'} />
+                    {unmappedCourseStudents.length > 0 ? (
+                      <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm">
+                        <p className="font-medium text-amber-950">Course students · read-only</p>
+                        <p className="mt-1 text-amber-900">
+                          These {unmappedCourseStudents.length} students are enrolled in the course but are not confirmed for this practical batch.
+                        </p>
+                        <ul className="mt-2 max-h-48 overflow-auto text-amber-950">
+                          {unmappedCourseStudents.map((student) => (
+                            <li key={student.student_id}>{student.name} · {student.roll_number}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+                  </div>
                 ) : filteredStudents.length === 0 ? (
                   <p className="text-sm text-muted-foreground">No students match &ldquo;{searchQuery}&rdquo;.</p>
                 ) : (
@@ -445,6 +674,15 @@ function MarkAttendanceContent() {
                             <p className="font-medium text-sgvu-navy">{s.name}</p>
                             <p className="text-xs text-muted-foreground">{s.roll_number || 'No roll number'}</p>
                           </div>
+                          {locked ? (
+                            <Badge variant="secondary" className="self-start sm:self-auto">
+                              {attendance[s.student_id] === 'LEAVE'
+                                ? 'Leave'
+                                : attendance[s.student_id]
+                                  ? attendance[s.student_id].toLowerCase()
+                                  : 'Not recorded'}
+                            </Badge>
+                          ) : (
                           <div className="flex shrink-0 gap-2">
                             <Button
                               size="sm"
@@ -474,6 +712,7 @@ function MarkAttendanceContent() {
                               Leave
                             </Button>
                           </div>
+                          )}
                         </li>
                       ))}
                     </ul>
@@ -482,7 +721,9 @@ function MarkAttendanceContent() {
 
                 <div className="flex flex-col gap-2 border-t border-border/50 pt-4 sm:flex-row sm:items-center sm:justify-between">
                   <p className="text-xs text-muted-foreground">
-                    {students.length > 0
+                    {locked && !hasSavedAttendance
+                      ? 'No saved attendance for this locked session.'
+                      : students.length > 0
                       ? `${presentCount} present · ${absentCount} absent · ${leaveCount} leave · ${students.length} in scheduled roster (${filteredStudents.length} shown)`
                       : 'Save syncs attendance to enrollment percentages.'}
                   </p>

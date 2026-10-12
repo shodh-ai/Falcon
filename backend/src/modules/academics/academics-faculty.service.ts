@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -236,8 +237,15 @@ export class AcademicsFacultyService {
     facultyUserId: string,
     tenantId: string,
     deptId?: number | null,
+    date = localDateString(),
   ) {
-    const day = new Date().getDay();
+    const requestedDay = new Date(`${date}T00:00:00Z`);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) ||
+        Number.isNaN(requestedDay.getTime()) ||
+        requestedDay.toISOString().slice(0, 10) !== date) {
+      throw new BadRequestException('date must be a valid YYYY-MM-DD value');
+    }
+    const day = requestedDay.getUTCDay();
     const isoDay = day === 0 ? 7 : day;
     const rows = await this.dataSource.query<
       Array<{
@@ -289,17 +297,69 @@ export class AcademicsFacultyService {
         end_time: row.end_time,
         section: row.section,
         is_practical: Boolean(row.is_practical),
-        student_count: await this.enrollmentRepo.count({
-          where: {
-            tenant_id: tenantId,
-            course_id: row.course_id,
-            status: 'ENROLLED',
-            ...(row.is_practical && row.section
-              ? { section_code: row.section }
-              : {}),
-          },
-        }),
+        student_count: row.is_practical && !row.section
+          ? 0
+          : await (async () => {
+              if (row.is_practical && row.section) {
+                const [configured] = await this.dataSource.query<Array<{ batch_id: string; student_count: number }>>(
+                  `SELECT b.batch_id, count(m.membership_id)::int AS student_count
+                   FROM academic_practical_batches b
+                   LEFT JOIN academic_practical_batch_members m ON m.batch_id = b.batch_id AND m.removed_at IS NULL
+                   WHERE b.tenant_id = $1 AND b.course_id = $2 AND b.section_code = $3
+                   GROUP BY b.batch_id`,
+                  [tenantId, row.course_id, row.section],
+                );
+                if (configured?.batch_id) return Number(configured.student_count);
+              }
+              if (row.is_practical && row.section) {
+                const [legacy] = await this.dataSource.query<Array<{ student_count: number }>>(
+                  `SELECT count(*)::int AS student_count FROM student_course_enrollments e
+                   WHERE e.tenant_id = $1 AND e.course_id = $2 AND e.section_code = $3
+                     AND e.status IN ('ENROLLED', 'COMPLETED', 'FAILED')
+                     AND NOT EXISTS (
+                       SELECT 1 FROM academic_practical_batch_members m
+                       WHERE m.tenant_id = e.tenant_id AND m.course_id = e.course_id
+                         AND m.student_user_id = e.student_user_id AND m.removed_at IS NULL)`,
+                  [tenantId, row.course_id, row.section],
+                );
+                return Number(legacy?.student_count ?? 0);
+              }
+              return this.enrollmentRepo.count({
+              where: {
+                tenant_id: tenantId,
+                course_id: row.course_id,
+                status: In(['ENROLLED', 'COMPLETED', 'FAILED']),
+                ...(row.is_practical ? { section_code: row.section! } : {}),
+              },
+              });
+            })(),
       })),
+    );
+  }
+
+  async listFacultyPracticalBatches(facultyUserId: string, tenantId: string, deptId?: number | null) {
+    return this.dataSource.query<Array<{
+      course_id: string;
+      course_code: string;
+      course_name: string;
+      section: string;
+      timetable_id: string;
+      scheduled_days: string;
+    }>>(
+      `WITH ${this.teachingDepartments.facultyCoursesCte(3)}
+       SELECT fc.course_id, c.course_code, c.course_name, BTRIM(t.section) AS section,
+              MIN(t.timetable_id::text)::uuid AS timetable_id,
+              string_agg(DISTINCT t.day_of_week::text, ', ' ORDER BY t.day_of_week::text) AS scheduled_days
+       FROM academic_timetables t
+       JOIN faculty_courses fc ON fc.course_id = t.course_id
+       JOIN academic_courses c ON c.course_id = t.course_id AND c.tenant_id = t.tenant_id
+       WHERE t.tenant_id = $1 AND t.faculty_user_id = $2 AND t.deleted_at IS NULL
+         AND NULLIF(BTRIM(t.section), '') IS NOT NULL
+         AND (UPPER(c.course_code) ~ '(P|LAB)$' OR c.course_name ILIKE '%practical%'
+              OR c.course_name ILIKE '%lab%')
+       GROUP BY fc.course_id, c.course_code, c.course_name, BTRIM(t.section)
+       ORDER BY c.course_code, section`,
+      [tenantId, facultyUserId, deptId ?? null],
     );
   }
 
@@ -308,6 +368,7 @@ export class AcademicsFacultyService {
     facultyUserId: string,
     tenantId: string,
     timetableId?: string,
+    date?: string,
   ) {
     await this.assertFacultyTeachesCourse(courseId, facultyUserId, tenantId);
 
@@ -335,6 +396,7 @@ export class AcademicsFacultyService {
       );
       if (!slot) throw new NotFoundException('Timetable slot not found');
       sectionCode = slot.is_practical ? slot.section?.trim() || null : null;
+      if (slot.is_practical && !sectionCode) return [];
     }
 
     const rows = await this.enrollmentRepo.find({
@@ -347,14 +409,52 @@ export class AcademicsFacultyService {
         // only ENROLLED made a faculty roster appear empty as soon as the
         // enrollment sync finalized a semester.
         status: In(['ENROLLED', 'COMPLETED', 'FAILED']),
-        ...(sectionCode ? { section_code: sectionCode } : {}),
       },
       relations: ['student'],
       order: { student_user_id: 'ASC' },
     });
 
+    let allowedIds: Set<string> | null = null;
+    if (sectionCode) {
+      const [batch] = await this.dataSource.query<Array<{ batch_id: string }>>(
+        `SELECT batch_id FROM academic_practical_batches
+         WHERE tenant_id = $1 AND course_id = $2 AND section_code = $3`,
+        [tenantId, courseId, sectionCode],
+      );
+      if (batch) {
+        const members = await this.dataSource.query<Array<{ student_user_id: string }>>(
+          `SELECT student_user_id FROM academic_practical_batch_members
+           WHERE batch_id = $1 AND removed_at IS NULL`,
+          [batch.batch_id],
+        );
+        allowedIds = new Set(members.map((member) => member.student_user_id));
+      } else {
+        const assigned = await this.dataSource.query<Array<{ student_user_id: string }>>(
+          `SELECT student_user_id FROM academic_practical_batch_members
+           WHERE tenant_id = $1 AND course_id = $2 AND removed_at IS NULL`,
+          [tenantId, courseId],
+        );
+        const elsewhere = new Set(assigned.map((row) => row.student_user_id));
+        allowedIds = new Set(rows.filter((row) =>
+          row.section_code === sectionCode && !elsewhere.has(row.student_user_id),
+        ).map((row) => row.student_user_id));
+      }
+      // A saved session is a historical snapshot: editing a batch today must
+      // not change who appears on that older attendance sheet.
+      if (date && timetableId) {
+        const [saved] = await this.dataSource.query<Array<{ attendance_data: Array<{ student_id: string }> }>>(
+          `SELECT attendance_data FROM course_attendance_logs
+           WHERE tenant_id = $1 AND course_id = $2 AND timetable_id = $3::uuid
+             AND date = $4::date LIMIT 1`,
+          [tenantId, courseId, timetableId, date],
+        );
+        if (saved) allowedIds = new Set(saved.attendance_data.map((entry) => entry.student_id));
+      }
+    }
+    const visibleRows = allowedIds ? rows.filter((row) => allowedIds.has(row.student_user_id)) : rows;
+
     const rollById = new Map<string, string>();
-    if (rows.length) {
+    if (visibleRows.length) {
       const profileRows = await this.dataSource.query<
         Array<{ user_id: string; roll_number: string }>
       >(
@@ -362,18 +462,128 @@ export class AcademicsFacultyService {
          FROM users u
          LEFT JOIN student_profiles sp ON sp.user_id = u.user_id
          WHERE u.user_id = ANY($1::uuid[])`,
-        [rows.map((r) => r.student_user_id)],
+        [visibleRows.map((r) => r.student_user_id)],
       );
       for (const p of profileRows) rollById.set(p.user_id, p.roll_number);
     }
 
-    return rows.map((row) => ({
+    return visibleRows.map((row) => ({
       student_id: row.student_user_id,
       name: row.student?.name ?? 'Student',
       roll_number: rollById.get(row.student_user_id) ?? row.student_user_id,
       email: row.student?.email ?? null,
       section_code: row.section_code ?? null,
     }));
+  }
+
+  /** The official timetable supplies the batch name; faculty manage its roster. */
+  private async facultyPracticalSlot(courseId: string, timetableId: string, facultyUserId: string, tenantId: string) {
+    await this.assertFacultyTeachesCourse(courseId, facultyUserId, tenantId);
+    const [slot] = await this.dataSource.query<Array<{ section: string | null; is_practical: boolean }>>(
+      `SELECT t.section,
+              (UPPER(c.course_code) ~ '(P|LAB)$' OR c.course_name ILIKE '%practical%'
+               OR c.course_name ILIKE '%lab%') AS is_practical
+       FROM academic_timetables t
+       JOIN academic_courses c ON c.course_id = t.course_id AND c.tenant_id = t.tenant_id
+       WHERE t.tenant_id = $1 AND t.timetable_id = $2::uuid AND t.course_id = $3
+         AND t.faculty_user_id = $4 AND t.deleted_at IS NULL LIMIT 1`,
+      [tenantId, timetableId, courseId, facultyUserId],
+    );
+    if (!slot?.is_practical || !slot.section?.trim()) {
+      throw new ForbiddenException('This is not an assigned, named practical batch');
+    }
+    return slot.section.trim();
+  }
+
+  async getPracticalBatch(courseId: string, timetableId: string, facultyUserId: string, tenantId: string) {
+    const sectionCode = await this.facultyPracticalSlot(courseId, timetableId, facultyUserId, tenantId);
+    const [batch] = await this.dataSource.query<Array<{ batch_id: string; revision: number }>>(
+      `SELECT batch_id, revision FROM academic_practical_batches
+       WHERE tenant_id = $1 AND course_id = $2 AND section_code = $3`,
+      [tenantId, courseId, sectionCode],
+    );
+    const enrolled = await this.getCourseStudents(courseId, facultyUserId, tenantId);
+    const assignments = await this.dataSource.query<Array<{ student_user_id: string; section_code: string }>>(
+      `SELECT m.student_user_id, b.section_code
+       FROM academic_practical_batch_members m
+       JOIN academic_practical_batches b ON b.batch_id = m.batch_id
+       WHERE m.tenant_id = $1 AND m.course_id = $2 AND m.removed_at IS NULL`,
+      [tenantId, courseId],
+    );
+    const byStudent = new Map(assignments.map((row) => [row.student_user_id, row.section_code]));
+    return {
+      section_code: sectionCode,
+      revision: batch?.revision ?? 0,
+      students: enrolled.map((student) => ({
+        ...student,
+        selected: batch ? byStudent.get(student.student_id) === sectionCode
+          : (byStudent.get(student.student_id) ?? student.section_code) === sectionCode,
+        assigned_batch: byStudent.get(student.student_id) ?? null,
+      })),
+    };
+  }
+
+  async savePracticalBatch(
+    courseId: string, timetableId: string, facultyUserId: string, tenantId: string,
+    expectedRevision: number, studentIds: string[],
+  ) {
+    const sectionCode = await this.facultyPracticalSlot(courseId, timetableId, facultyUserId, tenantId);
+    if (!Number.isInteger(expectedRevision) || expectedRevision < 0 || !Array.isArray(studentIds)) {
+      throw new BadRequestException('If-Match revision and student_ids array are required');
+    }
+    if (studentIds.some((id) => typeof id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id))) {
+      throw new BadRequestException('Each student ID must be a UUID');
+    }
+    if (studentIds.length !== new Set(studentIds).size) throw new BadRequestException('Duplicate students in batch');
+    return this.dataSource.transaction(async (manager) => {
+      await manager.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`practical:${tenantId}:${courseId}`]);
+      const [batch] = await manager.query<Array<{ batch_id: string; revision: number }>>(
+        `SELECT batch_id, revision FROM academic_practical_batches
+         WHERE tenant_id = $1 AND course_id = $2 AND section_code = $3 FOR UPDATE`,
+        [tenantId, courseId, sectionCode],
+      );
+      if ((batch?.revision ?? 0) !== expectedRevision) throw new ConflictException('Batch changed; refresh before saving');
+      const enrolled = await manager.query<Array<{ student_user_id: string }>>(
+        `SELECT student_user_id FROM student_course_enrollments
+         WHERE tenant_id = $1 AND course_id = $2 AND status IN ('ENROLLED', 'COMPLETED', 'FAILED')`,
+        [tenantId, courseId],
+      );
+      const valid = new Set(enrolled.map((row) => row.student_user_id));
+      if (studentIds.some((id) => !valid.has(id))) throw new BadRequestException('Batch contains a student outside this course');
+      const occupied = await manager.query<Array<{ student_user_id: string }>>(
+        `SELECT m.student_user_id FROM academic_practical_batch_members m
+         JOIN academic_practical_batches b ON b.batch_id = m.batch_id
+         WHERE m.tenant_id = $1 AND m.course_id = $2 AND m.removed_at IS NULL
+           AND b.section_code <> $3 AND m.student_user_id = ANY($4::uuid[])`,
+        [tenantId, courseId, sectionCode, studentIds],
+      );
+      if (occupied.length) throw new ConflictException('A student is already assigned to another practical batch');
+      const [savedBatch] = batch ? [batch] : await manager.query<Array<{ batch_id: string; revision: number }>>(
+        `INSERT INTO academic_practical_batches
+         (tenant_id, course_id, section_code, created_by, updated_by)
+         VALUES ($1, $2, $3, $4, $4) RETURNING batch_id, revision`,
+        [tenantId, courseId, sectionCode, facultyUserId],
+      );
+      await manager.query(
+        `UPDATE academic_practical_batch_members SET removed_at = now(), changed_by = $2
+         WHERE batch_id = $1 AND removed_at IS NULL AND NOT (student_user_id = ANY($3::uuid[]))`,
+        [savedBatch.batch_id, facultyUserId, studentIds],
+      );
+      await manager.query(
+        `INSERT INTO academic_practical_batch_members
+         (batch_id, tenant_id, course_id, student_user_id, changed_by)
+         SELECT $1, $2, $3, x, $5 FROM unnest($4::uuid[]) AS x
+         WHERE NOT EXISTS (SELECT 1 FROM academic_practical_batch_members m
+                           WHERE m.batch_id = $1 AND m.student_user_id = x AND m.removed_at IS NULL)`,
+        [savedBatch.batch_id, tenantId, courseId, studentIds, facultyUserId],
+      );
+      const revision = batch ? expectedRevision + 1 : 1;
+      if (batch) await manager.query(
+        `UPDATE academic_practical_batches SET revision = $2, updated_by = $3, updated_at = now() WHERE batch_id = $1`,
+        [savedBatch.batch_id, revision, facultyUserId],
+      );
+      return { section_code: sectionCode, revision, student_count: studentIds.length };
+    });
   }
 
   async getCourseAttendanceState(
@@ -770,27 +980,43 @@ export class AcademicsFacultyService {
     const section = slotRows[0]?.is_practical
       ? slotRows[0]?.section?.trim() || null
       : null;
-    const rosterRows = await this.dataSource.query<Array<{ student_user_id: string }>>(
-      `SELECT student_user_id
-         FROM student_course_enrollments
-        WHERE tenant_id = $1
-          AND course_id = $2
-          AND status IN ('ENROLLED', 'COMPLETED', 'FAILED')
-          AND ($3::varchar IS NULL OR section_code = $3::varchar)`,
-      [tenantId, dto.course_id, section],
-    );
-    const roster = new Set(rosterRows.map((row) => row.student_user_id));
-    const submitted = dto.attendance_data.map((row) => row.student_id);
-    const duplicate = submitted.find(
-      (studentId, index) => submitted.indexOf(studentId) !== index,
-    );
-    const outside = submitted.filter((studentId) => !roster.has(studentId));
-    const missing = [...roster].filter((studentId) => !submitted.includes(studentId));
-    if (duplicate) throw new BadRequestException('Attendance contains duplicate students');
-    if (outside.length) throw new BadRequestException('Attendance contains students outside this scheduled batch');
-    if (missing.length) throw new BadRequestException('Attendance must include every student in this scheduled batch');
-
+    if (slotRows[0]?.is_practical && !section) {
+      throw new ForbiddenException('Practical batch is not mapped to a student section');
+    }
     await this.dataSource.transaction(async (manager) => {
+      // Batch edits and attendance saves share this lock; neither can validate
+      // against a roster that changes before its transaction commits.
+      await manager.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`practical:${tenantId}:${dto.course_id}`]);
+      const [configured] = section ? await manager.query<Array<{ batch_id: string }>>(
+        `SELECT batch_id FROM academic_practical_batches
+         WHERE tenant_id = $1 AND course_id = $2 AND section_code = $3`,
+        [tenantId, dto.course_id, section],
+      ) : [];
+      const rosterRows = configured
+        ? await manager.query<Array<{ student_user_id: string }>>(
+            `SELECT m.student_user_id FROM academic_practical_batch_members m
+             JOIN student_course_enrollments e ON e.tenant_id = m.tenant_id
+               AND e.course_id = m.course_id AND e.student_user_id = m.student_user_id
+             WHERE m.batch_id = $1 AND m.removed_at IS NULL
+               AND e.status IN ('ENROLLED', 'COMPLETED', 'FAILED')`,
+            [configured.batch_id],
+          )
+        : await manager.query<Array<{ student_user_id: string }>>(
+            `SELECT e.student_user_id FROM student_course_enrollments e
+             WHERE e.tenant_id = $1 AND e.course_id = $2
+               AND e.status IN ('ENROLLED', 'COMPLETED', 'FAILED')
+               AND ($3::varchar IS NULL OR (e.section_code = $3::varchar AND NOT EXISTS (
+                 SELECT 1 FROM academic_practical_batch_members m
+                 WHERE m.tenant_id = e.tenant_id AND m.course_id = e.course_id
+                   AND m.student_user_id = e.student_user_id AND m.removed_at IS NULL)))`,
+            [tenantId, dto.course_id, section],
+          );
+      const roster = new Set(rosterRows.map((row) => row.student_user_id));
+      const submitted = dto.attendance_data.map((row) => row.student_id);
+      const duplicate = submitted.find((id, index) => submitted.indexOf(id) !== index);
+      if (duplicate) throw new BadRequestException('Attendance contains duplicate students');
+      if (submitted.some((id) => !roster.has(id))) throw new BadRequestException('Attendance contains students outside this scheduled batch');
+      if ([...roster].some((id) => !submitted.includes(id))) throw new BadRequestException('Attendance must include every student in this scheduled batch');
       // Serialize the exact slot/day so two browser tabs cannot overwrite a
       // practical batch with a stale roster.
       await manager.query(
