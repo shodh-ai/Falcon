@@ -1,0 +1,38 @@
+import { render, screen, within } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
+import TimetablePage from '@/app/(portals)/student/timetable/page';
+
+const { api } = vi.hoisted(() => ({ api: { get: vi.fn() } }));
+vi.mock('@/lib/api', () => ({ useAuthedApi: () => api }));
+vi.mock('@/lib/student-demo-mode', () => ({ isStudentDemoModeEnabled: () => false }));
+vi.mock('@/lib/notifications/falcon-toast', () => ({ toast: { error: vi.fn() } }));
+vi.mock('@/components/student/StudentPageShell', () => ({
+  StudentPageShell: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+}));
+
+describe('published student timetable', () => {
+  it('shows minute-accurate columns, afternoon practicals and simultaneous sessions', async () => {
+    const base = {
+      course_id: 'course', course_code: 'CODE', room: 'LT-24',
+      faculty_name: 'Faculty', day_of_week: 1, is_virtual: false,
+      live_join_url: null, session_date: null, attendance_status: null,
+    };
+    api.get.mockResolvedValue({
+      week_start: '2026-10-12',
+      week_dates: [{ day_of_week: 1, label: 'Mon', date: '2026-10-12' }],
+      slots: [
+        { ...base, timetable_id: 'one', course_name: 'Early theory', start_time: '10:00:00', end_time: '10:50:00' },
+        { ...base, timetable_id: 'two', course_name: 'Later theory', start_time: '10:50:00', end_time: '11:40:00' },
+        { ...base, timetable_id: 'three', course_name: 'Practical A', start_time: '13:30:00', end_time: '16:30:00' },
+        { ...base, timetable_id: 'four', course_name: 'Practical B', start_time: '13:30:00', end_time: '16:30:00' },
+      ],
+    });
+    render(<TimetablePage />);
+    await screen.findByRole('columnheader', { name: '1:30 PM' });
+    const table = within(screen.getByRole('table'));
+    expect(table.getByRole('columnheader', { name: '10:50 AM' })).toBeTruthy();
+    for (const name of ['Early theory', 'Later theory', 'Practical A', 'Practical B']) {
+      expect(table.getByRole('button', { name: new RegExp(name) })).toBeTruthy();
+    }
+  });
+});

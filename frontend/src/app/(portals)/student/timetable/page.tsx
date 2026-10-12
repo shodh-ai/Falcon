@@ -47,30 +47,11 @@ type WeekTimetableResponse = {
   slots: TimetableSlot[];
 };
 
-type TimeColumn =
-  | { type: 'slot'; hour: number; label: string }
-  | { type: 'lunch'; label: string };
-
-const TIME_COLUMNS: TimeColumn[] = [
-  { type: 'slot', hour: 9, label: '9:00 AM' },
-  { type: 'slot', hour: 10, label: '10:00 AM' },
-  { type: 'slot', hour: 11, label: '11:00 AM' },
-  { type: 'slot', hour: 12, label: '12:00 PM' },
-  { type: 'lunch', label: 'Lunch' },
-  { type: 'slot', hour: 14, label: '2:00 PM' },
-  { type: 'slot', hour: 15, label: '3:00 PM' },
-  { type: 'slot', hour: 16, label: '4:00 PM' },
-];
-
 function formatDisplayDate(date: string) {
   return new Date(`${date}T12:00:00`).toLocaleDateString('en-IN', {
     day: 'numeric',
     month: 'short',
   });
-}
-
-function slotStartHour(startTime: string) {
-  return Number.parseInt(startTime.split(':')[0] ?? '0', 10);
 }
 
 function shiftWeekStart(weekStart: string, deltaWeeks: number) {
@@ -248,10 +229,15 @@ export default function TimetablePage() {
   const weekDates = data?.week_dates ?? [];
   const slots = data?.slots ?? [];
 
+  const timeColumns = useMemo(
+    () => [...new Set(slots.map((slot) => slot.start_time.slice(0, 5)))].sort(),
+    [slots],
+  );
+
   const slotGrid = useMemo(() => {
     const map = new Map<string, TimetableSlot[]>();
     for (const slot of slots) {
-      const key = `${slot.day_of_week}|${slotStartHour(slot.start_time)}`;
+      const key = `${slot.day_of_week}|${slot.start_time.slice(0, 5)}`;
       const entries = map.get(key) ?? [];
       entries.push(slot);
       map.set(key, entries);
@@ -329,15 +315,15 @@ export default function TimetablePage() {
                       <th className="sticky left-0 z-10 w-28 border-b border-r border-sgvu-navy/10 bg-white p-2.5 text-center text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
                         Day
                       </th>
-                      {TIME_COLUMNS.map((col) => (
+                      {timeColumns.map((startTime) => (
                         <th
-                          key={col.type === 'lunch' ? 'lunch' : col.hour}
+                          key={startTime}
                           className={cn(
                             'min-w-[120px] border-b border-r border-sgvu-navy/10 bg-white p-2.5 text-center text-[10px] font-bold uppercase tracking-wider',
-                            col.type === 'lunch' ? 'text-muted-foreground' : 'text-sgvu-navy',
+                            'text-sgvu-navy',
                           )}
                         >
-                          {col.label}
+                          {to12h(startTime)}
                         </th>
                       ))}
                     </tr>
@@ -353,22 +339,11 @@ export default function TimetablePage() {
                             {formatDisplayDate(day.date)}
                           </div>
                         </th>
-                        {TIME_COLUMNS.map((col) => {
-                          if (col.type === 'lunch') {
-                            return (
-                              <td
-                                key={`${day.date}-lunch`}
-                                className="border-b border-r border-sgvu-navy/10 bg-slate-50 p-1 text-center align-middle text-[9px] font-bold uppercase tracking-[0.15em] text-muted-foreground"
-                              >
-                                Lunch
-                              </td>
-                            );
-                          }
-
-                          const cellSlots = slotGrid.get(`${day.day_of_week}|${col.hour}`) ?? [];
+                        {timeColumns.map((startTime) => {
+                          const cellSlots = slotGrid.get(`${day.day_of_week}|${startTime}`) ?? [];
                           return (
                             <td
-                              key={`${day.date}-${col.hour}`}
+                              key={`${day.date}-${startTime}`}
                               className="relative h-[6.25rem] min-w-[120px] border-b border-r border-sgvu-navy/10 align-top p-1.5"
                             >
                               {cellSlots.length > 0 ? (
