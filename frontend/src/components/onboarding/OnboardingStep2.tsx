@@ -84,6 +84,49 @@ function validateStudentForm(values: {
   return missing;
 }
 
+function validateStaffForm(values: {
+  bloodGroup: string;
+  mobile: string;
+  panNumber: string;
+  aadhaarNumber: string;
+  bankAccountNo: string;
+  ifscCode: string;
+  gender: string;
+  dateOfBirth: string;
+  emergencyContactName: string;
+  emergencyContactPhone: string;
+  permanentAddress: string;
+  currentAddress: string;
+  orcidId: string;
+  totalExperienceYears: string;
+  degreeLevel: string;
+  degreeName: string;
+  university: string;
+  passingYear: string;
+}) {
+  const required: Array<[string, string]> = [
+    ['Blood group', values.bloodGroup],
+    ['Mobile number', values.mobile],
+    ['PAN number', values.panNumber],
+    ['Aadhaar number', values.aadhaarNumber],
+    ['Bank account', values.bankAccountNo],
+    ['IFSC code', values.ifscCode],
+    ['Gender', values.gender],
+    ['Date of birth', values.dateOfBirth],
+    ['Emergency contact name', values.emergencyContactName],
+    ['Emergency contact phone', values.emergencyContactPhone],
+    ['Permanent address', values.permanentAddress],
+    ['Current address', values.currentAddress],
+    ['ORCID ID', values.orcidId],
+    ['Teaching experience (years)', values.totalExperienceYears],
+    ['Degree level', values.degreeLevel],
+    ['Degree name', values.degreeName],
+    ['University', values.university],
+    ['Passing year', values.passingYear],
+  ];
+  return required.filter(([, value]) => !value.trim()).map(([label]) => label);
+}
+
 function DocumentsSidebar({
   docTypes,
   docLabels,
@@ -221,6 +264,42 @@ export function OnboardingStep2({ config }: { config: PortalOnboardingConfig }) 
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [showProfileErrors, setShowProfileErrors] = useState(false);
+
+  const missingProfileFields = isStaff
+    ? validateStaffForm({
+        bloodGroup,
+        mobile,
+        panNumber,
+        aadhaarNumber,
+        bankAccountNo,
+        ifscCode,
+        gender,
+        dateOfBirth,
+        emergencyContactName,
+        emergencyContactPhone,
+        permanentAddress,
+        currentAddress,
+        orcidId,
+        totalExperienceYears,
+        degreeLevel,
+        degreeName,
+        university,
+        passingYear,
+      })
+    : validateStudentForm({
+        bloodGroup,
+        mobile,
+        abcId,
+        gender,
+        dateOfBirth,
+        fatherName,
+        motherName,
+        parentPhone,
+        emergencyContactName,
+        permanentAddress,
+        currentAddress,
+      });
 
   const uploadedCount = useMemo(
     () => docTypes.filter((t) => documents.some((d) => d.doc_type === t && d.file_path)).length,
@@ -228,7 +307,6 @@ export function OnboardingStep2({ config }: { config: PortalOnboardingConfig }) 
   );
 
   const loadProfile = useCallback(async () => {
-    setLoading(true);
     try {
       const data = await api.get<Record<string, unknown>>(`${config.apiPrefix}/profile`);
       setBloodGroup(String(data.blood_group ?? ''));
@@ -270,7 +348,7 @@ export function OnboardingStep2({ config }: { config: PortalOnboardingConfig }) 
   }, [api, config.apiPrefix]);
 
   useEffect(() => {
-    void loadProfile();
+    void Promise.resolve().then(loadProfile);
   }, [loadProfile]);
 
   const uploadDoc = async (docType: string, file: File) => {
@@ -292,24 +370,10 @@ export function OnboardingStep2({ config }: { config: PortalOnboardingConfig }) 
   };
 
   const saveAndSubmit = async () => {
-    if (!isStaff) {
-      const missing = validateStudentForm({
-        bloodGroup,
-        mobile,
-        abcId,
-        gender,
-        dateOfBirth,
-        fatherName,
-        motherName,
-        parentPhone,
-        emergencyContactName,
-        permanentAddress,
-        currentAddress,
-      });
-      if (missing.length) {
-        toast.error(`Please fill: ${missing.join(', ')}`);
-        return;
-      }
+    setShowProfileErrors(missingProfileFields.length > 0);
+    if (missingProfileFields.length) {
+      toast.error(`Complete the required profile fields: ${missingProfileFields.join(', ')}`);
+      return;
     }
 
     const missingDocs = docTypes.filter(
@@ -398,6 +462,11 @@ export function OnboardingStep2({ config }: { config: PortalOnboardingConfig }) 
 
   return (
     <div className="space-y-5">
+      {showProfileErrors && missingProfileFields.length ? (
+        <OnboardingAlert title="Profile details still needed">
+          Your documents are separate from these required fields: {missingProfileFields.join(', ')}.
+        </OnboardingAlert>
+      ) : null}
       {adminRemarks ? (
         <OnboardingAlert title="Admin feedback">
           {adminRemarks}. Please re-upload clearer documents and resubmit.
@@ -409,8 +478,8 @@ export function OnboardingStep2({ config }: { config: PortalOnboardingConfig }) 
         title="Profile & documents"
         description={
           isStaff
-            ? 'Complete your NAAC master record with personal details, KYC, and mandatory documents.'
-            : 'Tell us about yourself and upload the required documents. Fields marked * are mandatory.'
+            ? 'Complete every required profile field and upload all documents before submitting. This step cannot be skipped.'
+            : 'Complete every required profile field and upload all documents before submitting. This step cannot be skipped.'
         }
       >
         <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start lg:gap-8 xl:gap-10">
@@ -483,7 +552,7 @@ export function OnboardingStep2({ config }: { config: PortalOnboardingConfig }) 
                         {STAFF_DEGREE_LEVELS.map((level) => (<option key={level} value={level}>{level}</option>))}
                       </Select>
                     </FormField>
-                    <FormField id="degree-name" label="Degree name"><Input id="degree-name" className={onboardingInputClass} placeholder="M.Tech in AI" value={degreeName} onChange={(e) => setDegreeName(e.target.value)} /></FormField>
+                    <FormField id="degree-name" label="Degree name" required><Input id="degree-name" className={onboardingInputClass} placeholder="M.Tech in AI" value={degreeName} onChange={(e) => setDegreeName(e.target.value)} required /></FormField>
                     <FormField id="university" label="University" required><Input id="university" className={onboardingInputClass} value={university} onChange={(e) => setUniversity(e.target.value)} required /></FormField>
                     <FormField id="passing-year" label="Passing year" required><Input id="passing-year" type="number" className={onboardingInputClass} value={passingYear} onChange={(e) => setPassingYear(e.target.value)} required /></FormField>
                     <FormField id="specialization" label="Specialization" className="sm:col-span-2"><Input id="specialization" className={onboardingInputClass} value={specialization} onChange={(e) => setSpecialization(e.target.value)} /></FormField>

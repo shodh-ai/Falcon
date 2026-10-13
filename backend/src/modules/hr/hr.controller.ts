@@ -4,6 +4,7 @@ import {
   Controller,
   Delete,
   Get,
+  Headers,
   HttpCode,
   HttpStatus,
   Param,
@@ -57,6 +58,7 @@ import { HrDocumentVaultService } from './hr-document-vault.service';
 import { HrEmployeeBulkService } from './hr-employee-bulk.service';
 import { HrDocumentExportService } from './hr-document-export.service';
 import { HrTeamService } from './hr-team.service';
+import { HrFacultyPortfolioService, type FacultyWorkType } from './hr-faculty-portfolio.service';
 import { HR_DOCUMENT_CATEGORIES } from './hr-document.constants';
 import type { StaffRequestType } from '../../entities/staff-leave-request.entity';
 import { CreateLeaveRequestDto } from './dto/create-leave-request.dto';
@@ -103,6 +105,7 @@ export class HrController {
     private readonly documentExport: HrDocumentExportService,
     private readonly accessControl: HrAccessControlService,
     private readonly team: HrTeamService,
+    private readonly facultyPortfolio: HrFacultyPortfolioService,
   ) {}
 
   private resolveRoles(user: AuthUser): string[] {
@@ -816,6 +819,45 @@ export class HrController {
       userId,
       false,
     );
+  }
+
+  @Get('employees/:userId/portfolio')
+  @Roles('HR', 'HRAdmin', 'SuperAdmin')
+  @HrPermission('directory', 'read')
+  employeePortfolio(@Param('userId') userId: string, @Req() req: { user: AuthUser }) {
+    return this.facultyPortfolio.list(this.resolveTenantId(req.user), userId,
+      this.entityCtx.getScopedEntityId());
+  }
+
+  @Post('employees/:userId/portfolio/skills')
+  @Roles('HR', 'HRAdmin', 'SuperAdmin')
+  @HrPermission('directory', 'write')
+  addEmployeePortfolioSkill(@Param('userId') userId: string,
+    @Req() req: { user: AuthUser }, @Headers('idempotency-key') key: string,
+    @Body('keyword') keyword: string) {
+    return this.facultyPortfolio.addSkill(this.resolveTenantId(req.user), userId,
+      req.user.user_id, keyword, key, this.entityCtx.getScopedEntityId());
+  }
+
+  @Post('employees/:userId/portfolio/skills/remove')
+  @Roles('HR', 'HRAdmin', 'SuperAdmin')
+  @HrPermission('directory', 'write')
+  removeEmployeePortfolioSkill(@Param('userId') userId: string,
+    @Req() req: { user: AuthUser }, @Headers('idempotency-key') key: string,
+    @Body('keyword') keyword: string) {
+    return this.facultyPortfolio.removeSkill(this.resolveTenantId(req.user), userId,
+      req.user.user_id, keyword, key, this.entityCtx.getScopedEntityId());
+  }
+
+  @Post('employees/:userId/portfolio/work')
+  @Roles('HR', 'HRAdmin', 'SuperAdmin')
+  @HrPermission('directory', 'write')
+  addEmployeePortfolioWork(@Param('userId') userId: string,
+    @Req() req: { user: AuthUser }, @Headers('idempotency-key') key: string,
+    @Body() body: { work_type: FacultyWorkType; title: string; description?: string;
+      completed_on: string; evidence_url?: string }) {
+    return this.facultyPortfolio.addWork(this.resolveTenantId(req.user), userId,
+      req.user.user_id, body, key, this.entityCtx.getScopedEntityId());
   }
 
   @Post('employees/:userId/kyc/reveal')

@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Get,
+  Headers,
   Patch,
   Post,
   Req,
@@ -18,6 +19,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { FacultyProfileService } from './faculty-profile.service';
+import { HrFacultyPortfolioService, type FacultyWorkType } from '../hr/hr-faculty-portfolio.service';
 
 type AuthUser = { user_id: string; tenant_id?: string };
 
@@ -25,7 +27,10 @@ type AuthUser = { user_id: string; tenant_id?: string };
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
 export class FacultyProfileController {
-  constructor(private readonly profile: FacultyProfileService) {}
+  constructor(
+    private readonly profile: FacultyProfileService,
+    private readonly portfolio: HrFacultyPortfolioService,
+  ) {}
 
   private tenant(user: AuthUser) {
     return user.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
@@ -42,6 +47,42 @@ export class FacultyProfileController {
       this.tenant(req.user),
       req.user.user_id,
     );
+  }
+
+  @Get('portfolio')
+  getPortfolio(@Req() req: { user: AuthUser }) {
+    return this.portfolio.list(this.tenant(req.user), req.user.user_id);
+  }
+
+  @Post('portfolio/skills')
+  addPortfolioSkill(
+    @Req() req: { user: AuthUser },
+    @Headers('idempotency-key') key: string,
+    @Body('keyword') keyword: string,
+  ) {
+    return this.portfolio.addSkill(this.tenant(req.user), req.user.user_id,
+      req.user.user_id, keyword, key);
+  }
+
+  @Post('portfolio/skills/remove')
+  removePortfolioSkill(
+    @Req() req: { user: AuthUser },
+    @Headers('idempotency-key') key: string,
+    @Body('keyword') keyword: string,
+  ) {
+    return this.portfolio.removeSkill(this.tenant(req.user), req.user.user_id,
+      req.user.user_id, keyword, key);
+  }
+
+  @Post('portfolio/work')
+  addPortfolioWork(
+    @Req() req: { user: AuthUser },
+    @Headers('idempotency-key') key: string,
+    @Body() body: { work_type: FacultyWorkType; title: string;
+      description?: string; completed_on: string; evidence_url?: string },
+  ) {
+    return this.portfolio.addWork(this.tenant(req.user), req.user.user_id,
+      req.user.user_id, body, key);
   }
 
   @Get('photo')

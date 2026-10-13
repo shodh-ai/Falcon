@@ -42,8 +42,9 @@ import { withFacultyDemoFallback } from '@/lib/faculty-demo-mode';
 import { FACULTY_DEMO_PROFILE } from '@/lib/mock/faculty-portal-demo';
 import { useAuthedApi } from '@/lib/api';
 import { getSubdomainFromClient } from '@/lib/tenant';
+import { FacultyPortfolioPanel } from '@/components/faculty/FacultyPortfolioPanel';
 
-type ProfileTab = 'overview' | 'personal' | 'qualifications' | 'research' | 'workload' | 'documents';
+type ProfileTab = 'overview' | 'personal' | 'qualifications' | 'research' | 'portfolio' | 'workload' | 'documents';
 
 type Qualification = {
   qual_id: string;
@@ -139,6 +140,7 @@ const TABS: { id: ProfileTab; label: string; icon: typeof UserRound }[] = [
   { id: 'personal', label: 'Personal & KYC', icon: LockKeyhole },
   { id: 'qualifications', label: 'Qualifications', icon: GraduationCap },
   { id: 'research', label: 'Research & IQAC', icon: FlaskConical },
+  { id: 'portfolio', label: 'Skills & Portfolio', icon: Briefcase },
   { id: 'workload', label: 'Workload', icon: BookOpen },
   { id: 'documents', label: 'Documents', icon: FolderLock },
 ];
@@ -480,6 +482,7 @@ export function FacultyProfilePage() {
       t === 'personal' ||
       t === 'qualifications' ||
       t === 'research' ||
+      t === 'portfolio' ||
       t === 'workload' ||
       t === 'documents'
     ) {
@@ -676,6 +679,10 @@ export function FacultyProfilePage() {
             </SectionList>
           </FacultyPanel>
         </div>
+      )}
+
+      {tab === 'portfolio' && (
+        <FacultyPortfolioPanel api={api} basePath="/api/academics/faculty/profile/portfolio" />
       )}
 
       {tab === 'personal' && (

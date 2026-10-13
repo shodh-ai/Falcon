@@ -15,6 +15,7 @@ import { useAuthedApi } from '@/lib/api';
 
 type Row = {
   timetable_id: string;
+  faculty_user_id: string;
   day_of_week: number;
   start_time: string;
   end_time: string;
@@ -28,6 +29,7 @@ type Row = {
 
 type UnscheduledRow = {
   allocation_id: string;
+  faculty_user_id: string;
   program_name: string | null;
   semester: string | null;
   course_code: string;
@@ -56,6 +58,11 @@ export default function HodDepartmentTimetablePage() {
   const [unscheduled, setUnscheduled] = useState<UnscheduledRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [dayFilter, setDayFilter] = useState<number | 'all'>('all');
+  const [facultyFilter, setFacultyFilter] = useState('all');
+
+  useEffect(() => {
+    setFacultyFilter(new URLSearchParams(window.location.search).get('faculty') || 'all');
+  }, []);
 
   useEffect(() => {
     void (async () => {
@@ -76,40 +83,55 @@ export default function HodDepartmentTimetablePage() {
     })();
   }, [api]);
 
+  const facultyOptions = useMemo(() => {
+    const options = new Map<string, string>();
+    for (const row of [...rows, ...unscheduled]) options.set(row.faculty_user_id, row.faculty_name);
+    return [...options.entries()].sort((a, b) => a[1].localeCompare(b[1]));
+  }, [rows, unscheduled]);
+
+  const facultyRows = useMemo(
+    () => facultyFilter === 'all' ? rows : rows.filter((r) => r.faculty_user_id === facultyFilter),
+    [rows, facultyFilter],
+  );
+
+  const facultyUnscheduled = useMemo(
+    () => facultyFilter === 'all' ? unscheduled : unscheduled.filter((r) => r.faculty_user_id === facultyFilter),
+    [unscheduled, facultyFilter],
+  );
+
   const dayCounts = useMemo(() => {
     const c: Record<number, number> = {};
-    for (const row of rows) c[row.day_of_week] = (c[row.day_of_week] ?? 0) + 1;
+    for (const row of facultyRows) c[row.day_of_week] = (c[row.day_of_week] ?? 0) + 1;
     return c;
-  }, [rows]);
+  }, [facultyRows]);
 
   const filtered = useMemo(
-    () => (dayFilter === 'all' ? rows : rows.filter((r) => r.day_of_week === dayFilter)),
-    [rows, dayFilter],
+    () => (dayFilter === 'all' ? facultyRows : facultyRows.filter((r) => r.day_of_week === dayFilter)),
+    [facultyRows, dayFilter],
   );
 
   const stats = useMemo(() => {
-    const courses = new Set(rows.map((r) => r.course_code));
-    const faculty = new Set(rows.map((r) => r.faculty_name));
-    return { slots: rows.length, courses: courses.size, faculty: faculty.size };
-  }, [rows]);
+    const courses = new Set(facultyRows.map((r) => r.course_code));
+    return { slots: facultyRows.length, courses: courses.size, faculty: facultyOptions.length };
+  }, [facultyRows, facultyOptions]);
 
   const weekGrid = useMemo(() => {
     const byDay: Record<number, Row[]> = {};
     for (const d of DAYS) byDay[d.id] = [];
-    for (const row of rows) {
+    for (const row of facultyRows) {
       if (byDay[row.day_of_week]) byDay[row.day_of_week].push(row);
     }
     for (const d of DAYS) {
       byDay[d.id].sort((a, b) => String(a.start_time).localeCompare(String(b.start_time)));
     }
     return byDay;
-  }, [rows]);
+  }, [facultyRows]);
 
   return (
     <HodPageFrame>
       <HodPageHeader
         title="Department Timetable"
-        description="Master view — who is teaching where, across the week."
+        description="View each faculty member's weekly teaching calendar or the full department timetable."
         meta={
           <>
             <HodMetricChip label="Slots" value={stats.slots} emphasis />
@@ -129,7 +151,16 @@ export default function HodDepartmentTimetablePage() {
         }
       />
 
-      {!loading && rows.length > 0 ? (
+      <label className="mb-5 block max-w-sm text-sm font-medium text-sgvu-navy">
+        Faculty calendar
+        <select className="mt-1 w-full rounded-lg border border-gray-200 bg-white px-3 py-2"
+          value={facultyFilter} onChange={(event) => { setFacultyFilter(event.target.value); setDayFilter('all'); }}>
+          <option value="all">All department faculty</option>
+          {facultyOptions.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+        </select>
+      </label>
+
+      {!loading && facultyRows.length > 0 ? (
         <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
           <div className="space-y-3">
             <HodDayTabs days={DAYS} active={dayFilter} onChange={setDayFilter} counts={dayCounts} />
@@ -228,12 +259,12 @@ export default function HodDepartmentTimetablePage() {
           loading={loading}
           rows={[]}
           rowKey={() => ''}
-          empty="No timetable slots configured for your department."
+          empty={facultyFilter === 'all' ? 'No timetable slots configured for your department.' : 'No scheduled classes for this faculty member.'}
           columns={[]}
         />
       )}
 
-      {!loading && rows.length > 0 ? (
+      {!loading && facultyRows.length > 0 ? (
         <p className="text-sm text-muted-foreground">
           Need to reassign a slot?{' '}
           <Link href="/hod/academics/course-allocation" className="font-medium text-sgvu-navy underline">
@@ -242,7 +273,7 @@ export default function HodDepartmentTimetablePage() {
         </p>
       ) : null}
 
-      {!loading && unscheduled.length > 0 ? (
+      {!loading && facultyUnscheduled.length > 0 ? (
         <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-4">
           <div className="mb-3 flex items-center justify-between gap-3">
             <div>
@@ -252,7 +283,7 @@ export default function HodDepartmentTimetablePage() {
               </p>
             </div>
             <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-900">
-              {unscheduled.length} pending
+              {facultyUnscheduled.length} pending
             </span>
           </div>
           <div className="overflow-x-auto rounded-lg border border-amber-200 bg-white">
@@ -265,7 +296,7 @@ export default function HodDepartmentTimetablePage() {
                 </tr>
               </thead>
               <tbody>
-                {unscheduled.map((row) => (
+                {facultyUnscheduled.map((row) => (
                   <tr key={row.allocation_id} className="border-t border-amber-100">
                     <td className="px-3 py-2">{row.program_name ?? '—'} · {row.semester ?? '—'}</td>
                     <td className="px-3 py-2 font-semibold">{row.course_code} <span className="font-normal text-muted-foreground">· {row.course_name}</span></td>

@@ -46,6 +46,7 @@ import { HrDocumentExportProcessor } from './hr-document-export.processor';
 import { HrPayrollProcessor } from './hr-payroll.processor';
 import { HrTeamScopeService } from './hr-team-scope.service';
 import { HrTeamService } from './hr-team.service';
+import { HrFacultyPortfolioService } from './hr-faculty-portfolio.service';
 import { PayslipPdfService } from './payslip-pdf.service';
 import { FinanceModule } from '../finance/finance.module';
 import { NotificationsModule } from '../../core/notifications/notifications.module';
@@ -103,6 +104,7 @@ import { NotificationsModule } from '../../core/notifications/notifications.modu
     HrPayrollProcessor,
     HrTeamScopeService,
     HrTeamService,
+    HrFacultyPortfolioService,
     PayslipPdfService,
   ],
   exports: [
@@ -129,6 +131,7 @@ import { NotificationsModule } from '../../core/notifications/notifications.modu
     HrAccessControlService,
     HrTeamScopeService,
     HrTeamService,
+    HrFacultyPortfolioService,
   ],
 })
 export class HrModule {}
