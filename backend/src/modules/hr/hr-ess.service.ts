@@ -7,6 +7,12 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 import { HrChecklistService } from './hr-checklist.service';
+import {
+  awaitingHrActionSql,
+  completedExitSql,
+  fnfToInitiateSql,
+  pendingFnfClearanceSql,
+} from './hr-offboarding-status';
 
 @Injectable()
 export class HrEssService {
@@ -175,20 +181,43 @@ export class HrEssService {
     return rows[0];
   }
 
-  async listResignations(tenantId: string, entityId: number, status?: string) {
+  async listResignations(tenantId: string, entityId: number, queue?: 'fnf') {
     const params: unknown[] = [tenantId, entityId];
     let sql = `SELECT r.*, u.name AS employee_name, p.employee_id,
                       r.exit_status, r.fnf_deduct_checklist_penalty
                FROM hr_resignation_requests r
-               JOIN users u ON u.user_id = r.user_id
-               LEFT JOIN hr_employee_profiles p ON p.user_id = r.user_id
+               JOIN users u ON u.user_id = r.user_id AND u.tenant_id = r.tenant_id
+               LEFT JOIN hr_employee_profiles p ON p.user_id = r.user_id AND p.tenant_id = r.tenant_id
                WHERE r.tenant_id = $1 AND r.entity_id = $2`;
-    if (status) {
-      params.push(status);
-      sql += ` AND r.status = $3`;
-    }
+    if (queue === 'fnf') sql += ` AND ${pendingFnfClearanceSql('r')}`;
     sql += ` ORDER BY r.created_at DESC`;
     return this.dataSource.query(sql, params);
+  }
+
+  async getOffboardingSummary(tenantId: string, entityId: number) {
+    const [row] = await this.dataSource.query<
+      Array<{
+        awaiting_hr_action: string;
+        fnf_to_initiate: string;
+        pending_fnf_clearances: string;
+        completed_exits: string;
+      }>
+    >(
+      `SELECT
+         COUNT(*) FILTER (WHERE ${awaitingHrActionSql('r')})::text AS awaiting_hr_action,
+         COUNT(*) FILTER (WHERE ${fnfToInitiateSql('r')})::text AS fnf_to_initiate,
+         COUNT(*) FILTER (WHERE ${pendingFnfClearanceSql('r')})::text AS pending_fnf_clearances,
+         COUNT(*) FILTER (WHERE ${completedExitSql('r')})::text AS completed_exits
+       FROM hr_resignation_requests r
+       WHERE r.tenant_id = $1 AND r.entity_id = $2`,
+      [tenantId, entityId],
+    );
+    return {
+      awaiting_hr_action: Number(row?.awaiting_hr_action ?? 0),
+      fnf_to_initiate: Number(row?.fnf_to_initiate ?? 0),
+      pending_fnf_clearances: Number(row?.pending_fnf_clearances ?? 0),
+      completed_exits: Number(row?.completed_exits ?? 0),
+    };
   }
 
   async listPendingHodResignations(
@@ -237,47 +266,78 @@ export class HrEssService {
 
   async hodClearResignation(
     resignationId: string,
+    tenantId: string,
+    entityId: number,
     hodUserId: string,
     approved: boolean,
+    isHrAdmin = false,
   ) {
     const rows = await this.dataSource.query(
-      `UPDATE hr_resignation_requests SET
+      `UPDATE hr_resignation_requests r SET
          status = $2,
          hod_cleared_by = $3,
          hod_cleared_at = NOW(),
          updated_at = NOW()
-       WHERE resignation_id = $1
-       RETURNING *`,
-      [resignationId, approved ? 'PENDING_HR' : 'REJECTED', hodUserId],
+       FROM users employee
+       WHERE r.resignation_id = $1
+         AND r.tenant_id = $4 AND r.entity_id = $5
+         AND r.status = 'PENDING_HOD'
+         AND employee.user_id = r.user_id AND employee.tenant_id = r.tenant_id
+         AND employee.user_id <> $3
+         AND ($6::boolean OR employee.reporting_officer_id = $3
+              OR EXISTS (SELECT 1 FROM departments d
+                         WHERE d.dept_id = employee.dept_id AND d.hod_user_id = $3))
+       RETURNING r.*`,
+      [
+        resignationId,
+        approved ? 'PENDING_HR' : 'REJECTED',
+        hodUserId,
+        tenantId,
+        entityId,
+        isHrAdmin,
+      ],
     );
-    if (!rows[0]) throw new NotFoundException('Resignation request not found');
+    if (!rows[0]) {
+      throw new NotFoundException(
+        'Pending resignation not found in your scope',
+      );
+    }
     return rows[0];
   }
 
   async hrProcessResignation(
     resignationId: string,
+    tenantId: string,
+    entityId: number,
     hrUserId: string,
     separationMode: 'SERVE_NOTICE' | 'BUYOUT_NOTICE' | 'IMMEDIATE_SEPARATION',
   ) {
+    if (
+      !['SERVE_NOTICE', 'BUYOUT_NOTICE', 'IMMEDIATE_SEPARATION'].includes(
+        separationMode,
+      )
+    ) {
+      throw new BadRequestException('Invalid separation mode');
+    }
     const rows = await this.dataSource.query(
       `UPDATE hr_resignation_requests SET
          status = 'FNF_PENDING',
          separation_mode = $2,
          hr_processed_by = $3,
          hr_processed_at = NOW(),
+         fnf_ledger_ref = 'FNF-' || UPPER(SUBSTRING(resignation_id::text FROM 1 FOR 8)),
          updated_at = NOW()
-       WHERE resignation_id = $1
+       WHERE resignation_id = $1 AND tenant_id = $4 AND entity_id = $5
+         AND status IN ('PENDING_HR', 'HOD_CLEARED', 'HR_PROCESSING')
        RETURNING *`,
-      [resignationId, separationMode, hrUserId],
+      [resignationId, separationMode, hrUserId, tenantId, entityId],
     );
-    if (!rows[0]) throw new NotFoundException('Resignation request not found');
+    if (!rows[0]) {
+      throw new NotFoundException(
+        'HR-actionable resignation not found in your scope',
+      );
+    }
     const r = rows[0];
-
-    const fnfRef = `FNF-${resignationId.slice(0, 8).toUpperCase()}`;
-    await this.dataSource.query(
-      `UPDATE hr_resignation_requests SET fnf_ledger_ref = $2 WHERE resignation_id = $1`,
-      [resignationId, fnfRef],
-    );
 
     this.notify.leaveApproved({
       tenantId: r.tenant_id,
@@ -287,7 +347,7 @@ export class HrEssService {
       endDate: r.last_working_day,
     });
 
-    return { ...r, fnf_ledger_ref: fnfRef, finance_handoff: true };
+    return { ...r, finance_handoff: true };
   }
 
   async listEmployeeDocuments(

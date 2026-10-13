@@ -69,6 +69,10 @@ export class ObjectStorageService implements OnModuleInit {
     return this.enabled;
   }
 
+  getBucketName(): string {
+    return this.bucket;
+  }
+
   buildKey(tenantId: string, filename: string): string {
     const date = new Date();
     const y = date.getFullYear();

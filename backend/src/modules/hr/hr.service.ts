@@ -336,28 +336,29 @@ export class HrService {
       'LEAVE',
     );
 
-    const routing = await this.hrWorkflow.initializeRequest(
-      tenantId,
-      entityId,
-      'LEAVE',
-      staffUserId,
+    return this.hrWorkflow.withInitializedRequest(
+      tenantId, entityId, 'LEAVE', staffUserId,
+      async (routing, manager) => {
+        if (routing.is_final || !routing.approver_user_id) {
+          throw new BadRequestException('An assigned approval workflow is required before submission');
+        }
+        const row = this.staffLeaveRequests.create({
+          tenant_id: tenantId,
+          staff_user_id: staffUserId,
+          leave_type: dto.leave_type,
+          start_date: dto.start_date,
+          end_date: dto.end_date,
+          reason: dto.reason ?? null,
+          status: 'PENDING',
+          request_type: 'LEAVE',
+          entity_id: entityId,
+          workflow_id: routing.workflow_id,
+          current_step_order: routing.step_order,
+          current_approver_user_id: routing.approver_user_id,
+        });
+        return manager.getRepository(StaffLeaveRequest).save(row);
+      },
     );
-
-    const row = this.staffLeaveRequests.create({
-      tenant_id: tenantId,
-      staff_user_id: staffUserId,
-      leave_type: dto.leave_type,
-      start_date: dto.start_date,
-      end_date: dto.end_date,
-      reason: dto.reason ?? null,
-      status: routing.is_final ? 'HR_APPROVED' : 'PENDING',
-      request_type: 'LEAVE',
-      entity_id: entityId,
-      workflow_id: routing.workflow_id,
-      current_step_order: routing.step_order,
-      current_approver_user_id: routing.approver_user_id,
-    });
-    return this.staffLeaveRequests.save(row);
   }
 
   listMyStaffLeaves(staffUserId: string, tenantId: string) {
@@ -1606,6 +1607,8 @@ export class HrService {
       leave.request_type ?? 'LEAVE',
       leave.staff_user_id,
       leave.current_step_order,
+      leave.workflow_id,
+      leave.current_approver_user_id,
     );
 
     if (next.is_final) {
@@ -1681,6 +1684,8 @@ export class HrService {
       leave.request_type ?? 'LEAVE',
       leave.staff_user_id,
       leave.current_step_order,
+      leave.workflow_id,
+      leave.current_approver_user_id,
     );
 
     if (next.is_final) {

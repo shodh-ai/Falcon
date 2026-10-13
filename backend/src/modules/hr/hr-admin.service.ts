@@ -49,9 +49,38 @@ export class HrAdminService {
     );
   }
 
-  async listDepartments(_tenantId: string) {
+  async listDepartments(tenantId: string, entityId: number) {
     return this.dataSource.query(
-      `SELECT dept_id, dept_name FROM departments ORDER BY dept_name`,
+      `SELECT DISTINCT d.dept_id, d.dept_name
+       FROM users u
+       JOIN hr_employee_profiles p ON p.user_id = u.user_id AND p.tenant_id = u.tenant_id
+       JOIN departments d ON d.dept_id = u.dept_id
+       LEFT JOIN roles r ON r.role_id = u.role_id
+       WHERE u.tenant_id = $1 AND p.entity_id = $2
+         AND d.deleted_at IS NULL
+         AND r.role_name NOT IN ('Student', 'Applicant', 'Parent')
+       ORDER BY d.dept_name`,
+      [tenantId, entityId],
+    );
+  }
+
+  /** Creation metadata includes empty departments, which cannot appear in the staff directory yet. */
+  async listAvailableDepartments(tenantId: string) {
+    return this.dataSource.query(
+      `SELECT d.dept_id, d.dept_name
+       FROM departments d
+       WHERE d.deleted_at IS NULL
+         AND (
+           EXISTS (
+             SELECT 1 FROM users u
+             WHERE u.dept_id = d.dept_id AND u.tenant_id = $1
+           )
+           OR NOT EXISTS (
+             SELECT 1 FROM users u WHERE u.dept_id = d.dept_id
+           )
+         )
+       ORDER BY d.dept_name`,
+      [tenantId],
     );
   }
 
@@ -60,7 +89,7 @@ export class HrAdminService {
     entityId: number,
     viewerUserId?: string,
     viewerRoles: string[] = [],
-    options?: { limit?: number; offset?: number; q?: string },
+    options?: { limit?: number; offset?: number; q?: string; deptId?: number },
   ): Promise<PaginatedResponse<Record<string, unknown>>> {
     const { limit, offset } = parsePageParams(
       options?.limit,
@@ -68,14 +97,14 @@ export class HrAdminService {
       DEFAULT_PAGE_LIMIT,
     );
     const roleKey = [...viewerRoles].sort().join(',');
-    const cacheKey = `hr_dir:${tenantId}:${entityId}:${viewerUserId ?? 'all'}:${roleKey}:${limit}:${offset}:${options?.q?.trim().toLowerCase() ?? ''}`;
+    const cacheKey = `hr_dir:${tenantId}:${entityId}:${viewerUserId ?? 'all'}:${roleKey}:${limit}:${offset}:${options?.q?.trim().toLowerCase() ?? ''}:${options?.deptId ?? 'all'}`;
     return this.cache.getOrSet(
       cacheKey,
       () =>
         this.fetchDirectoryPage(
           tenantId,
           entityId,
-          { limit, offset, q: options?.q },
+          { limit, offset, q: options?.q, deptId: options?.deptId },
           viewerUserId,
           viewerRoles,
         ),
@@ -86,7 +115,7 @@ export class HrAdminService {
   private async fetchDirectoryPage(
     tenantId: string,
     entityId: number,
-    options: { limit: number; offset: number; q?: string },
+    options: { limit: number; offset: number; q?: string; deptId?: number },
     viewerUserId?: string,
     viewerRoles: string[] = [],
   ): Promise<PaginatedResponse<Record<string, unknown>>> {
@@ -111,6 +140,10 @@ export class HrAdminService {
         params.push(deptIds);
         deptClause = ` AND u.dept_id = ANY($${params.length})`;
       }
+    }
+    if (options.deptId !== undefined) {
+      params.push(options.deptId);
+      deptClause += ` AND u.dept_id = $${params.length}`;
     }
     let searchClause = '';
     if (options?.q?.trim()) {

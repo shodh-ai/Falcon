@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   Logger,
@@ -7,7 +8,7 @@ import {
 } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, MoreThanOrEqual } from 'typeorm';
+import { EntityManager, Repository, MoreThanOrEqual } from 'typeorm';
 import { HrHoliday } from '../../entities/hr-holiday.entity';
 import { HrDailyAttendance } from '../../entities/hr-daily-attendance.entity';
 import {
@@ -29,6 +30,7 @@ import {
 } from '../../common/validators/workforce-request.validator';
 import { canAccessTeamApprovals } from './utils/reporting-officer.util';
 import { workforceStatusPathForRoles } from './utils/workforce-portal-links.util';
+import { finalHrReviewSql } from './hr-final-review.sql';
 
 export type ApplyWorkforceRequestDto = {
   request_type: StaffRequestType;
@@ -41,6 +43,30 @@ export type ApplyWorkforceRequestDto = {
   missed_punch_type?: 'IN' | 'OUT' | 'BOTH';
   reason?: string;
   supporting_doc_urls?: string[];
+};
+
+type LegacyHodApprovalRow = {
+  leave_id: string;
+  tenant_id: string;
+  staff_user_id: string;
+  entity_id: number | null;
+  request_type: StaffRequestType;
+  leave_type: string;
+  workflow_id: string | null;
+  status: string;
+  current_step_order: number;
+  current_approver_user_id: string | null;
+  start_date: string;
+  end_date: string;
+  reason: string | null;
+  applied_at: Date;
+  employee_name?: string;
+  employee_id?: string | null;
+};
+
+type LegacyReapprovalTarget = {
+  step_order: number;
+  approver_user_id: string;
 };
 
 @Injectable()
@@ -320,49 +346,45 @@ export class HrWorkforceService {
     );
 
     const entityId = await this.resolveEmployeeEntityId(tenantId, staffUserId);
-    const routing = await this.hrWorkflow.initializeRequest(
-      tenantId,
-      entityId,
-      requestType,
-      staffUserId,
+    const saved = await this.hrWorkflow.withInitializedRequest(
+      tenantId, entityId, requestType, staffUserId,
+      async (routing, manager) => {
+        if (routing.is_final || !routing.approver_user_id) {
+          throw new BadRequestException('An assigned approval workflow is required before submission');
+        }
+        const row = this.requests.create({
+          tenant_id: tenantId,
+          staff_user_id: staffUserId,
+          request_type: requestType,
+          leave_type: leaveType,
+          start_date: startDate,
+          end_date: endDate,
+          start_time: hasStartTime ? dto.start_time!.trim() : null,
+          end_time: hasEndTime ? dto.end_time!.trim() : null,
+          reason: dto.reason?.trim() ?? null,
+          regularization_date: dto.regularization_date ?? null,
+          missed_punch_type: dto.missed_punch_type ?? null,
+          supporting_doc_urls: Array.isArray(dto.supporting_doc_urls)
+            ? dto.supporting_doc_urls.filter(
+                (u) => typeof u === 'string' && u.trim(),
+              )
+            : [],
+          status: 'PENDING',
+          entity_id: entityId,
+          workflow_id: routing.workflow_id,
+          current_step_order: routing.step_order,
+          current_approver_user_id: routing.approver_user_id,
+        });
+        return manager.getRepository(StaffLeaveRequest).save(row);
+      },
     );
 
-    const row = this.requests.create({
-      tenant_id: tenantId,
-      staff_user_id: staffUserId,
-      request_type: requestType,
-      leave_type: leaveType,
-      start_date: startDate,
-      end_date: endDate,
-      start_time: hasStartTime ? dto.start_time!.trim() : null,
-      end_time: hasEndTime ? dto.end_time!.trim() : null,
-      reason: dto.reason?.trim() ?? null,
-      regularization_date: dto.regularization_date ?? null,
-      missed_punch_type: dto.missed_punch_type ?? null,
-      supporting_doc_urls: Array.isArray(dto.supporting_doc_urls)
-        ? dto.supporting_doc_urls.filter(
-            (u) => typeof u === 'string' && u.trim(),
-          )
-        : [],
-      status: routing.is_final ? 'HR_APPROVED' : 'PENDING',
-      entity_id: entityId,
-      workflow_id: routing.workflow_id,
-      current_step_order: routing.step_order,
-      current_approver_user_id: routing.approver_user_id,
-    });
-    const saved = await this.requests.save(row);
-
-    if (routing.is_final) {
-      await this.applyApprovalSideEffects(saved);
-      return saved;
-    }
-
-    if (routing.approver_user_id) {
+    if (saved.current_approver_user_id) {
       await this.notifyWorkflowApprover(
         tenantId,
         staff,
         saved,
-        routing.approver_user_id,
+        saved.current_approver_user_id,
       );
     }
 
@@ -436,7 +458,7 @@ export class HrWorkforceService {
        JOIN users u ON u.user_id = r.staff_user_id
        LEFT JOIN departments d ON d.dept_id = u.dept_id
        WHERE r.tenant_id = $1
-         AND r.status = 'PENDING'
+         AND r.status IN ('PENDING', 'HOD_APPROVED')
          AND r.current_approver_user_id = $2
          ${typeClause}
          ${clause}
@@ -465,6 +487,352 @@ export class HrWorkforceService {
         department: r.employee_dept,
       },
     }));
+  }
+
+  /** The final HR review queue is scoped to the selected entity and assigned approver.
+   * The LEAVE workspace also owns on-duty final review; regularization is separate.
+   */
+  async listHrReviewPending(
+    tenantId: string,
+    entityId: number,
+    approverUserId: string,
+    requestType: 'LEAVE' | 'REGULARIZATION',
+  ) {
+    return this.dataSource.query<
+      Array<{
+        leave_id: string;
+        request_type: StaffRequestType;
+        leave_type: string;
+        start_date: string;
+        end_date: string;
+        regularization_date: string | null;
+        missed_punch_type: 'IN' | 'OUT' | 'BOTH' | null;
+        start_time: string | null;
+        end_time: string | null;
+        reason: string | null;
+        status: string;
+        applied_at: Date;
+        current_step_order: number;
+        employee_name: string;
+        employee_id: string | null;
+        recorded_check_in: Date | null;
+        recorded_check_out: Date | null;
+      }>
+    >(
+      `SELECT r.leave_id, r.request_type, r.leave_type, r.start_date, r.end_date,
+              r.regularization_date, r.missed_punch_type, r.start_time, r.end_time,
+              r.reason, r.status, r.applied_at,
+              r.current_step_order, u.name AS employee_name, p.employee_id,
+              da.first_in_time AS recorded_check_in,
+              da.last_out_time AS recorded_check_out
+       FROM staff_leave_requests r
+       JOIN hr_employee_profiles p ON p.user_id = r.staff_user_id
+         AND p.tenant_id = r.tenant_id
+       JOIN users u ON u.user_id = r.staff_user_id AND u.tenant_id = r.tenant_id
+       LEFT JOIN hr_approval_workflow_steps hr_step
+         ON hr_step.workflow_id = r.workflow_id AND hr_step.step_order = r.current_step_order
+       LEFT JOIN hr_daily_attendance da ON da.user_id = r.staff_user_id
+         AND da.date = r.regularization_date
+       WHERE r.tenant_id = $1 AND p.entity_id = $2
+         AND r.current_approver_user_id = $3
+         AND (r.request_type = $4 OR ($4 = 'LEAVE' AND r.request_type = 'ON_DUTY'))
+         AND r.status IN ('PENDING', 'HOD_APPROVED')
+         AND ${finalHrReviewSql('r', 'hr_step')}
+       ORDER BY r.applied_at ASC`,
+      [tenantId, entityId, approverUserId, requestType],
+    );
+  }
+
+  /** Pre-history HOD approvals need a new real manager decision, not a forged backfill. */
+  async listLegacyHodReconciliations(
+    tenantId: string,
+    entityId: number,
+    actorUserId: string,
+  ) {
+    await this.assertLiveReconciliationAdmin(
+      this.users.manager,
+      tenantId,
+      actorUserId,
+    );
+    const rows = await this.dataSource.query<LegacyHodApprovalRow[]>(
+      `SELECT r.leave_id, r.tenant_id, r.staff_user_id, r.entity_id,
+              r.request_type, r.leave_type, r.workflow_id, r.status,
+              r.current_step_order, r.current_approver_user_id,
+              r.start_date, r.end_date, r.reason, r.applied_at,
+              u.name AS employee_name, p.employee_id
+       FROM staff_leave_requests r
+       JOIN hr_employee_profiles p ON p.user_id = r.staff_user_id
+         AND p.tenant_id = r.tenant_id AND p.entity_id = $2
+       JOIN users u ON u.user_id = r.staff_user_id AND u.tenant_id = r.tenant_id
+       WHERE r.tenant_id = $1 AND (r.entity_id = $2 OR r.entity_id IS NULL)
+         AND r.status = 'HOD_APPROVED'
+         AND r.request_type IN ('LEAVE', 'ON_DUTY', 'REGULARIZATION')
+         AND NOT EXISTS (
+           SELECT 1 FROM hr_staff_request_decisions decision
+           WHERE decision.tenant_id = r.tenant_id AND decision.leave_id = r.leave_id
+         )
+       ORDER BY r.applied_at ASC`,
+      [tenantId, entityId],
+    );
+    return Promise.all(rows.map(async (row) => {
+      try {
+        const target = await this.resolveLegacyReapprovalTarget(
+          this.users.manager,
+          row,
+          tenantId,
+          entityId,
+          actorUserId,
+        );
+        return {
+          ...row,
+          can_reconcile: true,
+          reroute_step_order: target.step_order,
+          reroute_approver_user_id: target.approver_user_id,
+        };
+      } catch (error) {
+        return {
+          ...row,
+          can_reconcile: false,
+          block_reason: error instanceof Error ? error.message : 'Manual review required',
+        };
+      }
+    }));
+  }
+
+  async reconcileLegacyHodApproval(
+    actorUserId: string,
+    tenantId: string,
+    entityId: number,
+    leaveId: string,
+    reasonRaw: string,
+    evidenceReferenceRaw?: string,
+  ) {
+    const reason = typeof reasonRaw === 'string' ? reasonRaw.trim() : '';
+    const evidenceReference = typeof evidenceReferenceRaw === 'string'
+      ? evidenceReferenceRaw.trim() : '';
+    if (reason.length < 10 || reason.length > 2000) {
+      throw new BadRequestException('A reconciliation reason of 10–2000 characters is required');
+    }
+    if (evidenceReference.length > 1000) {
+      throw new BadRequestException('Evidence reference is too long');
+    }
+
+    const result = await this.dataSource.transaction(async (manager) => {
+      await this.assertLiveReconciliationAdmin(manager, tenantId, actorUserId);
+      const rows = await manager.query<LegacyHodApprovalRow[]>(
+        `SELECT r.leave_id, r.tenant_id, r.staff_user_id, r.entity_id,
+                r.request_type, r.leave_type, r.workflow_id, r.status,
+                r.current_step_order, r.current_approver_user_id,
+                r.start_date, r.end_date, r.reason, r.applied_at
+         FROM staff_leave_requests r
+         WHERE r.tenant_id = $1 AND r.leave_id = $2
+         FOR UPDATE OF r`,
+        [tenantId, leaveId],
+      );
+      const row = rows[0];
+      if (!row) throw new NotFoundException('Request not found');
+      const profile = await manager.query<Array<{ entity_id: number }>>(
+        `SELECT p.entity_id FROM hr_employee_profiles p
+         JOIN users u ON u.user_id = p.user_id AND u.tenant_id = p.tenant_id
+         WHERE p.tenant_id = $1 AND p.user_id = $2 AND p.entity_id = $3`,
+        [tenantId, row.staff_user_id, entityId],
+      );
+      if (!profile[0] || (row.entity_id !== null && Number(row.entity_id) !== entityId)) {
+        throw new NotFoundException('Request not found in this organization entity');
+      }
+      if (row.status !== 'HOD_APPROVED' ||
+          !['LEAVE', 'ON_DUTY', 'REGULARIZATION'].includes(row.request_type)) {
+        throw new ConflictException('Request is not awaiting legacy HOD reconciliation');
+      }
+      const prior = await manager.query<Array<{ decision_id: string }>>(
+        `SELECT decision_id FROM hr_staff_request_decisions
+         WHERE tenant_id = $1 AND leave_id = $2 LIMIT 1`,
+        [tenantId, leaveId],
+      );
+      if (prior[0]) {
+        throw new ConflictException('Request already has verifiable approval history');
+      }
+      const target = await this.resolveLegacyReapprovalTarget(
+        manager, row, tenantId, entityId, actorUserId,
+      );
+      const updated = await manager.query<Array<{
+        leave_id: string;
+        status: string;
+        current_step_order: number;
+        current_approver_user_id: string;
+      }>>(
+        `UPDATE staff_leave_requests
+         SET status = 'PENDING', current_step_order = $4,
+             current_approver_user_id = $5
+         WHERE tenant_id = $1 AND leave_id = $2 AND status = 'HOD_APPROVED'
+           AND current_step_order = $3
+           AND current_approver_user_id IS NOT DISTINCT FROM $6::uuid
+           AND NOT EXISTS (
+             SELECT 1 FROM hr_staff_request_decisions decision
+             WHERE decision.tenant_id = $1 AND decision.leave_id = $2
+           )
+         RETURNING leave_id, status, current_step_order, current_approver_user_id`,
+        [tenantId, leaveId, row.current_step_order, target.step_order,
+          target.approver_user_id, row.current_approver_user_id],
+      );
+      if (!updated[0]) {
+        throw new ConflictException('Request changed during reconciliation');
+      }
+      const audit = await manager.query<Array<{ reconciliation_id: string }>>(
+        `INSERT INTO hr_staff_request_reconciliations
+           (tenant_id, entity_id, leave_id, reconciled_by_user_id,
+            previous_status, previous_step_order, previous_approver_user_id,
+            rerouted_step_order, rerouted_approver_user_id, reason, evidence_reference)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+         RETURNING reconciliation_id`,
+        [tenantId, entityId, leaveId, actorUserId, row.status,
+          row.current_step_order, row.current_approver_user_id,
+          target.step_order, target.approver_user_id, reason,
+          evidenceReference || null],
+      );
+      return { ...updated[0], reconciliation_id: audit[0].reconciliation_id };
+    });
+    return result;
+  }
+
+  private async assertLiveReconciliationAdmin(
+    manager: EntityManager,
+    tenantId: string,
+    actorUserId: string,
+  ) {
+    const roles = await manager.query<Array<{ role_name: string }>>(
+      `SELECT DISTINCT role_name FROM (
+         SELECT r.role_name FROM users u JOIN roles r ON r.role_id = u.role_id
+         WHERE u.user_id = $1 AND u.tenant_id = $2 AND u.is_active = true
+         UNION ALL
+         SELECT r.role_name FROM users u
+         JOIN user_roles ur ON ur.user_id = u.user_id
+         JOIN roles r ON r.role_id = ur.role_id
+         WHERE u.user_id = $1 AND u.tenant_id = $2 AND u.is_active = true
+       ) current_roles`,
+      [actorUserId, tenantId],
+    );
+    if (!roles.some(({ role_name }) => role_name === 'HRAdmin' || role_name === 'SuperAdmin')) {
+      throw new ForbiddenException('Current HR administrator role is required for reconciliation');
+    }
+  }
+
+  private async resolveLegacyReapprovalTarget(
+    manager: EntityManager,
+    row: LegacyHodApprovalRow,
+    tenantId: string,
+    entityId: number,
+    actorUserId: string,
+  ): Promise<LegacyReapprovalTarget> {
+    let priorStepOrder = 1;
+    let priorStepType = 'REPORTING_MANAGER';
+    if (row.workflow_id === null) {
+      if (row.current_step_order !== 2) {
+        throw new ConflictException('Legacy fallback is not at its final HR step');
+      }
+    } else {
+      const steps = await manager.query<Array<{
+        current_type: string;
+        current_ref: string | null;
+        previous_order: number | null;
+        previous_type: string | null;
+      }>>(
+        `SELECT current_step.approver_type AS current_type,
+                current_step.approver_ref AS current_ref,
+                previous_step.step_order AS previous_order,
+                previous_step.approver_type AS previous_type
+         FROM hr_approval_workflows workflow
+         JOIN hr_approval_workflow_steps current_step
+           ON current_step.workflow_id = workflow.workflow_id
+          AND current_step.step_order = $5
+         LEFT JOIN LATERAL (
+           SELECT step_order, approver_type FROM hr_approval_workflow_steps prior
+           WHERE prior.workflow_id = workflow.workflow_id AND prior.step_order < $5
+           ORDER BY prior.step_order DESC LIMIT 1
+         ) previous_step ON true
+         WHERE workflow.workflow_id = $1 AND workflow.tenant_id = $2
+           AND workflow.entity_id = $3 AND workflow.action_type = $4
+           AND NOT EXISTS (
+             SELECT 1 FROM hr_approval_workflow_steps later
+             WHERE later.workflow_id = workflow.workflow_id AND later.step_order > $5
+           )`,
+        [row.workflow_id, tenantId, entityId, row.request_type, row.current_step_order],
+      );
+      const step = steps[0];
+      const currentIsHr = step && (
+        step.current_type === 'HR_ADMIN' || step.current_type === 'HR_EXECUTIVE' ||
+        (step.current_type === 'ROLE' &&
+          ['HR', 'HRAdmin', 'SuperAdmin'].includes(step.current_ref ?? ''))
+      );
+      if (!currentIsHr || !step.previous_order || !step.previous_type) {
+        throw new ConflictException('Pinned workflow has no verifiable final HR and prior manager steps');
+      }
+      priorStepOrder = Number(step.previous_order);
+      priorStepType = step.previous_type;
+    }
+    if (priorStepType !== 'REPORTING_MANAGER' && priorStepType !== 'DEPT_HEAD') {
+      throw new ConflictException('Prior workflow step is not a manager/HOD approval');
+    }
+    const candidate = await manager.query<Array<{ approver_user_id: string | null }>>(
+      `SELECT CASE WHEN $3 = 'DEPT_HEAD'
+              THEN NULLIF(department.hod_user_id, staff.user_id)
+              ELSE COALESCE(
+                NULLIF(staff.reporting_officer_id, staff.user_id),
+                NULLIF(department.hod_user_id, staff.user_id)
+              ) END AS approver_user_id
+       FROM users staff
+       LEFT JOIN departments department ON department.dept_id = staff.dept_id
+       WHERE staff.user_id = $1 AND staff.tenant_id = $2`,
+      [row.staff_user_id, tenantId, priorStepType],
+    );
+    const approverId = candidate[0]?.approver_user_id;
+    if (!approverId) {
+      throw new ConflictException('No current manager/HOD is configured for fresh approval');
+    }
+    if (approverId === actorUserId || approverId === row.current_approver_user_id) {
+      throw new ConflictException('Fresh manager/HOD reviewer must be independent of HR reconciliation and final review');
+    }
+    const active = await manager.query<Array<{ user_id: string }>>(
+      `SELECT approver.user_id FROM users approver
+       JOIN hr_employee_profiles approver_profile
+         ON approver_profile.user_id = approver.user_id
+        AND approver_profile.tenant_id = approver.tenant_id
+       WHERE approver.user_id = $1 AND approver.tenant_id = $2
+         AND approver_profile.entity_id = $3 AND approver.is_active = true`,
+      [approverId, tenantId, entityId],
+    );
+    if (!active[0]) {
+      throw new ConflictException('The configured manager/HOD is inactive or outside this tenant/entity');
+    }
+    return { step_order: priorStepOrder, approver_user_id: approverId };
+  }
+
+  /** Compatibility mutations must enter the same workflow path as the current review UI. */
+  async actOnScopedTeamRequest(
+    actorUserId: string,
+    tenantId: string,
+    entityId: number,
+    leaveId: string,
+    action: 'APPROVE' | 'REJECT',
+    roles: string[],
+    comment?: string,
+  ) {
+    const assigned = await this.dataSource.query<Array<{ leave_id: string }>>(
+      `SELECT r.leave_id
+       FROM staff_leave_requests r
+       JOIN hr_employee_profiles p ON p.user_id = r.staff_user_id
+         AND p.tenant_id = r.tenant_id
+       WHERE r.tenant_id = $1 AND p.entity_id = $2 AND r.leave_id = $3
+         AND r.current_approver_user_id = $4
+         AND r.status IN ('PENDING', 'HOD_APPROVED')`,
+      [tenantId, entityId, leaveId, actorUserId],
+    );
+    if (!assigned[0]) {
+      throw new ForbiddenException('Request is not pending your approval in this entity');
+    }
+    return this.actOnTeamRequest(actorUserId, tenantId, leaveId, action, comment, {
+      roles,
+    });
   }
 
   private get dataSource() {
@@ -515,9 +883,9 @@ export class HrWorkforceService {
        UNION SELECT r.role_name FROM users u JOIN roles r ON r.role_id = u.role_id WHERE u.user_id = $1`,
       [reportingOfficerId],
     );
-    const roleNames = options?.roles?.length
-      ? options.roles
-      : roles.map((r) => r.role_name);
+    // JWT/workspace roles can outlive a demotion. Approval power is checked
+    // against the actor's current database roles at decision time.
+    const roleNames = roles.map((r) => r.role_name);
 
     const adminOverride =
       options?.adminOverride === true &&
@@ -555,10 +923,11 @@ export class HrWorkforceService {
       );
     }
 
-    if (row.status !== 'PENDING') {
+    if (row.status !== 'PENDING' && row.status !== 'HOD_APPROVED') {
       throw new BadRequestException('Request has already been processed');
     }
 
+    let overrideAuditParams: string[] | null = null;
     if (adminOverride) {
       const approverDesignationRow = row.current_approver_user_id
         ? await this.users.manager.query(
@@ -585,25 +954,27 @@ export class HrWorkforceService {
           ? row.leave_type || 'LEAVE'
           : row.request_type;
 
-      await this.users.manager.query(
-        `INSERT INTO hr_override_logs (tenant_id, employee_id, assigned_approver, bypassed_by, type_of_action, type_of_request, date_and_time)
-         VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)`,
-        [
-          tenantId,
-          employeeId,
-          assignedApproverDesignation,
-          bypassedByDesignation,
-          actionType,
-          requestType,
-        ],
-      );
+      overrideAuditParams = [
+        tenantId, employeeId, assignedApproverDesignation,
+        bypassedByDesignation, actionType, requestType,
+      ];
     }
+
+    const expectedDecisionState = {
+      status: row.status,
+      stepOrder: row.current_step_order,
+      approverUserId: row.current_approver_user_id,
+    };
 
     if (action === 'REJECT') {
       row.status = 'REJECTED';
       row.current_approver_user_id = null;
-      const saved = await this.requests.save(row);
-      void this.notifyEmployeeDecision(staff, row, false, comment);
+      row.approver_remarks = comment?.trim() ?? row.approver_remarks;
+      const saved = await this.dataSource.transaction((manager) => this.commitDecision(
+        row, expectedDecisionState, reportingOfficerId, action,
+        adminOverride, manager, overrideAuditParams,
+      ));
+      void this.notifyEmployeeDecision(staff, saved, false, comment);
       return saved;
     }
 
@@ -614,38 +985,45 @@ export class HrWorkforceService {
     const isHodStep =
       stepType === 'REPORTING_MANAGER' || stepType === 'DEPT_HEAD';
 
-    if (isHodStep && this.shouldFinalizeAfterHodApproval(row)) {
-      row.status = 'HR_APPROVED';
-      row.current_approver_user_id = null;
-      row.approver_remarks = comment?.trim() ?? row.approver_remarks;
-      const saved = await this.requests.save(row);
-      await this.applyApprovalSideEffects(saved);
-      void this.notifyEmployeeDecision(staff, saved, true, comment);
-      return saved;
-    }
-
     const next = await this.hrWorkflow.advanceAfterApproval(
       tenantId,
       entityId,
       row.request_type,
       row.staff_user_id,
       row.current_step_order,
+      row.workflow_id,
+      reportingOfficerId,
     );
 
     if (next.is_final) {
       row.status = 'HR_APPROVED';
       row.current_approver_user_id = null;
       row.approver_remarks = comment?.trim() ?? row.approver_remarks;
-      const saved = await this.requests.save(row);
-      await this.applyApprovalSideEffects(saved);
+      const saved = await this.dataSource.transaction(async (manager) => {
+        await this.assertIndependentFinalDecision(
+          manager, row, expectedDecisionState, reportingOfficerId,
+        );
+        const claimed = await this.commitDecision(
+          row, expectedDecisionState, reportingOfficerId, action,
+          adminOverride, manager, overrideAuditParams,
+        );
+        await this.applyApprovalSideEffects(claimed, manager);
+        return claimed;
+      });
+      await this.recalculateApprovedAttendance(saved);
       void this.notifyEmployeeDecision(staff, saved, true, comment);
       return saved;
     }
 
+    // Keep the HoD decision visible while the request awaits independent HR sign-off.
+    if (isHodStep) row.status = 'HOD_APPROVED';
     row.current_step_order = next.step_order;
     row.current_approver_user_id = next.approver_user_id;
     row.approver_remarks = comment?.trim() ?? row.approver_remarks;
-    const saved = await this.requests.save(row);
+    const saved = await this.dataSource.transaction((manager) => this.commitDecision(
+      row, expectedDecisionState, reportingOfficerId, action,
+      adminOverride, manager, overrideAuditParams,
+    ));
 
     if (next.approver_user_id) {
       await this.notifyWorkflowApprover(
@@ -657,6 +1035,89 @@ export class HrWorkforceService {
     }
 
     return saved;
+  }
+
+  /** Only one concurrent reviewer may claim a pending decision and its side effects. */
+  private async commitDecision(
+    row: StaffLeaveRequest,
+    expected: {
+      status: string;
+      stepOrder: number;
+      approverUserId: string | null;
+    },
+    actorUserId: string,
+    action: 'APPROVE' | 'REJECT',
+    wasOverride: boolean,
+    manager: EntityManager,
+    overrideAuditParams: string[] | null,
+  ): Promise<StaffLeaveRequest> {
+    const updated = await manager.query<StaffLeaveRequest[]>(
+      `UPDATE staff_leave_requests
+       SET status = $1, current_step_order = $2,
+           current_approver_user_id = $3, approver_remarks = $4
+       WHERE tenant_id = $5 AND leave_id = $6
+         AND status = $7 AND current_step_order = $8
+         AND current_approver_user_id IS NOT DISTINCT FROM $9::uuid
+       RETURNING *`,
+      [
+        row.status,
+        row.current_step_order,
+        row.current_approver_user_id,
+        row.approver_remarks ?? null,
+        row.tenant_id,
+        row.leave_id,
+        expected.status,
+        expected.stepOrder,
+        expected.approverUserId,
+      ],
+    );
+    if (!updated[0]) {
+      throw new ConflictException('Request changed while approval was in progress');
+    }
+    await manager.query(
+      `INSERT INTO hr_staff_request_decisions
+         (tenant_id, leave_id, step_order, actor_user_id, action, was_override)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [row.tenant_id, row.leave_id, expected.stepOrder,
+        actorUserId, action, wasOverride],
+    );
+    await this.recordOverrideAfterClaim(overrideAuditParams, manager);
+    return Object.assign(row, updated[0]);
+  }
+
+  private async assertIndependentFinalDecision(
+    manager: EntityManager,
+    row: StaffLeaveRequest,
+    expected: { status: string; stepOrder: number; approverUserId: string | null },
+    actorUserId: string,
+  ) {
+    const previous = await manager.query<Array<{ actor_user_id: string }>>(
+      `SELECT actor_user_id FROM hr_staff_request_decisions
+       WHERE tenant_id = $1 AND leave_id = $2 AND action = 'APPROVE'`,
+      [row.tenant_id, row.leave_id],
+    );
+    if (previous.some((decision) => decision.actor_user_id === actorUserId)) {
+      throw new ForbiddenException('The previous approver cannot provide final HR sign-off');
+    }
+    if (expected.status === 'HOD_APPROVED' && previous.length === 0) {
+      throw new ConflictException(
+        'Prior approval actor is unverified; this legacy request requires HR reconciliation before final sign-off',
+      );
+    }
+  }
+
+  private async recordOverrideAfterClaim(
+    params: string[] | null,
+    manager: EntityManager,
+  ) {
+    if (!params) return;
+    await manager.query(
+      `INSERT INTO hr_override_logs
+         (tenant_id, employee_id, assigned_approver, bypassed_by,
+          type_of_action, type_of_request, date_and_time)
+       VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)`,
+      params,
+    );
   }
 
   /** Payroll: day counts as paid/present if biometric present, regularized, or approved OD. */
@@ -805,17 +1266,21 @@ export class HrWorkforceService {
       },
       title: `${label} pending your approval (Step ${row.current_step_order})`,
       message: `${staff.name} submitted ${label} (${row.start_date}${row.end_date !== row.start_date ? ` – ${row.end_date}` : ''}).`,
-      actionLink: row.current_approver_user_id
-        ? '/hr/inbox'
-        : '/faculty/team-requests',
+      actionLink: row.status === 'HOD_APPROVED' && ['LEAVE', 'ON_DUTY'].includes(row.request_type)
+        ? '/hr/leaves'
+        : row.status === 'HOD_APPROVED' && row.request_type === 'REGULARIZATION'
+          ? '/hr/regularizations'
+          : row.current_approver_user_id
+            ? '/hr/inbox'
+            : '/faculty/team-requests',
       category: 'HR',
       requesterName: staff.name,
     });
   }
 
-  private async applyApprovalSideEffects(row: StaffLeaveRequest) {
+  private async applyApprovalSideEffects(row: StaffLeaveRequest, manager: EntityManager) {
     if (row.request_type === 'REGULARIZATION' && row.regularization_date) {
-      await this.regularizeDay(row.staff_user_id, row.regularization_date);
+      await this.regularizeDay(row.staff_user_id, row.regularization_date, manager);
     } else if (row.request_type === 'ON_DUTY') {
       const dates = this.expandDates(row.start_date, row.end_date);
       for (const date of dates) {
@@ -825,24 +1290,28 @@ export class HrWorkforceService {
             date,
             row.start_time,
             row.end_time,
+            manager,
           );
         } else {
-          await this.markPresentForOd(row.staff_user_id, date);
+          await this.markPresentForOd(row.staff_user_id, date, manager);
         }
       }
     } else if (row.request_type === 'COMP_OFF_CREDIT') {
-      await this.creditCompOff(row.staff_user_id, 1);
+      await this.creditCompOff(row.staff_user_id, 1, manager);
     } else if (row.request_type === 'LEAVE') {
-      await this.deductLeaveBalance(row);
+      await this.deductLeaveBalance(row, manager);
     }
   }
 
-  private async regularizeDay(userId: string, date: string) {
-    let row = await this.dailyAttendance.findOne({
+  /** The authoritative daily row is written in the same transaction as final approval. */
+  private async regularizeDay(userId: string, date: string, manager: EntityManager) {
+    const daily = manager.getRepository(HrDailyAttendance);
+    let row = await daily.findOne({
       where: { user_id: userId, date },
+      lock: { mode: 'pessimistic_write' },
     });
     if (!row) {
-      row = this.dailyAttendance.create({
+      row = daily.create({
         user_id: userId,
         date,
         status: 'ABSENT',
@@ -859,16 +1328,17 @@ export class HrWorkforceService {
       row.first_in_time,
       row.last_out_time,
     ).toFixed(2);
-    await this.dailyAttendance.save(row);
-    await this.attendanceCalc.calculateAndPersist(userId, date);
+    await daily.save(row);
   }
 
-  private async markPresentForOd(userId: string, date: string) {
-    let row = await this.dailyAttendance.findOne({
+  private async markPresentForOd(userId: string, date: string, manager: EntityManager) {
+    const daily = manager.getRepository(HrDailyAttendance);
+    let row = await daily.findOne({
       where: { user_id: userId, date },
+      lock: { mode: 'pessimistic_write' },
     });
     if (!row) {
-      row = this.dailyAttendance.create({
+      row = daily.create({
         user_id: userId,
         date,
         status: 'ABSENT',
@@ -883,8 +1353,7 @@ export class HrWorkforceService {
       row.first_in_time,
       row.last_out_time,
     ).toFixed(2);
-    await this.dailyAttendance.save(row);
-    await this.attendanceCalc.calculateAndPersist(userId, date);
+    await daily.save(row);
   }
 
   /** Apply a partial OD window without manufacturing a full 8-hour day. */
@@ -893,10 +1362,15 @@ export class HrWorkforceService {
     date: string,
     startTime: string,
     endTime: string,
+    manager: EntityManager,
   ) {
-    let row = await this.dailyAttendance.findOne({ where: { user_id: userId, date } });
+    const daily = manager.getRepository(HrDailyAttendance);
+    let row = await daily.findOne({
+      where: { user_id: userId, date },
+      lock: { mode: 'pessimistic_write' },
+    });
     if (!row) {
-      row = this.dailyAttendance.create({
+      row = daily.create({
         user_id: userId,
         date,
         status: 'PRESENT',
@@ -910,36 +1384,23 @@ export class HrWorkforceService {
     // hours instead of converting the request into FULL_DAY.
     row.is_regularized = false;
     row.total_hours = this.computeHours(row.first_in_time, row.last_out_time).toFixed(2);
-    await this.dailyAttendance.save(row);
-    await this.attendanceCalc.calculateAndPersist(userId, date);
+    await daily.save(row);
   }
 
-  private async creditCompOff(userId: string, days: number) {
+  private async creditCompOff(userId: string, days: number, manager: EntityManager) {
     const year = new Date().getFullYear();
-    let balance = await this.balances.findOne({
-      where: { user_id: userId, leave_type: 'COMP_OFF', year },
-    });
-    if (!balance) {
-      balance = this.balances.create({
-        user_id: userId,
-        leave_type: 'COMP_OFF',
-        year,
-        entitled: days,
-        used: 0,
-      });
-    } else {
-      balance.entitled = Number(balance.entitled) + days;
-    }
-    await this.balances.save(balance);
+    await manager.query(
+      `INSERT INTO hr_leave_balances (user_id, leave_type, year, entitled, used)
+       VALUES ($1, 'COMP_OFF', $2, $3, 0)
+       ON CONFLICT (user_id, leave_type, year)
+       DO UPDATE SET entitled = hr_leave_balances.entitled + EXCLUDED.entitled,
+                     updated_at = NOW()`,
+      [userId, year, days],
+    );
   }
 
-  private async deductLeaveBalance(row: StaffLeaveRequest) {
+  private async deductLeaveBalance(row: StaffLeaveRequest, manager: EntityManager) {
     const year = new Date(row.start_date).getFullYear();
-    const balance = await this.balances.findOne({
-      where: { user_id: row.staff_user_id, leave_type: row.leave_type, year },
-    });
-    if (!balance) return;
-
     const dates = this.expandDates(row.start_date, row.end_date).filter((d) => {
       const dow = new Date(d).getDay();
       return dow !== 0 && dow !== 6;
@@ -958,8 +1419,27 @@ export class HrWorkforceService {
       days = Math.min(1, Math.max(0, partialHours / fullDayHours));
     }
 
-    balance.used = Number(balance.used) + days;
-    await this.balances.save(balance);
+    await manager.query(
+      `UPDATE hr_leave_balances SET used = used + $4, updated_at = NOW()
+       WHERE user_id = $1 AND leave_type = $2 AND year = $3`,
+      [row.staff_user_id, row.leave_type, year, days],
+    );
+  }
+
+  /** Derived attendance classifications may be retried; core daily rows already committed. */
+  private async recalculateApprovedAttendance(row: StaffLeaveRequest) {
+    const dates = row.request_type === 'REGULARIZATION' && row.regularization_date
+      ? [row.regularization_date]
+      : row.request_type === 'ON_DUTY'
+        ? this.expandDates(row.start_date, row.end_date)
+        : [];
+    for (const date of dates) {
+      try {
+        await this.attendanceCalc.calculateAndPersist(row.staff_user_id, date);
+      } catch (error) {
+        this.logger.warn(`Attendance projection pending recalculation for ${row.leave_id} on ${date}: ${String(error)}`);
+      }
+    }
   }
 
   private hoursBetweenClocks(start: string, end: string): number {
@@ -1024,28 +1504,28 @@ export class HrWorkforceService {
     });
   }
 
-  private shouldFinalizeAfterHodApproval(row: StaffLeaveRequest): boolean {
-    if (row.request_type === 'ON_DUTY') return true;
-    if (row.request_type === 'LEAVE') {
-      const leaveType = (row.leave_type ?? '').toUpperCase();
-      return ['CL', 'CCL', 'OD', 'RH'].includes(leaveType);
-    }
-    return false;
-  }
-
   private async resolveCurrentStepApproverType(
     tenantId: string,
     row: StaffLeaveRequest,
   ): Promise<string | null> {
-    if (!row.workflow_id || !row.current_step_order) return null;
+    if (!row.workflow_id) {
+      return row.current_step_order === 1
+        ? 'REPORTING_MANAGER'
+        : row.current_step_order === 2
+          ? 'HR_ADMIN'
+          : null;
+    }
+    if (!row.current_step_order) return null;
     const steps = await this.users.manager.query(
-      `SELECT approver_type FROM hr_approval_workflow_steps
+      `SELECT approver_type, approver_ref FROM hr_approval_workflow_steps
        WHERE workflow_id = $1 AND step_order = $2`,
       [row.workflow_id, row.current_step_order],
     );
-    return (
-      (steps[0] as { approver_type: string } | undefined)?.approver_type ?? null
-    );
+    const step = steps[0] as { approver_type: string; approver_ref?: string | null } | undefined;
+    if (!step) return null;
+    return step.approver_type === 'ROLE'
+      ? `ROLE:${step.approver_ref ?? ''}`
+      : step.approver_type;
   }
 
   private requestTypeLabel(type: StaffRequestType) {

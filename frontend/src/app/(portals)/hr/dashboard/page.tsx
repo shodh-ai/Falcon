@@ -63,6 +63,7 @@ export default function HrMasterDashboardPage() {
   const { data, error, isLoading } = useHrSWR<MasterDashboard>(
     'hr-dashboard-master',
     '/api/hr/dashboard/master',
+    { dedupingInterval: 0, revalidateOnMount: true, refreshInterval: 30_000 },
   );
 
   if (entityLoading || (entityReady && isLoading && !data && !error)) {
@@ -112,6 +113,7 @@ export default function HrMasterDashboardPage() {
   const hc = data?.headcount_snapshot;
   const att = data?.today_attendance;
   const pending = data?.pending_actions;
+  const actionableItems = (pending?.items ?? []).filter((item) => item.count > 0);
   const attrition = data?.attrition_trend ?? [];
   const lastTurnover = attrition[attrition.length - 1]?.turnover_pct ?? 0;
   const prevTurnover = attrition[attrition.length - 2]?.turnover_pct ?? lastTurnover;
@@ -206,7 +208,7 @@ export default function HrMasterDashboardPage() {
             <CardTitle>Pending Actions Queue</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            {(pending?.items ?? []).map((item) => (
+            {actionableItems.map((item) => (
               <div
                 key={item.label}
                 className="flex items-center justify-between rounded-lg border border-gray-100 px-4 py-3 text-sm transition-colors hover:bg-gray-50"
@@ -219,7 +221,7 @@ export default function HrMasterDashboardPage() {
                 </Button>
               </div>
             ))}
-            {(pending?.items ?? []).length === 0 && (
+            {actionableItems.length === 0 && (
               <HrEmptyState
                 title="No pending actions"
                 description="You're all caught up — nothing awaiting HR review right now."

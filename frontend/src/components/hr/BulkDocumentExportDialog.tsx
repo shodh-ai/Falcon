@@ -2,6 +2,7 @@
 
 import { Select } from '@/components/ui/select';
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { Archive } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import {
@@ -14,7 +15,7 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { useHrApi } from '@/lib/api/use-hr-api';
-import { HR_DOCUMENT_CATEGORIES } from '@/lib/api/api.hr-documents';
+import { HR_DOCUMENT_CATEGORIES, type ExportJobStatus } from '@/lib/api/api.hr-documents';
 
 type Dept = { dept_id: number; dept_name: string };
 
@@ -38,6 +39,7 @@ export function BulkDocumentExportDialog() {
   const [documentType, setDocumentType] = useState<string>('AADHAAR');
   const [deptId, setDeptId] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [job, setJob] = useState<ExportJobStatus | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -47,29 +49,32 @@ export function BulkDocumentExportDialog() {
       .catch(() => {});
   }, [api, open]);
 
-  function pollExportJob(jobId: string) {
-    let attempts = 0;
-    const interval = window.setInterval(() => {
-      attempts += 1;
+  useEffect(() => {
+    if (!open || !job?.job_id || job.status === 'COMPLETED' || job.status === 'FAILED') return;
+    let cancelled = false;
+    const check = () => {
       void api
-        .get<{ status: string; error_message?: string | null }>(
-          `/api/hr/documents/export-jobs/${jobId}`,
+        .get<ExportJobStatus>(
+          `/api/hr/documents/export-jobs/${job.job_id}`,
         )
-        .then((job) => {
-          if (job.status === 'COMPLETED') {
-            clearInterval(interval);
-            window.dispatchEvent(new CustomEvent('falcon:notifications-refresh'));
-          }
-          if (job.status === 'FAILED') {
-            clearInterval(interval);
-            toast.error(job.error_message ?? 'Export failed');
-            window.dispatchEvent(new CustomEvent('falcon:notifications-refresh'));
+        .then((updated) => {
+          if (!cancelled) {
+            setJob(updated);
+            if (updated.status === 'COMPLETED' || updated.status === 'FAILED') {
+              window.dispatchEvent(new CustomEvent('falcon:notifications-refresh'));
+            }
           }
         })
-        .catch(() => {});
-      if (attempts >= 40) clearInterval(interval);
-    }, 3000);
-  }
+        .catch(() => {
+          // A transient polling error is not a failed export; the tracking page remains available.
+        });
+    };
+    const interval = window.setInterval(check, 3000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [api, job?.job_id, job?.status, open]);
 
   async function generateArchive() {
     if (!documentType) {
@@ -82,14 +87,13 @@ export function BulkDocumentExportDialog() {
         document_type: documentType,
         dept_id: deptId ? Number(deptId) : undefined,
       });
-      setOpen(false);
+      setJob({ job_id: result.job_id, status: 'QUEUED', document_count: result.document_count });
       const count = result.document_count ?? 0;
       const label = documentLabel(documentType);
       toast.success(
-        `ZIP Generation Started. Compiling ${count} ${label}… You will be notified via the Bell Icon when your file is ready.`,
+        `ZIP generation started for ${count} ${label}. Track it here or via the bell notification.`,
       );
       window.dispatchEvent(new CustomEvent('falcon:notifications-refresh'));
-      pollExportJob(result.job_id);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to queue export');
     } finally {
@@ -156,6 +160,22 @@ export function BulkDocumentExportDialog() {
           <Button className="w-full" disabled={submitting} onClick={() => void generateArchive()}>
             {submitting ? 'Starting…' : 'Generate ZIP Archive'}
           </Button>
+          {job && (
+            <div role="status" className="space-y-2 rounded-lg border bg-muted/40 p-3 text-sm">
+              <p className="font-semibold">Export {job.status.toLowerCase().replaceAll('_', ' ')}</p>
+              {job.document_count !== undefined && <p>{job.document_count} document(s) selected</p>}
+              {job.status === 'COMPLETED' && (job.skipped_count ?? 0) > 0 && (
+                <p className="text-amber-800">{job.skipped_count} document(s) skipped. The ZIP contains an unavailable-documents.json manifest with reasons.</p>
+              )}
+              {job.status === 'COMPLETED' && job.error_message && <p className="text-amber-800">{job.error_message}</p>}
+              {job.status === 'FAILED' && (
+                <p role="alert" className="text-destructive">{job.error_message ?? 'Export failed. Try again or contact HR support.'}</p>
+              )}
+              <Button asChild size="sm" variant="outline">
+                <Link href={`/hr/export-job/${job.job_id}`}>Track export and download ZIP</Link>
+              </Button>
+            </div>
+          )}
         </div>
       </DialogContent>
     </Dialog>

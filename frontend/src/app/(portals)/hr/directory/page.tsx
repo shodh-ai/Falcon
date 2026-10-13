@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { Search, Users } from 'lucide-react';
 import { FalconLoader } from '@/components/brand/FalconLoader';
 import { HrPageHeader } from '@/components/hr/HrPageHeader';
@@ -12,6 +12,7 @@ import { EditEmployeeDialog } from '@/components/hr/EditEmployeeDialog';
 import { BulkDocumentExportDialog } from '@/components/hr/BulkDocumentExportDialog';
 import { HrDataTable, HrTable, HrTableHead, HrTh, HrTableBody, HrTr, HrTd } from '@/components/hr/HrDataTable';
 import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
 import { PaginationBar } from '@/components/ui/PaginationBar';
 import useSWR from 'swr';
 import { useHrApi } from '@/lib/api/use-hr-api';
@@ -31,28 +32,35 @@ type EmployeeRow = {
   is_active: boolean;
 };
 
+type Department = { dept_id: number; dept_name: string };
+
 export default function HrDirectoryPage() {
   const api = useHrApi();
   const { entityId, entityReady } = useHrEntity();
   const [query, setQuery] = useState('');
+  const [deptId, setDeptId] = useState('');
   const [offset, setOffset] = useState(0);
 
+  const { data: metadata } = useSWR<{ departments: Department[] }>(
+    entityReady ? ['hr-directory-departments', entityId] : null,
+    () => api.get<{ departments: Department[] }>('/api/hr/metadata/roles-departments'),
+  );
+
   const { data, isLoading, mutate } = useSWR<PaginatedResponse<EmployeeRow>>(
-    entityReady ? ['hr-directory', entityId, offset, query] : null,
+    entityReady ? ['hr-directory', entityId, offset, query, deptId] : null,
     () => {
       const q = new URLSearchParams({
         limit: String(DEFAULT_PAGE_SIZE),
         offset: String(offset),
       });
       if (query.trim()) q.set('q', query.trim());
+      if (deptId) q.set('dept_id', deptId);
       return api.get<PaginatedResponse<EmployeeRow>>(`/api/hr/directory?${q}`);
     },
     { keepPreviousData: true, revalidateOnFocus: true },
   );
 
   const rows = data?.data ?? [];
-
-  const filtered = useMemo(() => rows, [rows]);
 
   if (!entityReady || (isLoading && !data)) return <FalconLoader label="Loading employee directory…" />;
 
@@ -76,6 +84,22 @@ export default function HrDirectoryPage() {
               }}
             />
           </div>
+          <Select
+            aria-label="Filter employee directory by department"
+            className="h-10 rounded-md border border-gray-200 bg-white px-3 text-sm sm:w-56"
+            value={deptId}
+            onChange={(event) => {
+              setDeptId(event.target.value);
+              setOffset(0);
+            }}
+          >
+            <option value="">All departments</option>
+            {(metadata?.departments ?? []).map((department) => (
+              <option key={department.dept_id} value={department.dept_id}>
+                {department.dept_name}
+              </option>
+            ))}
+          </Select>
           <div className="flex flex-wrap gap-2 sm:justify-end">
           <BulkDocumentExportDialog />
           <AddEmployeeDialog onCreated={() => void mutate()} />
@@ -83,11 +107,11 @@ export default function HrDirectoryPage() {
         </div>
       </div>
 
-      {filtered.length === 0 ? (
+      {rows.length === 0 ? (
         <HrEmptyState
           icon={Users}
-          title={query ? 'No matching employees' : 'Directory is empty'}
-          description={query ? 'Try a different search term.' : 'Staff records will appear once employees are onboarded.'}
+          title={query || deptId ? 'No matching employees' : 'Directory is empty'}
+          description={query || deptId ? 'Try another search or department.' : 'Staff records will appear once employees are onboarded.'}
         />
       ) : (
         <>
@@ -103,7 +127,7 @@ export default function HrDirectoryPage() {
                 <HrTh className="w-14 text-right">Actions</HrTh>
               </HrTableHead>
               <HrTableBody>
-                {filtered.map((r) => (
+                {rows.map((r) => (
                   <HrTr key={r.user_id}>
                     <HrTd>
                       <HrPersonCell

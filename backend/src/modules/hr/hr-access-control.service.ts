@@ -1,6 +1,6 @@
 import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
+import { DataSource, EntityManager } from 'typeorm';
 import { CacheService } from '../../core/redis/cache.service';
 import type { HrPowerAction } from '../../common/decorators/require-hr-power.decorator';
 import type {
@@ -428,8 +428,9 @@ export class HrAccessControlService {
     tenantId: string,
     userId: string,
     module: HrDelegationModule,
+    manager?: EntityManager,
   ) {
-    const rows = await this.dataSource.query<AccessControlRow[]>(
+    const rows = await (manager ?? this.dataSource).query<AccessControlRow[]>(
       `SELECT access_id, user_id, module_name, can_view, can_edit, can_approve, can_delete,
               department_scope, entity_scope
        FROM hr_access_controls
@@ -528,18 +529,39 @@ export class HrAccessControlService {
     requesterUserId: string,
     module: HrDelegationModule,
     specificUserId?: string | null,
+    previousApproverId?: string | null,
+    manager?: EntityManager,
   ): Promise<string | null> {
+    const querySource = manager ?? this.dataSource;
     if (specificUserId) {
+      if (specificUserId === requesterUserId || specificUserId === previousApproverId) {
+        return null;
+      }
       const row = await this.getUserModuleAccess(
         tenantId,
         specificUserId,
         module,
+        manager,
       );
-      if (row?.can_approve) return specificUserId;
+      const hrRole = await querySource.query<Array<{ user_id: string }>>(
+        `SELECT u.user_id FROM users u
+         LEFT JOIN roles primary_role ON primary_role.role_id = u.role_id
+         WHERE u.tenant_id = $1 AND u.user_id = $2 AND u.is_active = true
+           AND (
+             primary_role.role_name IN ('HR', 'HRAdmin', 'SuperAdmin')
+             OR EXISTS (
+               SELECT 1 FROM user_roles ur JOIN roles secondary_role ON secondary_role.role_id = ur.role_id
+               WHERE ur.user_id = u.user_id
+                 AND secondary_role.role_name IN ('HR', 'HRAdmin', 'SuperAdmin')
+             )
+           ) LIMIT 1`,
+        [tenantId, specificUserId],
+      );
+      if (row?.can_approve && hrRole[0]) return specificUserId;
       return null;
     }
 
-    const requester = await this.dataSource.query<
+    const requester = await querySource.query<
       Array<{ dept_id: number | null }>
     >(`SELECT dept_id FROM users WHERE user_id = $1 AND tenant_id = $2`, [
       requesterUserId,
@@ -547,13 +569,24 @@ export class HrAccessControlService {
     ]);
     const deptId = requester[0]?.dept_id;
 
-    const rows = await this.dataSource.query<Array<{ user_id: string }>>(
+    const rows = await querySource.query<Array<{ user_id: string }>>(
       `SELECT u.user_id
        FROM users u
        INNER JOIN hr_access_controls hac
          ON hac.user_id = u.user_id AND hac.tenant_id = u.tenant_id
+       LEFT JOIN roles primary_role ON primary_role.role_id = u.role_id
        WHERE u.tenant_id = $1 AND u.is_active = true
+         AND u.user_id <> $4
+         AND ($5::uuid IS NULL OR u.user_id <> $5)
          AND hac.module_name = $2 AND hac.can_approve = true
+         AND (
+           primary_role.role_name IN ('HR', 'HRAdmin', 'SuperAdmin')
+           OR EXISTS (
+             SELECT 1 FROM user_roles ur JOIN roles secondary_role ON secondary_role.role_id = ur.role_id
+             WHERE ur.user_id = u.user_id
+               AND secondary_role.role_name IN ('HR', 'HRAdmin', 'SuperAdmin')
+           )
+         )
          AND (
            hac.department_scope IS NULL
            OR $3::int IS NULL
@@ -561,20 +594,37 @@ export class HrAccessControlService {
          )
        ORDER BY u.name
        LIMIT 1`,
-      [tenantId, module, deptId],
+      [tenantId, module, deptId, requesterUserId, previousApproverId ?? null],
     );
     return rows[0]?.user_id ?? null;
   }
 
-  async resolveHrAdminApprover(tenantId: string): Promise<string | null> {
-    const rows = await this.dataSource.query<Array<{ user_id: string }>>(
+  async resolveHrAdminApprover(
+    tenantId: string,
+    requesterUserId?: string,
+    previousApproverId?: string | null,
+    manager?: EntityManager,
+  ): Promise<string | null> {
+    const rows = await (manager ?? this.dataSource).query<Array<{ user_id: string }>>(
       `SELECT u.user_id FROM users u
-       JOIN roles r ON r.role_id = u.role_id
+       LEFT JOIN roles r ON r.role_id = u.role_id
        WHERE u.tenant_id = $1 AND u.is_active = true
-         AND r.role_name IN ('HRAdmin', 'SuperAdmin')
-       ORDER BY CASE WHEN r.role_name = 'HRAdmin' THEN 0 ELSE 1 END, u.name
+         AND (
+           r.role_name IN ('HRAdmin', 'SuperAdmin')
+           OR EXISTS (
+             SELECT 1 FROM user_roles ur JOIN roles secondary_role ON secondary_role.role_id = ur.role_id
+             WHERE ur.user_id = u.user_id
+               AND secondary_role.role_name IN ('HRAdmin', 'SuperAdmin')
+           )
+         )
+         AND ($2::uuid IS NULL OR u.user_id <> $2)
+         AND ($3::uuid IS NULL OR u.user_id <> $3)
+       ORDER BY CASE WHEN r.role_name = 'HRAdmin' OR EXISTS (
+         SELECT 1 FROM user_roles ur JOIN roles secondary_role ON secondary_role.role_id = ur.role_id
+         WHERE ur.user_id = u.user_id AND secondary_role.role_name = 'HRAdmin'
+       ) THEN 0 ELSE 1 END, u.name
        LIMIT 1`,
-      [tenantId],
+      [tenantId, requesterUserId ?? null, previousApproverId ?? null],
     );
     return rows[0]?.user_id ?? null;
   }
@@ -586,6 +636,20 @@ export class HrAccessControlService {
     approverType: string | null | undefined,
     requestType: string,
   ): Promise<void> {
+    if (approverType?.startsWith('ROLE:')) {
+      const requiredRole = approverType.slice('ROLE:'.length);
+      const allowedRoles = requiredRole === 'HR'
+        ? ['HR', 'HRAdmin', 'SuperAdmin']
+        : requiredRole === 'HRAdmin'
+          ? ['HRAdmin', 'SuperAdmin']
+          : [requiredRole];
+      if (!roles.some((role) => allowedRoles.includes(role))) {
+        throw new ForbiddenException(
+          `Current ${requiredRole || 'configured'} role is required for this approval step`,
+        );
+      }
+      return;
+    }
     if (this.isMasterRole(roles)) return;
     if (
       !approverType ||

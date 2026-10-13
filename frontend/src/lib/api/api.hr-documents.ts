@@ -34,6 +34,8 @@ export type VaultResponse = {
 export type ExportJobStatus = {
   job_id: string;
   status: 'QUEUED' | 'RUNNING' | 'COMPLETED' | 'FAILED';
+  document_count?: number;
+  skipped_count?: number;
   file_name?: string | null;
   error_message?: string | null;
   download_url?: string | null;

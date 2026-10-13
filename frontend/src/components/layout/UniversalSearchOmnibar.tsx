@@ -18,7 +18,7 @@ import {
   HEADER_SEARCH_CLASS,
   HEADER_SEARCH_MOBILE_CLASS,
 } from '@/components/layout/header-styles';
-import type { NavGroup, NavItem } from '@/lib/navigation';
+import type { NavGroup } from '@/lib/navigation';
 import { isLeadershipRoute, matchLeadershipShortcuts } from '@/lib/leadership-search-index';
 
 type SearchItem = {
@@ -60,39 +60,42 @@ export function UniversalSearchOmnibar({ navGroups = [] }: UniversalSearchOmniba
   const api = useAuthedApi();
   const onLeadership = isLeadershipRoute(pathname);
 
+  const closeSearch = useCallback(() => {
+    setOpen(false);
+    setQuery('');
+    setDebouncedQ('');
+    setResults(null);
+    setLoading(false);
+  }, []);
+
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === 'k') {
         e.preventDefault();
-        setOpen((v) => !v);
+        if (open) closeSearch();
+        else setOpen(true);
       }
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, []);
+  }, [closeSearch, open]);
 
   useEffect(() => {
-    if (!open) {
-      setQuery('');
-      setDebouncedQ('');
-      setResults(null);
-      return;
-    }
-    const timer = setTimeout(() => setDebouncedQ(query.trim()), DEBOUNCE_MS);
+    if (!open) return;
+    const timer = setTimeout(() => {
+      const value = query.trim();
+      setDebouncedQ(value);
+      if (value.length >= 2) setLoading(true);
+    }, DEBOUNCE_MS);
     return () => clearTimeout(timer);
   }, [query, open]);
 
   useEffect(() => {
     if (!open) return;
     const q = debouncedQ;
-    if (q.length < 2) {
-      setResults(null);
-      setLoading(false);
-      return;
-    }
+    if (q.length < 2) return;
 
     let cancelled = false;
-    setLoading(true);
     void api
       .get<SearchResponse>(`/api/search?q=${encodeURIComponent(q)}`)
       .then((data) => {
@@ -112,10 +115,10 @@ export function UniversalSearchOmnibar({ navGroups = [] }: UniversalSearchOmniba
 
   const navigate = useCallback(
     (href: string) => {
-      setOpen(false);
+      closeSearch();
       router.push(href);
     },
-    [router],
+    [closeSearch, router],
   );
 
   const runSearch = useCallback(
@@ -200,13 +203,10 @@ export function UniversalSearchOmnibar({ navGroups = [] }: UniversalSearchOmniba
         type="button"
         onClick={() => setOpen(true)}
         className={HEADER_SEARCH_CLASS}
-        aria-label="Open search (Cmd+K)"
+        aria-label="Open search"
       >
         <Search className="h-4 w-4 shrink-0 text-sgvu-navy/50" />
         <span className="truncate">{onLeadership ? 'Search CS Budget, defaulters…' : 'Search…'}</span>
-        <kbd className="ml-auto hidden rounded border border-sgvu-navy/10 bg-sgvu-surface px-1.5 py-0.5 text-[10px] font-medium lg:inline">
-          ⌘K
-        </kbd>
       </button>
 
       <button
@@ -218,7 +218,7 @@ export function UniversalSearchOmnibar({ navGroups = [] }: UniversalSearchOmniba
         <Search className="h-4 w-4" />
       </button>
 
-      <CommandDialog open={open} onOpenChange={setOpen} shouldFilter={false}>
+      <CommandDialog open={open} onOpenChange={(next) => next ? setOpen(true) : closeSearch()} shouldFilter={false}>
         <CommandInput
           placeholder={
             onLeadership
@@ -226,7 +226,13 @@ export function UniversalSearchOmnibar({ navGroups = [] }: UniversalSearchOmniba
               : 'Search pages, people, or tickets…'
           }
           value={query}
-          onValueChange={setQuery}
+          onValueChange={(value) => {
+            setQuery(value);
+            if (value.trim().length < 2) {
+              setResults(null);
+              setLoading(false);
+            }
+          }}
           onKeyDown={(e) => {
             if (e.key === 'Enter') void handleEnter();
           }}
