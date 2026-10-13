@@ -19,6 +19,10 @@ import { ObjectStorageService } from '../../storage/object-storage.service';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 import { BulkAttendanceDto } from './dto/bulk-attendance.dto';
 import { FacultyTeachingDepartmentsService } from './faculty-teaching-departments.service';
+import {
+  allocationMatchesStudentSlot,
+  parseAllocationSemester,
+} from './allocation-semester.util';
 
 export interface FacultyTodayClassDto {
   classId: number;
@@ -63,6 +67,15 @@ function localDateString(date = new Date()): string {
   const m = String(date.getMonth() + 1).padStart(2, '0');
   const d = String(date.getDate()).padStart(2, '0');
   return `${y}-${m}-${d}`;
+}
+
+function academicYearForDate(value?: string): string {
+  const date = value && /^\d{4}-\d{2}-\d{2}$/.test(value)
+    ? new Date(`${value}T00:00:00Z`)
+    : new Date();
+  const year = date.getUTCFullYear();
+  const start = date.getUTCMonth() >= 6 ? year : year - 1;
+  return `${start}-${start + 1}`;
 }
 
 @Injectable()
@@ -299,40 +312,13 @@ export class AcademicsFacultyService {
         is_practical: Boolean(row.is_practical),
         student_count: row.is_practical && !row.section
           ? 0
-          : await (async () => {
-              if (row.is_practical && row.section) {
-                const [configured] = await this.dataSource.query<Array<{ batch_id: string; student_count: number }>>(
-                  `SELECT b.batch_id, count(m.membership_id)::int AS student_count
-                   FROM academic_practical_batches b
-                   LEFT JOIN academic_practical_batch_members m ON m.batch_id = b.batch_id AND m.removed_at IS NULL
-                   WHERE b.tenant_id = $1 AND b.course_id = $2 AND b.section_code = $3
-                   GROUP BY b.batch_id`,
-                  [tenantId, row.course_id, row.section],
-                );
-                if (configured?.batch_id) return Number(configured.student_count);
-              }
-              if (row.is_practical && row.section) {
-                const [legacy] = await this.dataSource.query<Array<{ student_count: number }>>(
-                  `SELECT count(*)::int AS student_count FROM student_course_enrollments e
-                   WHERE e.tenant_id = $1 AND e.course_id = $2 AND e.section_code = $3
-                     AND e.status IN ('ENROLLED', 'COMPLETED', 'FAILED')
-                     AND NOT EXISTS (
-                       SELECT 1 FROM academic_practical_batch_members m
-                       WHERE m.tenant_id = e.tenant_id AND m.course_id = e.course_id
-                         AND m.student_user_id = e.student_user_id AND m.removed_at IS NULL)`,
-                  [tenantId, row.course_id, row.section],
-                );
-                return Number(legacy?.student_count ?? 0);
-              }
-              return this.enrollmentRepo.count({
-              where: {
-                tenant_id: tenantId,
-                course_id: row.course_id,
-                status: In(['ENROLLED', 'COMPLETED', 'FAILED']),
-                ...(row.is_practical ? { section_code: row.section! } : {}),
-              },
-              });
-            })(),
+          : (await this.getCourseStudents(
+              row.course_id,
+              facultyUserId,
+              tenantId,
+              row.timetable_id,
+              date,
+            )).length,
       })),
     );
   }
@@ -376,6 +362,7 @@ export class AcademicsFacultyService {
     // to the exact timetable slot when one is supplied so marking Batch A
     // cannot accidentally include or overwrite Batch B.
     let sectionCode: string | null = null;
+    let theorySectionCode: string | null = null;
     if (timetableId) {
       const [slot] = await this.dataSource.query<
         Array<{ section: string | null; is_practical: boolean }>
@@ -396,6 +383,7 @@ export class AcademicsFacultyService {
       );
       if (!slot) throw new NotFoundException('Timetable slot not found');
       sectionCode = slot.is_practical ? slot.section?.trim() || null : null;
+      theorySectionCode = slot.is_practical ? null : slot.section?.trim() || null;
       if (slot.is_practical && !sectionCode) return [];
     }
 
@@ -413,6 +401,64 @@ export class AcademicsFacultyService {
       relations: ['student'],
       order: { student_user_id: 'ASC' },
     });
+
+    // A course identity can be allocated to multiple programmes and sections.
+    // Owning one allocation must not expose the other programme's students.
+    // Preserve timetable-only legacy courses, which have no allocation facts.
+    const allocations = await this.dataSource.query<Array<{
+      program_name: string | null;
+      semester: string | null;
+      academic_year: string;
+    }>>(
+      `SELECT program_name, semester, academic_year
+       FROM academic_course_allocations
+       WHERE tenant_id = $1 AND course_id = $2 AND faculty_user_id = $3
+         AND status = 'ACTIVE'`,
+      [tenantId, courseId, facultyUserId],
+    );
+    const currentAllocations = allocations.filter(
+      (allocation) => allocation.academic_year === academicYearForDate(date),
+    );
+    let scopedRows = rows;
+    if (allocations.length) {
+      const profileRows = rows.length
+        ? await this.dataSource.query<Array<{
+            user_id: string;
+            program: string | null;
+            status: string | null;
+          }>>(
+            `SELECT user_id,
+                    COALESCE(NULLIF(BTRIM(program_name), ''), NULLIF(BTRIM(batch), '')) AS program,
+                    status
+             FROM student_profiles
+             WHERE tenant_id = $1 AND user_id = ANY($2::uuid[]) AND deleted_at IS NULL`,
+            [tenantId, rows.map((row) => row.student_user_id)],
+          )
+        : [];
+      const profiles = new Map(profileRows.map((profile) => [profile.user_id, profile]));
+      scopedRows = rows.filter((row) => {
+        const profile = profiles.get(row.student_user_id);
+        if (!profile?.program || (row.status === 'ENROLLED' && profile.status !== 'ACTIVE')) {
+          return false;
+        }
+        return currentAllocations.some((allocation) =>
+          allocationMatchesStudentSlot(
+            allocation.semester,
+            allocation.program_name,
+            Number(row.semester),
+            row.section_code,
+            profile.program!,
+          ),
+        );
+      });
+    }
+    if (theorySectionCode && currentAllocations.some((allocation) =>
+      parseAllocationSemester(allocation.semester).sectionCode != null,
+    )) {
+      scopedRows = scopedRows.filter((row) =>
+        row.section_code?.trim().toUpperCase() === theorySectionCode!.toUpperCase(),
+      );
+    }
 
     let allowedIds: Set<string> | null = null;
     if (sectionCode) {
@@ -435,7 +481,7 @@ export class AcademicsFacultyService {
           [tenantId, courseId],
         );
         const elsewhere = new Set(assigned.map((row) => row.student_user_id));
-        allowedIds = new Set(rows.filter((row) =>
+        allowedIds = new Set(scopedRows.filter((row) =>
           row.section_code === sectionCode && !elsewhere.has(row.student_user_id),
         ).map((row) => row.student_user_id));
       }
@@ -451,7 +497,7 @@ export class AcademicsFacultyService {
         if (saved) allowedIds = new Set(saved.attendance_data.map((entry) => entry.student_id));
       }
     }
-    const visibleRows = allowedIds ? rows.filter((row) => allowedIds.has(row.student_user_id)) : rows;
+    const visibleRows = allowedIds ? scopedRows.filter((row) => allowedIds.has(row.student_user_id)) : scopedRows;
 
     const rollById = new Map<string, string>();
     if (visibleRows.length) {

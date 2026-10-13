@@ -21,6 +21,10 @@ describe('department import Pharmacy enrollment matching', () => {
     assert.equal(allocationMatchesStudentSlot('I', 'D.Pharm', 1, null, 'D.Pharm'), true);
     assert.equal(allocationMatchesStudentSlot('II', 'D.Pharm', 1, null, 'D.Pharm'), false);
     assert.equal(allocationMatchesStudentSlot('I-B', 'D.Pharm', 1, 'A', 'D.Pharm'), false);
+    assert.equal(allocationMatchesStudentSlot('III-A', 'BTECH CSE', 3, null, 'BTECH CSE'), false);
+    assert.equal(allocationMatchesStudentSlot('unknown', 'BTECH CSE', 3, 'A', 'BTECH CSE'), false);
+    assert.equal(programsMatch('MTECH CSE', 'BTECH CSE'), false);
+    assert.equal(programsMatch('B.Tech ME', 'B.Tech Mechanical Engineering'), true);
   });
 
   it('inserts only courses belonging to the student programme', async () => {

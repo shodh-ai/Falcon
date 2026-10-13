@@ -15,10 +15,11 @@ export function parseAllocationSemester(semester: string | null | undefined): {
 } {
   if (!semester?.trim()) return { semesterNum: null, sectionCode: null };
   const parts = semester.trim().split('-');
-  const roman = parts[0]?.trim().toUpperCase() ?? '';
+  const label = parts[0]?.trim().toUpperCase() ?? '';
   const sectionCode = parts[1]?.trim().toUpperCase() || null;
+  const numeric = /^(?:SEM(?:ESTER)?\s*)?([1-8])$/.exec(label);
   return {
-    semesterNum: ROMAN_SEMESTER[roman] ?? null,
+    semesterNum: ROMAN_SEMESTER[label] ?? (numeric ? Number(numeric[1]) : null),
     sectionCode,
   };
 }
@@ -32,25 +33,23 @@ export function programsMatch(
   allocationProgram: string | null | undefined,
   studentProgram: string | null | undefined,
 ): boolean {
-  const alloc = normalizeProgram(allocationProgram);
-  const prog = normalizeProgram(studentProgram);
-  if (!prog || !alloc) return true;
+  const alloc = normalizeProgram(allocationProgram).replace(/[^A-Z0-9]/g, '');
+  const prog = normalizeProgram(studentProgram).replace(/[^A-Z0-9]/g, '');
+  // An unknown programme is not evidence that a student belongs to every
+  // allocation in the tenant.  The sync must fail closed until it is known.
+  if (!prog || !alloc) return false;
   if (prog === alloc) return true;
   // Pharmacy programmes are deliberately exact.  A broad `PHARM` match
   // would put D.Pharm and M.Pharm students into B.Pharm offerings during
   // roster/enrollment reconciliation.
   const pharmacyProgram = (value: string): string | null => {
-    const canonical = value.replace(/[^A-Z0-9]/gi, '').toUpperCase();
-    if (canonical === 'BPHARM' || canonical.startsWith('BPHARMLATERAL')) {
+    if (value === 'BPHARM' || value.startsWith('BPHARMLATERAL')) {
       return 'BPHARM';
     }
-    if (canonical === 'DPHARM' || canonical.startsWith('DPHARMREGULAR')) {
+    if (value === 'DPHARM' || value.startsWith('DPHARMREGULAR')) {
       return 'DPHARM';
     }
-    if (
-      canonical === 'MPHARMPHARMACEUTICS' ||
-      canonical.startsWith('MPHARMPHARMACEUTICS')
-    ) {
+    if (value === 'MPHARMPHARMACEUTICS') {
       return 'MPHARMPHARMACEUTICS';
     }
     return null;
@@ -60,20 +59,30 @@ export function programsMatch(
   if (allocPharmacy || progPharmacy) {
     return allocPharmacy != null && allocPharmacy === progPharmacy;
   }
-  if (
-    alloc.includes('ME') &&
-    (prog.includes('MECHANICAL') || prog.includes('MECH'))
-  ) {
-    return true;
-  }
-  if (alloc.includes('AGRI') && prog.includes('AGRI')) return true;
-  if (
-    alloc.includes('CSE') &&
-    (prog.includes('COMPUTER') || prog.includes('CSE'))
-  ) {
-    return true;
-  }
-  return false;
+  // Legacy student batch labels below have a verified one-to-one 2026
+  // allocation mapping. Do not replace this with a discipline substring test.
+  // Substring matching admitted M.Tech CSE students to B.Tech CSE courses,
+  // and even matched M.Tech to Mechanical Engineering via "ME".
+  const aliases: Record<string, string> = {
+    BTECHMECH: 'BTECHME',
+    BTECHMECHANICAL: 'BTECHME',
+    BTECHMECHANICALENGINEERING: 'BTECHME',
+    BTECHLATERALENTRYMECHANICALENGINEERING: 'BTECHME',
+    BTECHCOMPUTERSCIENCE: 'BTECHCSE',
+    BTECHCOMPUTERSCIENCEENGINEERING: 'BTECHCSE',
+    AGRI: 'BSCAGRICULTURE',
+    AGRICULTURE: 'BSCAGRICULTURE',
+    BSCAGRI: 'BSCAGRICULTURE',
+    APPLIEDSCIENCES: 'BSCAPPLIEDSCIENCES',
+    EDUCATION: 'BEDEDUCATION',
+    LAW: 'LLBLAW',
+    ISBM: 'BBAISBM',
+    SILS: 'BASILS',
+    C3WR: 'BTECHC3WR',
+    CA: 'BCOMCA',
+    GCAD: 'BDESGCAD',
+  };
+  return (aliases[alloc] ?? alloc) === (aliases[prog] ?? prog);
 }
 
 export function allocationMatchesStudentSlot(
@@ -85,12 +94,12 @@ export function allocationMatchesStudentSlot(
 ): boolean {
   const { semesterNum, sectionCode } =
     parseAllocationSemester(allocationSemester);
-  if (semesterNum != null && semesterNum !== studentSemester) return false;
+  if (semesterNum == null || semesterNum !== studentSemester) return false;
 
   if (!programsMatch(allocationProgram, studentProgram)) return false;
 
   const studentSectionNorm = studentSection?.trim().toUpperCase() ?? null;
-  if (sectionCode && studentSectionNorm && sectionCode !== studentSectionNorm) {
+  if (sectionCode && sectionCode !== studentSectionNorm) {
     return false;
   }
 
