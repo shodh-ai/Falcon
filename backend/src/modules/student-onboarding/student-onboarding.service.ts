@@ -949,55 +949,56 @@ export class StudentOnboardingService {
     profile: Record<string, unknown>,
   ) {
     if (kind === 'staff') {
-      const required = [
-        'blood_group',
-        'staff_mobile',
-        'pan_number',
-        'aadhaar_number',
-        'bank_account_no',
-        'ifsc_code',
-        'gender',
-        'date_of_birth',
-        'emergency_contact_name',
-        'emergency_contact_phone',
-        'permanent_address',
-        'current_address',
-        'orcid_id',
-        'total_experience_years',
-        'degree_level',
-        'university',
-        'passing_year',
+      const required: Array<[string, string]> = [
+        ['blood_group', 'Blood group'],
+        ['staff_mobile', 'Mobile number'],
+        ['pan_number', 'PAN number'],
+        ['aadhaar_number', 'Aadhaar number'],
+        ['bank_account_no', 'Bank account'],
+        ['ifsc_code', 'IFSC code'],
+        ['gender', 'Gender'],
+        ['date_of_birth', 'Date of birth'],
+        ['emergency_contact_name', 'Emergency contact name'],
+        ['emergency_contact_phone', 'Emergency contact phone'],
+        ['permanent_address', 'Permanent address'],
+        ['current_address', 'Current address'],
+        ['orcid_id', 'ORCID ID'],
+        ['total_experience_years', 'Teaching experience (years)'],
+        ['degree_level', 'Degree level'],
+        ['degree_name', 'Degree name'],
+        ['university', 'University'],
+        ['passing_year', 'Passing year'],
       ];
       const missing = required.filter(
-        (field) => !String(profile[field] ?? '').trim(),
-      );
+        ([field]) => !String(profile[field] ?? '').trim(),
+      ).map(([, label]) => label);
       if (missing.length) {
         throw new BadRequestException(
-          `Please complete all profile fields before submitting`,
+          `Complete the required profile fields: ${missing.join(', ')}`,
         );
       }
       return;
     }
 
-    const required = [
-      'blood_group',
-      'parent_contact_phone',
-      'abc_id',
-      'student_mobile',
-      'gender',
-      'date_of_birth',
-      'father_name',
-      'mother_name',
-      'emergency_contact_name',
-      'permanent_address',
-      'current_address',
+    const required: Array<[string, string]> = [
+      ['blood_group', 'Blood group'],
+      ['parent_contact_phone', 'Parent contact number'],
+      ['abc_id', 'ABC ID'],
+      ['student_mobile', 'Student mobile'],
+      ['gender', 'Gender'],
+      ['date_of_birth', 'Date of birth'],
+      ['father_name', "Father's name"],
+      ['mother_name', "Mother's name"],
+      ['emergency_contact_name', 'Emergency contact name'],
+      ['permanent_address', 'Permanent address'],
+      ['current_address', 'Current address'],
     ];
     const missing = required.filter(
-      (field) => !String(profile[field] ?? '').trim(),
-    );
+      ([field]) => !String(profile[field] ?? '').trim(),
+    ).map(([, label]) => label);
     if (missing.length) {
       throw new BadRequestException(
-        `Please complete all profile fields before submitting`,
+        `Complete the required profile fields: ${missing.join(', ')}`,
       );
     }
   }
@@ -1150,6 +1151,8 @@ export class StudentOnboardingService {
     }
     if (!degreeLevel)
       throw new BadRequestException('Highest degree level is required');
+    if (!degreeName)
+      throw new BadRequestException('Degree name is required');
     if (!university) throw new BadRequestException('University is required');
     if (
       !passingYear ||
@@ -1181,7 +1184,7 @@ export class StudentOnboardingService {
       industry_experience_years: industryExperienceYears,
       qualification: {
         degree_level: degreeLevel,
-        degree_name: degreeName ?? '',
+        degree_name: degreeName,
         university,
         passing_year: passingYear,
         specialization: specialization ?? '',

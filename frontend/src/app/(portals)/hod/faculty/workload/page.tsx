@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { toast } from '@/lib/notifications/falcon-toast';
 import {
   HodDataTable,
@@ -283,6 +284,8 @@ export default function HodFacultyWorkloadPage() {
               <div>
                 <p className="font-semibold">{r.name}</p>
                 <p className="text-muted-foreground text-xs">{r.email}</p>
+                <Link href={`/hod/department-timetable?faculty=${encodeURIComponent(r.user_id)}`}
+                  className="text-xs font-medium text-sgvu-navy underline">View calendar</Link>
               </div>
             ),
           },

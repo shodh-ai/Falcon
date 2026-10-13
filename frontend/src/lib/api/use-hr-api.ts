@@ -41,8 +41,8 @@ export function useHrApi() {
       entityId,
       entityReady,
       get: <T>(path: string) => resolveRequest(path, (p, h) => api.get<T>(p, h)),
-      post: <T>(path: string, body?: unknown) =>
-        resolveRequest(path, (p, h) => api.post<T>(p, body, h)),
+      post: <T>(path: string, body?: unknown, headers?: Record<string, string>) =>
+        resolveRequest(path, (p, h) => api.post<T>(p, body, { ...h, ...headers })),
       patch: <T>(path: string, body?: unknown) =>
         resolveRequest(path, (p, h) => api.patch<T>(p, body, h)),
       put: <T>(path: string, body?: unknown) =>

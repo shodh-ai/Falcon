@@ -13,6 +13,7 @@ import { Badge } from '@/components/ui/badge';
 import { useHrApi } from '@/lib/api/use-hr-api';
 import { useHrEntity } from '@/context/HrEntityContext';
 import { DocumentVaultGrid } from '@/components/hr/DocumentVaultGrid';
+import { FacultyPortfolioPanel } from '@/components/faculty/FacultyPortfolioPanel';
 
 type Profile360 = {
   user_id: string;
@@ -44,7 +45,7 @@ function EmployeeProfileContent() {
   const { entityId } = useHrEntity();
   const [profile, setProfile] = useState<Profile360 | null>(null);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<'overview' | 'kyc' | 'documents'>('overview');
+  const [tab, setTab] = useState<'overview' | 'kyc' | 'documents' | 'portfolio'>('overview');
   const [revealed, setRevealed] = useState(false);
   const [revealing, setRevealing] = useState(false);
   const [orgUnits, setOrgUnits] = useState<{ unit_id: string; unit_name: string; unit_type: string }[]>([]);
@@ -52,7 +53,7 @@ function EmployeeProfileContent() {
 
   useEffect(() => {
     const t = searchParams.get('tab');
-    if (t === 'kyc' || t === 'documents') setTab(t);
+    if (t === 'kyc' || t === 'documents' || t === 'portfolio') setTab(t);
   }, [searchParams]);
 
   useEffect(() => {
@@ -109,9 +110,16 @@ function EmployeeProfileContent() {
         <Button variant={tab === 'documents' ? 'default' : 'outline'} size="sm" onClick={() => setTab('documents')}>
           Documents
         </Button>
+        {['Faculty', 'HOD', 'Dean'].includes(profile.role) ? (
+          <Button variant={tab === 'portfolio' ? 'default' : 'outline'} size="sm" onClick={() => setTab('portfolio')}>
+            Skills & Portfolio
+          </Button>
+        ) : null}
       </div>
 
-      {tab === 'documents' ? (
+      {tab === 'portfolio' && ['Faculty', 'HOD', 'Dean'].includes(profile.role) ? (
+        <FacultyPortfolioPanel api={api} basePath={`/api/hr/employees/${id}/portfolio`} />
+      ) : tab === 'documents' ? (
         <DocumentVaultGrid userId={id} mode="hr" />
       ) : tab === 'overview' ? (
         <div className="grid gap-4 md:grid-cols-2">
