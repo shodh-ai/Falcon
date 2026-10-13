@@ -106,7 +106,7 @@ export class HrDashboardService {
        JOIN hr_employee_profiles p ON p.user_id = sl.staff_user_id AND p.tenant_id = sl.tenant_id
        LEFT JOIN hr_approval_workflow_steps hr_step
          ON hr_step.workflow_id = sl.workflow_id AND hr_step.step_order = sl.current_step_order
-       WHERE sl.tenant_id = $1 AND sl.request_type = 'LEAVE'
+       WHERE sl.tenant_id = $1 AND sl.request_type IN ('LEAVE', 'ON_DUTY')
          AND sl.status IN ('PENDING', 'HOD_APPROVED')
          AND sl.current_approver_user_id = $3
          AND ${finalHrReviewSql('sl', 'hr_step')}${entityFilter}`,
@@ -224,7 +224,7 @@ export class HrDashboardService {
         fnf_clearances: Number(pendingFnf?.count ?? 0),
         items: [
           {
-            label: 'Pending Leave Approvals',
+            label: 'Pending Leave / On-Duty Reviews',
             count: Number(pendingLeaves?.count ?? 0),
             href: '/hr/leaves',
           },

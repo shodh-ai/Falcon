@@ -8,6 +8,7 @@ import { HrPageHeader } from '@/components/hr/HrPageHeader';
 import { HrTabBar } from '@/components/hr/HrTabBar';
 import { HrPersonCell } from '@/components/hr/HrAvatar';
 import { HrLeaveReviewQueue } from '@/components/hr/HrLeaveReviewQueue';
+import { HrLegacyReconciliationPanel } from '@/components/hr/HrLegacyReconciliationPanel';
 import { HrEmptyState } from '@/components/hr/HrEmptyState';
 import { HrDataTable, HrTable, HrTableHead, HrTh, HrTableBody, HrTr, HrTd } from '@/components/hr/HrDataTable';
 import { Button } from '@/components/ui/button';
@@ -127,7 +128,7 @@ export default function HrLeavesPage() {
     <>
       <HrPageHeader
         title="Leave Management & Balances"
-        description="Final HR sign-off on HoD-approved requests and organization-wide leave balance grid."
+        description="Final HR sign-off on HoD-approved leave and on-duty requests, plus organization-wide leave balances."
         actions={
           <Button variant="outline" size="sm" onClick={() => setOnBehalfOpen(true)}>
             <UserPlus className="mr-2 h-4 w-4" />
@@ -146,7 +147,10 @@ export default function HrLeavesPage() {
       />
 
       {tab === 'approvals' ? (
-        <HrLeaveReviewQueue requestType="LEAVE" />
+        <>
+          <HrLeaveReviewQueue requestType="LEAVE" />
+          <HrLegacyReconciliationPanel />
+        </>
       ) : balances.length === 0 ? (
         <HrEmptyState
           icon={CalendarOff}

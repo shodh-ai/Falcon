@@ -20,7 +20,7 @@ type ReviewRow = {
   employee_email?: string | null;
   employee_id?: string | null;
   staff?: { name?: string | null; email?: string | null } | null;
-  request_type: HrReviewRequestType;
+  request_type: HrReviewRequestType | 'ON_DUTY';
   leave_type?: string | null;
   start_date: string;
   end_date: string;
@@ -78,7 +78,7 @@ export function HrLeaveReviewQueue({ requestType }: { requestType: HrReviewReque
     return (
       <HrEmptyState
         icon={Inbox}
-        title={`No pending ${requestType === 'LEAVE' ? 'leaves' : 'regularizations'}`}
+        title={`No pending ${requestType === 'LEAVE' ? 'leave or on-duty requests' : 'regularizations'}`}
         description="No requests of this type currently await your final HR sign-off."
       />
     );
@@ -98,9 +98,19 @@ export function HrLeaveReviewQueue({ requestType }: { requestType: HrReviewReque
           <Card key={row.leave_id} className="border-gray-100 shadow-sm">
             <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
               <div className="min-w-0 space-y-2">
-                <HrPersonCell name={name} subtitle={email ?? row.employee_id ?? 'Employee'} />
+                <HrPersonCell
+                  name={name}
+                  subtitle={row.employee_id
+                    ? `${row.employee_id}${email ? ` · ${email}` : ''}`
+                    : email ?? 'Employee'}
+                />
+                {requestType === 'LEAVE' && (
+                  <p className="text-xs font-medium text-sgvu-navy">
+                    Request: {row.request_type === 'ON_DUTY' ? 'On duty' : 'Leave'}
+                  </p>
+                )}
                 <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-                  <span>{requestType === 'REGULARIZATION' ? 'Attendance date' : 'Leave dates'}: {date}</span>
+                  <span>{requestType === 'REGULARIZATION' ? 'Attendance date' : 'Request dates'}: {date}</span>
                   {row.leave_type && <span>· {row.leave_type}</span>}
                   <span>· Status:</span>
                   <HrStatusBadge status={row.status} />

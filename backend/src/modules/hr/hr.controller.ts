@@ -1877,6 +1877,37 @@ export class HrController {
       .then((entity) => this.team.listAllPendingForAdmin(tenantId, entity));
   }
 
+  @Get('admin/requests/legacy-reconciliation')
+  @Roles('HRAdmin', 'SuperAdmin')
+  @HrPermission('leaves', 'read')
+  async listLegacyHodReconciliations(
+    @Req() req: { user: AuthUser },
+    @Query('entity_id') entityId?: string,
+  ) {
+    const tenantId = this.resolveTenantId(req.user);
+    const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
+    return this.workforce.listLegacyHodReconciliations(
+      tenantId, entity, req.user.user_id,
+    );
+  }
+
+  @Post('admin/requests/:leaveId/reconcile-legacy-approval')
+  @Roles('HRAdmin', 'SuperAdmin')
+  @HrPermission('leaves', 'write')
+  async reconcileLegacyHodApproval(
+    @Param('leaveId') leaveId: string,
+    @Req() req: { user: AuthUser },
+    @Query('entity_id') entityId: string | undefined,
+    @Body() body: { reason: string; evidence_reference?: string },
+  ) {
+    const tenantId = this.resolveTenantId(req.user);
+    const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
+    return this.workforce.reconcileLegacyHodApproval(
+      req.user.user_id, tenantId, entity, leaveId,
+      body?.reason, body?.evidence_reference,
+    );
+  }
+
   @Patch('admin/requests/:leaveId/override')
   @SkipEntityScope()
   @Roles('HRAdmin', 'SuperAdmin', 'HR')
@@ -2118,6 +2149,17 @@ export class HrController {
       this.hrAdmin.listDepartments(tenantId, entity),
     ]);
     return { roles, departments };
+  }
+
+  @Get('metadata/available-departments')
+  @Roles('HR', 'HRAdmin', 'SuperAdmin')
+  @HrPermission('directory', 'read')
+  async listAvailableDepartments(@Req() req: { user: AuthUser }) {
+    return {
+      departments: await this.hrAdmin.listAvailableDepartments(
+        this.resolveTenantId(req.user),
+      ),
+    };
   }
 
   @Get('ess/documents')

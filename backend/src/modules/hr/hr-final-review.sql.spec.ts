@@ -9,10 +9,10 @@ describe('final HR review predicate', () => {
     expect(sql).toContain('later_step.step_order > request.current_step_order');
   });
 
-  it('permits only an already HOD-approved legacy request with no workflow', () => {
+  it('permits HOD-approved legacy requests and direct HR fallback step two', () => {
     const sql = finalHrReviewSql('request', 'hr_step');
     expect(sql).toContain('request.workflow_id IS NULL');
-    expect(sql).toContain("request.status = 'HOD_APPROVED'");
-    expect(sql).not.toContain("request.status = 'PENDING'");
+    expect(sql).toContain('request.current_step_order = 2');
+    expect(sql).toContain("request.status IN ('PENDING', 'HOD_APPROVED')");
   });
 });

@@ -45,3 +45,36 @@ describe('legacy HR leave decision routes', () => {
     expect(actOnScopedTeamRequest).not.toHaveBeenCalled();
   });
 });
+
+describe('Leave and on-duty final review routes', () => {
+  const tenantId = '10000000-0000-4000-8000-000000000001';
+  const actor = {
+    user_id: '20000000-0000-4000-8000-000000000002',
+    tenant_id: tenantId,
+    roles: ['HR'],
+  };
+
+  it('accepts an on-duty case returned by the leave review group', async () => {
+    const listHrReviewPending = jest.fn()
+      .mockResolvedValueOnce([{ leave_id: 'od-id', request_type: 'ON_DUTY' }])
+      .mockResolvedValueOnce([]);
+    const actOnTeamRequest = jest.fn().mockResolvedValue({ status: 'HR_APPROVED' });
+    const controller = Object.assign(Object.create(HrController.prototype), {
+      workforce: { listHrReviewPending, actOnTeamRequest },
+      entityCtx: { resolveEntityId: jest.fn().mockResolvedValue(7) },
+    }) as HrController;
+
+    await expect(controller.actOnHrReview(
+      'od-id', { user: actor }, { action: 'APPROVE' }, '7',
+    )).resolves.toEqual({ status: 'HR_APPROVED' });
+    expect(listHrReviewPending).toHaveBeenNthCalledWith(
+      1, tenantId, 7, actor.user_id, 'LEAVE',
+    );
+    expect(listHrReviewPending).toHaveBeenNthCalledWith(
+      2, tenantId, 7, actor.user_id, 'REGULARIZATION',
+    );
+    expect(actOnTeamRequest).toHaveBeenCalledWith(
+      actor.user_id, tenantId, 'od-id', 'APPROVE', undefined, { roles: ['HR'] },
+    );
+  });
+});

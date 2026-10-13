@@ -49,11 +49,13 @@ export function AddEmployeeDialog({ onCreated }: Props) {
 
   useEffect(() => {
     if (!open) return;
-    void api
-      .get<{ roles: Role[]; departments: Dept[] }>('/api/hr/metadata/roles-departments')
-      .then((data) => {
-        setRoles(data.roles);
-        setDepartments(data.departments);
+    void Promise.all([
+      api.get<{ roles: Role[] }>('/api/hr/metadata/roles-departments'),
+      api.get<{ departments: Dept[] }>('/api/hr/metadata/available-departments'),
+    ])
+      .then(([roleData, departmentData]) => {
+        setRoles(roleData.roles);
+        setDepartments(departmentData.departments);
       })
       .catch(() => {});
   }, [api, open]);

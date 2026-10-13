@@ -37,6 +37,7 @@ describe('HR final review queue', () => {
   it('shows only the requested review type and records final approval', async () => {
     render(<HrLeaveReviewQueue requestType="REGULARIZATION" />);
     expect(await screen.findByText('Test Employee')).toBeInTheDocument();
+    expect(screen.getByText('EMP-42')).toBeInTheDocument();
     expect(screen.getByText(/Attendance date: 2026-10-10/)).toBeInTheDocument();
     expect(screen.getByText(/no check-in/)).toBeInTheDocument();
     expect(screen.getByText(/Requested correction: missing check-in/)).toBeInTheDocument();
@@ -55,6 +56,22 @@ describe('HR final review queue', () => {
     useHrSWR.mockReturnValue({ data: [], error: new Error('Service unavailable'), isLoading: false, mutate });
     render(<HrLeaveReviewQueue requestType="LEAVE" />);
     expect(await screen.findByText('Service unavailable')).toBeInTheDocument();
-    expect(screen.queryByText('No pending leaves')).not.toBeInTheDocument();
+    expect(screen.queryByText('No pending leave or on-duty requests')).not.toBeInTheDocument();
+  });
+
+  it('labels on-duty requests in the grouped leave final-sign-off queue', () => {
+    useHrSWR.mockReturnValue({
+      data: [{ ...regularization, request_type: 'ON_DUTY', leave_type: 'OD' }],
+      error: null,
+      isLoading: false,
+      mutate,
+    });
+    render(<HrLeaveReviewQueue requestType="LEAVE" />);
+    expect(screen.getByText('Request: On duty')).toBeInTheDocument();
+    expect(useHrSWR).toHaveBeenCalledWith(
+      ['hr-leave-review', 'LEAVE'],
+      '/api/hr/leaves/review?request_type=LEAVE',
+      expect.any(Object),
+    );
   });
 });

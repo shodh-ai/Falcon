@@ -24,4 +24,25 @@ describe('HR directory department metadata', () => {
     expect(sql).toContain('d.deleted_at IS NULL');
     expect(sql).toContain("r.role_name NOT IN ('Student', 'Applicant', 'Parent')");
   });
+
+  it('offers empty departments for onboarding without exposing another tenant\'s assigned departments', async () => {
+    const query = jest.fn().mockResolvedValue([]);
+    const service = new HrAdminService(
+      { query } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+
+    await service.listAvailableDepartments('tenant-one');
+
+    expect(query).toHaveBeenCalledWith(expect.any(String), ['tenant-one']);
+    const sql = query.mock.calls[0][0] as string;
+    expect(sql).toContain('u.tenant_id = $1');
+    expect(sql).toContain('OR NOT EXISTS');
+    expect(sql).toContain('d.deleted_at IS NULL');
+  });
 });

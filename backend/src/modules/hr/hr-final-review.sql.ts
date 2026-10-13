@@ -15,7 +15,8 @@ export function finalHrReviewSql(requestAlias: string, stepAlias: string) {
     )
     OR (
       ${requestAlias}.workflow_id IS NULL
-      AND ${requestAlias}.status = 'HOD_APPROVED'
+      AND ${requestAlias}.current_step_order = 2
+      AND ${requestAlias}.status IN ('PENDING', 'HOD_APPROVED')
     )
   )`;
 }

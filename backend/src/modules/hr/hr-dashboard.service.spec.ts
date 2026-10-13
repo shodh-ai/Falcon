@@ -6,7 +6,7 @@ describe('HrDashboardService pending review queues', () => {
 
   it('counts only the selected approver and entity, with distinct destinations', async () => {
     const query = jest.fn().mockImplementation((sql: string) => {
-      if (sql.includes("sl.request_type = 'LEAVE'")) return [{ count: '2' }];
+      if (sql.includes("sl.request_type IN ('LEAVE', 'ON_DUTY')")) return [{ count: '2' }];
       if (sql.includes("sl.request_type = 'REGULARIZATION'"))
         return [{ count: '1' }];
       if (sql.includes('FROM hr_resignation_requests rr\n'))
@@ -38,7 +38,9 @@ describe('HrDashboardService pending review queues', () => {
 
     for (const type of ['LEAVE', 'REGULARIZATION']) {
       const [sql, params] = query.mock.calls.find(([statement]) =>
-        statement.includes(`sl.request_type = '${type}'`),
+        type === 'LEAVE'
+          ? statement.includes("sl.request_type IN ('LEAVE', 'ON_DUTY')")
+          : statement.includes("sl.request_type = 'REGULARIZATION'"),
       );
       expect(sql).toContain('sl.current_approver_user_id = $3');
       expect(sql).toContain("sl.status IN ('PENDING', 'HOD_APPROVED')");
@@ -48,6 +50,8 @@ describe('HrDashboardService pending review queues', () => {
       expect(sql).toContain('p.entity_id = $2');
       expect(params).toEqual([tenantId, 7, approverId]);
     }
+
+    expect(dashboard.pending_actions.items[0].label).toBe('Pending Leave / On-Duty Reviews');
 
     const [fnfSql, fnfParams] = query.mock.calls.find(([statement]) =>
       statement.includes(

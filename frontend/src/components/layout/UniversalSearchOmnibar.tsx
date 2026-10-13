@@ -203,13 +203,10 @@ export function UniversalSearchOmnibar({ navGroups = [] }: UniversalSearchOmniba
         type="button"
         onClick={() => setOpen(true)}
         className={HEADER_SEARCH_CLASS}
-        aria-label="Open search (Ctrl+K or Command+K)"
+        aria-label="Open search"
       >
         <Search className="h-4 w-4 shrink-0 text-sgvu-navy/50" />
         <span className="truncate">{onLeadership ? 'Search CS Budget, defaulters…' : 'Search…'}</span>
-        <kbd className="ml-auto hidden rounded border border-sgvu-navy/10 bg-sgvu-surface px-1.5 py-0.5 text-[10px] font-medium lg:inline">
-          Ctrl / ⌘ K
-        </kbd>
       </button>
 
       <button

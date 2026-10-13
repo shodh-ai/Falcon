@@ -64,6 +64,26 @@ export class HrAdminService {
     );
   }
 
+  /** Creation metadata includes empty departments, which cannot appear in the staff directory yet. */
+  async listAvailableDepartments(tenantId: string) {
+    return this.dataSource.query(
+      `SELECT d.dept_id, d.dept_name
+       FROM departments d
+       WHERE d.deleted_at IS NULL
+         AND (
+           EXISTS (
+             SELECT 1 FROM users u
+             WHERE u.dept_id = d.dept_id AND u.tenant_id = $1
+           )
+           OR NOT EXISTS (
+             SELECT 1 FROM users u WHERE u.dept_id = d.dept_id
+           )
+         )
+       ORDER BY d.dept_name`,
+      [tenantId],
+    );
+  }
+
   async listDirectory(
     tenantId: string,
     entityId: number,
