@@ -25,7 +25,7 @@ export function parseAllocationSemester(semester: string | null | undefined): {
 }
 
 export function normalizeProgram(value: string | null | undefined): string {
-  return (value ?? '').replace(/[^A-Z0-9]/gi, '').toUpperCase();
+  return (value ?? '').replace(/\s+/g, '').toUpperCase();
 }
 
 /** Match allocation program labels to varied official student batch names. */
@@ -33,8 +33,8 @@ export function programsMatch(
   allocationProgram: string | null | undefined,
   studentProgram: string | null | undefined,
 ): boolean {
-  const alloc = normalizeProgram(allocationProgram);
-  const prog = normalizeProgram(studentProgram);
+  const alloc = normalizeProgram(allocationProgram).replace(/[^A-Z0-9]/g, '');
+  const prog = normalizeProgram(studentProgram).replace(/[^A-Z0-9]/g, '');
   // An unknown programme is not evidence that a student belongs to every
   // allocation in the tenant.  The sync must fail closed until it is known.
   if (!prog || !alloc) return false;

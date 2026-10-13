@@ -12,9 +12,10 @@ const ROMAN_SEMESTER = {
 function parseAllocationSemester(semester) {
   if (!semester?.trim()) return { semesterNum: null, sectionCode: null };
   const parts = semester.trim().split('-');
-  const roman = (parts[0]?.trim() ?? '').toUpperCase();
+  const label = (parts[0]?.trim() ?? '').toUpperCase();
   const sectionCode = parts[1]?.trim().toUpperCase() || null;
-  return { semesterNum: ROMAN_SEMESTER[roman] ?? null, sectionCode };
+  const numeric = /^(?:SEM(?:ESTER)?\s*)?([1-8])$/.exec(label);
+  return { semesterNum: ROMAN_SEMESTER[label] ?? (numeric ? Number(numeric[1]) : null), sectionCode };
 }
 
 function normalizeProgram(value) {
@@ -22,18 +23,17 @@ function normalizeProgram(value) {
 }
 
 function programsMatch(allocationProgram, studentProgram) {
-  const alloc = normalizeProgram(allocationProgram);
-  const prog = normalizeProgram(studentProgram);
-  if (!prog || !alloc) return true;
+  const alloc = normalizeProgram(allocationProgram).replace(/[^A-Z0-9]/g, '');
+  const prog = normalizeProgram(studentProgram).replace(/[^A-Z0-9]/g, '');
+  if (!prog || !alloc) return false;
   if (prog === alloc) return true;
   // Keep this in step with allocation-semester.util.ts. A generic PHARM
   // substring match enrolls B.Pharm, D.Pharm and M.Pharm students in one
   // another's courses (and therefore exposes them on the wrong faculty roster).
   const pharmacyProgram = (value) => {
-    const canonical = value.replace(/[^A-Z0-9]/g, '');
-    if (canonical === 'BPHARM' || canonical.startsWith('BPHARMLATERAL')) return 'BPHARM';
-    if (canonical === 'DPHARM' || canonical.startsWith('DPHARMREGULAR')) return 'DPHARM';
-    if (canonical.startsWith('MPHARMPHARMACEUTICS')) return 'MPHARMPHARMACEUTICS';
+    if (value === 'BPHARM' || value.startsWith('BPHARMLATERAL')) return 'BPHARM';
+    if (value === 'DPHARM' || value.startsWith('DPHARMREGULAR')) return 'DPHARM';
+    if (value === 'MPHARMPHARMACEUTICS') return 'MPHARMPHARMACEUTICS';
     return null;
   };
   const allocPharmacy = pharmacyProgram(alloc);
@@ -41,10 +41,26 @@ function programsMatch(allocationProgram, studentProgram) {
   if (allocPharmacy || progPharmacy) {
     return allocPharmacy != null && allocPharmacy === progPharmacy;
   }
-  if (alloc.includes('ME') && (prog.includes('MECHANICAL') || prog.includes('MECH'))) return true;
-  if (alloc.includes('AGRI') && prog.includes('AGRI')) return true;
-  if (alloc.includes('CSE') && (prog.includes('COMPUTER') || prog.includes('CSE'))) return true;
-  return false;
+  const aliases = {
+    BTECHMECH: 'BTECHME',
+    BTECHMECHANICAL: 'BTECHME',
+    BTECHMECHANICALENGINEERING: 'BTECHME',
+    BTECHLATERALENTRYMECHANICALENGINEERING: 'BTECHME',
+    BTECHCOMPUTERSCIENCE: 'BTECHCSE',
+    BTECHCOMPUTERSCIENCEENGINEERING: 'BTECHCSE',
+    AGRI: 'BSCAGRICULTURE',
+    AGRICULTURE: 'BSCAGRICULTURE',
+    BSCAGRI: 'BSCAGRICULTURE',
+    APPLIEDSCIENCES: 'BSCAPPLIEDSCIENCES',
+    EDUCATION: 'BEDEDUCATION',
+    LAW: 'LLBLAW',
+    ISBM: 'BBAISBM',
+    SILS: 'BASILS',
+    C3WR: 'BTECHC3WR',
+    CA: 'BCOMCA',
+    GCAD: 'BDESGCAD',
+  };
+  return (aliases[alloc] ?? alloc) === (aliases[prog] ?? prog);
 }
 
 function allocationMatchesStudentSlot(
@@ -55,26 +71,27 @@ function allocationMatchesStudentSlot(
   studentProgram,
 ) {
   const { semesterNum, sectionCode } = parseAllocationSemester(allocationSemester);
-  if (semesterNum != null && semesterNum !== studentSemester) return false;
+  if (semesterNum == null || semesterNum !== studentSemester) return false;
   if (!programsMatch(allocationProgram, studentProgram)) return false;
   const studentSectionNorm = studentSection?.trim().toUpperCase() ?? null;
-  if (sectionCode && studentSectionNorm && sectionCode !== studentSectionNorm) return false;
+  if (sectionCode && sectionCode !== studentSectionNorm) return false;
   return true;
 }
 
 async function resolveStudentSlot(client, tenantId, studentUserId) {
   const { rows } = await client.query(
-    `SELECT sp.batch, sp.current_semester, sp.section_code
+    `SELECT COALESCE(NULLIF(BTRIM(sp.program_name), ''), NULLIF(BTRIM(sp.batch), '')) AS program,
+            sp.current_semester, sp.section_code
      FROM student_profiles sp
      WHERE sp.user_id = $1 AND sp.tenant_id = $2
      LIMIT 1`,
     [studentUserId, tenantId],
   );
-  if (!rows[0]?.current_semester) return null;
+  if (!rows[0]?.current_semester || !rows[0]?.program) return null;
   return {
     studentUserId,
     tenantId,
-    program: rows[0].batch ?? '',
+    program: rows[0].program ?? '',
     semester: Number(rows[0].current_semester),
     sectionCode: rows[0].section_code?.trim().toUpperCase() ?? null,
   };
@@ -131,7 +148,12 @@ async function syncStudentSlot(client, slot, academicYear) {
   }
 
   let removed = 0;
-  if (courseIds.length > 0) {
+  const hasUnresolvedSection = !slot.sectionCode && allocations.some((row) => {
+    const allocationSlot = parseAllocationSemester(row.semester);
+    return allocationSlot.semesterNum === slot.semester && Boolean(allocationSlot.sectionCode) &&
+      programsMatch(row.program_name, slot.program);
+  });
+  if (courseIds.length > 0 && !hasUnresolvedSection) {
     const deleted = await client.query(
       `DELETE FROM student_course_enrollments
        WHERE tenant_id = $1
@@ -143,18 +165,17 @@ async function syncStudentSlot(client, slot, academicYear) {
       [slot.tenantId, slot.studentUserId, slot.semester, courseIds],
     );
     removed = deleted.rows.length;
+    const orphanSemester = await client.query(
+      `DELETE FROM student_course_enrollments
+       WHERE tenant_id = $1
+         AND student_user_id = $2
+         AND semester <> $3
+         AND status = 'ENROLLED'
+       RETURNING enrollment_id`,
+      [slot.tenantId, slot.studentUserId, slot.semester],
+    );
+    removed += orphanSemester.rows.length;
   }
-
-  const orphanSemester = await client.query(
-    `DELETE FROM student_course_enrollments
-     WHERE tenant_id = $1
-       AND student_user_id = $2
-       AND semester <> $3
-       AND status = 'ENROLLED'
-     RETURNING enrollment_id`,
-    [slot.tenantId, slot.studentUserId, slot.semester],
-  );
-  removed += orphanSemester.rows.length;
 
   return { added, kept, removed, courses: courseIds.length };
 }
