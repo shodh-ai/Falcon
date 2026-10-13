@@ -40,7 +40,7 @@ function createService(options?: {
 }
 
 describe('Faculty attendance date and practical batch safety', () => {
-  it('loads the requested weekday and includes historical course memberships in the count', async () => {
+  it('loads the requested weekday and counts only the scoped visible roster', async () => {
     const { service, dataSource } = createService({
       timetableRows: [
         {
@@ -57,6 +57,10 @@ describe('Faculty attendance date and practical batch safety', () => {
       ],
     });
 
+    const rosterSpy = jest.spyOn(service, 'getCourseStudents').mockResolvedValue([
+      { student_id: 'student-a', name: 'A', roll_number: 'A', email: '', section_code: null },
+      { student_id: 'student-b', name: 'B', roll_number: 'B', email: '', section_code: null },
+    ]);
     const rows = await service.getFacultyAcademicTimetableToday(
       'faculty-1',
       'tenant-1',
@@ -70,12 +74,7 @@ describe('Faculty attendance date and practical batch safety', () => {
       expect.stringContaining('t.day_of_week = $4'),
       ['tenant-1', 'faculty-1', null, 2],
     );
-    expect(dataSource.query).toHaveBeenCalledWith(
-      expect.stringContaining(
-        "e.status IN ('ENROLLED', 'COMPLETED', 'FAILED')",
-      ),
-      ['tenant-1', 'course-1', 'BATCH-A'],
-    );
+    expect(rosterSpy).toHaveBeenCalledWith('course-1', 'faculty-1', 'tenant-1', 'slot-1', '2026-10-13');
   });
 
   it('rejects invalid dates instead of looking up an unrelated class day', async () => {

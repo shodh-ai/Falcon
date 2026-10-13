@@ -1,5 +1,6 @@
 import {
   allocationMatchesStudentSlot,
+  parseAllocationSemester,
   programsMatch,
 } from './allocation-semester.util';
 
@@ -28,5 +29,23 @@ describe('pharmacy allocation programme matching', () => {
     expect(
       allocationMatchesStudentSlot('I', 'D.Pharm', 1, null, 'B.Pharm'),
     ).toBe(false);
+  });
+
+  it('never merges programmes merely because their discipline names overlap', () => {
+    expect(programsMatch('BTECH CSE', 'MTECH CSE')).toBe(false);
+    expect(programsMatch('MTECH CSE', 'BTECH CSE')).toBe(false);
+    expect(programsMatch('MTECH CSE', 'B.Tech Mechanical')).toBe(false);
+    expect(programsMatch('B.Tech ME', 'B.TECH MECH')).toBe(true);
+    expect(programsMatch('BTECH CSE', 'B.Tech Computer Science')).toBe(true);
+    expect(programsMatch(null, 'B.Pharm')).toBe(false);
+    expect(programsMatch('B.Pharm', '')).toBe(false);
+  });
+
+  it('keeps sections and unknown semester labels out of a student roster', () => {
+    expect(parseAllocationSemester('Semester 3-A')).toEqual({ semesterNum: 3, sectionCode: 'A' });
+    expect(allocationMatchesStudentSlot('III-A', 'BTECH CSE', 3, 'A', 'BTECH CSE')).toBe(true);
+    expect(allocationMatchesStudentSlot('III-B', 'BTECH CSE', 3, 'A', 'BTECH CSE')).toBe(false);
+    expect(allocationMatchesStudentSlot('III-B', 'BTECH CSE', 3, null, 'BTECH CSE')).toBe(false);
+    expect(allocationMatchesStudentSlot('unknown', 'B.Pharm', 1, null, 'B.Pharm')).toBe(false);
   });
 });

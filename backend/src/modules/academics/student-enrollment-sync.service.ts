@@ -1,7 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
-import { allocationMatchesStudentSlot } from './allocation-semester.util';
+import {
+  allocationMatchesStudentSlot,
+  parseAllocationSemester,
+  programsMatch,
+} from './allocation-semester.util';
 
 export type StudentSlot = {
   studentUserId: string;
@@ -31,9 +35,10 @@ export class StudentEnrollmentSyncService {
     academicYear = '2026-2027',
   ): Promise<SyncResult[]> {
     const students = await this.dataSource.query<
-      Array<{ user_id: string; batch: string | null }>
+      Array<{ user_id: string; program: string | null }>
     >(
-      `SELECT u.user_id, sp.batch
+      `SELECT u.user_id,
+              COALESCE(NULLIF(BTRIM(sp.program_name), ''), NULLIF(BTRIM(sp.batch), '')) AS program
        FROM users u
        INNER JOIN roles r ON r.role_id = u.role_id
        LEFT JOIN student_profiles sp ON sp.user_id = u.user_id
@@ -49,7 +54,7 @@ export class StudentEnrollmentSyncService {
       const slot = await this.resolveStudentSlot(
         tenantId,
         student.user_id,
-        student.batch ?? 'BTECH CSE',
+        student.program ?? '',
       );
       if (!slot) continue;
       results.push(await this.syncStudentSlot(slot, academicYear));
@@ -63,15 +68,16 @@ export class StudentEnrollmentSyncService {
     academicYear = '2026-2027',
   ): Promise<SyncResult | null> {
     const profileRows = await this.dataSource.query<
-      Array<{ batch: string | null }>
+      Array<{ program: string | null }>
     >(
-      `SELECT batch FROM student_profiles WHERE user_id = $1 AND tenant_id = $2 LIMIT 1`,
+      `SELECT COALESCE(NULLIF(BTRIM(program_name), ''), NULLIF(BTRIM(batch), '')) AS program
+       FROM student_profiles WHERE user_id = $1 AND tenant_id = $2 LIMIT 1`,
       [studentUserId, tenantId],
     );
     const slot = await this.resolveStudentSlot(
       tenantId,
       studentUserId,
-      profileRows[0]?.batch ?? 'BTECH CSE',
+      profileRows[0]?.program ?? '',
     );
     if (!slot) return null;
     return this.syncStudentSlot(slot, academicYear);
@@ -82,6 +88,10 @@ export class StudentEnrollmentSyncService {
     studentUserId: string,
     program: string,
   ): Promise<StudentSlot | null> {
+    if (!program.trim()) {
+      this.logger.warn(`Enrollment sync skipped for ${studentUserId}: programme is unknown`);
+      return null;
+    }
     const profileSlot = await this.dataSource.query<
       Array<{ current_semester: number | null; section_code: string | null }>
     >(
@@ -93,12 +103,27 @@ export class StudentEnrollmentSyncService {
     );
 
     if (profileSlot[0]?.current_semester != null) {
+      const semester = Number(profileSlot[0].current_semester);
+      let sectionCode = profileSlot[0].section_code?.trim().toUpperCase() || null;
+      // Older imports stored a section only on enrollments.  Recover it only
+      // when there is exactly one section in the student's current semester;
+      // guessing from one row could enroll the student in both A and B.
+      if (!sectionCode) {
+        const sections = await this.dataSource.query<Array<{ section_code: string }>>(
+          `SELECT DISTINCT UPPER(BTRIM(section_code)) AS section_code
+           FROM student_course_enrollments
+           WHERE tenant_id = $1 AND student_user_id = $2 AND semester = $3
+             AND status = 'ENROLLED' AND NULLIF(BTRIM(section_code), '') IS NOT NULL`,
+          [tenantId, studentUserId, semester],
+        );
+        if (sections.length === 1) sectionCode = sections[0].section_code;
+      }
       return {
         studentUserId,
         tenantId,
         program,
-        semester: Number(profileSlot[0].current_semester),
-        sectionCode: profileSlot[0].section_code?.trim().toUpperCase() ?? null,
+        semester,
+        sectionCode,
       };
     }
 
@@ -109,6 +134,7 @@ export class StudentEnrollmentSyncService {
        FROM student_course_enrollments
        WHERE tenant_id = $1
          AND student_user_id = $2
+         AND status = 'ENROLLED'
          AND section_code IS NOT NULL
        GROUP BY semester, section_code
        ORDER BY semester DESC, COUNT(*) DESC
@@ -128,17 +154,23 @@ export class StudentEnrollmentSyncService {
     }
 
     const maxSemRows = await this.dataSource.query<Array<{ semester: number }>>(
-      `SELECT COALESCE(MAX(semester), 1) AS semester
+      `SELECT MAX(semester) AS semester
        FROM student_course_enrollments
-       WHERE tenant_id = $1 AND student_user_id = $2`,
+       WHERE tenant_id = $1 AND student_user_id = $2
+         AND status = 'ENROLLED'`,
       [tenantId, studentUserId],
     );
+
+    if (maxSemRows[0]?.semester == null) {
+      this.logger.warn(`Enrollment sync skipped for ${studentUserId}: semester is unknown`);
+      return null;
+    }
 
     return {
       studentUserId,
       tenantId,
       program,
-      semester: Number(maxSemRows[0]?.semester ?? 1),
+      semester: Number(maxSemRows[0].semester),
       sectionCode: null,
     };
   }
@@ -177,6 +209,12 @@ export class StudentEnrollmentSyncService {
       .filter(Boolean);
 
     const uniqueCourseIds = [...new Set(matchingCourseIds)];
+    const hasUnresolvedSection = !slot.sectionCode && allocations.some((row) => {
+      const allocationSlot = parseAllocationSemester(row.semester);
+      return allocationSlot.semesterNum === slot.semester &&
+        Boolean(allocationSlot.sectionCode) &&
+        programsMatch(row.program_name, slot.program);
+    });
 
     let added = 0;
     let removed = 0;
@@ -210,7 +248,7 @@ export class StudentEnrollmentSyncService {
       else kept += 1;
     }
 
-    if (uniqueCourseIds.length > 0) {
+    if (uniqueCourseIds.length > 0 && !hasUnresolvedSection) {
       const deleteResult = await this.dataSource.query<
         Array<{ enrollment_id: string }>
       >(
@@ -224,20 +262,23 @@ export class StudentEnrollmentSyncService {
         [slot.tenantId, slot.studentUserId, slot.semester, uniqueCourseIds],
       );
       removed = deleteResult.length;
+      const orphanSemesterDelete = await this.dataSource.query<
+        Array<{ enrollment_id: string }>
+      >(
+        `DELETE FROM student_course_enrollments
+         WHERE tenant_id = $1
+           AND student_user_id = $2
+           AND semester <> $3
+           AND status = 'ENROLLED'
+         RETURNING enrollment_id`,
+        [slot.tenantId, slot.studentUserId, slot.semester],
+      );
+      removed += orphanSemesterDelete.length;
+    } else {
+      this.logger.warn(
+        `Enrollment sync preserved ${slot.studentUserId}: ${hasUnresolvedSection ? 'section is not verified' : 'no unambiguous allocations'} for ${slot.program} semester ${slot.semester}${slot.sectionCode ? `-${slot.sectionCode}` : ''}`,
+      );
     }
-
-    const orphanSemesterDelete = await this.dataSource.query<
-      Array<{ enrollment_id: string }>
-    >(
-      `DELETE FROM student_course_enrollments
-       WHERE tenant_id = $1
-         AND student_user_id = $2
-         AND semester <> $3
-         AND status = 'ENROLLED'
-       RETURNING enrollment_id`,
-      [slot.tenantId, slot.studentUserId, slot.semester],
-    );
-    removed += orphanSemesterDelete.length;
 
     this.logger.debug(
       `Synced ${slot.studentUserId} sem ${slot.semester}${slot.sectionCode ? `-${slot.sectionCode}` : ''}: +${added} -${removed} =${kept}`,
@@ -260,15 +301,16 @@ export class StudentEnrollmentSyncService {
     academicYear = '2026-2027',
   ): Promise<{ semester: number; courseIds: string[] }> {
     const profileRows = await this.dataSource.query<
-      Array<{ batch: string | null }>
+      Array<{ program: string | null }>
     >(
-      `SELECT batch FROM student_profiles WHERE user_id = $1 AND tenant_id = $2 LIMIT 1`,
+      `SELECT COALESCE(NULLIF(BTRIM(program_name), ''), NULLIF(BTRIM(batch), '')) AS program
+       FROM student_profiles WHERE user_id = $1 AND tenant_id = $2 LIMIT 1`,
       [studentUserId, tenantId],
     );
     const slot = await this.resolveStudentSlot(
       tenantId,
       studentUserId,
-      profileRows[0]?.batch ?? 'BTECH CSE',
+      profileRows[0]?.program ?? '',
     );
     if (!slot) return { semester: 1, courseIds: [] };
 
