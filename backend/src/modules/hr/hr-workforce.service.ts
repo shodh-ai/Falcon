@@ -29,6 +29,7 @@ import {
 } from '../../common/validators/workforce-request.validator';
 import { canAccessTeamApprovals } from './utils/reporting-officer.util';
 import { workforceStatusPathForRoles } from './utils/workforce-portal-links.util';
+import { finalHrReviewSql } from './hr-final-review.sql';
 
 export type ApplyWorkforceRequestDto = {
   request_type: StaffRequestType;
@@ -436,7 +437,7 @@ export class HrWorkforceService {
        JOIN users u ON u.user_id = r.staff_user_id
        LEFT JOIN departments d ON d.dept_id = u.dept_id
        WHERE r.tenant_id = $1
-         AND r.status = 'PENDING'
+         AND r.status IN ('PENDING', 'HOD_APPROVED')
          AND r.current_approver_user_id = $2
          ${typeClause}
          ${clause}
@@ -465,6 +466,86 @@ export class HrWorkforceService {
         department: r.employee_dept,
       },
     }));
+  }
+
+  /** The final HR review queue is scoped to the selected entity and assigned approver. */
+  async listHrReviewPending(
+    tenantId: string,
+    entityId: number,
+    approverUserId: string,
+    requestType: 'LEAVE' | 'REGULARIZATION',
+  ) {
+    return this.dataSource.query<
+      Array<{
+        leave_id: string;
+        request_type: StaffRequestType;
+        leave_type: string;
+        start_date: string;
+        end_date: string;
+        regularization_date: string | null;
+        missed_punch_type: 'IN' | 'OUT' | 'BOTH' | null;
+        start_time: string | null;
+        end_time: string | null;
+        reason: string | null;
+        status: string;
+        applied_at: Date;
+        current_step_order: number;
+        employee_name: string;
+        employee_id: string | null;
+        recorded_check_in: Date | null;
+        recorded_check_out: Date | null;
+      }>
+    >(
+      `SELECT r.leave_id, r.request_type, r.leave_type, r.start_date, r.end_date,
+              r.regularization_date, r.missed_punch_type, r.start_time, r.end_time,
+              r.reason, r.status, r.applied_at,
+              r.current_step_order, u.name AS employee_name, p.employee_id,
+              da.first_in_time AS recorded_check_in,
+              da.last_out_time AS recorded_check_out
+       FROM staff_leave_requests r
+       JOIN hr_employee_profiles p ON p.user_id = r.staff_user_id
+         AND p.tenant_id = r.tenant_id
+       JOIN users u ON u.user_id = r.staff_user_id AND u.tenant_id = r.tenant_id
+       LEFT JOIN hr_approval_workflow_steps hr_step
+         ON hr_step.workflow_id = r.workflow_id AND hr_step.step_order = r.current_step_order
+       LEFT JOIN hr_daily_attendance da ON da.user_id = r.staff_user_id
+         AND da.date = r.regularization_date
+       WHERE r.tenant_id = $1 AND p.entity_id = $2
+         AND r.current_approver_user_id = $3
+         AND r.request_type = $4
+         AND r.status IN ('PENDING', 'HOD_APPROVED')
+         AND ${finalHrReviewSql('r', 'hr_step')}
+       ORDER BY r.applied_at ASC`,
+      [tenantId, entityId, approverUserId, requestType],
+    );
+  }
+
+  /** Compatibility mutations must enter the same workflow path as the current review UI. */
+  async actOnScopedTeamRequest(
+    actorUserId: string,
+    tenantId: string,
+    entityId: number,
+    leaveId: string,
+    action: 'APPROVE' | 'REJECT',
+    roles: string[],
+    comment?: string,
+  ) {
+    const assigned = await this.dataSource.query<Array<{ leave_id: string }>>(
+      `SELECT r.leave_id
+       FROM staff_leave_requests r
+       JOIN hr_employee_profiles p ON p.user_id = r.staff_user_id
+         AND p.tenant_id = r.tenant_id
+       WHERE r.tenant_id = $1 AND p.entity_id = $2 AND r.leave_id = $3
+         AND r.current_approver_user_id = $4
+         AND r.status IN ('PENDING', 'HOD_APPROVED')`,
+      [tenantId, entityId, leaveId, actorUserId],
+    );
+    if (!assigned[0]) {
+      throw new ForbiddenException('Request is not pending your approval in this entity');
+    }
+    return this.actOnTeamRequest(actorUserId, tenantId, leaveId, action, comment, {
+      roles,
+    });
   }
 
   private get dataSource() {
@@ -555,7 +636,7 @@ export class HrWorkforceService {
       );
     }
 
-    if (row.status !== 'PENDING') {
+    if (row.status !== 'PENDING' && row.status !== 'HOD_APPROVED') {
       throw new BadRequestException('Request has already been processed');
     }
 
@@ -614,16 +695,6 @@ export class HrWorkforceService {
     const isHodStep =
       stepType === 'REPORTING_MANAGER' || stepType === 'DEPT_HEAD';
 
-    if (isHodStep && this.shouldFinalizeAfterHodApproval(row)) {
-      row.status = 'HR_APPROVED';
-      row.current_approver_user_id = null;
-      row.approver_remarks = comment?.trim() ?? row.approver_remarks;
-      const saved = await this.requests.save(row);
-      await this.applyApprovalSideEffects(saved);
-      void this.notifyEmployeeDecision(staff, saved, true, comment);
-      return saved;
-    }
-
     const next = await this.hrWorkflow.advanceAfterApproval(
       tenantId,
       entityId,
@@ -642,6 +713,8 @@ export class HrWorkforceService {
       return saved;
     }
 
+    // Keep the HoD decision visible while the request awaits independent HR sign-off.
+    if (isHodStep) row.status = 'HOD_APPROVED';
     row.current_step_order = next.step_order;
     row.current_approver_user_id = next.approver_user_id;
     row.approver_remarks = comment?.trim() ?? row.approver_remarks;
@@ -805,9 +878,13 @@ export class HrWorkforceService {
       },
       title: `${label} pending your approval (Step ${row.current_step_order})`,
       message: `${staff.name} submitted ${label} (${row.start_date}${row.end_date !== row.start_date ? ` – ${row.end_date}` : ''}).`,
-      actionLink: row.current_approver_user_id
-        ? '/hr/inbox'
-        : '/faculty/team-requests',
+      actionLink: row.status === 'HOD_APPROVED' && row.request_type === 'LEAVE'
+        ? '/hr/leaves'
+        : row.status === 'HOD_APPROVED' && row.request_type === 'REGULARIZATION'
+          ? '/hr/regularizations'
+          : row.current_approver_user_id
+            ? '/hr/inbox'
+            : '/faculty/team-requests',
       category: 'HR',
       requesterName: staff.name,
     });
@@ -1022,15 +1099,6 @@ export class HrWorkforceService {
       startDate: row.start_date,
       endDate: row.end_date,
     });
-  }
-
-  private shouldFinalizeAfterHodApproval(row: StaffLeaveRequest): boolean {
-    if (row.request_type === 'ON_DUTY') return true;
-    if (row.request_type === 'LEAVE') {
-      const leaveType = (row.leave_type ?? '').toUpperCase();
-      return ['CL', 'CCL', 'OD', 'RH'].includes(leaveType);
-    }
-    return false;
   }
 
   private async resolveCurrentStepApproverType(

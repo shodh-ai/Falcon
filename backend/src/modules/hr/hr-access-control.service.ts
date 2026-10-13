@@ -566,15 +566,19 @@ export class HrAccessControlService {
     return rows[0]?.user_id ?? null;
   }
 
-  async resolveHrAdminApprover(tenantId: string): Promise<string | null> {
+  async resolveHrAdminApprover(
+    tenantId: string,
+    requesterUserId?: string,
+  ): Promise<string | null> {
     const rows = await this.dataSource.query<Array<{ user_id: string }>>(
       `SELECT u.user_id FROM users u
        JOIN roles r ON r.role_id = u.role_id
        WHERE u.tenant_id = $1 AND u.is_active = true
          AND r.role_name IN ('HRAdmin', 'SuperAdmin')
+         AND ($2::uuid IS NULL OR u.user_id <> $2)
        ORDER BY CASE WHEN r.role_name = 'HRAdmin' THEN 0 ELSE 1 END, u.name
        LIMIT 1`,
-      [tenantId],
+      [tenantId, requesterUserId ?? null],
     );
     return rows[0]?.user_id ?? null;
   }

@@ -2,6 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { HrEntityContextService } from './hr-entity-context.service';
+import { pendingFnfClearanceSql } from './hr-offboarding-status';
+import { finalHrReviewSql } from './hr-final-review.sql';
 
 @Injectable()
 export class HrDashboardService {
@@ -10,10 +12,14 @@ export class HrDashboardService {
     private readonly entityCtx: HrEntityContextService,
   ) {}
 
-  async getMasterDashboard(tenantId: string, entityId: number) {
+  async getMasterDashboard(
+    tenantId: string,
+    entityId: number,
+    approverUserId: string,
+  ) {
     const today = new Date().toISOString().slice(0, 10);
     const monthStart = today.slice(0, 7) + '-01';
-    const entityFilter = this.entityCtx.entityFilterSql('p', 2);
+    const entityFilter = this.entityCtx.entityFilterSql('p', 2, entityId);
 
     const [headcountRow] = await this.dataSource.query<
       Array<{ total: string; new_joiners: string; exits: string }>
@@ -98,9 +104,13 @@ export class HrDashboardService {
     >(
       `SELECT COUNT(*)::text AS count FROM staff_leave_requests sl
        JOIN hr_employee_profiles p ON p.user_id = sl.staff_user_id AND p.tenant_id = sl.tenant_id
+       LEFT JOIN hr_approval_workflow_steps hr_step
+         ON hr_step.workflow_id = sl.workflow_id AND hr_step.step_order = sl.current_step_order
        WHERE sl.tenant_id = $1 AND sl.request_type = 'LEAVE'
-         AND sl.status IN ('PENDING', 'HOD_APPROVED')${entityFilter}`,
-      [tenantId, entityId],
+         AND sl.status IN ('PENDING', 'HOD_APPROVED')
+         AND sl.current_approver_user_id = $3
+         AND ${finalHrReviewSql('sl', 'hr_step')}${entityFilter}`,
+      [tenantId, entityId, approverUserId],
     );
 
     const [pendingRegularizations] = await this.dataSource.query<
@@ -108,14 +118,19 @@ export class HrDashboardService {
     >(
       `SELECT COUNT(*)::text AS count FROM staff_leave_requests sl
        JOIN hr_employee_profiles p ON p.user_id = sl.staff_user_id AND p.tenant_id = sl.tenant_id
+       LEFT JOIN hr_approval_workflow_steps hr_step
+         ON hr_step.workflow_id = sl.workflow_id AND hr_step.step_order = sl.current_step_order
        WHERE sl.tenant_id = $1 AND sl.request_type = 'REGULARIZATION'
-         AND sl.status IN ('PENDING', 'HOD_APPROVED')${entityFilter}`,
-      [tenantId, entityId],
+         AND sl.status IN ('PENDING', 'HOD_APPROVED')
+         AND sl.current_approver_user_id = $3
+         AND ${finalHrReviewSql('sl', 'hr_step')}${entityFilter}`,
+      [tenantId, entityId, approverUserId],
     );
 
     const [pendingFnf] = await this.dataSource.query<Array<{ count: string }>>(
       `SELECT COUNT(*)::text AS count FROM hr_resignation_requests rr
-       WHERE rr.tenant_id = $1 AND rr.status IN ('FNF_PENDING', 'HR_PROCESSING')${entityFilter.replace('p.', 'rr.')}`,
+       WHERE rr.tenant_id = $1 AND ${pendingFnfClearanceSql('rr')}
+       ${this.entityCtx.entityFilterSql('rr', 2, entityId)}`,
       [tenantId, entityId],
     );
 
@@ -216,12 +231,12 @@ export class HrDashboardService {
           {
             label: 'Pending Regularizations',
             count: Number(pendingRegularizations?.count ?? 0),
-            href: '/hr/leaves',
+            href: '/hr/regularizations',
           },
           {
             label: 'Pending FNF Clearances',
             count: Number(pendingFnf?.count ?? 0),
-            href: '/hr/offboarding',
+            href: '/hr/offboarding?filter=fnf',
           },
         ],
       },

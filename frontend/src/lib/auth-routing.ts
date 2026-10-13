@@ -310,6 +310,7 @@ const hrPathModules: Array<{ prefix: string; module: string }> = [
   { prefix: '/hr/kyc', module: 'documents' },
   { prefix: '/hr/attendance', module: 'attendance' },
   { prefix: '/hr/leaves', module: 'leaves' },
+  { prefix: '/hr/regularizations', module: 'leaves' },
   { prefix: '/hr/payroll', module: 'payroll' },
   { prefix: '/hr/onboarding', module: 'onboarding' },
   { prefix: '/hr/offboarding', module: 'offboarding' },

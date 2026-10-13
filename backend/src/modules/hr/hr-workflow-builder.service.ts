@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { HrAccessControlService } from './hr-access-control.service';
@@ -176,6 +176,21 @@ export class HrWorkflowBuilderService {
         requesterUserId,
         step,
       );
+      // An explicit HR gate must not vanish just because its approver is
+      // absent or would approve their own request.
+      const mandatoryHrStep =
+        step.approver_type === 'HR_ADMIN' ||
+        step.approver_type === 'HR_EXECUTIVE' ||
+        (step.approver_type === 'ROLE' &&
+          ['HR', 'HRAdmin', 'SuperAdmin'].includes(step.approver_ref ?? ''));
+      if (
+        mandatoryHrStep &&
+        (!approverUserId || approverUserId === requesterUserId)
+      ) {
+        throw new BadRequestException(
+          'An independent HR approver is not configured for this request',
+        );
+      }
       // Never leave a request parked on an unassigned or self-approval step.
       // Continue to the next configured approval step instead.
       if (!approverUserId || approverUserId === requesterUserId) continue;
@@ -298,7 +313,10 @@ export class HrWorkflowBuilderService {
     }
 
     if (step.approver_type === 'HR_ADMIN') {
-      return this.accessControl.resolveHrAdminApprover(tenantId);
+      return this.accessControl.resolveHrAdminApprover(
+        tenantId,
+        requesterUserId,
+      );
     }
 
     return null;

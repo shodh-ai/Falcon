@@ -73,4 +73,59 @@ describe('HrWorkflowBuilderService', () => {
       service.resolveDefaultApprover(tenantId, requesterId),
     ).resolves.toBe(hrId);
   });
+
+  it('fails closed when the mandatory final HR approver is missing', async () => {
+    const query = jest
+      .fn()
+      .mockResolvedValueOnce([{ workflow_id: 'workflow-1' }])
+      .mockResolvedValueOnce([
+        { step_order: 2, approver_type: 'HR_ADMIN', approver_ref: null },
+      ]);
+    const service = createService(query);
+
+    await expect(
+      service.resolveNextApprover(tenantId, 1, 'ON_DUTY', requesterId, 1),
+    ).rejects.toThrow('An independent HR approver is not configured');
+  });
+
+  it('does not skip an unassigned ROLE HR final step', async () => {
+    const query = jest
+      .fn()
+      .mockResolvedValueOnce([{ workflow_id: 'workflow-1' }])
+      .mockResolvedValueOnce([
+        { step_order: 2, approver_type: 'ROLE', approver_ref: 'HR' },
+      ])
+      .mockResolvedValueOnce([]);
+    const service = createService(query);
+    await expect(
+      service.resolveNextApprover(tenantId, 1, 'LEAVE', requesterId, 1),
+    ).rejects.toThrow('An independent HR approver is not configured');
+  });
+
+  it('excludes the requester when finding an independent HR-admin approver', async () => {
+    const query = jest
+      .fn()
+      .mockResolvedValueOnce([{ workflow_id: 'workflow-1' }])
+      .mockResolvedValueOnce([
+        { step_order: 2, approver_type: 'HR_ADMIN', approver_ref: null },
+      ]);
+    const accessControl = {
+      resolveHrAdminApprover: jest.fn().mockResolvedValue(hrId),
+    };
+    const service = new HrWorkflowBuilderService(
+      { query } as never,
+      accessControl as never,
+    );
+    await expect(
+      service.resolveNextApprover(tenantId, 1, 'ON_DUTY', requesterId, 1),
+    ).resolves.toEqual({
+      step_order: 2,
+      approver_user_id: hrId,
+      approver_type: 'HR_ADMIN',
+    });
+    expect(accessControl.resolveHrAdminApprover).toHaveBeenCalledWith(
+      tenantId,
+      requesterId,
+    );
+  });
 });

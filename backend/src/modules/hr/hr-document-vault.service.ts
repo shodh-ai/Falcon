@@ -12,9 +12,9 @@ import {
   HR_DOCUMENT_CATEGORIES,
   HR_DOCUMENT_GROUP_MAP,
 } from './hr-document.constants';
-import { parseStorageKey } from './utils/s3-key.util';
 import {
   openDocumentReadStream,
+  parseTenantStorageKey,
   resolveDocumentDiskPath,
 } from './utils/document-file-path.util';
 
@@ -80,13 +80,34 @@ export class HrDocumentVaultService {
     if (!dto.file_url?.trim())
       throw new BadRequestException('file_url is required');
 
+    const fileUrl = dto.file_url.trim();
+    const key = parseTenantStorageKey(
+      fileUrl,
+      tenantId,
+      this.storage.getBucketName(),
+    );
+    const localFile = resolveDocumentDiskPath(fileUrl, tenantId);
+    if ((!key || !this.storage.isEnabled()) && !localFile) {
+      throw new BadRequestException(
+        "Document must reference an uploaded file in this tenant's secure storage",
+      );
+    }
+
     const status = options?.autoVerify ? 'VERIFIED' : 'PENDING';
     const fileName =
       dto.file_name?.trim() ||
-      dto.file_url.split('/').pop()?.split('?')[0] ||
+      fileUrl.split('/').pop()?.split('?')[0] ||
       'document';
 
-    const rows = await this.dataSource.query(
+    const rows = await this.dataSource.query<
+      Array<{
+        document_id: string;
+        document_type: string;
+        file_name: string;
+        verification_status: string;
+        uploaded_at: string;
+      }>
+    >(
       `INSERT INTO hr_employee_documents
          (tenant_id, entity_id, user_id, document_type, file_url, file_name, uploaded_by, verification_status)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
@@ -96,7 +117,7 @@ export class HrDocumentVaultService {
         entityId,
         userId,
         docType,
-        dto.file_url,
+        key ? `s3://${this.storage.getBucketName()}/${key}` : fileUrl,
         fileName,
         uploadedBy,
         status,
@@ -109,12 +130,23 @@ export class HrDocumentVaultService {
     tenantId: string,
     docId: string,
     status: 'VERIFIED' | 'REJECTED',
-    hrUserId: string,
+    _hrUserId: string,
   ) {
+    // The controller checks reviewer permissions; the current document schema
+    // does not persist reviewer identity here.
+    void _hrUserId;
     if (!['VERIFIED', 'REJECTED'].includes(status)) {
       throw new BadRequestException('status must be VERIFIED or REJECTED');
     }
-    const rows = await this.dataSource.query(
+    const rows = await this.dataSource.query<
+      Array<{
+        document_id: string;
+        document_type: string;
+        file_name: string;
+        verification_status: string;
+        uploaded_at: string;
+      }>
+    >(
       `UPDATE hr_employee_documents SET verification_status = $3
        WHERE document_id = $1 AND tenant_id = $2
        RETURNING document_id, document_type, file_name, verification_status, uploaded_at`,
@@ -143,7 +175,11 @@ export class HrDocumentVaultService {
       throw new ForbiddenException('You can only download your own documents');
     }
 
-    const key = parseStorageKey(doc.file_url);
+    const key = parseTenantStorageKey(
+      doc.file_url,
+      tenantId,
+      this.storage.getBucketName(),
+    );
     if (key && this.storage.isEnabled()) {
       const url = await this.storage.getPresignedDownloadUrl(
         key,
@@ -159,43 +195,10 @@ export class HrDocumentVaultService {
       };
     }
 
-    if (
-      doc.file_url.startsWith('http://') ||
-      doc.file_url.startsWith('https://')
-    ) {
-      return {
-        url: doc.file_url,
-        delivery: 'presigned' as const,
-        expires_at: new Date(
-          Date.now() + PRESIGNED_TTL_SECONDS * 1000,
-        ).toISOString(),
-        file_name: doc.file_name,
-      };
-    }
-
-    if (
-      resolveDocumentDiskPath(doc.file_url) ||
-      (key && !this.storage.isEnabled())
-    ) {
+    if (resolveDocumentDiskPath(doc.file_url, tenantId)) {
       return {
         url: `/api/hr/documents/${docId}/file`,
         delivery: 'authenticated' as const,
-        expires_at: new Date(
-          Date.now() + PRESIGNED_TTL_SECONDS * 1000,
-        ).toISOString(),
-        file_name: doc.file_name,
-      };
-    }
-
-    if (
-      doc.file_url.startsWith('/') ||
-      doc.file_url.includes('uploads/download')
-    ) {
-      return {
-        url: doc.file_url.startsWith('http')
-          ? doc.file_url
-          : `/api/uploads/download?key=${encodeURIComponent(key ?? '')}`,
-        delivery: 'presigned' as const,
         expires_at: new Date(
           Date.now() + PRESIGNED_TTL_SECONDS * 1000,
         ).toISOString(),
@@ -228,7 +231,11 @@ export class HrDocumentVaultService {
       throw new ForbiddenException('You can only download your own documents');
     }
 
-    const stream = await openDocumentReadStream(doc.file_url, this.storage);
+    const stream = await openDocumentReadStream(
+      doc.file_url,
+      this.storage,
+      tenantId,
+    );
     if (!stream) {
       throw new NotFoundException(
         'Document file not available in secure storage',

@@ -4,6 +4,7 @@ import {
   Controller,
   Delete,
   Get,
+  GoneException,
   Headers,
   HttpCode,
   HttpStatus,
@@ -62,7 +63,6 @@ import { HrFacultyPortfolioService, type FacultyWorkType } from './hr-faculty-po
 import { HR_DOCUMENT_CATEGORIES } from './hr-document.constants';
 import type { StaffRequestType } from '../../entities/staff-leave-request.entity';
 import { CreateLeaveRequestDto } from './dto/create-leave-request.dto';
-import { LeaveActionDto } from './dto/leave-action.dto';
 import { RunPayrollDto, UpdateEmployeeDto } from './dto/hr-operations.dto';
 import type { LeaveRequestStatus } from '../../entities/leave-request.entity';
 import type { StaffLeaveStatus } from '../../entities/staff-leave-request.entity';
@@ -136,8 +136,13 @@ export class HrController {
 
   @Patch('leaves/:id/action')
   @Roles('HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
-  act(@Param('id') id: string, @Body() dto: LeaveActionDto) {
-    return this.hr.actOnLeave(id, dto);
+  act() {
+    // This older model has no entity or assigned-approver key. Reject rather
+    // than trust actor_user_id supplied by a client or bypass the canonical
+    // staff_leave_requests workflow and its approval side effects.
+    throw new GoneException(
+      'Legacy leave actions are disabled. Use the assigned HR/faculty review workflow.',
+    );
   }
 
   @Get('balances/:userId')
@@ -368,7 +373,7 @@ export class HrController {
   ) {
     const tenantId = this.resolveTenantId(req.user);
     const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
-    return this.dashboard.getMasterDashboard(tenantId, entity);
+    return this.dashboard.getMasterDashboard(tenantId, entity, req.user.user_id);
   }
 
   @Get('dashboard/metrics')
@@ -392,7 +397,7 @@ export class HrController {
   ) {
     const tenantId = this.resolveTenantId(req.user);
     const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
-    return this.dashboard.getMasterDashboard(tenantId, entity);
+    return this.dashboard.getMasterDashboard(tenantId, entity, req.user.user_id);
   }
 
   @Get('reports/muster-roll')
@@ -794,7 +799,12 @@ export class HrController {
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
     @Query('q') q?: string,
+    @Query('dept_id') deptId?: string,
   ) {
+    const parsedDeptId = deptId === undefined ? undefined : Number(deptId);
+    if (parsedDeptId !== undefined && (!Number.isSafeInteger(parsedDeptId) || parsedDeptId <= 0)) {
+      throw new BadRequestException('dept_id must be a positive integer');
+    }
     const tenantId = this.resolveTenantId(req.user);
     const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
     return this.hrAdmin.listDirectory(
@@ -806,6 +816,7 @@ export class HrController {
         limit: limit ? Number(limit) : undefined,
         offset: offset ? Number(offset) : undefined,
         q,
+        deptId: parsedDeptId,
       },
     );
   }
@@ -1124,6 +1135,55 @@ export class HrController {
     return this.hr.listAllStaffLeaves(tenantId, entity, status);
   }
 
+  @Get('leaves/review')
+  @Roles('HR', 'HRAdmin', 'SuperAdmin')
+  @HrPermission('leaves', 'read')
+  async hrReviewQueue(
+    @Req() req: { user: AuthUser },
+    @Query('request_type') requestType: 'LEAVE' | 'REGULARIZATION',
+    @Query('entity_id') entityId?: string,
+  ) {
+    if (requestType !== 'LEAVE' && requestType !== 'REGULARIZATION') {
+      throw new BadRequestException('request_type must be LEAVE or REGULARIZATION');
+    }
+    const tenantId = this.resolveTenantId(req.user);
+    const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
+    return this.workforce.listHrReviewPending(
+      tenantId, entity, req.user.user_id, requestType,
+    );
+  }
+
+  @Patch('leaves/review/:leaveId')
+  @Roles('HR', 'HRAdmin', 'SuperAdmin')
+  @HrPermission('leaves', 'write')
+  async actOnHrReview(
+    @Param('leaveId') leaveId: string,
+    @Req() req: { user: AuthUser },
+    @Body() body: { action: 'APPROVE' | 'REJECT'; comment?: string },
+    @Query('entity_id') entityId?: string,
+  ) {
+    if (body.action !== 'APPROVE' && body.action !== 'REJECT') {
+      throw new BadRequestException('action must be APPROVE or REJECT');
+    }
+    const tenantId = this.resolveTenantId(req.user);
+    const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
+    const [leave, regularization] = await Promise.all([
+      this.workforce.listHrReviewPending(tenantId, entity, req.user.user_id, 'LEAVE'),
+      this.workforce.listHrReviewPending(tenantId, entity, req.user.user_id, 'REGULARIZATION'),
+    ]);
+    if (![...leave, ...regularization].some((row) => row.leave_id === leaveId)) {
+      throw new BadRequestException('Request is not pending your HR review in this entity');
+    }
+    return this.workforce.actOnTeamRequest(
+      req.user.user_id,
+      tenantId,
+      leaveId,
+      body.action,
+      body.comment,
+      { roles: this.resolveRoles(req.user) },
+    );
+  }
+
   @Get('holidays')
   @SkipEntityScope()
   @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
@@ -1141,43 +1201,66 @@ export class HrController {
   @Patch('staff-leaves/:leaveId/status')
   @Roles('HR', 'HRAdmin', 'SuperAdmin', 'HOD')
   @HrPermission('leaves', 'write')
-  actOnStaffLeave(
+  async actOnStaffLeave(
     @Param('leaveId') leaveId: string,
     @Req() req: { user: AuthUser },
     @Body('status') status: 'HOD_APPROVED' | 'HR_APPROVED' | 'REJECTED',
+    @Query('entity_id') entityId?: string,
   ) {
-    return this.hr.actOnStaffLeave(
+    if (!['HOD_APPROVED', 'HR_APPROVED', 'REJECTED'].includes(status)) {
+      throw new BadRequestException('Invalid leave decision');
+    }
+    const tenantId = this.resolveTenantId(req.user);
+    const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
+    return this.workforce.actOnScopedTeamRequest(
+      req.user.user_id,
+      tenantId,
+      entity,
       leaveId,
-      this.resolveTenantId(req.user),
-      status,
-      req.user,
+      status === 'REJECTED' ? 'REJECT' : 'APPROVE',
+      this.resolveRoles(req.user),
     );
   }
 
   @Patch('leaves/:leaveId/approve')
   @Roles('HOD', 'Dean', 'SuperAdmin')
-  hodApproveLeave(
+  async hodApproveLeave(
     @Param('leaveId') leaveId: string,
     @Req() req: { user: AuthUser },
+    @Query('entity_id') entityId?: string,
   ) {
-    return this.hr.hodApproveStaffLeave(
+    const tenantId = this.resolveTenantId(req.user);
+    const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
+    return this.workforce.actOnScopedTeamRequest(
+      req.user.user_id,
+      tenantId,
+      entity,
       leaveId,
-      this.resolveTenantId(req.user),
-      req.user,
+      'APPROVE',
+      this.resolveRoles(req.user),
     );
   }
 
   @Patch('leaves/:leaveId/reject')
   @Roles('HOD', 'Dean', 'SuperAdmin')
-  hodRejectLeave(
+  async hodRejectLeave(
     @Param('leaveId') leaveId: string,
     @Req() req: { user: AuthUser },
     @Body('remarks') remarks: string,
+    @Query('entity_id') entityId?: string,
   ) {
-    return this.hr.hodRejectStaffLeave(
+    if (!remarks?.trim()) {
+      throw new BadRequestException('Rejection remarks are required');
+    }
+    const tenantId = this.resolveTenantId(req.user);
+    const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
+    return this.workforce.actOnScopedTeamRequest(
+      req.user.user_id,
+      tenantId,
+      entity,
       leaveId,
-      this.resolveTenantId(req.user),
-      req.user,
+      'REJECT',
+      this.resolveRoles(req.user),
       remarks,
     );
   }
@@ -1420,23 +1503,44 @@ export class HrController {
   async offboarding(
     @Req() req: { user: AuthUser },
     @Query('entity_id') entityId?: string,
+    @Query('queue') queue?: string,
+  ) {
+    if (queue && queue !== 'fnf') {
+      throw new BadRequestException('queue must be fnf');
+    }
+    const tenantId = this.resolveTenantId(req.user);
+    const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
+    return this.ess.listResignations(tenantId, entity, queue as 'fnf' | undefined);
+  }
+
+  @Get('offboarding/summary')
+  @Roles('HR', 'HRAdmin', 'SuperAdmin')
+  @HrPermission('offboarding', 'read')
+  async offboardingSummary(
+    @Req() req: { user: AuthUser },
+    @Query('entity_id') entityId?: string,
   ) {
     const tenantId = this.resolveTenantId(req.user);
     const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
-    return this.ess.listResignations(tenantId, entity);
+    return this.ess.getOffboardingSummary(tenantId, entity);
   }
 
   @Patch('offboarding/:resignationId/process')
   @Roles('HR', 'HRAdmin', 'SuperAdmin')
   @HrPermission('offboarding', 'write')
-  hrProcessOffboarding(
+  async hrProcessOffboarding(
     @Param('resignationId') resignationId: string,
     @Req() req: { user: AuthUser },
     @Body('separation_mode')
     separationMode: 'SERVE_NOTICE' | 'BUYOUT_NOTICE' | 'IMMEDIATE_SEPARATION',
+    @Query('entity_id') entityId?: string,
   ) {
+    const tenantId = this.resolveTenantId(req.user);
+    const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
     return this.ess.hrProcessResignation(
       resignationId,
+      tenantId,
+      entity,
       req.user.user_id,
       separationMode,
     );
@@ -1475,16 +1579,25 @@ export class HrController {
   }
 
   @Patch('ess/resignation/:resignationId/hod-clearance')
-  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
-  hodClearResignation(
+  @Roles('HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
+  async hodClearResignation(
     @Param('resignationId') resignationId: string,
     @Req() req: { user: AuthUser },
     @Body('approved') approved: boolean,
+    @Query('entity_id') entityId?: string,
   ) {
+    const tenantId = this.resolveTenantId(req.user);
+    const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
+    const isHrAdmin = this.resolveRoles(req.user).some((role) =>
+      ['HR', 'HRAdmin', 'SuperAdmin'].includes(role),
+    );
     return this.ess.hodClearResignation(
       resignationId,
+      tenantId,
+      entity,
       req.user.user_id,
       approved,
+      isHrAdmin,
     );
   }
 
@@ -1993,11 +2106,16 @@ export class HrController {
 
   @Get('metadata/roles-departments')
   @Roles('HR', 'HRAdmin', 'SuperAdmin')
-  async listRolesAndDepartments(@Req() req: { user: AuthUser }) {
+  @HrPermission('directory', 'read')
+  async listRolesAndDepartments(
+    @Req() req: { user: AuthUser },
+    @Query('entity_id') entityId?: string,
+  ) {
     const tenantId = this.resolveTenantId(req.user);
+    const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
     const [roles, departments] = await Promise.all([
       this.hrAdmin.listRoles(tenantId),
-      this.hrAdmin.listDepartments(tenantId),
+      this.hrAdmin.listDepartments(tenantId, entity),
     ]);
     return { roles, departments };
   }
@@ -2438,13 +2556,20 @@ export class HrController {
 
   @Patch('offboarding/:resignationId/exit-status')
   @Roles('HR', 'HRAdmin', 'SuperAdmin')
+  @HrPermission('offboarding', 'write')
   async updateExitStatus(
     @Param('resignationId') resignationId: string,
+    @Req() req: { user: AuthUser },
     @Body()
     body: { exit_status: string; fnf_deduct_checklist_penalty?: boolean },
+    @Query('entity_id') entityId?: string,
   ) {
+    const tenantId = this.resolveTenantId(req.user);
+    const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
     return this.checklists.updateExitStatus(
       resignationId,
+      tenantId,
+      entity,
       body.exit_status,
       body.fnf_deduct_checklist_penalty,
     );

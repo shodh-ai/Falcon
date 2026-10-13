@@ -150,6 +150,9 @@ export class HrDocumentExportService {
       status: job.status,
       file_name: job.file_name,
       error_message: job.error_message,
+      skipped_count: job.status === 'COMPLETED'
+        ? Number(job.error_message?.match(/^(\d+) of \d+ matched/)?.[1] ?? 0)
+        : undefined,
       created_at: job.created_at,
       completed_at: job.completed_at,
       download_url,
@@ -247,12 +250,22 @@ export class HrDocumentExportService {
         throw new Error('No documents matched the selected filters');
       }
 
-      const { zipBuffer, packedCount } = await this.buildZipArchive(docs);
+      const { zipBuffer, packedCount, skipped } = await this.buildZipArchive(
+        docs,
+        job.tenantId,
+      );
       if (packedCount === 0) {
         throw new Error(
-          'Matched documents exist but their files could not be read from storage. Check S3/MinIO or upload paths.',
+          `No matched files could be read from storage. ${skipped.length} document(s) unavailable: ${skipped
+            .slice(0, 5)
+            .map((item) => item.document_id)
+            .join(', ')}${skipped.length > 5 ? ', …' : ''}. Check the source uploads or S3/MinIO object keys.`,
         );
       }
+
+      const exportWarning = skipped.length
+        ? `${skipped.length} of ${docs.length} matched document(s) were unavailable. Download the ZIP and inspect unavailable-documents.json for IDs and reasons.`
+        : null;
 
       const deptLabel = job.filters.dept_id
         ? `Dept${job.filters.dept_id}`
@@ -273,9 +286,10 @@ export class HrDocumentExportService {
         );
         await this.dataSource.query(
           `UPDATE hr_document_export_jobs
-           SET status = 'COMPLETED', file_key = $2, file_name = $3, completed_at = NOW()
+           SET status = 'COMPLETED', file_key = $2, file_name = $3,
+               error_message = $4, completed_at = NOW()
            WHERE job_id = $1`,
-          [job.jobId, s3Key, zipName],
+          [job.jobId, s3Key, zipName, exportWarning],
         );
       } else {
         const fullPath = resolve(uploadRoot(), fileKey);
@@ -283,9 +297,10 @@ export class HrDocumentExportService {
         writeFileSync(fullPath, zipBuffer);
         await this.dataSource.query(
           `UPDATE hr_document_export_jobs
-           SET status = 'COMPLETED', file_key = $2, file_name = $3, completed_at = NOW()
+           SET status = 'COMPLETED', file_key = $2, file_name = $3,
+               error_message = $4, completed_at = NOW()
            WHERE job_id = $1`,
-          [job.jobId, fileKey, zipName],
+          [job.jobId, fileKey, zipName, exportWarning],
         );
       }
 
@@ -297,7 +312,7 @@ export class HrDocumentExportService {
         label,
         zipUrl: downloadPath,
         title: 'Bulk document export ready',
-        message: `Your ZIP archive (${packedCount} files) is ready. Click to download.`,
+        message: `Your ZIP archive (${packedCount} files) is ready.${exportWarning ? ` ${exportWarning}` : ''}`,
         actionLink: downloadPath,
       });
 
@@ -305,6 +320,7 @@ export class HrDocumentExportService {
         file_key: fileKey,
         file_name: zipName,
         document_count: packedCount,
+        skipped_count: skipped.length,
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -334,34 +350,61 @@ export class HrDocumentExportService {
       document_type: string;
       employee_name: string;
       employee_id: string | null;
+      document_id: string;
     }>,
-  ): Promise<{ zipBuffer: Buffer; packedCount: number }> {
+    tenantId: string,
+  ): Promise<{
+    zipBuffer: Buffer;
+    packedCount: number;
+    skipped: Array<{ document_id: string; employee_name: string; document_type: string; reason: string }>;
+  }> {
     return new Promise((resolvePromise, reject) => {
       const archive = new ZipArchive({ zlib: { level: 5 } });
       const chunks: Buffer[] = [];
       let packedCount = 0;
+      const skipped: Array<{ document_id: string; employee_name: string; document_type: string; reason: string }> = [];
 
       archive.on('data', (chunk: Buffer) => chunks.push(chunk));
       archive.on('error', reject);
       archive.on('end', () =>
-        resolvePromise({ zipBuffer: Buffer.concat(chunks), packedCount }),
+        resolvePromise({ zipBuffer: Buffer.concat(chunks), packedCount, skipped }),
       );
 
       void (async () => {
         for (const doc of docs) {
-          const stream = await openDocumentReadStream(
-            doc.file_url,
-            this.storage,
-          );
-          if (!stream) continue;
+          let stream: Readable | null = null;
+          try {
+            stream = await openDocumentReadStream(
+              doc.file_url,
+              this.storage,
+              tenantId,
+            );
+          } catch {
+            // One missing S3 object must not prevent an otherwise valid export.
+          }
+          if (!stream) {
+            skipped.push({
+              document_id: doc.document_id,
+              employee_name: doc.employee_name,
+              document_type: doc.document_type,
+              reason: 'File missing or unreadable in configured storage',
+            });
+            continue;
+          }
           packedCount += 1;
           const safeName = doc.employee_name.replace(/[^a-zA-Z0-9]/g, '');
           const empId = (doc.employee_id ?? 'NA').replace(/[^a-zA-Z0-9]/g, '');
           const ext = (doc.file_name ?? 'file.pdf').includes('.')
             ? doc.file_name!.slice(doc.file_name!.lastIndexOf('.'))
             : '.pdf';
-          const entryName = `${doc.document_type}_${safeName}_${empId}${ext}`;
+          const entryName = `${doc.document_type}_${safeName}_${empId}_${doc.document_id}${ext}`;
           archive.append(stream, { name: entryName });
+        }
+        if (skipped.length) {
+          archive.append(
+            JSON.stringify({ skipped_documents: skipped }, null, 2),
+            { name: 'unavailable-documents.json' },
+          );
         }
         await archive.finalize();
       })().catch(reject);

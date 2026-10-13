@@ -1028,7 +1028,7 @@ export class HrTeamService {
        JOIN users u ON u.user_id = r.staff_user_id
        LEFT JOIN hr_employee_profiles p ON p.user_id = u.user_id AND p.tenant_id = r.tenant_id
        LEFT JOIN users approver ON approver.user_id = r.current_approver_user_id
-       WHERE r.tenant_id = $1 AND r.status = 'PENDING'${entityClause}
+       WHERE r.tenant_id = $1 AND r.status IN ('PENDING', 'HOD_APPROVED')${entityClause}
        ORDER BY r.applied_at ASC`,
       params,
     );

@@ -1,7 +1,9 @@
 'use client';
 
 import { Select } from '@/components/ui/select';
-import { useEffect, useMemo, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { CheckCircle2, Clock3, Search, Users } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { HrPageHeader } from '@/components/hr/HrPageHeader';
@@ -23,21 +25,50 @@ type Resignation = {
   fnf_deduct_checklist_penalty: boolean;
 };
 
+type OffboardingSummary = {
+  awaiting_hr_action: number;
+  fnf_to_initiate: number;
+  pending_fnf_clearances: number;
+  completed_exits: number;
+};
+
 export default function HrOffboardingPage() {
+  return (
+    <Suspense fallback={<p className="p-6 text-sm text-muted-foreground">Loading exit cases…</p>}>
+      <HrOffboardingContent />
+    </Suspense>
+  );
+}
+
+function HrOffboardingContent() {
   const api = useHrApi();
+  const searchParams = useSearchParams();
   const { entityId } = useHrEntity();
   const [rows, setRows] = useState<Resignation[]>([]);
+  const [summary, setSummary] = useState<OffboardingSummary | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Record<string, string>>({});
   const [exitStatus, setExitStatus] = useState<Record<string, string>>({});
   const [fnfPenalty, setFnfPenalty] = useState<Record<string, boolean>>({});
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
 
-  const load = () => void api.get<Resignation[]>('/api/hr/offboarding').then(setRows);
+  const fnfQueue = searchParams.get('filter') === 'fnf';
+  const load = useCallback(() => {
+    const path = fnfQueue ? '/api/hr/offboarding?queue=fnf' : '/api/hr/offboarding';
+    void Promise.all([
+      api.get<Resignation[]>(path),
+      api.get<OffboardingSummary>('/api/hr/offboarding/summary'),
+    ]).then(([nextRows, nextSummary]) => {
+      setRows(nextRows);
+      setSummary(nextSummary);
+      setLoadError(null);
+    }).catch((error) => setLoadError(error instanceof Error ? error.message : 'Could not load exit cases'));
+  }, [api, fnfQueue]);
 
   useEffect(() => {
     load();
-  }, [api, entityId]);
+  }, [load, entityId]);
 
   const filteredRows = useMemo(() => rows.filter((row) => {
     const matchesStatus = statusFilter === 'ALL' || row.status === statusFilter;
@@ -45,9 +76,9 @@ export default function HrOffboardingPage() {
     return matchesStatus && searchText.includes(query.trim().toLowerCase());
   }), [query, rows, statusFilter]);
 
-  const pendingCount = rows.filter((row) => row.status === 'PENDING_HR' || row.status === 'HOD_CLEARED').length;
-  const fnfCount = rows.filter((row) => row.exit_status === 'INITIATE_FNF').length;
-  const completedCount = rows.filter((row) => row.exit_status === 'OFFBOARDED').length;
+  const pendingCount = summary?.awaiting_hr_action ?? 0;
+  const fnfCount = summary?.fnf_to_initiate ?? 0;
+  const completedCount = summary?.completed_exits ?? 0;
 
   async function saveExitMeta(resignationId: string) {
     try {
@@ -68,7 +99,7 @@ export default function HrOffboardingPage() {
   ) {
     try {
       await api.patch(`/api/hr/offboarding/${resignationId}/process`, { separation_mode: mode });
-      toast.success('Exit processed — FNF pushed to Finance');
+      toast.success('Exit processed — FNF clearance pending');
       load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed');
@@ -82,11 +113,24 @@ export default function HrOffboardingPage() {
         description="HR control panel for exiting employees — notice period, buyout, or immediate separation."
       />
 
+      {loadError && (
+        <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+          {loadError} <Button size="sm" variant="outline" onClick={load}>Retry</Button>
+        </div>
+      )}
+
       <div className="grid gap-3 sm:grid-cols-3">
         <Card><CardContent className="flex items-center gap-3 p-4"><Clock3 className="h-5 w-5 text-amber-600" /><div><p className="text-xs text-muted-foreground">Awaiting HR action</p><p className="text-xl font-bold text-sgvu-navy">{pendingCount}</p></div></CardContent></Card>
-        <Card><CardContent className="flex items-center gap-3 p-4"><Users className="h-5 w-5 text-sgvu-gold" /><div><p className="text-xs text-muted-foreground">FNF to initiate</p><p className="text-xl font-bold text-sgvu-navy">{fnfCount}</p></div></CardContent></Card>
+        <Card><CardContent className="flex items-center gap-3 p-4"><Users className="h-5 w-5 text-sgvu-gold" /><div><p className="text-xs text-muted-foreground">FNF to initiate</p><p className="text-xl font-bold text-sgvu-navy">{fnfCount}</p><p className="text-xs text-muted-foreground">Subset of cases awaiting HR action</p></div></CardContent></Card>
         <Card><CardContent className="flex items-center gap-3 p-4"><CheckCircle2 className="h-5 w-5 text-emerald-600" /><div><p className="text-xs text-muted-foreground">Completed exits</p><p className="text-xl font-bold text-sgvu-navy">{completedCount}</p></div></CardContent></Card>
       </div>
+
+      {fnfQueue && (
+        <div className="flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm">
+          <span>Showing {summary?.pending_fnf_clearances ?? rows.length} pending FNF clearance cases.</span>
+          <Button asChild size="sm" variant="outline"><Link href="/hr/offboarding">Show all exits</Link></Button>
+        </div>
+      )}
 
       <Card>
         <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
@@ -120,10 +164,10 @@ export default function HrOffboardingPage() {
                   <Button size="sm" variant="outline" onClick={() => void saveExitMeta(r.resignation_id)}>Save</Button>
                 </div>
                 <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={fnfPenalty[r.resignation_id] ?? r.fnf_deduct_checklist_penalty} onChange={(e) => setFnfPenalty((s) => ({ ...s, [r.resignation_id]: e.target.checked }))} /> Deduct checklist penalty in FNF</label>
-                {r.status === 'PENDING_HR' || r.status === 'HOD_CLEARED' ? <>
+                {r.status === 'PENDING_HR' || r.status === 'HOD_CLEARED' || r.status === 'HR_PROCESSING' ? <>
                   <p className="text-xs font-semibold text-sgvu-navy">Separation mode</p>
                   <div className="flex flex-wrap gap-2 text-xs">{(['SERVE_NOTICE', 'BUYOUT_NOTICE', 'IMMEDIATE_SEPARATION'] as const).map((mode) => <label key={mode} className="flex items-center gap-1"><input type="radio" name={`mode-${r.resignation_id}`} checked={(selected[r.resignation_id] ?? 'SERVE_NOTICE') === mode} onChange={() => setSelected((s) => ({ ...s, [r.resignation_id]: mode }))} /> {mode.replaceAll('_', ' ')}</label>)}</div>
-                  <Button size="sm" onClick={() => void processExit(r.resignation_id, (selected[r.resignation_id] ?? 'SERVE_NOTICE') as 'SERVE_NOTICE' | 'BUYOUT_NOTICE' | 'IMMEDIATE_SEPARATION')}>Clear & push to FNF</Button>
+                  <Button size="sm" onClick={() => void processExit(r.resignation_id, (selected[r.resignation_id] ?? 'SERVE_NOTICE') as 'SERVE_NOTICE' | 'BUYOUT_NOTICE' | 'IMMEDIATE_SEPARATION')}>Start FNF clearance</Button>
                 </> : null}
               </div>
             </div>

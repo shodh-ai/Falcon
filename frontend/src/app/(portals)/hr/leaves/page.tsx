@@ -2,12 +2,12 @@
 
 import { Select } from '@/components/ui/select';
 import { FormEvent, useEffect, useState } from 'react';
-import { CalendarOff, Inbox, UserPlus } from 'lucide-react';
+import { CalendarOff, UserPlus } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { HrPageHeader } from '@/components/hr/HrPageHeader';
 import { HrTabBar } from '@/components/hr/HrTabBar';
 import { HrPersonCell } from '@/components/hr/HrAvatar';
-import { HrStatusBadge } from '@/components/hr/HrStatusBadge';
+import { HrLeaveReviewQueue } from '@/components/hr/HrLeaveReviewQueue';
 import { HrEmptyState } from '@/components/hr/HrEmptyState';
 import { HrDataTable, HrTable, HrTableHead, HrTh, HrTableBody, HrTr, HrTd } from '@/components/hr/HrDataTable';
 import { Button } from '@/components/ui/button';
@@ -15,17 +15,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { useHrApi } from '@/lib/api/use-hr-api';
 import { useHrEntity } from '@/context/HrEntityContext';
-
-type LeaveRequest = {
-  leave_id?: string;
-  staff_leave_id?: string;
-  leave_type: string;
-  start_date: string;
-  end_date: string;
-  reason: string;
-  status: string;
-  staff?: { name?: string; email?: string };
-};
+import { currentLocalDate, validateOnBehalfDates } from '@/lib/hr-on-behalf';
 
 type BalanceRow = {
   user_id: string;
@@ -46,6 +36,7 @@ type OnBehalfForm = {
   start_date: string;
   end_date: string;
   regularization_date: string;
+  missed_punch_type: '' | 'IN' | 'OUT' | 'BOTH';
   reason: string;
 };
 
@@ -53,7 +44,6 @@ export default function HrLeavesPage() {
   const api = useHrApi();
   const { entityId, entityReady } = useHrEntity();
   const [tab, setTab] = useState<'approvals' | 'balances'>('approvals');
-  const [pending, setPending] = useState<LeaveRequest[]>([]);
   const [balances, setBalances] = useState<BalanceRow[]>([]);
   const [staff, setStaff] = useState<DirectoryRow[]>([]);
   const [onBehalfOpen, setOnBehalfOpen] = useState(false);
@@ -65,17 +55,14 @@ export default function HrLeavesPage() {
     start_date: '',
     end_date: '',
     regularization_date: '',
+    missed_punch_type: '',
     reason: '',
   });
   const year = new Date().getFullYear();
 
   useEffect(() => {
-    if (!entityReady) return;
-    if (tab === 'approvals') {
-      void api.get<LeaveRequest[]>('/api/hr/leaves/all?status=HOD_APPROVED').then(setPending);
-    } else {
-      void api.get<BalanceRow[]>(`/api/hr/leaves/balances-grid?year=${year}`).then(setBalances);
-    }
+    if (!entityReady || tab !== 'balances') return;
+    void api.get<BalanceRow[]>(`/api/hr/leaves/balances-grid?year=${year}`).then(setBalances);
   }, [api, entityId, entityReady, tab, year]);
 
   useEffect(() => {
@@ -89,6 +76,11 @@ export default function HrLeavesPage() {
     e.preventDefault();
     if (!onBehalf.staff_user_id) {
       toast.error('Select an employee');
+      return;
+    }
+    const dateError = validateOnBehalfDates(onBehalf);
+    if (dateError) {
+      toast.error(dateError);
       return;
     }
     setOnBehalfSubmitting(true);
@@ -107,24 +99,17 @@ export default function HrLeavesPage() {
             : onBehalf.end_date,
         regularization_date:
           onBehalf.request_type === 'REGULARIZATION' ? onBehalf.regularization_date : undefined,
+        missed_punch_type:
+          onBehalf.request_type === 'REGULARIZATION' ? onBehalf.missed_punch_type : undefined,
         reason: onBehalf.reason,
       });
       toast.success('Request submitted on behalf of employee');
       setOnBehalfOpen(false);
+      setOnBehalf((previous) => ({ ...previous, start_date: '', end_date: '', regularization_date: '', missed_punch_type: '', reason: '' }));
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Submit failed');
     } finally {
       setOnBehalfSubmitting(false);
-    }
-  }
-
-  async function hrApprove(leaveId: string, status: 'HR_APPROVED' | 'REJECTED') {
-    try {
-      await api.patch(`/api/hr/staff-leaves/${leaveId}/status`, { status });
-      toast.success(status === 'HR_APPROVED' ? 'Leave approved' : 'Leave rejected');
-      setPending(await api.get<LeaveRequest[]>('/api/hr/leaves/all?status=HOD_APPROVED'));
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Action failed');
     }
   }
 
@@ -161,51 +146,7 @@ export default function HrLeavesPage() {
       />
 
       {tab === 'approvals' ? (
-        <div className="space-y-3 pt-2">
-          {pending.length === 0 ? (
-            <HrEmptyState
-              icon={Inbox}
-              title="No pending leaves"
-              description="You're all caught up — no HoD-approved requests awaiting HR sign-off."
-            />
-          ) : (
-            pending.map((l) => {
-              const leaveId = l.leave_id ?? l.staff_leave_id ?? '';
-              return (
-                <Card
-                  key={leaveId}
-                  className="border-gray-100 shadow-sm transition-shadow hover:shadow-md"
-                >
-                  <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
-                    <div className="flex min-w-0 flex-1 items-start gap-4">
-                      <HrPersonCell
-                        name={l.staff?.name ?? 'Staff member'}
-                        subtitle={l.staff?.email ?? `${l.leave_type} · ${l.start_date} → ${l.end_date}`}
-                      />
-                      <div className="hidden sm:block">
-                        <HrStatusBadge status={l.status} />
-                      </div>
-                    </div>
-                    <div className="space-y-2 sm:text-right">
-                      <p className="text-sm text-muted-foreground sm:hidden">
-                        <HrStatusBadge status={l.status} />
-                      </p>
-                      <p className="text-sm text-muted-foreground">{l.reason}</p>
-                      <div className="flex gap-2 sm:justify-end">
-                        <Button size="sm" onClick={() => void hrApprove(leaveId, 'HR_APPROVED')}>
-                          HR Approve
-                        </Button>
-                        <Button size="sm" variant="outline" onClick={() => void hrApprove(leaveId, 'REJECTED')}>
-                          Reject
-                        </Button>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              );
-            })
-          )}
-        </div>
+        <HrLeaveReviewQueue requestType="LEAVE" />
       ) : balances.length === 0 ? (
         <HrEmptyState
           icon={CalendarOff}
@@ -301,26 +242,54 @@ export default function HrLeavesPage() {
                   </Select>
                 )}
                 {onBehalf.request_type === 'REGULARIZATION' ? (
-                  <Input
-                    type="date"
-                    required
-                    value={onBehalf.regularization_date}
-                    onChange={(e) => setOnBehalf((f) => ({ ...f, regularization_date: e.target.value }))}
-                  />
+                  <>
+                    <label className="block space-y-1 text-sm font-medium">
+                      <span>Attendance date to regularize</span>
+                      <Input
+                        type="date"
+                        required
+                        max={currentLocalDate()}
+                        value={onBehalf.regularization_date}
+                        onChange={(e) => setOnBehalf((f) => ({ ...f, regularization_date: e.target.value }))}
+                      />
+                    </label>
+                    <label className="block space-y-1 text-sm font-medium">
+                      <span>Requested correction</span>
+                      <Select
+                        required
+                        value={onBehalf.missed_punch_type}
+                        onChange={(e) => setOnBehalf((f) => ({ ...f, missed_punch_type: e.target.value as OnBehalfForm['missed_punch_type'] }))}
+                      >
+                        <option value="">Select missed punch…</option>
+                        <option value="IN">Missing check-in</option>
+                        <option value="OUT">Missing check-out</option>
+                        <option value="BOTH">Missing check-in and check-out</option>
+                      </Select>
+                    </label>
+                  </>
                 ) : (
                   <>
-                    <Input
-                      type="date"
-                      required
-                      value={onBehalf.start_date}
-                      onChange={(e) => setOnBehalf((f) => ({ ...f, start_date: e.target.value }))}
-                    />
-                    <Input
-                      type="date"
-                      required
-                      value={onBehalf.end_date}
-                      onChange={(e) => setOnBehalf((f) => ({ ...f, end_date: e.target.value }))}
-                    />
+                    <label className="block space-y-1 text-sm font-medium">
+                      <span>Start Date</span>
+                      <span className="block text-xs font-normal text-muted-foreground">The first day of the leave period.</span>
+                      <Input
+                        type="date"
+                        required
+                        value={onBehalf.start_date}
+                        onChange={(e) => setOnBehalf((f) => ({ ...f, start_date: e.target.value }))}
+                      />
+                    </label>
+                    <label className="block space-y-1 text-sm font-medium">
+                      <span>End Date</span>
+                      <span className="block text-xs font-normal text-muted-foreground">The last day of the leave period.</span>
+                      <Input
+                        type="date"
+                        required
+                        min={onBehalf.start_date || undefined}
+                        value={onBehalf.end_date}
+                        onChange={(e) => setOnBehalf((f) => ({ ...f, end_date: e.target.value }))}
+                      />
+                    </label>
                   </>
                 )}
                 <Input

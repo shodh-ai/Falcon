@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 
@@ -112,18 +116,33 @@ export class HrChecklistService {
 
   async updateExitStatus(
     resignationId: string,
+    tenantId: string,
+    entityId: number,
     exitStatus: string,
     fnfDeductPenalty?: boolean,
   ) {
+    if (
+      !['PENDING_CLEARANCE', 'INITIATE_FNF', 'OFFBOARDED'].includes(exitStatus)
+    ) {
+      throw new BadRequestException('Invalid exit status');
+    }
     const rows = await this.dataSource.query(
       `UPDATE hr_resignation_requests SET
          exit_status = $2,
          fnf_deduct_checklist_penalty = COALESCE($3, fnf_deduct_checklist_penalty),
          updated_at = NOW()
-       WHERE resignation_id = $1 RETURNING *`,
-      [resignationId, exitStatus, fnfDeductPenalty ?? null],
+       WHERE resignation_id = $1 AND tenant_id = $4 AND entity_id = $5
+         AND status NOT IN ('REJECTED', 'WITHDRAWN')
+         AND COALESCE(exit_status, 'PENDING_CLEARANCE') <> 'OFFBOARDED'
+         AND ($2 <> 'OFFBOARDED' OR status IN ('FNF_PENDING', 'FNF_COMPLETED'))
+       RETURNING *`,
+      [resignationId, exitStatus, fnfDeductPenalty ?? null, tenantId, entityId],
     );
-    if (!rows[0]) throw new NotFoundException('Resignation not found');
+    if (!rows[0]) {
+      throw new NotFoundException(
+        'Actionable resignation not found in your scope',
+      );
+    }
     return rows[0];
   }
 }
