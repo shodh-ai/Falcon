@@ -37,6 +37,11 @@ describe('pharmacy allocation programme matching', () => {
     expect(programsMatch('MTECH CSE', 'B.Tech Mechanical')).toBe(false);
     expect(programsMatch('B.Tech ME', 'B.TECH MECH')).toBe(true);
     expect(programsMatch('BTECH CSE', 'B.Tech Computer Science')).toBe(true);
+    expect(programsMatch('BSC AGRICULTURE', 'Agriculture')).toBe(true);
+    expect(programsMatch('B.ED EDUCATION', 'Education')).toBe(true);
+    expect(programsMatch('BBA ISBM', 'ISBM')).toBe(true);
+    expect(programsMatch('B.TECH C3WR', 'C3WR')).toBe(true);
+    expect(programsMatch('BSC AGRICULTURE', 'Applied Sciences')).toBe(false);
     expect(programsMatch(null, 'B.Pharm')).toBe(false);
     expect(programsMatch('B.Pharm', '')).toBe(false);
   });

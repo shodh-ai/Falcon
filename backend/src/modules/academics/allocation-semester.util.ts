@@ -59,16 +59,28 @@ export function programsMatch(
   if (allocPharmacy || progPharmacy) {
     return allocPharmacy != null && allocPharmacy === progPharmacy;
   }
-  // Legacy aliases are allowed only within the same degree and discipline.
+  // Legacy student batch labels below have a verified one-to-one 2026
+  // allocation mapping. Do not replace this with a discipline substring test.
   // Substring matching admitted M.Tech CSE students to B.Tech CSE courses,
   // and even matched M.Tech to Mechanical Engineering via "ME".
   const aliases: Record<string, string> = {
     BTECHMECH: 'BTECHME',
     BTECHMECHANICAL: 'BTECHME',
     BTECHMECHANICALENGINEERING: 'BTECHME',
+    BTECHLATERALENTRYMECHANICALENGINEERING: 'BTECHME',
     BTECHCOMPUTERSCIENCE: 'BTECHCSE',
     BTECHCOMPUTERSCIENCEENGINEERING: 'BTECHCSE',
+    AGRI: 'BSCAGRICULTURE',
+    AGRICULTURE: 'BSCAGRICULTURE',
     BSCAGRI: 'BSCAGRICULTURE',
+    APPLIEDSCIENCES: 'BSCAPPLIEDSCIENCES',
+    EDUCATION: 'BEDEDUCATION',
+    LAW: 'LLBLAW',
+    ISBM: 'BBAISBM',
+    SILS: 'BASILS',
+    C3WR: 'BTECHC3WR',
+    CA: 'BCOMCA',
+    GCAD: 'BDESGCAD',
   };
   return (aliases[alloc] ?? alloc) === (aliases[prog] ?? prog);
 }
