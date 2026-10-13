@@ -24,6 +24,8 @@ describe('FinanceChequeService', () => {
 
   it('logs cheque with PENDING_CLEARANCE status', async () => {
     dataSource.query
+      .mockResolvedValueOnce([{ exists: 1 }])
+      .mockResolvedValueOnce([{ exists: 1 }])
       .mockResolvedValueOnce([{ transaction_id: 'tx1', amount: 5000 }])
       .mockResolvedValueOnce([]);
 
@@ -36,7 +38,22 @@ describe('FinanceChequeService', () => {
     });
 
     expect(txn.transaction_id).toBe('tx1');
-    expect(dataSource.query.mock.calls[0][0]).toMatch(/PENDING_CLEARANCE/);
+    expect(dataSource.query.mock.calls[0][1]).toEqual(['stu-1', 't1']);
+    expect(dataSource.query.mock.calls[1][1]).toEqual(['dem-1', 'stu-1', 't1']);
+    expect(dataSource.query.mock.calls[2][0]).toMatch(/PENDING_CLEARANCE/);
+  });
+
+  it('does not accept a cheque for a student from another tenant', async () => {
+    dataSource.query.mockResolvedValueOnce([]);
+    await expect(
+      service.logCheque('tenant-a', {
+        student_user_id: 'student-b',
+        amount: 5000,
+        cheque_number: 'CHQ001',
+        bank_name: 'Test Bank',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(dataSource.query).toHaveBeenCalledTimes(1);
   });
 
   it('marks cheque returned and creates bounce penalty', async () => {

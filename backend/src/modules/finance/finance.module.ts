@@ -12,6 +12,10 @@ import { FinanceService } from './finance.service';
 import { FinanceWebhookService } from './finance-webhook.service';
 import { FinanceReceiptService } from './finance-receipt.service';
 import { FinanceLedgerService } from './finance-ledger.service';
+import { FinanceAccountingService } from './finance-accounting.service';
+import { FinanceAccountingController } from './finance-accounting.controller';
+import { FinanceBankReconciliationService } from './finance-bank-reconciliation.service';
+import { FinanceBankReconciliationController } from './finance-bank-reconciliation.controller';
 import { FinanceAccountsService } from './finance-accounts.service';
 import { FinanceApprovalsService } from './finance-approvals.service';
 import { FinanceChequeService } from './finance-cheque.service';
@@ -27,12 +31,18 @@ import { GatewayPaymentService } from './gateway-payment.service';
     CampusWalletModule,
     BudgetFpaModule,
   ],
-  controllers: [FinanceController],
+  controllers: [
+    FinanceController,
+    FinanceAccountingController,
+    FinanceBankReconciliationController,
+  ],
   providers: [
     FinanceService,
     FinanceWebhookService,
     FinanceReceiptService,
     FinanceLedgerService,
+    FinanceAccountingService,
+    FinanceBankReconciliationService,
     FinanceAccountsService,
     FinanceApprovalsService,
     FinanceChequeService,
@@ -42,6 +52,7 @@ import { GatewayPaymentService } from './gateway-payment.service';
   exports: [
     FinanceService,
     FinanceLedgerService,
+    FinanceAccountingService,
     FinanceReceiptService,
     GatewayPaymentService,
   ],

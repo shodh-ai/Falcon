@@ -123,14 +123,16 @@ export class ExamsService {
     const student = await this.users.findOne({
       where: { user_id: studentUserId },
     });
-    const tenantId =
-      student?.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
+    if (!student?.tenant_id) {
+      throw new ForbiddenException('Student tenant context is required');
+    }
+    const tenantId = student.tenant_id;
 
     const [attendance, pendingDues] = await Promise.all([
       this.attendanceEligibility.evaluate(tenantId, studentUserId, {
         context: 'EXAM_DESK',
       }),
-      this.finance.getPendingDues(studentUserId),
+      this.finance.getPendingDues(tenantId, studentUserId),
     ]);
 
     const blockingDues = pendingDues.filter(

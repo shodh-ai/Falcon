@@ -1,6 +1,11 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { IsNull, Repository } from 'typeorm';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { FeeDemand } from '../../entities/fee-demand.entity';
 import { Transaction } from '../../entities/transaction.entity';
@@ -21,18 +26,25 @@ export class FinanceService {
     private readonly notify: NotificationEmitterService,
   ) {}
 
-  listDemands(studentUserId?: string) {
-    if (studentUserId) {
-      return this.demands.find({
-        where: { student_user_id: studentUserId },
-        order: { due_date: 'ASC' },
-      });
-    }
-    return this.demands.find({ order: { due_date: 'ASC' } });
+  listDemands(tenantId: string, studentUserId?: string) {
+    return this.demands.find({
+      where: {
+        tenant_id: tenantId,
+        ...(studentUserId ? { student_user_id: studentUserId } : {}),
+      },
+      order: { due_date: 'ASC' },
+    });
   }
 
   async createDemand(dto: CreateFeeDemandDto, tenantId: string) {
-    const saved = await this.demands.save(this.demands.create(dto));
+    const student = await this.demands.manager.query(
+      `SELECT 1 FROM users WHERE user_id=$1 AND tenant_id=$2 LIMIT 1`,
+      [dto.student_user_id, tenantId],
+    );
+    if (!student.length) throw new NotFoundException('Student not found');
+    const saved = await this.demands.save(
+      this.demands.create({ ...dto, tenant_id: tenantId }),
+    );
     this.notify.feeGenerated({
       tenantId,
       userId: saved.student_user_id,
@@ -48,14 +60,16 @@ export class FinanceService {
     const successfulToday = await this.transactions
       .createQueryBuilder('transaction')
       .where('transaction.status = :status', { status: 'SUCCESS' })
+      .andWhere('transaction.tenant_id = :tenantId', { tenantId })
       .andWhere('DATE(transaction.created_at) = :today', { today })
       .getMany();
     const openDemands = await this.demands
       .createQueryBuilder('demand')
       .where("demand.status NOT IN ('PAID', 'WAIVED')")
+      .andWhere('demand.tenant_id = :tenantId', { tenantId })
       .getMany();
     const recentTransactions = await this.transactions.find({
-      where: { status: 'SUCCESS' },
+      where: { status: 'SUCCESS', tenant_id: tenantId },
       order: { created_at: 'DESC' },
       take: 8,
     });
@@ -151,14 +165,17 @@ export class FinanceService {
     };
   }
 
-  async bulkGenerateDemands(dto: {
-    program?: string;
-    semester?: number;
-    academic_year?: string;
-    due_date?: string;
-    tuition_fee?: number;
-    development_fee?: number;
-  }) {
+  async bulkGenerateDemands(
+    tenantId: string,
+    dto: {
+      program?: string;
+      semester?: number;
+      academic_year?: string;
+      due_date?: string;
+      tuition_fee?: number;
+      development_fee?: number;
+    },
+  ) {
     const semester = Number(dto.semester ?? 3);
     const tuitionFee = Number(dto.tuition_fee ?? 85000);
     const developmentFee = Number(dto.development_fee ?? 15000);
@@ -172,8 +189,9 @@ export class FinanceService {
       `SELECT u.user_id
        FROM users u
        JOIN roles r ON r.role_id = u.role_id
-       WHERE r.role_name = 'Student'
+       WHERE r.role_name = 'Student' AND u.tenant_id=$1
        ORDER BY u.name ASC`,
+      [tenantId],
     );
 
     const created: FeeDemand[] = [];
@@ -181,6 +199,7 @@ export class FinanceService {
       const existing = await this.demands.findOne({
         where: {
           student_user_id: student.user_id,
+          tenant_id: tenantId,
           fee_head: 'SEMESTER_FEE',
           academic_year: academicYear,
           semester,
@@ -190,6 +209,7 @@ export class FinanceService {
       created.push(
         this.demands.create({
           student_user_id: student.user_id,
+          tenant_id: tenantId,
           fee_head: 'SEMESTER_FEE',
           academic_year: academicYear,
           semester,
@@ -215,8 +235,10 @@ export class FinanceService {
     };
   }
 
-  listFinePolicies() {
-    return this.finePolicies.find();
+  listFinePolicies(tenantId: string) {
+    return this.finePolicies.find({
+      where: [{ tenant_id: tenantId }, { tenant_id: IsNull() }],
+    });
   }
 
   /**
@@ -230,7 +252,7 @@ export class FinanceService {
     const rows = await this.demands.manager.query(
       `UPDATE finance_fee_demands d SET status='OVERDUE',updated_at=NOW()
        FROM users u
-       WHERE u.user_id=d.student_user_id AND d.due_date<$1
+         WHERE u.user_id=d.student_user_id AND d.tenant_id=u.tenant_id AND d.due_date<$1
          AND d.status NOT IN('PAID','OVERDUE','WAIVED')
          AND platform_module_is_available('finance_procurement',u.tenant_id,NULL,u.dept_id::text)
        RETURNING d.demand_id`,
@@ -239,19 +261,23 @@ export class FinanceService {
     this.logger.log(`Late-fee sweep: marked ${rows.length} demands as OVERDUE`);
   }
 
-  listTransactions(studentUserId?: string) {
-    if (studentUserId) {
-      return this.transactions.find({
-        where: { student_user_id: studentUserId },
-        order: { created_at: 'DESC' },
-      });
-    }
-    return this.transactions.find({ order: { created_at: 'DESC' } });
+  listTransactions(tenantId: string, studentUserId?: string) {
+    return this.transactions.find({
+      where: {
+        tenant_id: tenantId,
+        ...(studentUserId ? { student_user_id: studentUserId } : {}),
+      },
+      order: { created_at: 'DESC' },
+    });
   }
 
-  async uploadReceipt(transactionId: string, receiptUrl: string) {
+  async uploadReceipt(
+    tenantId: string,
+    transactionId: string,
+    receiptUrl: string,
+  ) {
     const result = await this.transactions.update(
-      { transaction_id: transactionId },
+      { transaction_id: transactionId, tenant_id: tenantId },
       { receipt_url: receiptUrl },
     );
     if (result.affected === 0)
@@ -259,12 +285,12 @@ export class FinanceService {
     return { success: true };
   }
 
-  async listDefaulters() {
+  async listDefaulters(tenantId: string) {
     const rows = await this.demands.find({
       where: [
-        { status: 'PENDING' },
-        { status: 'PARTIALLY_PAID' },
-        { status: 'OVERDUE' },
+        { tenant_id: tenantId, status: 'PENDING' },
+        { tenant_id: tenantId, status: 'PARTIALLY_PAID' },
+        { tenant_id: tenantId, status: 'OVERDUE' },
       ],
       order: { due_date: 'ASC' },
     });
@@ -272,8 +298,9 @@ export class FinanceService {
     const students =
       studentIds.length > 0
         ? await this.demands.manager.query(
-            `SELECT user_id, name, official_email FROM users WHERE user_id = ANY($1::uuid[])`,
-            [studentIds],
+            `SELECT user_id, name, official_email FROM users
+             WHERE user_id = ANY($1::uuid[]) AND tenant_id=$2`,
+            [studentIds, tenantId],
           )
         : [];
     const studentMap = new Map(
@@ -298,7 +325,7 @@ export class FinanceService {
   }
 
   async lockAdmitCards(tenantId: string) {
-    const defaulters = await this.listDefaulters();
+    const defaulters = await this.listDefaulters(tenantId);
     const studentIds = [
       ...new Set(defaulters.map((row) => row.student_user_id)),
     ];
@@ -316,23 +343,46 @@ export class FinanceService {
     };
   }
 
-  async applyScholarship(dto: {
-    student_user_id?: string;
-    discount_percent?: number;
-  }) {
+  async applyScholarship(
+    tenantId: string,
+    dto: {
+      student_user_id?: string;
+      discount_percent?: number;
+    },
+  ) {
     if (!dto.student_user_id)
       throw new BadRequestException('student_user_id is required');
     const discountPercent = Number(dto.discount_percent ?? 50);
+    if (
+      !Number.isFinite(discountPercent) ||
+      discountPercent < 0 ||
+      discountPercent > 100
+    )
+      throw new BadRequestException(
+        'discount_percent must be between 0 and 100',
+      );
     const activeDemand = await this.demands.findOne({
       where: [
-        { student_user_id: dto.student_user_id, status: 'PENDING' },
-        { student_user_id: dto.student_user_id, status: 'PARTIALLY_PAID' },
-        { student_user_id: dto.student_user_id, status: 'OVERDUE' },
+        {
+          tenant_id: tenantId,
+          student_user_id: dto.student_user_id,
+          status: 'PENDING',
+        },
+        {
+          tenant_id: tenantId,
+          student_user_id: dto.student_user_id,
+          status: 'PARTIALLY_PAID',
+        },
+        {
+          tenant_id: tenantId,
+          student_user_id: dto.student_user_id,
+          status: 'OVERDUE',
+        },
       ],
       order: { due_date: 'ASC' },
     });
     if (!activeDemand)
-      throw new BadRequestException(
+      throw new NotFoundException(
         'No active fee demand found for this student',
       );
     const original = Number(activeDemand.total_amount);
@@ -347,9 +397,12 @@ export class FinanceService {
     return this.demands.save(activeDemand);
   }
 
-  async getPendingDues(studentUserId: string): Promise<FeeDemand[]> {
+  async getPendingDues(
+    tenantId: string,
+    studentUserId: string,
+  ): Promise<FeeDemand[]> {
     const demands = await this.demands.find({
-      where: { student_user_id: studentUserId },
+      where: { tenant_id: tenantId, student_user_id: studentUserId },
       order: { due_date: 'ASC' },
     });
     return demands.filter((d) => {

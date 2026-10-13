@@ -44,6 +44,20 @@ export class FinanceChequeService {
     if (!amount || amount <= 0)
       throw new BadRequestException('Valid amount is required');
 
+    const student = await this.dataSource.query(
+      `SELECT 1 FROM users WHERE user_id=$1 AND tenant_id=$2 LIMIT 1`,
+      [dto.student_user_id, tenantId],
+    );
+    if (!student.length) throw new BadRequestException('Student not found');
+    if (dto.demand_id) {
+      const demand = await this.dataSource.query(
+        `SELECT 1 FROM finance_fee_demands
+         WHERE demand_id=$1 AND student_user_id=$2 AND tenant_id=$3 LIMIT 1`,
+        [dto.demand_id, dto.student_user_id, tenantId],
+      );
+      if (!demand.length) throw new BadRequestException('Demand not found');
+    }
+
     const rows = await this.dataSource.query(
       `INSERT INTO finance_transactions (
          tenant_id, student_user_id, demand_id, gateway, payment_mode, amount,

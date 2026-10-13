@@ -77,10 +77,10 @@ export class FinanceAccountsService {
     return { job_id: (rows[0] as { job_id: string }).job_id };
   }
 
-  getBulkJob(jobId: string) {
+  getBulkJob(tenantId: string, jobId: string) {
     return this.dataSource.query(
-      `SELECT * FROM finance_bulk_jobs WHERE job_id = $1`,
-      [jobId],
+      `SELECT * FROM finance_bulk_jobs WHERE job_id = $1 AND tenant_id = $2`,
+      [jobId, tenantId],
     );
   }
 
@@ -140,9 +140,9 @@ export class FinanceAccountsService {
     for (const student of students as Array<{ user_id: string }>) {
       const existing = await this.dataSource.query(
         `SELECT demand_id FROM finance_fee_demands
-         WHERE student_user_id = $1 AND fee_head = 'SEMESTER_FEE'
-           AND academic_year = $2 AND semester = $3`,
-        [student.user_id, academicYear, semester],
+         WHERE tenant_id = $1 AND student_user_id = $2 AND fee_head = 'SEMESTER_FEE'
+           AND academic_year = $3 AND semester = $4`,
+        [tenantId, student.user_id, academicYear, semester],
       );
       if (existing.length) continue;
 
@@ -179,8 +179,8 @@ export class FinanceAccountsService {
 
     await this.dataSource.query(
       `UPDATE finance_bulk_jobs SET status = 'COMPLETED', generated_count = $2, completed_at = NOW()
-       WHERE job_id = $1`,
-      [jobId, generated],
+       WHERE job_id = $1 AND tenant_id = $3`,
+      [jobId, generated, tenantId],
     );
     return { generated };
   }
@@ -194,7 +194,7 @@ export class FinanceAccountsService {
        FROM finance_transactions t
        LEFT JOIN users u ON u.user_id = t.student_user_id
        LEFT JOIN student_profiles sp ON sp.user_id = t.student_user_id
-       WHERE (t.tenant_id = $1 OR t.tenant_id IS NULL)
+       WHERE t.tenant_id = $1
          AND ($2::text IS NULL OR t.gateway_payment_id ILIKE $2 OR t.gateway_order_id ILIKE $2
               OR sp.enrollment_no ILIKE $2 OR u.name ILIKE $2)
        ORDER BY t.created_at DESC
@@ -275,6 +275,33 @@ export class FinanceAccountsService {
       );
       if (!vendors[0]) throw new NotFoundException('Vendor not found');
 
+      const expenseHeads = await tx.query(
+        `SELECT 1 FROM finance_expense_heads
+         WHERE expense_head_id=$1 AND tenant_id=$2 AND is_active=true`,
+        [dto.expense_head_id, tenantId],
+      );
+      if (!expenseHeads[0])
+        throw new NotFoundException('Expense head not found');
+
+      if (dto.program_id) {
+        const programs = await tx.query(
+          `SELECT 1 FROM fin_program_budgets WHERE program_id=$1 AND tenant_id=$2`,
+          [dto.program_id, tenantId],
+        );
+        if (!programs[0])
+          throw new NotFoundException('Program budget not found');
+      }
+
+      if (dto.dept_budget_id) {
+        const budgets = await tx.query(
+          `SELECT 1 FROM fin_dept_budgets
+           WHERE budget_id=$1 AND tenant_id=$2 AND deleted_at IS NULL`,
+          [dto.dept_budget_id, tenantId],
+        );
+        if (!budgets[0])
+          throw new NotFoundException('Department budget not found');
+      }
+
       let deptBudgetId = dto.dept_budget_id;
       if (!deptBudgetId && dto.department_id) {
         const fyRows = await tx.query(
@@ -303,6 +330,7 @@ export class FinanceAccountsService {
            WHERE po_id=$1 AND tenant_id=$2`,
           [dto.po_id, tenantId],
         );
+        if (!poRows[0]) throw new NotFoundException('Purchase order not found');
         if (poRows[0]?.source_system === 'MODULE2') {
           throw new BadRequestException({
             message: 'Enter invoices through Progressive Procurement',
@@ -389,8 +417,9 @@ export class FinanceAccountsService {
         : null;
       if (deptBudgetId) {
         await tx.query(
-          `UPDATE fin_dept_budgets SET utilized_amount = utilized_amount + $2 WHERE budget_id = $1`,
-          [deptBudgetId, netPayable],
+          `UPDATE fin_dept_budgets SET utilized_amount = utilized_amount + $2
+           WHERE budget_id = $1 AND tenant_id = $3`,
+          [deptBudgetId, netPayable, tenantId],
         );
       }
       await tx.query(
@@ -429,7 +458,7 @@ export class FinanceAccountsService {
       }
 
       if (!requiresBoard) {
-        await this.ledger.postExpense(
+        await this.ledger.postVendorInvoiceAccrual(
           tenantId,
           invoiceId,
           netPayable,
@@ -497,7 +526,7 @@ export class FinanceAccountsService {
          WHERE budget_id = $1 AND tenant_id = $2`,
         [deptBudgetId, tenantId],
       );
-      if (!rows[0]) return { allowed: true };
+      if (!rows[0]) throw new NotFoundException('Department budget not found');
       const r = rows[0] as {
         allocated_amount: string;
         utilized_amount: string;

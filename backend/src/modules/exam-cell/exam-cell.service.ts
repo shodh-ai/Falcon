@@ -494,7 +494,10 @@ export class ExamCellService {
     }[] = [];
 
     for (const student of students) {
-      const pendingDues = await this.finance.getPendingDues(student.user_id);
+      const pendingDues = await this.finance.getPendingDues(
+        tenantId,
+        student.user_id,
+      );
       const feeStatus = pendingDues.length > 0 ? 'Pending' : 'Clear';
       const attendance = await this.attendanceEligibility.evaluate(
         tenantId,
@@ -533,10 +536,13 @@ export class ExamCellService {
 
   async getAdmitBlockReasons(
     studentUserId: string,
-    tenantId = 'a0000000-0000-4000-8000-000000000001',
+    tenantId: string,
   ): Promise<string[]> {
     const reasons: string[] = [];
-    const pendingDues = await this.finance.getPendingDues(studentUserId);
+    const pendingDues = await this.finance.getPendingDues(
+      tenantId,
+      studentUserId,
+    );
     if (pendingDues.length > 0) {
       reasons.push('Blocked: Pending fee dues');
     }

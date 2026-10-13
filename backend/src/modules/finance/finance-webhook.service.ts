@@ -109,6 +109,41 @@ export class FinanceWebhookService {
     const existing = await this.transactions.findOne({
       where: { gateway_payment_id: paymentId },
     });
+
+    // Provider notes are signed by the gateway but are not an authority for
+    // tenancy. Resolve the owner from Falcon's own student/demand records.
+    const ownerRows = studentUserId
+      ? await this.dataSource.query(
+          `SELECT tenant_id FROM users WHERE user_id=$1`,
+          [studentUserId],
+        )
+      : [];
+    const demandRows = demandId
+      ? await this.dataSource.query(
+          `SELECT tenant_id, student_user_id FROM finance_fee_demands WHERE demand_id=$1`,
+          [demandId],
+        )
+      : [];
+    const ownerTenant = (ownerRows[0] as { tenant_id?: string } | undefined)
+      ?.tenant_id;
+    const demandOwner = demandRows[0] as
+      | { tenant_id?: string; student_user_id?: string }
+      | undefined;
+    const tenantId =
+      ownerTenant ?? demandOwner?.tenant_id ?? existing?.tenant_id;
+    if (
+      !tenantId ||
+      (studentUserId && !ownerTenant) ||
+      (demandId && !demandOwner) ||
+      (ownerTenant && demandOwner && demandOwner.tenant_id !== ownerTenant) ||
+      (studentUserId &&
+        demandOwner?.student_user_id &&
+        demandOwner.student_user_id !== studentUserId) ||
+      (tenantIdFromNotes && tenantIdFromNotes !== tenantId) ||
+      (existing?.tenant_id && existing.tenant_id !== tenantId)
+    ) {
+      throw new UnauthorizedException('Payment identity does not match');
+    }
     if (existing?.status === 'SUCCESS') {
       return { received: true, processed: false, duplicate: true };
     }
@@ -116,6 +151,7 @@ export class FinanceWebhookService {
     let txn = existing;
     if (!txn) {
       txn = this.transactions.create({
+        tenant_id: tenantId,
         gateway: provider.toUpperCase() as Transaction['gateway'],
         gateway_payment_id: paymentId,
         gateway_order_id: orderId || null,
@@ -144,6 +180,7 @@ export class FinanceWebhookService {
       return { received: true, processed: false, duplicate: true };
     }
 
+    txn.tenant_id = tenantId;
     txn.status = 'SUCCESS';
     txn.gateway_payload = dto.payload;
     txn.direction = txn.direction ?? 'IN';
@@ -160,14 +197,6 @@ export class FinanceWebhookService {
     await this.transactions.save(txn);
 
     if (feeHead === 'EVENTS_CLUB' && registrationId && studentUserId) {
-      const tenantRows = await this.dataSource.query(
-        `SELECT tenant_id FROM users WHERE user_id = $1`,
-        [studentUserId],
-      );
-      const tenantId =
-        tenantIdFromNotes ||
-        (tenantRows[0] as { tenant_id: string } | undefined)?.tenant_id ||
-        'a0000000-0000-4000-8000-000000000001';
       this.events.emit('event.registration.paid', {
         tenantId,
         studentUserId,
@@ -185,14 +214,6 @@ export class FinanceWebhookService {
     }
 
     if (feeHead === 'HOSTEL_BOOKING' && holdId && studentUserId) {
-      const tenantRows = await this.dataSource.query(
-        `SELECT tenant_id FROM users WHERE user_id = $1`,
-        [studentUserId],
-      );
-      const tenantId =
-        tenantIdFromNotes ||
-        (tenantRows[0] as { tenant_id: string } | undefined)?.tenant_id ||
-        'a0000000-0000-4000-8000-000000000001';
       this.events.emit('hostel.booking.payment_captured', {
         tenantId,
         studentUserId,
@@ -209,14 +230,6 @@ export class FinanceWebhookService {
     }
 
     if (feeHead === 'WALLET_TOPUP' && studentUserId) {
-      const tenantRows = await this.dataSource.query(
-        `SELECT tenant_id FROM users WHERE user_id = $1`,
-        [studentUserId],
-      );
-      const tenantId =
-        tenantIdFromNotes ||
-        (tenantRows[0] as { tenant_id: string } | undefined)?.tenant_id ||
-        'a0000000-0000-4000-8000-000000000001';
       await this.campusWallet.topUp(tenantId, studentUserId, amount, paymentId);
       return {
         received: true,
@@ -228,7 +241,7 @@ export class FinanceWebhookService {
 
     if (demandId) {
       const demand = await this.demands.findOne({
-        where: { demand_id: demandId },
+        where: { demand_id: demandId, tenant_id: tenantId },
       });
       if (demand) {
         const paid = Number(demand.paid_amount ?? 0) + amount;
@@ -242,13 +255,6 @@ export class FinanceWebhookService {
         await this.demands.save(demand);
 
         if (demand.status === 'PAID') {
-          const tenantRows = await this.dataSource.query(
-            `SELECT tenant_id FROM users WHERE user_id = $1`,
-            [demand.student_user_id],
-          );
-          const tenantId =
-            (tenantRows[0] as { tenant_id: string } | undefined)?.tenant_id ??
-            'a0000000-0000-4000-8000-000000000001';
           this.events.emit('finance.demand_paid', {
             demandId: demand.demand_id,
             feeHead: demand.fee_head,
@@ -259,16 +265,6 @@ export class FinanceWebhookService {
         }
       }
     }
-
-    const tenantRows = studentUserId
-      ? await this.dataSource.query(
-          `SELECT tenant_id FROM users WHERE user_id = $1`,
-          [studentUserId],
-        )
-      : [];
-    const tenantId =
-      (tenantRows[0] as { tenant_id: string } | undefined)?.tenant_id ??
-      'a0000000-0000-4000-8000-000000000001';
 
     const receiptStudentId = studentUserId || txn.student_user_id;
     const receiptNumber = `RCP-${new Date().getFullYear()}-${txn.transaction_id.slice(0, 8).toUpperCase()}`;
@@ -282,8 +278,11 @@ export class FinanceWebhookService {
         amount,
         paymentMode: txn.payment_mode ?? undefined,
         feeHead: demandId
-          ? (await this.demands.findOne({ where: { demand_id: demandId } }))
-              ?.fee_head
+          ? (
+              await this.demands.findOne({
+                where: { demand_id: demandId, tenant_id: tenantId },
+              })
+            )?.fee_head
           : undefined,
       });
       txn.receipt_url = receiptUrl;

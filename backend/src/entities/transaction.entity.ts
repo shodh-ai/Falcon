@@ -29,6 +29,9 @@ export class Transaction extends BaseSoftDeleteEntity {
   @PrimaryGeneratedColumn('uuid')
   transaction_id: string;
 
+  @Column({ type: 'uuid', nullable: true })
+  tenant_id: string | null;
+
   @ManyToOne(() => FeeDemand, { nullable: true })
   @JoinColumn({ name: 'demand_id' })
   demand: FeeDemand | null;

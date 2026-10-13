@@ -15,8 +15,11 @@ import { BaseSoftDeleteEntity } from './base-soft-delete.entity';
  */
 @Entity('finance_late_fine_policies')
 export class LateFinePolicy extends BaseSoftDeleteEntity {
-  @PrimaryGeneratedColumn()
-  policy_id: number;
+  @PrimaryGeneratedColumn('uuid')
+  policy_id: string;
+
+  @Column({ type: 'uuid', nullable: true })
+  tenant_id: string | null;
 
   @Column({ length: 120 })
   policy_name: string;

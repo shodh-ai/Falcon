@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  ForbiddenException,
   Get,
   Header,
   Param,
@@ -59,7 +60,10 @@ export class FinanceController {
   ) {}
 
   private tenant(req: { user: AuthUser }) {
-    return req.user.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
+    if (!req.user.tenant_id) {
+      throw new ForbiddenException('Tenant context is required');
+    }
+    return req.user.tenant_id;
   }
 
   @Get('dashboard')
@@ -88,8 +92,11 @@ export class FinanceController {
 
   @Get('demands')
   @Roles(...FINANCE_DESK)
-  listDemands(@Query('studentUserId') studentUserId?: string) {
-    return this.finance.listDemands(studentUserId);
+  listDemands(
+    @Req() req: { user: AuthUser },
+    @Query('studentUserId') studentUserId?: string,
+  ) {
+    return this.finance.listDemands(this.tenant(req), studentUserId);
   }
 
   @Post('demands')
@@ -123,8 +130,8 @@ export class FinanceController {
 
   @Get('demands/jobs/:jobId')
   @Roles(...FINANCE_DESK)
-  bulkJobStatus(@Param('jobId') jobId: string) {
-    return this.accounts.getBulkJob(jobId);
+  bulkJobStatus(@Req() req: { user: AuthUser }, @Param('jobId') jobId: string) {
+    return this.accounts.getBulkJob(this.tenant(req), jobId);
   }
 
   @Get('collections')
@@ -135,20 +142,27 @@ export class FinanceController {
 
   @Get('transactions')
   @Roles(...FINANCE_DESK)
-  listTransactions(@Query('studentUserId') studentUserId?: string) {
-    return this.finance.listTransactions(studentUserId);
+  listTransactions(
+    @Req() req: { user: AuthUser },
+    @Query('studentUserId') studentUserId?: string,
+  ) {
+    return this.finance.listTransactions(this.tenant(req), studentUserId);
   }
 
   @Patch('transactions/:id/receipt')
   @Roles(...FINANCE_DESK)
-  uploadReceipt(@Param('id') id: string, @Body() dto: { receipt_url: string }) {
-    return this.finance.uploadReceipt(id, dto.receipt_url);
+  uploadReceipt(
+    @Req() req: { user: AuthUser },
+    @Param('id') id: string,
+    @Body() dto: { receipt_url: string },
+  ) {
+    return this.finance.uploadReceipt(this.tenant(req), id, dto.receipt_url);
   }
 
   @Get('defaulters')
   @Roles(...FINANCE_DESK, 'President')
-  listDefaulters() {
-    return this.finance.listDefaulters();
+  listDefaulters(@Req() req: { user: AuthUser }) {
+    return this.finance.listDefaulters(this.tenant(req));
   }
 
   @Post('defaulters/lock-admit-cards')
@@ -160,14 +174,15 @@ export class FinanceController {
   @Post('scholarships')
   @Roles(...FINANCE_DESK)
   applyScholarship(
+    @Req() req: { user: AuthUser },
     @Body() dto: { student_user_id?: string; discount_percent?: number },
   ) {
-    return this.finance.applyScholarship(dto);
+    return this.finance.applyScholarship(this.tenant(req), dto);
   }
 
   @Get('fine-policies')
-  listFinePolicies() {
-    return this.finance.listFinePolicies();
+  listFinePolicies(@Req() req: { user: AuthUser }) {
+    return this.finance.listFinePolicies(this.tenant(req));
   }
 
   @Get('vendors')
