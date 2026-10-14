@@ -915,7 +915,7 @@ export function FacultyProfilePage() {
       {tab === 'workload' && (
         <div className="space-y-5">
           <div className="grid gap-4 sm:grid-cols-3">
-            <FacultyStatCard label="Weekly teaching time" value={formatTeachingDuration(profile.workload.weekly_teaching_hours)} sub={profile.workload.pending_sessions ? `${profile.workload.pending_sessions} sessions (${formatTeachingDuration((profile.workload.pending_minutes || 0) / 60)}) excluded: awaiting confirmation` : 'Sum of published scheduled class durations'} icon={BookOpen} />
+            <FacultyStatCard label="Weekly teaching time" value={profile.workload.weekly_teaching_hours ? formatTeachingDuration(profile.workload.weekly_teaching_hours) : 'Not scheduled'} sub={profile.workload.pending_sessions ? `${profile.workload.pending_sessions} sessions (${formatTeachingDuration((profile.workload.pending_minutes || 0) / 60)}) excluded: awaiting confirmation` : profile.workload.weekly_teaching_hours ? 'Sum of published scheduled class durations' : 'No published sessions; this is not a no-load declaration'} icon={BookOpen} />
             <FacultyStatCard label="B.Tech project guides" value={profile.workload.project_guides_count} />
             <FacultyStatCard label="PhD scholars" value={profile.workload.phd_scholars_count} />
           </div>

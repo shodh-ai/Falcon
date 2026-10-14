@@ -52,6 +52,15 @@ async function main(){
  const schedule=await workspace.getWeeklyTimetable(shalu,tenant,43);
  assert.equal(schedule.length,11);assert.equal(schedule.filter(s=>s.awaiting_confirmation).length,1);
  assert.ok(schedule.some(s=>s.course_code==='ER2015T'&&s.day_of_week===3&&s.start_time==='15:10:00'));
+ await c.query(`ALTER TABLE users ADD COLUMN name text DEFAULT 'Synthetic faculty'; ALTER TABLE users ADD COLUMN role_id int DEFAULT 1;
+   ALTER TABLE departments ADD COLUMN hod_user_id uuid; ALTER TABLE academic_courses ADD COLUMN credits numeric DEFAULT 1;
+   ALTER TABLE academic_faculty_load_declarations ADD COLUMN reason text; ALTER TABLE academic_faculty_load_declarations ADD COLUMN revision int;
+   CREATE TABLE roles(role_id int,role_name text); INSERT INTO roles VALUES(1,'Faculty');`);
+ const {AcademicsService}=require('../dist/modules/academics/academics.service');
+ const academics=Object.create(AcademicsService.prototype);academics.users={manager:dataSource};
+ const loads=await academics.listFacultyWorkloadForDepartments(tenant,[43]);
+ const load=loads.find(row=>row.user_id===shalu);assert.equal(load.pending_sessions,1);assert.equal(load.pending_minutes,210);
+ assert.equal(load.scheduled_minutes,830);assert.equal(load.workload_status,'AWAITING_CONFIRMATION');
  assert.equal((await c.query('SELECT count(*)::int AS n FROM academic_timetables WHERE deleted_at IS NULL')).rows[0].n,188);
  assert.equal((await c.query('SELECT count(*)::int AS n FROM academic_timetable_source_entries')).rows[0].n,269);
  assert.deepEqual((await c.query('SELECT * FROM course_attendance_logs')).rows,history);
