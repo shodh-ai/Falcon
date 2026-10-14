@@ -1115,6 +1115,23 @@ export class AcademicsFacultyService {
     },
   ) {
     const date = dto.date ?? localDateString();
+    const parsedDate = new Date(`${date}T00:00:00Z`);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(parsedDate.getTime()) || parsedDate.getUTCFullYear()<1 || parsedDate.toISOString().slice(0,10)!==date) {
+      throw new BadRequestException('date must be a valid YYYY-MM-DD value');
+    }
+    if (dto.timetable_id?.startsWith('held:')) {
+      throw new BadRequestException('This class is awaiting department confirmation. Attendance cannot be recorded.');
+    }
+    if (!dto.timetable_id) {
+      const [publication] = await this.dataSource.query(`SELECT EXISTS (
+        SELECT 1 FROM academic_timetable_source_entries e
+        JOIN academic_timetable_publications p ON p.publication_id=e.publication_id AND p.state='ACTIVE' AND p.activated_on<=$4::date
+        WHERE e.tenant_id=$1 AND e.course_id=$2 AND $3::uuid=ANY(e.faculty_user_ids)
+          AND e.state IN ('CONFIRMED','HELD')) AS requires_published_slot`, [tenantId,dto.course_id,facultyUserId,date]);
+      if (publication?.requires_published_slot === true) {
+        throw new BadRequestException('Select a confirmed published timetable session to record attendance.');
+      }
+    }
     await this.assertCanMarkAttendance(
       dto.course_id,
       facultyUserId,

@@ -40,6 +40,16 @@ function createService(options?: {
 }
 
 describe('Faculty attendance date and practical batch safety', () => {
+  it('rejects a held session before authorization, casting or any database write', async () => {
+    const {service,dataSource}=createService();
+    await expect(service.saveCourseAttendanceLog('f','t',{course_id:'c',timetable_id:'held:p2-d2-5',attendance_data:[{student_id:'s',status:'PRESENT'}]})).rejects.toBeInstanceOf(BadRequestException);
+    expect(dataSource.query).not.toHaveBeenCalled();
+  });
+  it('does not allow published or held source courses through the legacy slotless write path', async () => {
+    const {service,dataSource}=createService({timetableRows:[{requires_published_slot:true}]});
+    await expect(service.saveCourseAttendanceLog('f','t',{course_id:'c',attendance_data:[{student_id:'s',status:'PRESENT'}]})).rejects.toBeInstanceOf(BadRequestException);
+    expect(dataSource.query).toHaveBeenCalledTimes(1);
+  });
   it('uses one bounded week query without fetching any student roster', async () => {
     const { service, dataSource } = createService({ timetableRows: [
       {date:'2026-10-12',timetable_id:'slot-1',has_saved_attendance:true},
