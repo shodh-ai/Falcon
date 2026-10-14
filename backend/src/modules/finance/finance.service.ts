@@ -21,18 +21,29 @@ export class FinanceService {
     private readonly notify: NotificationEmitterService,
   ) {}
 
-  listDemands(studentUserId?: string) {
+  listDemands(tenantId: string, studentUserId?: string, limit?: number, offset?: number) {
+    const paging = limit == null ? {} : {
+      take: Math.min(200, Math.max(1, Math.floor(limit))),
+      skip: Math.min(1_000_000, Math.max(0, Number.isFinite(offset) ? Math.floor(offset ?? 0) : 0)),
+    };
     if (studentUserId) {
       return this.demands.find({
-        where: { student_user_id: studentUserId },
+        where: { tenant_id: tenantId, student_user_id: studentUserId },
         order: { due_date: 'ASC' },
+        ...paging,
       });
     }
-    return this.demands.find({ order: { due_date: 'ASC' } });
+    return this.demands.find({ where: { tenant_id: tenantId }, order: { created_at: 'DESC' }, ...paging });
   }
 
   async createDemand(dto: CreateFeeDemandDto, tenantId: string) {
-    const saved = await this.demands.save(this.demands.create(dto));
+    const owners = await this.demands.manager.query<Array<{ tenant_id: string }>>(
+      `SELECT tenant_id FROM users WHERE user_id = $1 LIMIT 1`,
+      [dto.student_user_id],
+    );
+    if (owners[0]?.tenant_id !== tenantId)
+      throw new BadRequestException('Student is not in this institution');
+    const saved = await this.demands.save(this.demands.create({ ...dto, tenant_id: tenantId }));
     this.notify.feeGenerated({
       tenantId,
       userId: saved.student_user_id,
@@ -48,17 +59,22 @@ export class FinanceService {
     const successfulToday = await this.transactions
       .createQueryBuilder('transaction')
       .where('transaction.status = :status', { status: 'SUCCESS' })
+      .andWhere('transaction.tenant_id = :tenantId', { tenantId })
       .andWhere('DATE(transaction.created_at) = :today', { today })
       .getMany();
     const openDemands = await this.demands
       .createQueryBuilder('demand')
       .where("demand.status NOT IN ('PAID', 'WAIVED')")
+      .andWhere('demand.tenant_id = :tenantId', { tenantId })
       .getMany();
-    const recentTransactions = await this.transactions.find({
-      where: { status: 'SUCCESS' },
-      order: { created_at: 'DESC' },
-      take: 8,
-    });
+    const recentTransactions = await this.transactions
+      .createQueryBuilder('transaction')
+      .leftJoinAndSelect('transaction.demand', 'demand', 'demand.tenant_id = :tenantId', { tenantId })
+      .where('transaction.status = :status', { status: 'SUCCESS' })
+      .andWhere('transaction.tenant_id = :tenantId', { tenantId })
+      .orderBy('transaction.created_at', 'DESC')
+      .take(8)
+      .getMany();
 
     const budgets = await this.demands.manager.query(
       `SELECT b.budget_id, d.dept_name AS department,
@@ -144,7 +160,13 @@ export class FinanceService {
           Math.max(0, Number(row.total_amount) - Number(row.paid_amount ?? 0)),
         0,
       ),
-      recent_transactions: recentTransactions,
+      recent_transactions: recentTransactions.map(({ demand, ...row }) => ({
+        ...row,
+        payment_source: demand ? 'Student fees' : (row.ledger_category ?? row.txn_kind ?? 'Other').replace(/_/g, ' '),
+        payment_purpose: demand
+          ? `${demand.fee_head.replace(/_/g, ' ')} · ${demand.academic_year}${demand.semester ? ` · Semester ${demand.semester}` : ''}`
+          : row.txn_kind?.replace(/_/g, ' ') ?? 'Payment',
+      })),
       transaction_count_today: successfulToday.length,
       budget_utilization: budgets,
       procurement,

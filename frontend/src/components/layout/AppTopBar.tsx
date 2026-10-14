@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { Menu } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
@@ -62,7 +63,7 @@ export function AppTopBar({
           </SheetContent>
         </Sheet>
 
-        <div className="min-w-0 flex-1">
+        <Link href={config.homeHref} className="min-w-0 flex-1 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sgvu-gold" aria-label={`Go to ${config.personaTitle} home`}>
           <h1 className="truncate text-sm font-bold tracking-tight text-sgvu-navy sm:text-base md:text-lg">
             {pageShortTitle ? (
               <>
@@ -76,7 +77,7 @@ export function AppTopBar({
           <p className="hidden truncate text-[11px] font-medium text-sgvu-navy/50 sm:block">
             {config.personaLabel}
           </p>
-        </div>
+        </Link>
 
         <div
           className="hidden h-9 w-px shrink-0 bg-sgvu-navy/10 md:block"

@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { FinancePageHeader, formatInr } from '@/components/finance/FinancePageHeader';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -16,7 +17,14 @@ type Dashboard = {
     allocated_amount: string;
     utilized_amount: string;
   }>;
-  recent_transactions: Array<{ transaction_id: string; amount: string; payment_mode?: string; created_at: string }>;
+  recent_transactions: Array<{
+    transaction_id: string;
+    amount: string;
+    payment_mode?: string;
+    created_at: string;
+    payment_source?: string;
+    payment_purpose?: string;
+  }>;
   procurement?: {
     cleared_invoice_count: number;
     procurement_invoice_count: number;
@@ -57,10 +65,10 @@ export default function FinanceDashboardPage() {
             <p className="text-xs text-muted-foreground">{data?.transaction_count_today ?? 0} successful payments</p>
           </CardContent>
         </Card>
-        <Card>
-          <CardContent className="p-4">
+        <Card className="min-w-0">
+          <CardContent className="min-w-0 p-4">
             <p className="text-xs text-muted-foreground">Total outstanding dues</p>
-            <p className="text-3xl font-black text-sgvu-navy">{formatInr(data?.total_outstanding)}</p>
+            <p className="min-w-0 break-words text-[clamp(1.25rem,2vw,1.875rem)] font-black leading-tight tabular-nums text-sgvu-navy" style={{ overflowWrap: 'anywhere' }}>{formatInr(data?.total_outstanding)}</p>
           </CardContent>
         </Card>
         <Card>
@@ -92,7 +100,10 @@ export default function FinanceDashboardPage() {
             </div>
           ))}
           {!data?.budget_utilization?.length && (
-            <p className="text-sm text-muted-foreground">Allocate budgets under Budget Allocation to see utilization bars.</p>
+            <div className="space-y-2 text-sm text-muted-foreground">
+              <p>No departmental budgets have been allocated yet. Utilization will appear here after allocation.</p>
+              <Link href="/finance/budgets" className="inline-flex font-semibold text-sgvu-navy underline underline-offset-2 hover:text-sgvu-gold">Open Budget Allocation</Link>
+            </div>
           )}
         </CardContent>
       </Card>
@@ -132,12 +143,19 @@ export default function FinanceDashboardPage() {
         </CardHeader>
         <CardContent className="space-y-2 text-sm">
           {(data?.recent_transactions ?? []).map((t) => (
-            <div key={t.transaction_id} className="flex justify-between border-b py-2">
-              <span className="font-mono text-xs">{t.transaction_id.slice(0, 8)}…</span>
-              <span>{formatInr(t.amount)}</span>
-              <span className="text-muted-foreground">{t.payment_mode ?? '—'}</span>
-            </div>
+            <details key={t.transaction_id} className="group border-b py-2">
+              <summary className="flex cursor-pointer flex-wrap items-center justify-between gap-2 font-medium">
+                <span>{t.payment_purpose ?? 'Payment'} <span className="text-muted-foreground">· {t.payment_source ?? 'Other'}</span></span>
+                <span>{formatInr(t.amount)}</span>
+              </summary>
+              <dl className="mt-2 grid gap-1 text-xs text-muted-foreground sm:grid-cols-2">
+                <div><dt className="inline font-semibold">Transaction ID: </dt><dd className="inline break-all font-mono">{t.transaction_id}</dd></div>
+                <div><dt className="inline font-semibold">Method: </dt><dd className="inline">{t.payment_mode ?? 'Not recorded'}</dd></div>
+                <div><dt className="inline font-semibold">Recorded: </dt><dd className="inline">{new Date(t.created_at).toLocaleString('en-IN')}</dd></div>
+              </dl>
+            </details>
           ))}
+          {!data?.recent_transactions?.length && <p className="text-sm text-muted-foreground">No successful payments recorded yet.</p>}
         </CardContent>
       </Card>
     </div>
