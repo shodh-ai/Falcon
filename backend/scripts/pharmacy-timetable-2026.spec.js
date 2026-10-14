@@ -2,6 +2,7 @@ const {test}=require('node:test');const assert=require('node:assert/strict');
 const {buildManifest}=require('./pharmacy-timetable-2026');
 test('eight source pages, unique provenance and valid exact durations',()=>{
   const m=buildManifest();assert.equal(Object.keys(m.pages).length,8);assert.equal(m.entries.length,269);
+  assert.equal(m.source_breaks.length,48);
   assert.equal(new Set(m.entries.map(e=>e.source_key)).size,m.entries.length);
   for(const e of m.entries){assert.ok(e.start<e.end);assert.ok(['HELD','CONFIRMED','ACTIVITY'].includes(e.state));}
 });

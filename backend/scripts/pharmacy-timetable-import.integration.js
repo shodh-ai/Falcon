@@ -9,9 +9,9 @@ async function main(){
  CREATE TABLE tenants(tenant_id uuid PRIMARY KEY,subdomain text,is_active boolean);
  CREATE TABLE departments(dept_id int PRIMARY KEY,dept_name text);
  CREATE TABLE users(user_id uuid PRIMARY KEY,tenant_id uuid,official_email text,dept_id int,is_active boolean,deleted_at timestamptz,onboarding_status text);
- CREATE TABLE academic_faculty_load_declarations(tenant_id uuid,faculty_user_id uuid,status text);
+ CREATE TABLE academic_faculty_load_declarations(tenant_id uuid,faculty_user_id uuid,status text,academic_year text);
  CREATE TABLE academic_courses(course_id uuid PRIMARY KEY,tenant_id uuid,course_code text,course_name text,deleted_at timestamptz);
- CREATE TABLE academic_subjects(subject_id serial PRIMARY KEY,subject_code text,deleted_at timestamptz);
+ CREATE TABLE academic_subjects(subject_id serial PRIMARY KEY,subject_code text,deleted_at timestamptz,subject_name text);
  CREATE TABLE academic_course_allocations(allocation_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),tenant_id uuid,subject_id int,program_name text,semester text,faculty_user_id uuid,academic_year text,course_id uuid,status text,updated_at timestamptz DEFAULT now());
  CREATE UNIQUE INDEX active_allocation ON academic_course_allocations(tenant_id,subject_id,program_name,semester,academic_year,faculty_user_id) WHERE status='ACTIVE';
  CREATE TABLE academic_timetables(timetable_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),tenant_id uuid,course_id uuid,day_of_week int,start_time time,end_time time,room text,faculty_user_id uuid,section text,deleted_at timestamptz);
@@ -20,7 +20,7 @@ async function main(){
  `);
  const tenant=randomUUID();await c.query("INSERT INTO tenants VALUES($1,'sgvu',true)",[tenant]);await c.query("INSERT INTO departments VALUES(43,'Pharmacy')");
  const manifest=buildManifest();const courses=new Map(),faculty=new Map();
- for(const code of new Set(manifest.entries.filter(e=>e.faculty_emails.length).map(e=>e.course_code))){const id=randomUUID();courses.set(code,id);await c.query('INSERT INTO academic_courses VALUES($1,$2,$3,$3,NULL)',[id,tenant,code]);await c.query('INSERT INTO academic_subjects(subject_code) VALUES($1)',[code]);}
+ for(const code of new Set(manifest.entries.filter(e=>e.faculty_emails.length).map(e=>e.course_code))){const id=randomUUID();courses.set(code,id);await c.query('INSERT INTO academic_courses VALUES($1,$2,$3,$3,NULL)',[id,tenant,code]);await c.query('INSERT INTO academic_subjects(subject_code,subject_name) VALUES($1,$1)',[code]);}
  for(const email of new Set(manifest.entries.flatMap(e=>e.faculty_emails))){const id=randomUUID();faculty.set(email,id);await c.query("INSERT INTO users VALUES($1,$2,$3,43,true,NULL,'COMPLETED')",[id,tenant,email]);}
  const old=randomUUID(),actor=faculty.get('yogesh.matta@mygyanvihar.com'),course=courses.get('BP106T');
  await c.query("INSERT INTO academic_timetables VALUES($1,$2,$3,4,'09:00','10:00','LT-27',$4,'A',NULL)",[old,tenant,course,actor]);

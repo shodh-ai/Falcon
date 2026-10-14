@@ -17,10 +17,10 @@ async function reconcile(client, apply = false) {
     }
     const codes = [...new Set(manifest.entries.filter(e => e.faculty_emails.length).map(e => e.course_code))];
     const emails = [...new Set(manifest.entries.flatMap(e => e.faculty_emails))];
-    const courses = await client.query('SELECT course_id,course_code FROM academic_courses WHERE tenant_id=$1 AND course_code=ANY($2) AND deleted_at IS NULL', [tenant,codes]);
+    const courses = await client.query('SELECT course_id,course_code,course_name FROM academic_courses WHERE tenant_id=$1 AND course_code=ANY($2) AND deleted_at IS NULL', [tenant,codes]);
     const faculty = await client.query(`SELECT u.user_id,lower(u.official_email) AS email FROM users u JOIN departments d ON d.dept_id=u.dept_id
       WHERE u.tenant_id=$1 AND lower(u.official_email)=ANY($2) AND u.is_active=true AND u.deleted_at IS NULL AND lower(d.dept_name)='pharmacy'`, [tenant,emails]);
-    const subjects = await client.query('SELECT subject_id,subject_code FROM academic_subjects WHERE subject_code=ANY($1) AND deleted_at IS NULL', [codes]);
+    const subjects = await client.query('SELECT subject_id,subject_code,subject_name FROM academic_subjects WHERE subject_code=ANY($1) AND deleted_at IS NULL', [codes]);
     const resolve = (rows,key,value) => {
       const matches = rows.filter(row => row[key]===value);
       if (matches.length !== 1) throw new Error(`Unresolved or ambiguous ${key}: ${value} (${matches.length})`);
@@ -29,6 +29,10 @@ async function reconcile(client, apply = false) {
     for (const entry of manifest.entries.filter(e => e.faculty_emails.length)) {
       entry.course_id = resolve(courses.rows,'course_code',entry.course_code).course_id;
       entry.subject_id = resolve(subjects.rows,'subject_code',entry.course_code).subject_id;
+      const normalize=name=>String(name).toLowerCase().replace(/[^a-z0-9]/g,'');
+      if(normalize(resolve(courses.rows,'course_code',entry.course_code).course_name)!==normalize(resolve(subjects.rows,'subject_code',entry.course_code).subject_name)) {
+        throw new Error(`Course/catalogue meaning mismatch: ${entry.course_code}; reconcile explicitly before publication`);
+      }
       entry.faculty_user_ids = entry.faculty_emails.map(email => resolve(faculty.rows,'email',email).user_id);
       if (entry.state==='CONFIRMED' && entry.faculty_user_ids.length !== 1) throw new Error('Shared publication requires explicit multi-teacher slot support');
     }
@@ -42,7 +46,7 @@ async function reconcile(client, apply = false) {
       faculty:emails.length, history_policy:'Existing attendance rows and original slot IDs are not updated.' };
     const officialEmails=[...emails,...['nidhi.chauhan','nisha.yadav','preeti.khulbe','shikha.kandpal','gauri.gupta'].map(local=>`${local}@mygyanvihar.com`)];
     const audit=await client.query(`SELECT lower(u.official_email) AS email,u.is_active,u.onboarding_status,
-      d.status AS load_declaration FROM users u LEFT JOIN academic_faculty_load_declarations d ON d.tenant_id=u.tenant_id AND d.faculty_user_id=u.user_id
+      d.status AS load_declaration FROM users u LEFT JOIN academic_faculty_load_declarations d ON d.tenant_id=u.tenant_id AND d.faculty_user_id=u.user_id AND d.academic_year='2026-2027'
       WHERE u.tenant_id=$1 AND lower(u.official_email)=ANY($2) AND u.deleted_at IS NULL`,[tenant,officialEmails]);
     report.faculty_audit=officialEmails.map(email=>({email,accounts:audit.rows.filter(u=>u.email===email),
       confirmed_sessions:manifest.entries.filter(e=>e.state==='CONFIRMED'&&e.faculty_emails.includes(email)).length,

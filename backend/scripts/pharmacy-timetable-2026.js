@@ -176,7 +176,8 @@ function buildManifest() {
   }
   for(const entry of entries) entry.state=entry.session_type==='ACTIVITY'?'ACTIVITY':entry.held_reasons.length?'HELD':'CONFIRMED';
   return {source_sha256:SOURCE_SHA256,academic_year:'2026-2027',reviewed_decisions:{AM:faculty.AM,MG:faculty.MG,
-    tuesday_engineering_batch:'C as printed, unresolved',venues:'Printed page header, shared overlaps reported',history:'Preserve original attendance'},pages,entries};
+    tuesday_engineering_batch:'C as printed, unresolved',venues:'Printed page header, shared overlaps reported',history:'Preserve original attendance'},pages,
+    source_breaks:Object.keys(pages).flatMap(page=>[1,2,3,4,5,6].map(day=>({page:Number(page),day,start:'12:30',end:'13:30',state:'ACTIVITY',label:'Lunch'}))),entries};
 }
 module.exports={buildManifest,SOURCE_SHA256,faculty};
 if(require.main===module) console.log(JSON.stringify(buildManifest(),null,2));
