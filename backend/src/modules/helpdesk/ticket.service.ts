@@ -6,6 +6,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
@@ -17,6 +18,7 @@ import {
   type ITicketProvider,
 } from './providers/ticket-provider.interface';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
+import { FalconNotificationsService } from '../../core/notifications/falcon-notifications.service';
 import {
   WorkflowRoutingService,
   type RoutedApprover,
@@ -54,6 +56,7 @@ export class TicketService {
     private readonly workflowNotify: WorkflowNotificationService,
     @InjectRepository(User) private readonly users: Repository<User>,
     private readonly campusScope: CampusScopeService,
+    @Optional() private readonly falconNotifications?: FalconNotificationsService,
   ) {}
 
   async createTicket(studentUserId: string, dto: CreateTicketDto) {
@@ -186,6 +189,16 @@ export class TicketService {
       category: 'HELPDESK',
       requesterName: student?.name,
     });
+
+    void this.falconNotifications?.create({
+      tenantId,
+      userId: studentUserId,
+      category: 'HELPDESK',
+      title: `${dto.category === 'FACILITIES' ? 'Facilities request' : 'Helpdesk ticket'} submitted`,
+      message: `Request ${ticketRef} has been sent for review. Submission does not confirm a room booking or resolution.`,
+      actionLink: '/notifications',
+      intent: 'status_update',
+    }).catch((error: unknown) => this.logger.warn(`Submission notification failed: ${String(error)}`));
 
     return ticket;
   }

@@ -9,6 +9,7 @@ import {
   Query,
   Req,
   Res,
+  ServiceUnavailableException,
   UseGuards,
 } from '@nestjs/common';
 import type { Response } from 'express';
@@ -88,8 +89,17 @@ export class FinanceController {
 
   @Get('demands')
   @Roles(...FINANCE_DESK)
-  listDemands(@Query('studentUserId') studentUserId?: string) {
-    return this.finance.listDemands(studentUserId);
+  listDemands(
+    @Req() req: { user: AuthUser },
+    @Query('studentUserId') studentUserId?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+  ) {
+    return this.finance.listDemands(
+      this.tenant(req), studentUserId,
+      limit && /^\d+$/.test(limit) ? Number(limit) : undefined,
+      offset && /^\d+$/.test(offset) ? Number(offset) : undefined,
+    );
   }
 
   @Post('demands')
@@ -107,12 +117,21 @@ export class FinanceController {
     @Req() req: { user: AuthUser },
     @Body() dto: Record<string, unknown>,
   ) {
-    const { job_id } = await this.accounts.createBulkJob(this.tenant(req), dto);
-    await this.bulkQueue.add('generate', {
-      jobId: job_id,
-      tenantId: this.tenant(req),
+    const { job_id } = await this.accounts.createBulkJob(this.tenant(req), {
       ...dto,
+      requested_by: req.user.user_id,
     });
+    try {
+      await this.bulkQueue.add('generate', {
+        ...dto,
+        jobId: job_id,
+        tenantId: this.tenant(req),
+        requestedBy: req.user.user_id,
+      });
+    } catch (error) {
+      await this.accounts.markBulkJobFailed(this.tenant(req), job_id, error);
+      throw new ServiceUnavailableException('Demand generation could not start; please retry.');
+    }
     return {
       queued: true,
       job_id,
@@ -123,8 +142,8 @@ export class FinanceController {
 
   @Get('demands/jobs/:jobId')
   @Roles(...FINANCE_DESK)
-  bulkJobStatus(@Param('jobId') jobId: string) {
-    return this.accounts.getBulkJob(jobId);
+  bulkJobStatus(@Req() req: { user: AuthUser }, @Param('jobId') jobId: string) {
+    return this.accounts.getBulkJob(this.tenant(req), jobId);
   }
 
   @Get('collections')
@@ -219,7 +238,7 @@ export class FinanceController {
   }
 
   @Post('approvals/:approvalId/verify-otp')
-  @Roles('SuperAdmin', 'President', 'Chairman')
+  @Roles('CFO', 'SuperAdmin', 'President', 'Chairman')
   verifyApprovalOtp(
     @Req() req: { user: AuthUser },
     @Param('approvalId') approvalId: string,

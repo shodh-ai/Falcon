@@ -5,6 +5,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -19,6 +20,7 @@ import { LeaveBalance } from '../../entities/leave-balance.entity';
 import { StaffAttendance } from '../../entities/staff-attendance.entity';
 import { User } from '../../entities/user.entity';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
+import { FalconNotificationsService } from '../../core/notifications/falcon-notifications.service';
 import { WorkflowRoutingService } from '../../core/workflow/workflow-routing.service';
 import { WorkflowNotificationService } from '../../core/workflow/workflow-notification.service';
 import { AttendanceCalculationService } from './attendance-calculation.service';
@@ -91,6 +93,7 @@ export class HrWorkforceService {
     private readonly attendanceCalc: AttendanceCalculationService,
     private readonly hrWorkflow: HrWorkflowRoutingService,
     private readonly accessControl: HrAccessControlService,
+    @Optional() private readonly falconNotifications?: FalconNotificationsService,
   ) {}
 
   async getTodayWidget(userId: string) {
@@ -387,6 +390,16 @@ export class HrWorkforceService {
         saved.current_approver_user_id,
       );
     }
+
+    void this.falconNotifications?.create({
+      tenantId,
+      userId: staffUserId,
+      category: 'HR',
+      title: `${this.requestTypeLabel(requestType)} submitted`,
+      message: 'Your request is waiting for independent review. You will be notified when a decision is recorded.',
+      actionLink: '/notifications',
+      intent: 'status_update',
+    }).catch((error: unknown) => this.logger.warn(`Submission notification failed: ${String(error)}`));
 
     return saved;
   }

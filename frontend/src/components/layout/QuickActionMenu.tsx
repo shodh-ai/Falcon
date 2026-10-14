@@ -32,6 +32,7 @@ import {
   canUseWorkforceQuickActions,
 } from '@/lib/quick-action-access';
 import { workforceRequestsApi } from '@/lib/workforce-api';
+import { inclusiveCalendarDays, timeRangeMinutes } from '@/lib/quick-action-dates';
 
 type ModalKind = 'leave' | 'od' | 'ticket' | 'room' | null;
 type QuickActionKey = Exclude<ModalKind, null> | 'meeting';
@@ -55,16 +56,22 @@ export function QuickActionMenu() {
     end_date: '',
     reason: '',
   });
-  const [odForm, setOdForm] = useState({ start_date: '', end_date: '', reason: '' });
+  const [odForm, setOdForm] = useState({ start_date: '', end_date: '', start_time: '', end_time: '', reason: '' });
   const [ticketForm, setTicketForm] = useState({ category: 'IT', subject: '', description: '' });
-  const [roomForm, setRoomForm] = useState({ date: '', slot: '10:00', room: '', purpose: '' });
+  const [roomForm, setRoomForm] = useState({ date: '', slot: '10:00', end: '11:00', room: '', purpose: '' });
+  const roomDuration = timeRangeMinutes(roomForm.slot, roomForm.end);
 
   async function submitLeave(e: FormEvent) {
     e.preventDefault();
+    if (inclusiveCalendarDays(leaveForm.start_date, leaveForm.end_date) === null) {
+      toast.error('End Date must be on or after Start Date.');
+      return;
+    }
     setSubmitting(true);
     try {
       await api.post(workforceRequestsApi(user, pathname), { request_type: 'LEAVE', ...leaveForm });
       toast.success('Leave request submitted');
+      window.dispatchEvent(new Event('falcon:notifications-refresh'));
       setOpen(null);
       setLeaveForm({ leave_type: 'CL', start_date: '', end_date: '', reason: '' });
     } catch (err) {
@@ -76,6 +83,14 @@ export function QuickActionMenu() {
 
   async function submitOd(e: FormEvent) {
     e.preventDefault();
+    if (inclusiveCalendarDays(odForm.start_date, odForm.end_date) === null) {
+      toast.error('End Date must be on or after Start Date.');
+      return;
+    }
+    if ((odForm.start_time || odForm.end_time) && (!odForm.start_time || !odForm.end_time || odForm.start_date !== odForm.end_date || odForm.start_time >= odForm.end_time)) {
+      toast.error('For a timed OD, select one date and both departure and return times in order.');
+      return;
+    }
     setSubmitting(true);
     try {
       await api.post(workforceRequestsApi(user, pathname), {
@@ -83,11 +98,14 @@ export function QuickActionMenu() {
         leave_type: 'OD',
         start_date: odForm.start_date,
         end_date: odForm.end_date,
+        start_time: odForm.start_time || undefined,
+        end_time: odForm.end_time || undefined,
         reason: odForm.reason,
       });
       toast.success('On-duty request submitted');
+      window.dispatchEvent(new Event('falcon:notifications-refresh'));
       setOpen(null);
-      setOdForm({ start_date: '', end_date: '', reason: '' });
+      setOdForm({ start_date: '', end_date: '', start_time: '', end_time: '', reason: '' });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Submit failed');
     } finally {
@@ -108,7 +126,8 @@ export function QuickActionMenu() {
         subject: ticketForm.subject.trim(),
         description: ticketForm.description.trim(),
       });
-      toast.success('IT ticket raised');
+      toast.success('Helpdesk ticket submitted');
+      window.dispatchEvent(new Event('falcon:notifications-refresh'));
       setOpen(null);
       setTicketForm({ category: 'IT', subject: '', description: '' });
     } catch (err) {
@@ -118,11 +137,28 @@ export function QuickActionMenu() {
     }
   }
 
-  function submitRoom(e: FormEvent) {
+  async function submitRoom(e: FormEvent) {
     e.preventDefault();
-    toast.success('Meeting room request noted — facilities team will confirm shortly.');
-    setOpen(null);
-    setRoomForm({ date: '', slot: '10:00', room: '', purpose: '' });
+    if (timeRangeMinutes(roomForm.slot, roomForm.end) === null) {
+      toast.error('Meeting End Time must be after Meeting Start Time.');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await api.post('/api/helpdesk/tickets', {
+        category: 'FACILITIES',
+        subject: `Meeting room request for ${roomForm.date}`,
+        description: `Meeting date: ${roomForm.date}; start: ${roomForm.slot}; end: ${roomForm.end}; preferred room: ${roomForm.room.trim() || 'any suitable room'}; purpose: ${roomForm.purpose.trim()}`,
+      });
+      toast.success('Facilities request submitted. The room is not booked until confirmed.');
+      window.dispatchEvent(new Event('falcon:notifications-refresh'));
+      setOpen(null);
+      setRoomForm({ date: '', slot: '10:00', end: '11:00', room: '', purpose: '' });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not submit the room request');
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   const menuItems = useMemo(() => {
@@ -130,7 +166,7 @@ export function QuickActionMenu() {
       { key: 'leave', label: 'Apply for Leave / OD', icon: CalendarDays, show: canLeave },
       { key: 'ticket', label: 'Raise IT Ticket', icon: Headphones, show: canTicket },
       { key: 'meeting', label: 'Schedule Executive Meeting', icon: Presentation, show: isPresidentPortal },
-      { key: 'room', label: 'Book Meeting Room', icon: Presentation, show: !isPresidentPortal },
+      { key: 'room', label: 'Request Meeting Room', icon: Presentation, show: !isPresidentPortal && canTicket },
     ];
     return items.filter((item) => item.show);
   }, [canLeave, canTicket, isPresidentPortal]);
@@ -198,20 +234,25 @@ export function QuickActionMenu() {
               <option value="SL">Sick (SL)</option>
               <option value="EL">Earned (EL)</option>
             </Select>
-            <Input
+            <label className="grid gap-1 text-sm font-medium">Start Date
+              <Input
               type="date"
               min={workforceMinDate()}
               value={leaveForm.start_date}
               onChange={(e) => setLeaveForm((f) => ({ ...f, start_date: e.target.value }))}
               required
-            />
-            <Input
+              />
+            </label>
+            <label className="grid gap-1 text-sm font-medium">End Date
+              <Input
               type="date"
-              min={workforceMinDate()}
+              min={leaveForm.start_date || workforceMinDate()}
               value={leaveForm.end_date}
               onChange={(e) => setLeaveForm((f) => ({ ...f, end_date: e.target.value }))}
               required
-            />
+              />
+            </label>
+            <p className="text-xs text-muted-foreground">{inclusiveCalendarDays(leaveForm.start_date, leaveForm.end_date) ? `${inclusiveCalendarDays(leaveForm.start_date, leaveForm.end_date)} calendar day(s) selected. Choose the same date twice for a single day; HR policy determines chargeable leave.` : 'Select a start and end date to see the duration.'}</p>
             <Input
               placeholder="Reason"
               value={leaveForm.reason}
@@ -231,20 +272,29 @@ export function QuickActionMenu() {
             <DialogTitle>Apply On Duty (OD)</DialogTitle>
           </DialogHeader>
           <form onSubmit={submitOd} className="grid gap-3">
-            <Input
+            <label className="grid gap-1 text-sm font-medium">Start Date
+              <Input
               type="date"
               min={workforceMinDate()}
               value={odForm.start_date}
               onChange={(e) => setOdForm((f) => ({ ...f, start_date: e.target.value }))}
               required
-            />
-            <Input
+              />
+            </label>
+            <label className="grid gap-1 text-sm font-medium">End Date
+              <Input
               type="date"
-              min={workforceMinDate()}
+              min={odForm.start_date || workforceMinDate()}
               value={odForm.end_date}
               onChange={(e) => setOdForm((f) => ({ ...f, end_date: e.target.value }))}
               required
-            />
+              />
+            </label>
+            <p className="text-xs text-muted-foreground">{inclusiveCalendarDays(odForm.start_date, odForm.end_date) ? `${inclusiveCalendarDays(odForm.start_date, odForm.end_date)} calendar day(s) selected.` : 'Select a start and end date to see the duration.'} Times are optional for a single-day OD.</p>
+            <div className="grid grid-cols-2 gap-2">
+              <label className="grid gap-1 text-sm font-medium">Departure Time<Input type="time" value={odForm.start_time} onChange={(e) => setOdForm((f) => ({ ...f, start_time: e.target.value }))} /></label>
+              <label className="grid gap-1 text-sm font-medium">Expected Return Time<Input type="time" value={odForm.end_time} onChange={(e) => setOdForm((f) => ({ ...f, end_time: e.target.value }))} /></label>
+            </div>
             <Input
               placeholder="Purpose / venue"
               value={odForm.reason}
@@ -296,23 +346,31 @@ export function QuickActionMenu() {
       <Dialog open={open === 'room'} onOpenChange={(v) => !v && setOpen(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Book Meeting Room</DialogTitle>
+            <DialogTitle>Request Meeting Room</DialogTitle>
             <DialogDescription>Request is routed to facilities for confirmation.</DialogDescription>
           </DialogHeader>
           <form onSubmit={submitRoom} className="grid gap-3">
-            <Input
+            <label className="grid gap-1 text-sm font-medium">Meeting Date
+              <Input
               type="date"
               min={workforceMinDate()}
               value={roomForm.date}
               onChange={(e) => setRoomForm((f) => ({ ...f, date: e.target.value }))}
               required
-            />
-            <Input
+              />
+            </label>
+            <label className="grid gap-1 text-sm font-medium">Meeting Start Time
+              <Input
               type="time"
               value={roomForm.slot}
               onChange={(e) => setRoomForm((f) => ({ ...f, slot: e.target.value }))}
               required
-            />
+              />
+            </label>
+            <label className="grid gap-1 text-sm font-medium">Meeting End Time
+              <Input type="time" value={roomForm.end} onChange={(e) => setRoomForm((f) => ({ ...f, end: e.target.value }))} required />
+            </label>
+            <p className="text-xs text-muted-foreground">{roomDuration === null ? 'End time must be after start time.' : `Requested duration: ${Math.floor(roomDuration / 60)} hour(s) ${roomDuration % 60} minute(s).`}</p>
             <Input
               placeholder="Preferred room / block"
               value={roomForm.room}
@@ -324,7 +382,7 @@ export function QuickActionMenu() {
               onChange={(e) => setRoomForm((f) => ({ ...f, purpose: e.target.value }))}
               required
             />
-            <Button type="submit">Request booking</Button>
+            <Button type="submit" disabled={submitting}>{submitting ? 'Submitting…' : 'Send room request'}</Button>
           </form>
         </DialogContent>
       </Dialog>
