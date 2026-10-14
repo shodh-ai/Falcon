@@ -72,7 +72,7 @@ describe('Faculty attendance date and practical batch safety', () => {
     expect(rows[0].student_count).toBe(2);
     expect(dataSource.query).toHaveBeenCalledWith(
       expect.stringContaining('t.day_of_week = $4'),
-      ['tenant-1', 'faculty-1', null, 2],
+      ['tenant-1', 'faculty-1', null, 2, '2026-10-13'],
     );
     expect(rosterSpy).toHaveBeenCalledWith('course-1', 'faculty-1', 'tenant-1', 'slot-1', '2026-10-13');
   });
@@ -88,6 +88,21 @@ describe('Faculty attendance date and practical batch safety', () => {
       ),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(dataSource.query).not.toHaveBeenCalled();
+  });
+
+  it('reports persisted per-session attendance without leaking another faculty or batch record', async () => {
+    const { service, dataSource } = createService({ timetableRows: [
+      { timetable_id: 'slot-1', course_id: 'course-1', is_practical: true, section: null, has_saved_attendance: true },
+      { timetable_id: 'slot-2', course_id: 'course-1', is_practical: true, section: null, has_saved_attendance: false },
+    ] });
+    const rows = await service.getFacultyAcademicTimetableToday('faculty-1', 'tenant-1', 43, '2000-01-03');
+    expect(rows.map(row => row.has_saved_attendance)).toEqual([true, false]);
+    expect(rows.every(row => row.attendance_locked)).toBe(true);
+    const sql = dataSource.query.mock.calls[0][0];
+    for (const condition of ['cal.tenant_id = t.tenant_id', 'cal.course_id = t.course_id',
+      'cal.faculty_user_id = t.faculty_user_id', 'cal.timetable_id = t.timetable_id', 'cal.date = $5::date']) {
+      expect(sql).toContain(condition);
+    }
   });
 
   it('does not count the whole course as the roster of an unmapped practical batch', async () => {

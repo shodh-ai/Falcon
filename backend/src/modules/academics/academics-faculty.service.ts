@@ -271,6 +271,7 @@ export class AcademicsFacultyService {
         end_time: string;
         section: string | null;
         is_practical: boolean;
+        has_saved_attendance: boolean;
       }>
     >(
       `WITH ${this.teachingDepartments.facultyCoursesCte(3)}
@@ -287,7 +288,15 @@ export class AcademicsFacultyService {
            UPPER(c.course_code) ~ '(P|LAB)$'
            OR c.course_name ILIKE '%practical%'
            OR c.course_name ILIKE '%lab%'
-         ) AS is_practical
+         ) AS is_practical,
+         EXISTS (
+           SELECT 1 FROM course_attendance_logs cal
+           WHERE cal.tenant_id = t.tenant_id
+             AND cal.course_id = t.course_id
+             AND cal.faculty_user_id = t.faculty_user_id
+             AND cal.timetable_id = t.timetable_id
+             AND cal.date = $5::date
+         ) AS has_saved_attendance
        FROM academic_timetables t
        INNER JOIN faculty_courses fc ON fc.course_id = t.course_id
        INNER JOIN academic_courses c ON c.course_id = t.course_id AND c.tenant_id = t.tenant_id
@@ -296,7 +305,7 @@ export class AcademicsFacultyService {
          AND t.deleted_at IS NULL
          AND t.day_of_week = $4
        ORDER BY t.start_time`,
-      [tenantId, facultyUserId, deptId ?? null, isoDay],
+      [tenantId, facultyUserId, deptId ?? null, isoDay, date],
     );
 
     return Promise.all(
@@ -310,6 +319,8 @@ export class AcademicsFacultyService {
         end_time: row.end_time,
         section: row.section,
         is_practical: Boolean(row.is_practical),
+        has_saved_attendance: Boolean(row.has_saved_attendance),
+        attendance_locked: this.isAttendanceLocked(date),
         student_count: row.is_practical && !row.section
           ? 0
           : (await this.getCourseStudents(
