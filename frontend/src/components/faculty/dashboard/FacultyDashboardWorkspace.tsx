@@ -32,6 +32,7 @@ import { withTeachingDeptId } from '@/lib/faculty/teaching-departments';
 import { createMeetingsApi, type PortalMeetingRecord } from '@/lib/api/api.meetings';
 import { notificationsApi, type FalconNotification } from '@/lib/api/notifications';
 import { cn } from '@/lib/utils';
+import { FacultyObserverDashboard } from './FacultyObserverDashboard';
 
 type FacultyClass = {
   timetable_id: string;
@@ -475,6 +476,13 @@ function PendingTaskRow({ task }: { task: PendingTask }) {
 }
 
 export function FacultyDashboardWorkspace() {
+  const { user } = useAuth();
+  return user?.read_only_academic_view
+    ? <FacultyObserverDashboard />
+    : <StandardFacultyDashboardWorkspace />;
+}
+
+function StandardFacultyDashboardWorkspace() {
   const api = useAuthedApi();
   const { user, token } = useAuth();
   const { activeDeptId, loading: deptLoading } = useTeachingDepartment();
