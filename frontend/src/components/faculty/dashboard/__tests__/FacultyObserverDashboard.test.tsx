@@ -2,12 +2,17 @@ import { render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { FacultyObserverDashboard } from '../FacultyObserverDashboard';
 import { FacultyDashboardWorkspace } from '../FacultyDashboardWorkspace';
+import FacultyTimetablePage from '@/app/(portals)/faculty/timetable/page';
 
 const mocks = vi.hoisted(() => ({ get: vi.fn(), department: { activeDeptId: 43, loading: false } }));
 const api = { get: mocks.get };
 vi.mock('@/lib/api', () => ({ useAuthedApi: () => api }));
 vi.mock('@/context/AuthContext', () => ({ useAuth: () => ({ user: { read_only_academic_view: true } }) }));
 vi.mock('@/components/faculty/TeachingDepartmentContext', () => ({ useTeachingDepartment: () => mocks.department }));
+vi.mock('@/components/faculty/useFacultyCourses', () => ({
+  useFacultyCourses: () => ({ courses: [], loading: false, error: null }),
+  uniqueFacultyCoursesByCourseId: (courses: unknown[]) => courses,
+}));
 
 describe('Faculty academic observer dashboard', () => {
   beforeEach(() => {
@@ -34,6 +39,15 @@ describe('Faculty academic observer dashboard', () => {
     await screen.findByText('10:50–11:40 · LT-27 · 96 students');
     expect(mocks.get).toHaveBeenCalledTimes(2);
     expect(screen.getByRole('heading', { name: 'Academic observer dashboard' })).toBeInTheDocument();
+  });
+
+  it('loads the timetable without requesting private adjustments or showing write controls', async () => {
+    mocks.get.mockImplementation((path: string) => Promise.resolve(path.includes('/stats') ? null : []));
+    render(<FacultyTimetablePage />);
+    await waitFor(() => expect(mocks.get).toHaveBeenCalledTimes(2));
+    expect(mocks.get.mock.calls.every(([path]) => !path.includes('adjustments'))).toBe(true);
+    expect(screen.queryByText('Schedule change request')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Submit for HoD approval' })).not.toBeInTheDocument();
   });
 
   it('does not disguise a genuine authorized API failure as an empty roster', async () => {

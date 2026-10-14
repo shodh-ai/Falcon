@@ -32,6 +32,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { useAuthedApi } from '@/lib/api';
+import { useAuth } from '@/context/AuthContext';
 import { useTeachingDepartment } from '@/components/faculty/TeachingDepartmentContext';
 import { withTeachingDeptId } from '@/lib/faculty/teaching-departments';
 import {
@@ -141,6 +142,8 @@ function formatTermStart(value: string | null) {
 
 export default function FacultyTimetablePage() {
   const api = useAuthedApi();
+  const { user } = useAuth();
+  const isObserver = Boolean(user?.read_only_academic_view);
   const { activeDeptId, loading: deptLoading } = useTeachingDepartment();
   const { courses, loading: coursesLoading, error: coursesError } = useFacultyCourses();
   const [schedule, setSchedule] = useState<TimetableRow[]>([]);
@@ -162,7 +165,7 @@ export default function FacultyTimetablePage() {
       const [scheduleData, statsData, adjustmentData] = await Promise.all([
         api.get<TimetableRow[]>(withTeachingDeptId('/api/academics/faculty/workspaces/timetable', activeDeptId)),
         api.get<TimetableStats>(withTeachingDeptId('/api/academics/faculty/workspaces/timetable/stats', activeDeptId)),
-        api.get<Adjustment[]>('/api/academics/faculty/workspaces/adjustments'),
+        isObserver ? Promise.resolve([] as Adjustment[]) : api.get<Adjustment[]>('/api/academics/faculty/workspaces/adjustments'),
       ]);
       setSchedule(withFacultyDemoFallback(scheduleData, facultyDemoTimetable(), isEmptyArray));
       setStats(withFacultyDemoFallback(statsData, facultyDemoTimetableStats()));
@@ -172,7 +175,7 @@ export default function FacultyTimetablePage() {
       setStats(withFacultyDemoFallback(null, facultyDemoTimetableStats()));
       setAdjustments(withFacultyDemoFallback([], facultyDemoAdjustments(), isEmptyArray));
     }
-  }, [api, activeDeptId]);
+  }, [api, activeDeptId, isObserver]);
 
   useEffect(() => {
     if (deptLoading) return;
@@ -499,7 +502,7 @@ export default function FacultyTimetablePage() {
         )}
       </FacultyPanel>
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      {!isObserver && <div className="grid gap-4 lg:grid-cols-2">
         <FacultyPanel title="Schedule change request" description="Extra class, cancel, or substitute">
           {coursesError && (
             <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
@@ -609,7 +612,7 @@ export default function FacultyTimetablePage() {
             </div>
           )}
         </FacultyPanel>
-      </div>
+      </div>}
 
       <FacultyPanel title="Teaching progress by course" count={stats?.courses.length ?? 0}>
         {!stats || stats.courses.length === 0 ? (

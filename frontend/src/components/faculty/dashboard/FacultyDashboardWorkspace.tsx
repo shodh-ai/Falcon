@@ -476,7 +476,8 @@ function PendingTaskRow({ task }: { task: PendingTask }) {
 }
 
 export function FacultyDashboardWorkspace() {
-  const { user } = useAuth();
+  const { user, isLoading } = useAuth();
+  if (isLoading || !user) return <FacultyInlineLoading label="Loading workspace…" />;
   return user?.read_only_academic_view
     ? <FacultyObserverDashboard />
     : <StandardFacultyDashboardWorkspace />;
