@@ -5,7 +5,7 @@ import { useAuthedApi } from '@/lib/api';
 import { withTeachingDeptId } from '@/lib/faculty/teaching-departments';
 import { cn } from '@/lib/utils';
 
-type SessionState = { has_saved_attendance?: boolean; attendance_locked?: boolean };
+type SessionState = { has_saved_attendance?: boolean; attendance_locked?: boolean; awaiting_confirmation?: boolean };
 type Day = { date: string; sessions: SessionState[] | null; failed?: boolean };
 
 export function shiftAttendanceDate(date: string, days: number) {
@@ -22,16 +22,19 @@ export function attendanceWeekStart(date: string) {
 export function attendanceDayStatus(sessions: SessionState[] | null) {
   if (!sessions) return { label: 'Loading…', detail: '', tone: 'neutral' };
   if (!sessions.length) return { label: 'No class', detail: '', tone: 'neutral' };
+  const held = sessions.filter(session => session.awaiting_confirmation).length;
+  const confirmed = sessions.filter(session => !session.awaiting_confirmation);
+  if (!confirmed.length) return { label: 'Awaiting confirmation', detail: `${held} held session${held === 1 ? '' : 's'}`, tone: 'pending' };
   if (sessions.some(session => typeof session.has_saved_attendance !== 'boolean')) {
     return { label: 'Status unavailable', detail: '', tone: 'neutral' };
   }
-  const recorded = sessions.filter(session => session.has_saved_attendance).length;
-  const missing = sessions.filter(session => !session.has_saved_attendance);
+  const recorded = confirmed.filter(session => session.has_saved_attendance).length;
+  const missing = confirmed.filter(session => !session.has_saved_attendance);
   const locked = missing.filter(session => session.attendance_locked).length;
   return {
-    label: `${recorded}/${sessions.length} recorded`,
-    detail: !missing.length ? 'Complete' : locked === missing.length ? `${locked} not recorded · locked` : `${missing.length} pending`,
-    tone: !missing.length ? 'complete' : 'pending',
+    label: `${recorded}/${confirmed.length} recorded`,
+    detail: (!missing.length ? 'Complete' : locked === missing.length ? `${locked} not recorded · locked` : `${missing.length} pending`) + (held ? ` · ${held} awaiting confirmation` : ''),
+    tone: !missing.length && !held ? 'complete' : 'pending',
   };
 }
 
@@ -45,23 +48,25 @@ export function AttendanceWeekNavigator({ selectedDate, today, deptId, scopeLoad
   useEffect(() => {
     if (scopeLoading) return;
     let cancelled = false;
-    Promise.all(Array.from({ length: 7 }, async (_, index): Promise<Day> => {
-      const date = shiftAttendanceDate(start, index);
-      if (date > today) return { date, sessions: [] };
-      try {
-        const sessions = await api.get<SessionState[]>(withTeachingDeptId(`/api/academics/faculty/timetable/today?date=${date}`, deptId));
-        if (!Array.isArray(sessions)) throw new Error('Invalid attendance status response');
-        return { date, sessions };
-      } catch { return { date, sessions: null, failed: true }; }
-    })).then(days => { if (!cancelled) setResult({ start, deptId, revision, days }); });
+    api.get<Day[]>(withTeachingDeptId(`/api/academics/faculty/attendance/week?start=${start}`, deptId))
+      .then(days => {
+        if (!Array.isArray(days) || days.length !== 7 || days.some((day, index) => day.date !== shiftAttendanceDate(start, index) || !Array.isArray(day.sessions))) {
+          throw new Error('Invalid attendance status response');
+        }
+        if (!cancelled) setResult({ start, deptId, revision, days });
+      }).catch(() => {
+        if (!cancelled) setResult({ start, deptId, revision, days: Array.from({ length: 7 }, (_, index) => ({ date: shiftAttendanceDate(start, index), sessions: null, failed: true })) });
+      });
     return () => { cancelled = true; };
   }, [api, start, today, deptId, scopeLoading, revision]);
 
   const resolved = !scopeLoading && result?.start === start && result.deptId === deptId && result.revision === revision;
   const days = resolved ? result.days : Array.from({ length: 7 }, (_, index) => ({ date: shiftAttendanceDate(start, index), sessions: null } as Day));
+  const knownSessions = days.flatMap(day => day.sessions || []).filter(session => !session.awaiting_confirmation);
+  const recorded = knownSessions.filter(session => session.has_saved_attendance).length;
   return <section aria-label="Attendance week status" className="space-y-3 rounded-xl border bg-card p-4">
     <div className="flex flex-wrap items-center justify-between gap-2">
-      <div><h2 className="font-semibold text-sgvu-navy">Attendance this week</h2>
+      <div><h2 className="font-semibold text-sgvu-navy">Attendance this week{resolved && days.every(day => !day.failed) ? ` · ${recorded}/${knownSessions.length} sessions recorded` : ''}</h2>
         <p className="text-xs text-muted-foreground">{start} – {shiftAttendanceDate(start, 6)} · Saved records matched to your published timetable.</p></div>
       <div className="flex gap-2">
         <button type="button" className="rounded-lg border px-3 py-2 text-sm" onClick={() => onSelect(shiftAttendanceDate(selectedDate, -7))}>Previous week</button>

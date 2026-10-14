@@ -191,6 +191,17 @@ export class AcademicsController {
     );
   }
 
+  @Get('faculty/attendance/week')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  async getFacultyAttendanceWeek(
+    @Req() req: { user: AuthUser },
+    @Query('deptId') deptIdRaw?: string,
+    @Query('start') start?: string,
+  ) {
+    const deptId = await this.resolveFacultyDeptId(req, deptIdRaw);
+    return this.facultyAcademics.getFacultyAttendanceWeek(req.user.user_id, this.resolveTenantId(req.user), deptId, start);
+  }
+
   @Get('faculty/attendance/missing')
   @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
   async getMissingAttendanceAlerts(

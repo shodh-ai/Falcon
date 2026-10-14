@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { AttendanceWeekNavigator, attendanceDayStatus, attendanceWeekStart } from '../AttendanceWeekNavigator';
+import { AttendanceWeekNavigator, attendanceDayStatus, attendanceWeekStart, shiftAttendanceDate } from '../AttendanceWeekNavigator';
 
 const api = vi.hoisted(() => ({ get: vi.fn() }));
 vi.mock('@/lib/api', () => ({ useAuthedApi: () => api }));
@@ -9,9 +9,9 @@ const baseProps = { selectedDate: '2026-10-14', today: '2026-10-14', deptId: 43,
 describe('Attendance date navigation', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    api.get.mockImplementation((path: string) => Promise.resolve(path.includes('2026-10-12')
+    api.get.mockResolvedValue(Array.from({ length: 7 }, (_, index) => ({ date: shiftAttendanceDate('2026-10-12', index), sessions: index === 0
       ? [{ has_saved_attendance: true }, { has_saved_attendance: false, attendance_locked: false }]
-      : path.includes('2026-10-13') ? [{ has_saved_attendance: true }] : []));
+      : index === 1 ? [{ has_saved_attendance: true }] : [] })));
   });
 
   it('distinguishes partly recorded, complete, no-class and upcoming dates', async () => {
@@ -22,7 +22,7 @@ describe('Attendance date navigation', () => {
     expect(screen.getByRole('button', { name: '2026-10-13: 1/1 recorded, Complete' })).toBeEnabled();
     expect(screen.getByRole('button', { name: '2026-10-14: No class' })).toBeEnabled();
     expect(screen.getByRole('button', { name: '2026-10-15: Upcoming' })).toBeDisabled();
-    expect(api.get).toHaveBeenCalledTimes(3);
+    expect(api.get).toHaveBeenCalledTimes(1);
     expect(api.get.mock.calls.every(([path]) => path.endsWith('deptId=43'))).toBe(true);
   });
 
@@ -36,10 +36,10 @@ describe('Attendance date navigation', () => {
   it('reloads statuses after a successful save revision', async () => {
     const view = render(<AttendanceWeekNavigator {...baseProps} />);
     await screen.findByRole('button', { name: '2026-10-12: 1/2 recorded, 1 pending' });
-    api.get.mockResolvedValue([{ has_saved_attendance: true }]);
+    api.get.mockResolvedValue(Array.from({ length: 7 }, (_, index) => ({ date: shiftAttendanceDate('2026-10-12', index), sessions: [{ has_saved_attendance: true }] })));
     view.rerender(<AttendanceWeekNavigator {...baseProps} revision={1} />);
     await screen.findByRole('button', { name: '2026-10-12: 1/1 recorded, Complete' });
-    expect(api.get).toHaveBeenCalledTimes(6);
+    expect(api.get).toHaveBeenCalledTimes(2);
   });
 
   it('does not request data before the teaching department has resolved', async () => {
@@ -51,5 +51,7 @@ describe('Attendance date navigation', () => {
     expect(attendanceDayStatus([{ has_saved_attendance: false, attendance_locked: true }]).detail).toBe('1 not recorded · locked');
     expect(attendanceDayStatus([{}]).label).toBe('Status unavailable');
     expect(attendanceWeekStart('2026-11-01')).toBe('2026-10-26');
+    expect(attendanceDayStatus([{awaiting_confirmation:true}]).label).toBe('Awaiting confirmation');
+    expect(attendanceDayStatus([{has_saved_attendance:true},{has_saved_attendance:false,awaiting_confirmation:true}]).tone).toBe('pending');
   });
 });

@@ -1,6 +1,7 @@
 'use client';
 
 import { Select } from '@/components/ui/select';
+import { PublishedTimetableGrid } from '@/components/faculty/PublishedTimetableGrid';
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   BookOpen,
@@ -61,14 +62,6 @@ const WEEK_DAYS = [
   { val: 6, label: 'Sat' },
 ] as const;
 
-const GRID_HOURS = [9, 10, 11, 12, 13, 14, 15, 16];
-const LUNCH_HOUR = 13;
-
-function formatGridTime(hour: number) {
-  const h = hour > 12 ? hour - 12 : hour === 0 ? 12 : hour;
-  const ampm = hour >= 12 ? 'PM' : 'AM';
-  return `${h}:00 ${ampm}`;
-}
 
 function formatSlotTime(value: string) {
   const [hours = '0', minutes = '00'] = String(value).split(':');
@@ -78,9 +71,6 @@ function formatSlotTime(value: string) {
   return `${displayHour}:${minutes} ${hour >= 12 ? 'PM' : 'AM'}`;
 }
 
-function slotStartHour(start: string) {
-  return Number.parseInt(String(start).slice(0, 2), 10);
-}
 
 type TimetableRow = {
   timetable_id: string;
@@ -90,6 +80,8 @@ type TimetableRow = {
   room: string | null;
   course_code: string;
   course_name: string;
+  section?: string | null;
+  awaiting_confirmation?: boolean;
 };
 
 type Adjustment = {
@@ -147,6 +139,7 @@ export default function FacultyTimetablePage() {
   const { activeDeptId, loading: deptLoading } = useTeachingDepartment();
   const { courses, loading: coursesLoading, error: coursesError } = useFacultyCourses();
   const [schedule, setSchedule] = useState<TimetableRow[]>([]);
+  const [scheduleError, setScheduleError] = useState<string | null>(null);
   const [stats, setStats] = useState<TimetableStats | null>(null);
   const [adjustments, setAdjustments] = useState<Adjustment[]>([]);
   const [form, setForm] = useState({
@@ -168,9 +161,11 @@ export default function FacultyTimetablePage() {
         isObserver ? Promise.resolve([] as Adjustment[]) : api.get<Adjustment[]>('/api/academics/faculty/workspaces/adjustments'),
       ]);
       setSchedule(withFacultyDemoFallback(scheduleData, facultyDemoTimetable(), isEmptyArray));
+      setScheduleError(null);
       setStats(withFacultyDemoFallback(statsData, facultyDemoTimetableStats()));
       setAdjustments(withFacultyDemoFallback(adjustmentData, facultyDemoAdjustments(), isEmptyArray));
     } catch {
+      setScheduleError('Could not load the published timetable. Please retry; this does not mean there are no classes.');
       setSchedule(withFacultyDemoFallback([], facultyDemoTimetable(), isEmptyArray));
       setStats(withFacultyDemoFallback(null, facultyDemoTimetableStats()));
       setAdjustments(withFacultyDemoFallback([], facultyDemoAdjustments(), isEmptyArray));
@@ -193,18 +188,6 @@ export default function FacultyTimetablePage() {
     [courses],
   );
 
-  const slotsByDayHour = useMemo(() => {
-    const map = new Map<string, TimetableRow[]>();
-    for (const row of schedule) {
-      const hour = slotStartHour(row.start_time);
-      if (!Number.isFinite(hour)) continue;
-      const key = `${row.day_of_week}|${hour}`;
-      const existing = map.get(key) ?? [];
-      existing.push(row);
-      map.set(key, existing);
-    }
-    return map;
-  }, [schedule]);
 
   async function submitAdjustment(e: FormEvent) {
     e.preventDefault();
@@ -350,7 +333,7 @@ export default function FacultyTimetablePage() {
         description="Your published teaching plan for the week"
         contentClassName="p-0"
       >
-        {schedule.length === 0 ? (
+        {scheduleError ? <p role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm">{scheduleError}</p> : schedule.length === 0 ? (
           <div className="p-4 sm:p-5">
             <FacultyEmptyState
               description={
@@ -408,6 +391,8 @@ export default function FacultyTimetablePage() {
                             <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
                               <span className="inline-flex items-center gap-1"><Clock className="h-3 w-3" />{formatSlotTime(entry.start_time)}–{formatSlotTime(entry.end_time)}</span>
                               <span className="inline-flex items-center gap-1"><MapPin className="h-3 w-3" />{entry.room ?? 'Room TBA'}</span>
+                              <span>{entry.section || 'Whole course'} · {/(P|LAB)$/i.test(entry.course_code) ? 'Practical' : 'Class'}</span>
+                              <span>{entry.awaiting_confirmation ? 'Awaiting department confirmation' : 'Published'}</span>
                             </div>
                           </div>
                         ))}
@@ -418,86 +403,7 @@ export default function FacultyTimetablePage() {
               })}
             </div>
 
-            <div className="hidden overflow-x-auto lg:block">
-              <table className="w-full min-w-[980px] table-fixed border-collapse text-sm">
-                <thead>
-                  <tr className="border-b border-border/60 bg-muted/25">
-                    <th className="sticky left-0 z-20 w-[92px] border-r border-border/60 bg-muted/50 px-2 py-3 text-center text-[10px] font-bold uppercase tracking-[0.14em] text-muted-foreground">
-                      Time
-                    </th>
-                    {WEEK_DAYS.map((day) => {
-                      const dayCount = schedule.filter((entry) => entry.day_of_week === day.val).length;
-                      return (
-                        <th key={day.val} className="px-2 py-3 text-center">
-                          <span className="block text-xs font-black uppercase tracking-[0.12em] text-sgvu-navy">{day.label}</span>
-                          <span className="mt-0.5 block text-[9px] font-medium text-muted-foreground">
-                            {dayCount === 0 ? 'No classes' : `${dayCount} ${dayCount === 1 ? 'class' : 'classes'}`}
-                          </span>
-                        </th>
-                      );
-                    })}
-                  </tr>
-                </thead>
-                <tbody>
-                  {GRID_HOURS.map((hour) => {
-                    if (hour === LUNCH_HOUR) {
-                      return (
-                        <tr key={`lunch-${hour}`} className="border-b border-border/50">
-                          <td className="sticky left-0 z-10 border-r border-border/60 bg-muted/35 px-2 py-2 text-center text-[10px] font-semibold tabular-nums text-muted-foreground">
-                            {formatGridTime(hour)}
-                          </td>
-                          <td colSpan={WEEK_DAYS.length} className="bg-sgvu-gold/[0.07] px-2 py-2 text-center">
-                            <span className="inline-flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.2em] text-sgvu-navy/65">
-                              <span className="h-px w-8 bg-sgvu-gold/60" /> Lunch break <span className="h-px w-8 bg-sgvu-gold/60" />
-                            </span>
-                          </td>
-                        </tr>
-                      );
-                    }
-
-                    return (
-                      <tr key={hour} className="border-b border-border/45 last:border-b-0">
-                        <td className="sticky left-0 z-10 border-r border-border/60 bg-muted/20 px-2 py-3 text-center text-[10px] font-bold tabular-nums text-sgvu-navy">
-                          {formatGridTime(hour)}
-                        </td>
-                        {WEEK_DAYS.map((day) => {
-                          const entries = slotsByDayHour.get(`${day.val}|${hour}`) ?? [];
-                          return (
-                            <td key={day.val} className="h-[88px] border-r border-border/35 bg-background p-1.5 align-top last:border-r-0">
-                              {entries.length === 0 ? (
-                                <div className="h-full rounded-lg transition-colors hover:bg-muted/20" />
-                              ) : (
-                                <div className="flex h-full flex-col gap-1.5">
-                                  {entries.map((entry) => (
-                                    <div
-                                      key={entry.timetable_id}
-                                      className="group relative flex h-full min-h-[74px] flex-col overflow-hidden rounded-lg border border-sgvu-navy/15 bg-sgvu-navy px-2.5 py-2 text-white shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md"
-                                    >
-                                      <span className="absolute inset-y-0 left-0 w-1 bg-sgvu-gold" />
-                                      <div className="flex items-start justify-between gap-2 pl-1">
-                                        <p className="truncate text-[11px] font-black tracking-wide">{entry.course_code}</p>
-                                        <span className="shrink-0 rounded bg-white/10 px-1.5 py-0.5 text-[8px] font-semibold tabular-nums text-white/85">
-                                          {formatSlotTime(entry.start_time)}
-                                        </span>
-                                      </div>
-                                      <p className="mt-1 line-clamp-2 pl-1 text-[10px] leading-snug text-white/80">{entry.course_name}</p>
-                                      <div className="mt-auto flex items-center justify-between gap-2 pl-1 pt-1 text-[9px] text-white/65">
-                                        <span className="inline-flex min-w-0 items-center gap-1"><MapPin className="h-2.5 w-2.5 shrink-0" /><span className="truncate">{entry.room ?? 'Room TBA'}</span></span>
-                                        <span className="shrink-0">to {formatSlotTime(entry.end_time)}</span>
-                                      </div>
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+            <div className="hidden lg:block"><PublishedTimetableGrid slots={schedule} /></div>
           </div>
         )}
       </FacultyPanel>

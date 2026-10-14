@@ -18,7 +18,7 @@ export class FacultyReadOnlyInterceptor implements NestInterceptor {
     if (read && path === '/api/staff/onboarding/status') return next.handle();
     if (read && /^\/api\/platform\/modules\/runtime$/.test(path)) return next.handle();
     if (!read) throw new ForbiddenException('This faculty observer account is read-only.');
-    const academic = /^\/api\/academics\/faculty\/(?:dashboard|teaching-departments|today-classes|timetable\/today|practical-batches|attendance\/missing|profile|profile\/compliance|workspaces\/(?:courses|timetable|timetable\/schedule-data|timetable\/stats))$/.test(path)
+    const academic = /^\/api\/academics\/faculty\/(?:dashboard|teaching-departments|today-classes|timetable\/today|practical-batches|attendance\/(?:missing|week)|profile|profile\/compliance|workspaces\/(?:courses|timetable|timetable\/schedule-data|timetable\/stats))$/.test(path)
       || /^\/api\/academics\/faculty\/course\/[^/]+\/(?:students|attendance|attendance\/analytics|attendance\/previous-session|practical-batch)$/.test(path)
       || /^\/api\/academics\/faculty\/courses\/[^/]+\/workspace$/.test(path);
     if (!academic) throw new ForbiddenException('This observer account can only view assigned academic data.');

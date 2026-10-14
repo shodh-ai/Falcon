@@ -50,6 +50,7 @@ type FacultyClass = {
   is_practical?: boolean;
   has_saved_attendance?: boolean;
   attendance_locked?: boolean;
+  awaiting_confirmation?: boolean;
 };
 
 type Student = {
@@ -200,7 +201,8 @@ function MarkAttendanceContent() {
         if (!Array.isArray(data)) throw new Error('Timetable API returned an invalid response');
         setClassesError(null);
         setClasses(data);
-        if (data.length === 0) {
+        const selectable = data.filter(c => !c.awaiting_confirmation);
+        if (selectable.length === 0) {
           setSelectedCourseId(null);
           setSelectedTimetableId(null);
           setStudents([]);
@@ -208,9 +210,9 @@ function MarkAttendanceContent() {
           return;
         }
         const fromUrl = initialCourseId
-          ? data.find((c) => c.course_id === initialCourseId)
+          ? selectable.find((c) => c.course_id === initialCourseId)
           : undefined;
-        const pick = fromUrl ?? data[0]!;
+        const pick = fromUrl ?? selectable[0]!;
         setSelectedCourseId(pick.course_id);
         setSelectedTimetableId(pick.timetable_id);
       })
@@ -558,6 +560,7 @@ function MarkAttendanceContent() {
                   <li key={c.timetable_id}>
                     <button
                       type="button"
+                      disabled={c.awaiting_confirmation}
                       onClick={() => {
                         setRosterLoading(true);
                         setSelectedCourseId(c.course_id);
@@ -576,7 +579,7 @@ function MarkAttendanceContent() {
                         {String(c.start_time).slice(0, 5)}–{String(c.end_time).slice(0, 5)} · {c.student_count} students
                       </p>
                       <p className={cn('mt-2 text-xs font-medium', c.has_saved_attendance ? 'text-emerald-700' : 'text-amber-800')}>
-                        {c.has_saved_attendance === true ? 'Attendance recorded'
+                        {c.awaiting_confirmation ? 'Awaiting department confirmation' : c.has_saved_attendance === true ? 'Attendance recorded'
                           : c.has_saved_attendance === false ? c.attendance_locked ? 'Not recorded · date locked' : 'Attendance pending'
                           : 'Attendance status unavailable'}
                       </p>

@@ -115,6 +115,8 @@ type FacultyProfile = {
       session_type: string;
     }>;
     weekly_teaching_hours: number;
+    pending_sessions?: number;
+    pending_minutes?: number;
     project_guides_count: number;
     project_guides: Array<{
       guide_id: string;
@@ -913,7 +915,7 @@ export function FacultyProfilePage() {
       {tab === 'workload' && (
         <div className="space-y-5">
           <div className="grid gap-4 sm:grid-cols-3">
-            <FacultyStatCard label="Weekly teaching time" value={formatTeachingDuration(profile.workload.weekly_teaching_hours)} sub="Sum of scheduled class durations" icon={BookOpen} />
+            <FacultyStatCard label="Weekly teaching time" value={formatTeachingDuration(profile.workload.weekly_teaching_hours)} sub={profile.workload.pending_sessions ? `${profile.workload.pending_sessions} sessions (${formatTeachingDuration((profile.workload.pending_minutes || 0) / 60)}) excluded: awaiting confirmation` : 'Sum of published scheduled class durations'} icon={BookOpen} />
             <FacultyStatCard label="B.Tech project guides" value={profile.workload.project_guides_count} />
             <FacultyStatCard label="PhD scholars" value={profile.workload.phd_scholars_count} />
           </div>

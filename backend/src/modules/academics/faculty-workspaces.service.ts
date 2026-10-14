@@ -675,14 +675,16 @@ export class FacultyWorkspacesService {
     if (hodDepartmentIds.length) {
       return this.dataSource.query(
         `SELECT
-           t.timetable_id,
+           t.timetable_id::text AS timetable_id,
            t.day_of_week,
            t.start_time,
            t.end_time,
            t.room,
+           t.section,
            c.course_id,
            c.course_code,
-           c.course_name
+           c.course_name,
+           false AS awaiting_confirmation
          FROM academic_timetables t
          INNER JOIN academic_courses c ON c.course_id = t.course_id AND c.tenant_id = t.tenant_id
          LEFT JOIN users u ON u.user_id = t.faculty_user_id
@@ -701,27 +703,48 @@ export class FacultyWorkspacesService {
              )
            )
            AND ($3::int IS NULL OR u.dept_id = $3)
-         ORDER BY t.day_of_week, t.start_time, c.course_code`,
+         UNION ALL
+         SELECT 'held:' || e.source_key,(e.entry->>'day')::int,(e.entry->>'start')::time,(e.entry->>'end')::time,
+           e.entry->>'room',e.entry->>'batch',c.course_id,c.course_code,c.course_name,true
+         FROM academic_timetable_source_entries e
+         JOIN academic_timetable_publications p ON p.publication_id=e.publication_id AND p.state='ACTIVE' AND p.activated_on<=CURRENT_DATE
+         JOIN academic_courses c ON c.course_id=e.course_id AND c.tenant_id=e.tenant_id
+         WHERE e.tenant_id=$1 AND e.state='HELD' AND EXISTS (
+           SELECT 1 FROM users u WHERE u.tenant_id=e.tenant_id AND u.user_id=ANY(e.faculty_user_ids)
+             AND u.dept_id=ANY($2::int[]) AND ($3::int IS NULL OR u.dept_id=$3))
+         ORDER BY day_of_week, start_time, course_code`,
         [tenantId, hodDepartmentIds, deptId ?? null],
       );
     }
     return this.dataSource.query(
       `WITH ${this.teachingDepartments.facultyCoursesCte(3)}
        SELECT
-         t.timetable_id,
+         t.timetable_id::text AS timetable_id,
          t.day_of_week,
          t.start_time,
          t.end_time,
          t.room,
+         t.section,
          c.course_id,
          c.course_code,
-         c.course_name
+         c.course_name,
+         false AS awaiting_confirmation
        FROM academic_timetables t
        INNER JOIN faculty_courses fc ON fc.course_id = t.course_id
        INNER JOIN academic_courses c ON c.course_id = t.course_id AND c.tenant_id = t.tenant_id
        WHERE t.tenant_id = $1
+         AND t.faculty_user_id = $2
          AND t.deleted_at IS NULL
-       ORDER BY t.day_of_week, t.start_time, c.course_code`,
+         AND (t.valid_from IS NULL OR t.valid_from <= CURRENT_DATE)
+       UNION ALL
+       SELECT 'held:' || e.source_key, (e.entry->>'day')::int,(e.entry->>'start')::time,(e.entry->>'end')::time,
+         e.entry->>'room',e.entry->>'batch',c.course_id,c.course_code,c.course_name,true
+       FROM academic_timetable_source_entries e
+       JOIN academic_timetable_publications p ON p.publication_id=e.publication_id AND p.state='ACTIVE' AND p.activated_on<=CURRENT_DATE
+       JOIN academic_courses c ON c.course_id=e.course_id AND c.tenant_id=e.tenant_id
+       WHERE e.tenant_id=$1 AND $2::uuid=ANY(e.faculty_user_ids) AND e.state='HELD'
+         AND e.course_id IN (SELECT course_id FROM faculty_courses)
+       ORDER BY day_of_week, start_time, course_code`,
       [tenantId, facultyUserId, deptId ?? null],
     );
   }
@@ -765,6 +788,7 @@ export class FacultyWorkspacesService {
          FROM academic_timetables t
          INNER JOIN faculty_courses fc ON fc.course_id = t.course_id
          WHERE t.tenant_id = $1
+           AND t.faculty_user_id = $2
            AND t.deleted_at IS NULL
        ),
        expected AS (
@@ -860,6 +884,7 @@ export class FacultyWorkspacesService {
          INNER JOIN faculty_courses fc ON fc.course_id = t.course_id
          INNER JOIN academic_courses c ON c.course_id = t.course_id AND c.tenant_id = t.tenant_id
          WHERE t.tenant_id = $1
+           AND t.faculty_user_id = $2
            AND t.deleted_at IS NULL
        ),
        course_expected AS (

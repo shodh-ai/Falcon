@@ -44,6 +44,7 @@ type FacultyClass = {
   end_time: string;
   student_count: number;
   section?: string | null;
+  awaiting_confirmation?: boolean;
 };
 
 type MissingAttendanceAlert = {
@@ -921,7 +922,7 @@ function StandardFacultyDashboardWorkspace() {
                                 : 'bg-emerald-100 text-emerald-700',
                             )}
                           >
-                            {needsMark ? 'Needs marking' : 'Attendance ready'}
+                            {c.awaiting_confirmation ? 'Awaiting department confirmation' : needsMark ? 'Needs marking' : 'Attendance ready'}
                           </span>
                         </div>
                         <p className="mt-0.5 font-semibold text-sgvu-navy">
@@ -934,7 +935,7 @@ function StandardFacultyDashboardWorkspace() {
                       </div>
                       <Button asChild size="sm" className={cn('shrink-0', dashActionClass)}>
                         <Link href={attendanceHref(c)}>
-                          {needsMark ? 'Mark attendance' : 'Open attendance'}
+                          {c.awaiting_confirmation ? 'Review held class' : needsMark ? 'Mark attendance' : 'Open attendance'}
                         </Link>
                       </Button>
                     </div>

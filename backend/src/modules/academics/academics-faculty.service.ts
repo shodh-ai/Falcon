@@ -246,6 +246,50 @@ export class AcademicsFacultyService {
     });
   }
 
+  /** Seven bounded days, one query; deliberately does not fetch student rosters. */
+  async getFacultyAttendanceWeek(facultyUserId: string, tenantId: string, deptId?: number | null, start = localDateString()) {
+    const parsed = new Date(`${start}T00:00:00Z`);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== start) {
+      throw new BadRequestException('start must be a valid YYYY-MM-DD value');
+    }
+    const rows = await this.dataSource.query(
+      `WITH ${this.teachingDepartments.facultyCoursesCte(3)},
+       days AS (SELECT ($4::date + n)::date AS date FROM generate_series(0, 6) n)
+       SELECT days.date::text AS date, t.timetable_id::text, t.course_id,
+         c.course_code, c.course_name, t.start_time, t.end_time, t.room, t.section,
+         EXISTS (SELECT 1 FROM course_attendance_logs cal
+           WHERE cal.tenant_id = t.tenant_id AND cal.course_id = t.course_id
+             AND cal.faculty_user_id = t.faculty_user_id
+             AND cal.timetable_id = t.timetable_id AND cal.date = days.date) AS has_saved_attendance
+       FROM days
+       LEFT JOIN academic_timetables t ON t.tenant_id = $1 AND t.faculty_user_id = $2
+         AND ((t.deleted_at IS NULL AND t.valid_to IS NULL) OR t.valid_to >= days.date)
+         AND (t.valid_from IS NULL OR t.valid_from <= days.date)
+         AND t.day_of_week = EXTRACT(ISODOW FROM days.date)
+         AND t.course_id IN (SELECT course_id FROM faculty_courses)
+       LEFT JOIN academic_courses c ON c.course_id = t.course_id AND c.tenant_id = t.tenant_id
+       UNION ALL
+       SELECT days.date::text, 'held:' || e.source_key, e.course_id, c.course_code, c.course_name,
+         (e.entry->>'start')::time, (e.entry->>'end')::time, e.entry->>'room', e.entry->>'batch', false
+       FROM days JOIN academic_timetable_source_entries e ON e.tenant_id=$1 AND e.state='HELD'
+       JOIN academic_timetable_publications p ON p.publication_id=e.publication_id AND p.state='ACTIVE' AND p.activated_on<=days.date
+       JOIN academic_courses c ON c.course_id=e.course_id AND c.tenant_id=e.tenant_id
+       WHERE $2::uuid=ANY(e.faculty_user_ids) AND (e.entry->>'day')::int=EXTRACT(ISODOW FROM days.date)
+         AND e.course_id IN (SELECT course_id FROM faculty_courses)
+       ORDER BY date, start_time, timetable_id`,
+      [tenantId, facultyUserId, deptId ?? null, start],
+    );
+    return Array.from({ length: 7 }, (_, index) => {
+      const date = new Date(parsed);
+      date.setUTCDate(date.getUTCDate() + index);
+      const key = date.toISOString().slice(0, 10);
+      return { date: key, sessions: rows.filter(row => row.date === key && row.timetable_id).map(row => ({
+        ...row, has_saved_attendance: Boolean(row.has_saved_attendance), attendance_locked: this.isAttendanceLocked(key),
+        awaiting_confirmation: String(row.timetable_id).startsWith('held:'),
+      })) };
+    });
+  }
+
   async getFacultyAcademicTimetableToday(
     facultyUserId: string,
     tenantId: string,
@@ -276,7 +320,7 @@ export class AcademicsFacultyService {
     >(
       `WITH ${this.teachingDepartments.facultyCoursesCte(3)}
        SELECT
-         t.timetable_id,
+         t.timetable_id::text AS timetable_id,
          fc.course_id,
          c.course_code,
          c.course_name,
@@ -302,9 +346,18 @@ export class AcademicsFacultyService {
        INNER JOIN academic_courses c ON c.course_id = t.course_id AND c.tenant_id = t.tenant_id
        WHERE t.tenant_id = $1
          AND t.faculty_user_id = $2
-         AND t.deleted_at IS NULL
+         AND ((t.deleted_at IS NULL AND t.valid_to IS NULL) OR t.valid_to >= $5::date)
+         AND (t.valid_from IS NULL OR t.valid_from <= $5::date)
          AND t.day_of_week = $4
-       ORDER BY t.start_time`,
+       UNION ALL
+       SELECT 'held:' || e.source_key, e.course_id, c.course_code,c.course_name,e.entry->>'room',
+         (e.entry->>'start')::time,(e.entry->>'end')::time,e.entry->>'batch',e.entry->>'session_type'='LAB',false
+       FROM academic_timetable_source_entries e
+       JOIN academic_timetable_publications p ON p.publication_id=e.publication_id AND p.state='ACTIVE' AND p.activated_on<=$5::date
+       JOIN academic_courses c ON c.course_id=e.course_id AND c.tenant_id=e.tenant_id
+       WHERE e.tenant_id=$1 AND $2::uuid=ANY(e.faculty_user_ids) AND e.state='HELD'
+         AND (e.entry->>'day')::int=$4 AND e.course_id IN (SELECT course_id FROM faculty_courses)
+       ORDER BY start_time`,
       [tenantId, facultyUserId, deptId ?? null, isoDay, date],
     );
 
@@ -321,7 +374,8 @@ export class AcademicsFacultyService {
         is_practical: Boolean(row.is_practical),
         has_saved_attendance: Boolean(row.has_saved_attendance),
         attendance_locked: this.isAttendanceLocked(date),
-        student_count: row.is_practical && !row.section
+        awaiting_confirmation: row.timetable_id.startsWith('held:'),
+        student_count: row.timetable_id.startsWith('held:') || row.is_practical && !row.section
           ? 0
           : (await this.getCourseStudents(
               row.course_id,
@@ -367,6 +421,21 @@ export class AcademicsFacultyService {
     timetableId?: string,
     date?: string,
   ) {
+    // A previously recorded sheet is an immutable roster snapshot. The original
+    // actor retains read access even when their current allocation is superseded.
+    if (timetableId && date && this.isAttendanceLocked(date)) {
+      const [saved] = await this.dataSource.query(`SELECT cal.attendance_data FROM course_attendance_logs cal
+        JOIN academic_timetables t ON t.timetable_id=cal.timetable_id AND t.tenant_id=cal.tenant_id
+        WHERE cal.tenant_id=$1 AND cal.course_id=$2 AND cal.faculty_user_id=$3
+          AND cal.timetable_id=$4::uuid AND cal.date=$5::date AND t.faculty_user_id=$3`,
+        [tenantId,courseId,facultyUserId,timetableId,date]);
+      if (Array.isArray(saved?.attendance_data)) {
+        const ids = saved.attendance_data.map((entry: {student_id:string})=>entry.student_id);
+        return this.dataSource.query(`SELECT u.user_id AS student_id,u.name,${ROLL_NUMBER_SQL} AS roll_number,
+          u.official_email AS email,NULL::text AS section_code FROM users u LEFT JOIN student_profiles sp ON sp.user_id=u.user_id
+          WHERE u.tenant_id=$1 AND u.user_id=ANY($2::uuid[]) ORDER BY u.user_id`,[tenantId,ids]);
+      }
+    }
     await this.assertFacultyTeachesCourse(courseId, facultyUserId, tenantId);
 
     // Practical sessions are scheduled per batch/section.  Scope the roster
@@ -388,9 +457,10 @@ export class AcademicsFacultyService {
             AND t.timetable_id = $2::uuid
             AND t.course_id = $3
             AND t.faculty_user_id = $4
-            AND t.deleted_at IS NULL
+            AND ((t.deleted_at IS NULL AND t.valid_to IS NULL) OR t.valid_to >= $5::date)
+            AND (t.valid_from IS NULL OR t.valid_from <= $5::date)
           LIMIT 1`,
-        [tenantId, timetableId, courseId, facultyUserId],
+        [tenantId, timetableId, courseId, facultyUserId, date ?? localDateString()],
       );
       if (!slot) throw new NotFoundException('Timetable slot not found');
       sectionCode = slot.is_practical ? slot.section?.trim() || null : null;
@@ -698,6 +768,14 @@ export class AcademicsFacultyService {
     date = localDateString(),
     timetableId?: string,
   ) {
+    if (timetableId && this.isAttendanceLocked(date)) {
+      const [saved] = await this.dataSource.query(`SELECT cal.attendance_data FROM course_attendance_logs cal
+        JOIN academic_timetables t ON t.timetable_id=cal.timetable_id AND t.tenant_id=cal.tenant_id
+        WHERE cal.tenant_id=$1 AND cal.course_id=$2 AND cal.faculty_user_id=$3
+          AND cal.timetable_id=$4::uuid AND cal.date=$5::date AND t.faculty_user_id=$3`,
+        [tenantId,courseId,facultyUserId,timetableId,date]);
+      if (Array.isArray(saved?.attendance_data)) return {course_id:courseId,date,timetable_id:timetableId,locked:true,attendance_data:saved.attendance_data};
+    }
     await this.assertCanMarkAttendance(courseId, facultyUserId, tenantId, date);
     const effectiveFacultyId = await this.resolveAttendanceFacultyId(
       courseId,
@@ -814,6 +892,8 @@ export class AcademicsFacultyService {
            ON t.tenant_id = $1
           AND t.course_id = ec.course_id
           AND t.day_of_week = $4
+          AND t.faculty_user_id = ec.log_faculty_id
+          AND t.deleted_at IS NULL
          WHERE t.end_time < CURRENT_TIME
        )
        SELECT

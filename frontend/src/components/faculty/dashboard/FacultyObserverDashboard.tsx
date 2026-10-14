@@ -15,6 +15,7 @@ type Class = {
   end_time: string;
   room: string | null;
   student_count: number;
+  awaiting_confirmation?: boolean;
 };
 
 /** Deliberately mounts no HR, research, approval or notification widgets. */
@@ -85,6 +86,7 @@ export function FacultyObserverDashboard() {
               {classes.map(slot => <li key={slot.timetable_id} className="rounded-lg border p-3">
                 <p className="font-medium">{slot.course_code} · {slot.course_name}</p>
                 <p className="mt-1 text-sm text-slate-600">{slot.start_time.slice(0, 5)}–{slot.end_time.slice(0, 5)} · {slot.room || 'Room not specified'} · {slot.student_count} students</p>
+                {slot.awaiting_confirmation && <p className="mt-1 text-sm text-amber-800">Awaiting department confirmation</p>}
               </li>)}
             </ul>
           </section>

@@ -40,6 +40,27 @@ function createService(options?: {
 }
 
 describe('Faculty attendance date and practical batch safety', () => {
+  it('uses one bounded week query without fetching any student roster', async () => {
+    const { service, dataSource } = createService({ timetableRows: [
+      {date:'2026-10-12',timetable_id:'slot-1',has_saved_attendance:true},
+      {date:'2026-10-12',timetable_id:'slot-2',has_saved_attendance:false},
+      {date:'2026-10-13',timetable_id:'held:p2-d2-5',has_saved_attendance:false},
+    ] });
+    const roster = jest.spyOn(service,'getCourseStudents');
+    const week=await service.getFacultyAttendanceWeek('faculty-1','tenant-1',43,'2026-10-12');
+    expect(dataSource.query).toHaveBeenCalledTimes(1);
+    expect(week).toHaveLength(7);
+    expect(week[0].sessions.map(s=>s.has_saved_attendance)).toEqual([true,false]);
+    expect(week[1].sessions[0].awaiting_confirmation).toBe(true);
+    expect(week[6].date).toBe('2026-10-18');
+    expect(roster).not.toHaveBeenCalled();
+    expect(dataSource.query).toHaveBeenCalledWith(expect.stringContaining('generate_series(0, 6)'),['tenant-1','faculty-1',43,'2026-10-12']);
+  });
+  it('rejects invalid week input before querying', async () => {
+    const {service,dataSource}=createService();
+    await expect(service.getFacultyAttendanceWeek('f','t',null,'2026-02-30')).rejects.toBeInstanceOf(BadRequestException);
+    expect(dataSource.query).not.toHaveBeenCalled();
+  });
   it('loads the requested weekday and counts only the scoped visible roster', async () => {
     const { service, dataSource } = createService({
       timetableRows: [
