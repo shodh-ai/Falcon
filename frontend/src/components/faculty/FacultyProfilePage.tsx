@@ -43,6 +43,7 @@ import { FACULTY_DEMO_PROFILE } from '@/lib/mock/faculty-portal-demo';
 import { useAuthedApi } from '@/lib/api';
 import { getSubdomainFromClient } from '@/lib/tenant';
 import { FacultyPortfolioPanel } from '@/components/faculty/FacultyPortfolioPanel';
+import { formatTeachingDuration } from '@/lib/faculty/workload-duration';
 
 type ProfileTab = 'overview' | 'personal' | 'qualifications' | 'research' | 'portfolio' | 'workload' | 'documents';
 
@@ -912,7 +913,7 @@ export function FacultyProfilePage() {
       {tab === 'workload' && (
         <div className="space-y-5">
           <div className="grid gap-4 sm:grid-cols-3">
-            <FacultyStatCard label="Weekly teaching hours" value={profile.workload.weekly_teaching_hours} sub="from timetable" icon={BookOpen} />
+            <FacultyStatCard label="Weekly teaching time" value={formatTeachingDuration(profile.workload.weekly_teaching_hours)} sub="Sum of scheduled class durations" icon={BookOpen} />
             <FacultyStatCard label="B.Tech project guides" value={profile.workload.project_guides_count} />
             <FacultyStatCard label="PhD scholars" value={profile.workload.phd_scholars_count} />
           </div>
