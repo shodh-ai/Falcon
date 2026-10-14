@@ -26,6 +26,7 @@ interface User {
   password_reset_required?: boolean;
   has_direct_reports?: boolean;
   is_department_hod?: boolean;
+  read_only_academic_view?: boolean;
 }
 
 interface AuthContextType {

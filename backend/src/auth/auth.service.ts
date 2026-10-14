@@ -331,6 +331,7 @@ export class AuthService {
         role: roleClaims.primaryRole,
         roles: roleClaims.roles,
         primaryRole: roleClaims.primaryRole,
+        read_only_academic_view: tokenUserForClaims.role?.role_name === 'FacultyReadOnly',
         role_id: tokenUser.role_id,
         department: tokenUser.department?.dept_name,
         dept_id: tokenUser.dept_id,
@@ -754,6 +755,11 @@ export class AuthService {
   }
 
   getRoleClaims(user: User): { roles: string[]; primaryRole?: string } {
+    // The dedicated DB role cannot gain ordinary Faculty access on older
+    // releases. JWT validation independently requires an enabled binding.
+    if (user.role?.role_name === 'FacultyReadOnly') {
+      return { roles: ['Faculty'], primaryRole: 'Faculty' };
+    }
     const mapped = (user.userRoles ?? [])
       .filter((row) => row.role?.role_name)
       .sort((a, b) => Number(b.is_primary) - Number(a.is_primary))
