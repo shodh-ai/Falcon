@@ -233,7 +233,7 @@ export class ExamCellEnterpriseService {
         this.attendanceEligibility.evaluate(tenantId, studentUserId, {
           context: 'EXAM_DESK',
         }),
-        this.finance.getPendingDues(studentUserId),
+        this.finance.getPendingDues(tenantId, studentUserId),
         this.db.query(
           `SELECT COUNT(*)::int AS c FROM ufm_cases
          WHERE tenant_id = $1 AND student_user_id = $2 AND status != 'CLOSED'`,
@@ -880,7 +880,10 @@ export class ExamCellEnterpriseService {
       [studentUserId],
     );
 
-    const pendingDues = await this.finance.getPendingDues(studentUserId);
+    const pendingDues = await this.finance.getPendingDues(
+      tenantId,
+      studentUserId,
+    );
     const cgpaEarned = grade?.cgpa != null ? Number(grade.cgpa) : null;
     const creditsEarned = credits?.earned ?? 0;
     const pendingBacklogs = backlogs?.c ?? 0;
@@ -982,7 +985,7 @@ export class ExamCellEnterpriseService {
       at: reg[0]?.created_at ?? null,
     });
 
-    const dues = await this.finance.getPendingDues(studentUserId);
+    const dues = await this.finance.getPendingDues(tenantId, studentUserId);
     events.push({
       stage: 'Fee Paid',
       status: dues.length === 0 ? 'COMPLETED' : 'PENDING',

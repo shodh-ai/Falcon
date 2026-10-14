@@ -23,6 +23,9 @@ export class FeeDemand extends BaseSoftDeleteEntity {
   @PrimaryGeneratedColumn('uuid')
   demand_id: string;
 
+  @Column({ type: 'uuid', nullable: true })
+  tenant_id: string | null;
+
   @Column({ type: 'uuid' })
   student_user_id: string;
 

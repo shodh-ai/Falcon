@@ -183,7 +183,7 @@ export class FinanceApprovalsService {
           [tenantId, approval.entity_id, user.user_id],
         );
 
-        await this.ledger.postExpense(
+        await this.ledger.postVendorInvoiceAccrual(
           tenantId,
           inv.invoice_id,
           Number(inv.net_payable ?? 0),

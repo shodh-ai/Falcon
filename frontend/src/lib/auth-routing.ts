@@ -640,6 +640,11 @@ export function isFinancePathAllowedForRole(
 ): boolean {
   if (!pathname.startsWith('/finance')) return true;
 
+  if (pathname === '/finance/bank-reconciliation' || pathname.startsWith('/finance/bank-reconciliation/')) {
+    return new Set(['accountant','financecontroller','cfo','superadmin','tenantadmin','internalauditor','treasuryoperator'])
+      .has((role ?? '').trim().toLowerCase());
+  }
+
   if (isFinanceAccountSelfServicePath(pathname)) {
     const r = (role ?? '').trim().toLowerCase();
     return (

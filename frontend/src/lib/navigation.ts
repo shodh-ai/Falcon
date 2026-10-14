@@ -1366,6 +1366,7 @@ export const financePortal: PortalConfig = {
       title: 'Core Accounting',
       items: [
         { label: 'Ledger Accounts', href: '/finance/ledger', icon: BookMarked, keywords: ['double entry', 'chart of accounts'], roles: FINANCE_DESK_ROLES },
+        { label: 'Bank Reconciliation', href: '/finance/bank-reconciliation', icon: Landmark, keywords: ['statement', 'matching', 'treasury'], roles: ['Accountant', 'FinanceController', 'CFO', 'SuperAdmin', 'TenantAdmin', 'InternalAuditor', 'TreasuryOperator'] },
         { label: 'Budget Allocation', href: '/finance/budgets', icon: TrendingUp, keywords: ['department', 'utilization'], roles: FINANCE_DESK_ROLES },
         { label: 'Audit Reports', href: '/finance/audit-reports', icon: FileSpreadsheet, keywords: ['trial balance', 'gstr', 'day book'], roles: FINANCE_DESK_ROLES },
       ],
@@ -1381,6 +1382,7 @@ export const financePortal: PortalConfig = {
     { label: 'Vendors', href: '/finance/vendors', icon: Building2, roles: [...FINANCE_DESK_ROLES, 'ProcurementHead'] },
     { label: 'Project Funding Requests', href: '/finance/funding-requests', icon: Receipt, roles: [...FINANCE_DESK_ROLES, 'HOD', 'Faculty'] },
     { label: 'Audit Reports', href: '/finance/audit-reports', icon: FileSpreadsheet, roles: FINANCE_DESK_ROLES },
+    { label: 'Bank Reconciliation', href: '/finance/bank-reconciliation', icon: Landmark, roles: ['Accountant', 'FinanceController', 'CFO', 'SuperAdmin', 'TenantAdmin', 'InternalAuditor', 'TreasuryOperator'] },
   ],
 };
 

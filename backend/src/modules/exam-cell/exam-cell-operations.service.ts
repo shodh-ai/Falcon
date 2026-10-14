@@ -219,7 +219,7 @@ export class ExamCellOperationsService {
       this.attendanceEligibility.evaluate(tenantId, studentUserId, {
         context: 'EXAM_DESK',
       }),
-      this.finance.getPendingDues(studentUserId),
+      this.finance.getPendingDues(tenantId, studentUserId),
     ]);
     const blockReasons: string[] = [];
     if (!attendance.eligible && attendance.reason) {

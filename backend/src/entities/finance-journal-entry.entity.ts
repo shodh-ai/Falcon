@@ -22,7 +22,7 @@ export class FinanceJournalEntry extends BaseTenantEntity {
   @Column({ length: 30 })
   source_type: string;
 
-  @Column({ type: 'uuid', nullable: true })
+  @Column({ type: 'text', nullable: true })
   source_id: string | null;
 
   @CreateDateColumn()
