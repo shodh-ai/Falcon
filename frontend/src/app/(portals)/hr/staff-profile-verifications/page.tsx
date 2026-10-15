@@ -42,7 +42,6 @@ export default function StaffProfileVerificationsPage() {
     dept_id: number; dept_name: string; school_name: string;
   }>>([]);
   const canDecide = [...(user?.roles ?? []), user?.role ?? ''].includes('HRAdmin');
-  const isSuperAdmin = [...(user?.roles ?? []), user?.role ?? ''].includes('SuperAdmin');
 
   const load = useCallback(async () => {
     try {
@@ -55,11 +54,11 @@ export default function StaffProfileVerificationsPage() {
   }, [api, departmentId]);
   useEffect(() => { void load(); }, [load]);
   useEffect(() => {
-    if (!isSuperAdmin) return;
+    if (!canDecide) return;
     void api.get<Array<{ dept_id: number; dept_name: string; school_name: string }>>(
       '/api/hr/staff-profile-reviews/pharmacy/departments',
     ).then(setPharmacyDepartments).catch(() => undefined);
-  }, [api, isSuperAdmin]);
+  }, [api, canDecide]);
 
   const open = async (id: string) => {
     try {
@@ -153,9 +152,9 @@ export default function StaffProfileVerificationsPage() {
           setError(cause instanceof Error ? cause.message : 'Could not import submitted staff.');
         } finally { setBusy(false); }
       }}>Import existing submitted staff into HR queue</Button>}
-      {isSuperAdmin && <section className="space-y-3 rounded-lg border border-amber-300 bg-amber-50 p-4">
+      {canDecide && <section className="space-y-3 rounded-lg border border-amber-300 bg-amber-50 p-4">
         <h2 className="font-semibold">One-time Pharmacy HR recheck</h2>
-        <p className="text-sm">Choose the exact Pharmacy department. Preview every account before reopening. This freezes previously approved staff until HR Admin decides.</p>
+        <p className="text-sm">HR Admin chooses the exact Pharmacy department and previews every account before reopening. Previously approved staff stay frozen until HR Admin decides.</p>
         <label className="block text-sm">Pharmacy department
           <select className="mt-1 block w-full max-w-md rounded border bg-white p-2" value={departmentId}
             onChange={(event) => { setDepartmentId(event.target.value); setPreview(null); }}>

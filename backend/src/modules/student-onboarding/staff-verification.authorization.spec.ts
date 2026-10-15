@@ -21,3 +21,25 @@ describe('StaffVerificationController authorization', () => {
     expect(reject).toContain("@Roles('HRAdmin')");
   });
 });
+
+describe('StaffProfileReviewAdminController authorization', () => {
+  it('reserves Pharmacy recheck preparation and decisions for HR Admin', () => {
+    const source = readFileSync(
+      join(__dirname, 'staff-profile-review.controller.ts'),
+      'utf8',
+    );
+    const routes = [
+      "@Get('pharmacy/departments')",
+      "@Get('pharmacy/preview')",
+      "@Post('pharmacy/reopen')",
+      "@Post(':reviewId/return')",
+      "@Post(':reviewId/approve')",
+    ];
+
+    for (const route of routes) {
+      const start = source.indexOf(route);
+      expect(start).toBeGreaterThanOrEqual(0);
+      expect(source.slice(start, start + 100)).toContain("@Roles('HRAdmin')");
+    }
+  });
+});

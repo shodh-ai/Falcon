@@ -107,7 +107,7 @@ export class StaffProfileReviewAdminController {
   ) {}
 
   @Get('pharmacy/departments')
-  @Roles('SuperAdmin')
+  @Roles('HRAdmin')
   pharmacyDepartments(@Req() req: { user: ReviewActor }) {
     return this.reviews.pharmacyDepartments(req.user.tenant_id);
   }
@@ -119,7 +119,7 @@ export class StaffProfileReviewAdminController {
   }
 
   @Get('pharmacy/preview')
-  @Roles('SuperAdmin')
+  @Roles('HRAdmin')
   preview(@Req() req: { user: ReviewActor }, @Query('department_id') departmentId: string) {
     const id = Number(departmentId);
     if (!Number.isInteger(id) || id <= 0) throw new BadRequestException('Exact department_id is required');
@@ -127,7 +127,7 @@ export class StaffProfileReviewAdminController {
   }
 
   @Post('pharmacy/reopen')
-  @Roles('SuperAdmin')
+  @Roles('HRAdmin')
   reopen(
     @Req() req: { user: ReviewActor; headers: Record<string, string | undefined> },
     @Body() body: { department_id: number; preview_hash: string; backup_reference: string },
