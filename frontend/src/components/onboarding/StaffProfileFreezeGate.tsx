@@ -66,7 +66,11 @@ export function StaffProfileFreezeGate({ children }: { children: ReactNode }) {
   if (loading) return <FalconLoader label="Checking HR verification…" className="min-h-screen" />;
   const frozen = review?.source === 'PHARMACY_RECHECK' &&
     ['PENDING_HR', 'RETURNED_FOR_CORRECTION'].includes(review.status);
-  if (!error && !frozen) return <>{children}</>;
+  // The server enforces an active freeze on every business API request. If this
+  // status request fails before a review was loaded, do not freeze unrelated
+  // faculty solely because the review service is temporarily unavailable.
+  // Keep an already-confirmed freeze in place across transient refresh errors.
+  if (!frozen) return <>{children}</>;
 
   const correct = async () => {
     const fields = review?.requested_fields ?? [];

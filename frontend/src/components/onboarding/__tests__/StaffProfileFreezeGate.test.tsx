@@ -27,6 +27,13 @@ describe('StaffProfileFreezeGate', () => {
     expect(await screen.findByText('Mark attendance')).toBeInTheDocument();
   });
 
+  it('does not falsely freeze an account when the review lookup is unavailable', async () => {
+    mocks.get.mockRejectedValue(new Error('Review service unavailable'));
+    render(<StaffProfileFreezeGate><button>Mark attendance</button></StaffProfileFreezeGate>);
+    expect(await screen.findByText('Mark attendance')).toBeInTheDocument();
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+  });
+
   it('offers only corrections requested by HR', async () => {
     mocks.get.mockResolvedValue({
       status: 'RETURNED_FOR_CORRECTION', source: 'PHARMACY_RECHECK',
