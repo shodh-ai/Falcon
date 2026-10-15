@@ -25,7 +25,10 @@ describe('HR final review queue and approval routing', () => {
       assertActorIsCurrentApprover: jest.fn(),
       advanceAfterApproval,
     };
-    const accessControl = { assertWorkflowApproverPower: jest.fn() };
+    const accessControl = {
+      assertWorkflowApproverPower: jest.fn(),
+      departmentScopeClause: jest.fn().mockResolvedValue({ clause: '', params: [] }),
+    };
     const service = new HrWorkforceService(
       {} as never, {} as never, requests as never, {} as never,
       {} as never, users as never, {} as never, {} as never,
@@ -61,6 +64,35 @@ describe('HR final review queue and approval routing', () => {
     expect(sql).toContain('r.current_approver_user_id = $3');
     expect(sql).toContain('p.entity_id = $2');
     expect(params).toEqual([tenantId, 7, approverId, 'LEAVE']);
+  });
+
+  it('keeps final HR review out of the manager inbox even for a dual-role approver', async () => {
+    const { service, query } = makeService();
+    await service.listPendingInbox(approverId, tenantId, ['HOD', 'HRAdmin']);
+    const [sql] = query.mock.calls[0];
+    expect(sql).toContain('AND NOT (r.request_type IN');
+    expect(sql).toContain("hr_step.approver_type IN ('HR_ADMIN', 'HR_EXECUTIVE')");
+    expect(sql).toContain('r.current_approver_user_id = $2');
+  });
+
+  it('does not let admin override replace an assigned final HR review', async () => {
+    const row = {
+      leave_id: 'leave-id', tenant_id: tenantId, staff_user_id: 'staff-id',
+      request_type: 'LEAVE', status: 'HOD_APPROVED', workflow_id: 'workflow-id',
+      current_step_order: 2, current_approver_user_id: approverId,
+    };
+    const query = jest.fn()
+      .mockResolvedValueOnce([{ role_name: 'HRAdmin' }])
+      .mockResolvedValueOnce([{ approver_type: 'HR_ADMIN' }]);
+    const { service, transaction } = makeService({
+      query,
+      findOne: jest.fn().mockResolvedValue(row),
+    });
+    await expect(service.actOnTeamRequest(
+      approverId, tenantId, row.leave_id, 'APPROVE', undefined,
+      { adminOverride: true, roles: ['HRAdmin'] },
+    )).rejects.toThrow('Use Leave Management');
+    expect(transaction).not.toHaveBeenCalled();
   });
 
   it('rejects legacy approval for an unassigned or out-of-entity request', async () => {
