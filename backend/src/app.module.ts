@@ -86,6 +86,7 @@ import { AuditModule } from './core/audit/audit.module';
 import { RedisModule } from './core/redis/redis.module';
 import { ImpersonationReadOnlyGuard } from './common/guards/impersonation-readonly.guard';
 import { FacultyReadOnlyInterceptor } from './common/interceptors/faculty-read-only.interceptor';
+import { StaffProfileFreezeInterceptor } from './common/interceptors/staff-profile-freeze.interceptor';
 import { TenantModule } from './tenant/tenant.module';
 import { StorageModule } from './storage/storage.module';
 import { MetricsModule } from './metrics/metrics.module';
@@ -240,6 +241,7 @@ import { DatabaseExceptionFilter } from './common/filters/database-exception.fil
     { provide: APP_FILTER, useClass: DatabaseExceptionFilter },
     { provide: APP_GUARD, useClass: ImpersonationReadOnlyGuard },
     { provide: APP_INTERCEPTOR, useClass: TenantContextInterceptor },
+    { provide: APP_INTERCEPTOR, useClass: StaffProfileFreezeInterceptor },
     { provide: APP_INTERCEPTOR, useClass: FacultyReadOnlyInterceptor },
     { provide: APP_INTERCEPTOR, useClass: ModuleAvailabilityInterceptor },
     { provide: APP_INTERCEPTOR, useClass: TenantSchemaInterceptor },

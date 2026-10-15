@@ -790,6 +790,7 @@ export const hrPortal: PortalConfig = {
       title: 'Employee Master',
       items: [
         { label: 'Employee Directory', href: '/hr/directory', icon: Users, keywords: ['staff', '500', 'roster'], hrModule: 'directory' },
+        { label: 'Staff Profile Verification', href: '/hr/staff-profile-verifications', icon: UserCheck, keywords: ['faculty', 'HR', 'profile', 'verification'], roles: ['HR', 'HRAdmin', 'SuperAdmin', 'CampusAdmin'] },
         { label: 'KYC & Document Vault', href: '/hr/kyc', icon: FolderLock, keywords: ['pan', 'aadhaar', 'bank', 'encrypted'], hrModule: 'documents' },
       ],
     },

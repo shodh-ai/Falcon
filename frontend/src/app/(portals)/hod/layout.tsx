@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import { RoleGate } from '@/components/layout/RoleGate';
 import { HodShell } from '@/components/layout/HodShell';
 import { PortalOnboardingGuard } from '@/components/onboarding/PortalOnboardingGuard';
+import { StaffProfileFreezeGate } from '@/components/onboarding/StaffProfileFreezeGate';
 import { HOD_ONBOARDING_CONFIG } from '@/lib/onboarding/portal-onboarding';
 
 export default function HodPortalLayout({ children }: { children: ReactNode }) {
@@ -22,7 +23,7 @@ export default function HodPortalLayout({ children }: { children: ReactNode }) {
   return (
     <RoleGate>
       <PortalOnboardingGuard config={HOD_ONBOARDING_CONFIG}>
-        <HodShell>{children}</HodShell>
+        <StaffProfileFreezeGate><HodShell>{children}</HodShell></StaffProfileFreezeGate>
       </PortalOnboardingGuard>
     </RoleGate>
   );

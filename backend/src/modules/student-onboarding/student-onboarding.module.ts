@@ -11,6 +11,8 @@ import {
 import { RegistrarIntegrationController } from './registrar-integration.controller';
 import { StudentOnboardingService } from './student-onboarding.service';
 import { StudentOnboardingWelcomeEmailListener } from './student-onboarding-welcome-email.listener';
+import { StaffProfileReviewService } from './staff-profile-review.service';
+import { StaffProfileReviewAdminController, StaffProfileReviewSelfController } from './staff-profile-review.controller';
 
 @Module({
   imports: [StorageModule, ExamCellModule],
@@ -20,11 +22,14 @@ import { StudentOnboardingWelcomeEmailListener } from './student-onboarding-welc
     StaffVerificationController,
     StudentVerificationAdminController,
     RegistrarIntegrationController,
+    StaffProfileReviewAdminController,
+    StaffProfileReviewSelfController,
   ],
   providers: [
     StudentOnboardingService,
     StudentOnboardingWelcomeEmailListener,
     HrFieldEncryptionService,
+    StaffProfileReviewService,
   ],
   exports: [StudentOnboardingService],
 })

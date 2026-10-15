@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import Link from 'next/link';
 import { CheckCircle2, Loader2, Search, XCircle } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -243,7 +244,7 @@ export function CampusAdminVerificationsPage() {
     };
   }, [detail?.documents, previewDoc, selectedId, selectedKind, token]);
 
-  const canReview = detail?.person.onboarding_status === 'PENDING_ADMIN_APPROVAL';
+  const canReview = selectedKind !== 'staff' && detail?.person.onboarding_status === 'PENDING_ADMIN_APPROVAL';
 
   const approve = async () => {
     if (!selectedId) return;
@@ -291,8 +292,11 @@ export function CampusAdminVerificationsPage() {
           <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-sgvu-gold">Campus Admin</p>
           <h1 className="mt-1 text-2xl font-bold tracking-tight text-sgvu-navy">Verifications</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            First-login submissions from students and staff on your assigned campus.
+            Student submissions can be approved here. Staff profiles are view-only; HR Admin makes the final decision.
           </p>
+          <Link href="/campus-admin/hr/staff-profile-verifications" className="mt-2 inline-block text-sm text-blue-700 underline">
+            View staff HR verification status
+          </Link>
         </CardContent>
       </Card>
 

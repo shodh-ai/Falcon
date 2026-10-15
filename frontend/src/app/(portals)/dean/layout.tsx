@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import { RoleGate } from '@/components/layout/RoleGate';
 import { GenericPortalShell } from '@/components/layout/GenericPortalShell';
 import { PortalOnboardingGuard } from '@/components/onboarding/PortalOnboardingGuard';
+import { StaffProfileFreezeGate } from '@/components/onboarding/StaffProfileFreezeGate';
 import { DEAN_ONBOARDING_CONFIG } from '@/lib/onboarding/portal-onboarding';
 
 export default function DeanPortalLayout({ children }: { children: ReactNode }) {
@@ -22,7 +23,7 @@ export default function DeanPortalLayout({ children }: { children: ReactNode }) 
   return (
     <RoleGate>
       <PortalOnboardingGuard config={DEAN_ONBOARDING_CONFIG}>
-        <GenericPortalShell portal="dean">{children}</GenericPortalShell>
+        <StaffProfileFreezeGate><GenericPortalShell portal="dean">{children}</GenericPortalShell></StaffProfileFreezeGate>
       </PortalOnboardingGuard>
     </RoleGate>
   );

@@ -1,8 +1,10 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
   ForbiddenException,
+  Optional,
   UnauthorizedException,
 } from '@nestjs/common';
 import { DataSource, QueryRunner } from 'typeorm';
@@ -22,6 +24,7 @@ import {
   resolveOnboardingPortalKind,
   type OnboardingPortalKind,
 } from './onboarding-portal.util';
+import { StaffProfileReviewService } from './staff-profile-review.service';
 
 type OnboardingDocRow = {
   doc_id: string;
@@ -124,6 +127,7 @@ export class StudentOnboardingService {
     private readonly crypto: HrFieldEncryptionService,
     private readonly enterpriseAudit: EnterpriseAuditService,
     private readonly campusScope: CampusScopeService,
+    @Optional() private readonly staffReviews?: StaffProfileReviewService,
   ) {}
 
   resolveTenantId(tenantId?: string | null) {
@@ -335,6 +339,9 @@ export class StudentOnboardingService {
     const kind = resolveOnboardingPortalKind(user.role_name);
 
     if (kind === 'staff') {
+      if (user.onboarding_status === 'COMPLETED') {
+        throw new ForbiddenException('Completed staff profiles can only be corrected through an HR review');
+      }
       return this.saveStaffProfile(tenant, userId, body);
     }
     return this.saveStudentProfile(tenant, userId, body);
@@ -354,6 +361,9 @@ export class StudentOnboardingService {
     }
 
     if (kind === 'staff') {
+      if (user.onboarding_status === 'COMPLETED') {
+        throw new ForbiddenException('Completed staff documents can only be replaced through an HR review');
+      }
       await this.dataSource.query(
         `INSERT INTO staff_onboarding_docs (tenant_id, staff_user_id, doc_type, file_path, status)
          VALUES ($1, $2, $3, $4, 'PENDING')
@@ -417,17 +427,30 @@ export class StudentOnboardingService {
       throw new BadRequestException(`Missing documents: ${missing.join(', ')}`);
     }
 
-    const submitted = await this.dataSource.query<Array<{ user_id: string }>>(
-      `UPDATE users
-       SET onboarding_status = 'PENDING_ADMIN_APPROVAL', updated_at = NOW()
-       WHERE user_id = $1 AND tenant_id = $2 AND onboarding_status = 'PENDING_DOCUMENTS'
-       RETURNING user_id`,
-      [userId, tenantId],
-    );
-    if (!submitted.length) {
-      throw new BadRequestException(
-        'Could not submit profile for verification',
-      );
+    const runner = this.dataSource.createQueryRunner();
+    await runner.connect();
+    await runner.startTransaction();
+    try {
+      const submitted = (await runner.query(
+        `UPDATE users
+         SET onboarding_status = 'PENDING_ADMIN_APPROVAL', updated_at = NOW()
+         WHERE user_id = $1 AND tenant_id = $2 AND onboarding_status = 'PENDING_DOCUMENTS'
+         RETURNING user_id`,
+        [userId, tenantId],
+      )) as Array<{ user_id: string }>;
+      if (!submitted.length) {
+        throw new BadRequestException('Could not submit profile for verification');
+      }
+      if (kind === 'staff') {
+        if (!this.staffReviews) throw new ConflictException('HR verification is unavailable');
+        await this.staffReviews.open(tenantId, userId, 'INITIAL', userId, runner);
+      }
+      await runner.commitTransaction();
+    } catch (error) {
+      await runner.rollbackTransaction();
+      throw error;
+    } finally {
+      await runner.release();
     }
 
     this.notifications.onboardingVerificationRequested({
@@ -668,6 +691,7 @@ export class StudentOnboardingService {
     actor?: OnboardingAuditActor,
     scopeUser?: ScopedAuthUser,
     expectedKind?: OnboardingPortalKind,
+    expectedReviewId?: string,
   ) {
     await this.assertVerificationCampus(scopeUser, targetUserId);
     const tenant = this.resolveTenantId(tenantId);
@@ -701,25 +725,49 @@ export class StudentOnboardingService {
       if (!user) throw new NotFoundException('User not found');
 
       const status = (user.onboarding_status ?? '').trim();
-      if (status === 'COMPLETED') {
-        throw new BadRequestException('User has already been approved');
+      const kind = verifiedKind;
+      const staffReview = kind === 'staff'
+        ? await this.staffReviews?.activeReview(tenant, targetUserId, qr, true)
+        : null;
+      if (kind === 'staff') {
+        const roles = [...(scopeUser?.roles ?? []), scopeUser?.role ?? ''];
+        if (!roles.some((role) => role.toLowerCase() === 'hradmin')) {
+          throw new ForbiddenException('Only HR Admin may approve staff profiles');
+        }
+        if (scopeUser?.user_id === targetUserId) {
+          throw new ForbiddenException('Cannot approve your own profile');
+        }
+        if (!staffReview || staffReview.status !== 'PENDING_HR') {
+          throw new ConflictException('No staff profile is awaiting HR approval');
+        }
+        if (expectedReviewId && staffReview.review_id !== expectedReviewId) {
+          throw new ConflictException('Selected HR review is no longer current');
+        }
+        const snapshot = await this.staffReviews!.snapshot(tenant, targetUserId, qr);
+        if (snapshot.hash !== staffReview.submitted_snapshot_hash) {
+          throw new ConflictException('Staff profile changed since submission; resubmit for HR review');
+        }
+        const missing = getRequiredDocTypes('staff').filter(
+          (docType) => !snapshot.documentManifest.some((doc: { doc_type: string; file_path: string }) =>
+            doc.doc_type === docType && Boolean(doc.file_path)),
+        );
+        if (missing.length) throw new BadRequestException(`Missing documents: ${missing.join(', ')}`);
       }
-      if (status !== 'PENDING_ADMIN_APPROVAL') {
+      if (status !== 'PENDING_ADMIN_APPROVAL' && !(kind === 'staff' && status === 'COMPLETED')) {
         throw new BadRequestException(
           `User is not awaiting admin approval (current status: ${status || 'UNKNOWN'})`,
         );
       }
 
-      const kind = verifiedKind;
-      const updated = (await qr.query(
-        `UPDATE users
-         SET onboarding_status = 'COMPLETED', updated_at = NOW()
-         WHERE user_id = $1 AND tenant_id = $2 AND onboarding_status = 'PENDING_ADMIN_APPROVAL'
-         RETURNING user_id`,
-        [targetUserId, tenant],
-      )) as Array<{ user_id: string }>;
-      if (!updated.length) {
-        throw new BadRequestException('User is not awaiting admin approval');
+      if (status === 'PENDING_ADMIN_APPROVAL') {
+        const updated = (await qr.query(
+          `UPDATE users
+           SET onboarding_status = 'COMPLETED', updated_at = NOW()
+           WHERE user_id = $1 AND tenant_id = $2 AND onboarding_status = 'PENDING_ADMIN_APPROVAL'
+           RETURNING user_id`,
+          [targetUserId, tenant],
+        )) as Array<{ user_id: string }>;
+        if (!updated.length) throw new ConflictException('Staff onboarding changed during approval');
       }
 
       if (kind === 'staff') {
@@ -730,6 +778,17 @@ export class StudentOnboardingService {
           [targetUserId, tenant],
         );
         await this.finalizeStaffOnboarding(tenant, targetUserId, qr);
+        await qr.query(
+          `UPDATE staff_profile_reviews
+           SET status = 'APPROVED', revision = revision + 1,
+               decided_by = $3, decided_at = NOW(), updated_at = NOW()
+           WHERE tenant_id = $1 AND review_id = $2 AND status = 'PENDING_HR'`,
+          [tenant, staffReview!.review_id, actor?.userId ?? scopeUser?.user_id],
+        );
+        await this.staffReviews!.appendEvent(
+          qr, { ...staffReview!, revision: staffReview!.revision + 1 },
+          'APPROVED', actor?.userId ?? scopeUser?.user_id ?? null,
+        );
       } else {
         await qr.query(
           `UPDATE student_onboarding_docs
@@ -745,7 +804,7 @@ export class StudentOnboardingService {
         .dismissVerificationNotifications(tenant, targetUserId)
         .catch(() => undefined);
 
-      this.notifications.studentOnboardingApproved({
+      if (status !== 'COMPLETED') this.notifications.studentOnboardingApproved({
         tenantId: tenant,
         userId: targetUserId,
         studentName: user.name,
