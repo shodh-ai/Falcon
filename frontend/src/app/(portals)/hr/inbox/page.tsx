@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Check, Inbox, X } from 'lucide-react';
 import { FalconLoader } from '@/components/brand/FalconLoader';
@@ -55,34 +55,33 @@ export default function HrInboxPage() {
   const [adminPending, setAdminPending] = useState<AdminPendingResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState<string | null>(null);
+  const [overrideError, setOverrideError] = useState<{ leaveId: string; message: string } | null>(null);
 
-  const load = () => {
-    setLoading(true);
-    const tasks: Promise<void>[] = [
-      api
-        .get<InboxResponse>('/api/hr/inbox/pending')
-        .then(setInbox)
-        .catch(() => setInbox({ count: 0, items: [] }))
-        .then(() => undefined),
-    ];
-    if (isHrAdmin) {
-      tasks.push(
-        api
-          .get<AdminPendingResponse>('/api/hr/admin/pending-requests')
-          .then(setAdminPending)
-          .catch(() => setAdminPending({ count: 0, items: [] }))
-          .then(() => undefined),
-      );
-    }
-    void Promise.all(tasks).finally(() => setLoading(false));
-  };
+  const fetchQueues = useCallback(async () => {
+    return Promise.all([
+      api.get<InboxResponse>('/api/hr/inbox/pending')
+        .catch(() => ({ count: 0, items: [] } as InboxResponse)),
+      isHrAdmin
+        ? api.get<AdminPendingResponse>('/api/hr/admin/pending-requests')
+          .catch(() => ({ count: 0, items: [] } as AdminPendingResponse))
+        : Promise.resolve(null),
+    ]);
+  }, [api, isHrAdmin]);
 
   useEffect(() => {
-    load();
-  }, [api]);
+    let active = true;
+    void fetchQueues().then(([pending, overridePending]) => {
+      if (!active) return;
+      setInbox(pending);
+      setAdminPending(overridePending);
+      setLoading(false);
+    });
+    return () => { active = false; };
+  }, [fetchQueues]);
 
   async function act(leaveId: string, action: 'APPROVE' | 'REJECT', override = false) {
     setActing(leaveId);
+    setOverrideError(null);
     try {
       if (override) {
         await api.patch(`/api/hr/admin/requests/${leaveId}/override`, { action });
@@ -91,10 +90,14 @@ export default function HrInboxPage() {
         await api.patch(`/api/hr/workforce/team/${leaveId}/action`, { action });
         toast.success(action === 'APPROVE' ? 'Approved' : 'Rejected');
       }
-      load();
+      const [pending, overridePending] = await fetchQueues();
+      setInbox(pending);
+      setAdminPending(overridePending);
       window.dispatchEvent(new CustomEvent('falcon:notifications-refresh'));
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Action failed');
+      const message = e instanceof Error ? e.message : 'Action failed';
+      if (override) setOverrideError({ leaveId, message });
+      else toast.error(message);
     } finally {
       setActing(null);
     }
@@ -169,9 +172,9 @@ export default function HrInboxPage() {
         <section className="mt-10 space-y-3">
           <HrPageHeader
             title="HR Admin Override"
-            description="Bypass stalled approvers so payroll and attendance are not blocked."
+            description="Exception-only action for a stalled approver. Final HR sign-off remains separate and requires an independent reviewer."
           />
-          <Badge variant="destructive">{adminPending?.count} system-wide pending</Badge>
+          <Badge variant="destructive">{adminPending?.count} eligible for exception review</Badge>
           {(adminPending?.items ?? []).map((item) => (
             <Card key={`admin-${item.leave_id}`} className="border-amber-200">
               <CardContent className="flex flex-wrap items-start justify-between gap-4 p-4">
@@ -205,6 +208,11 @@ export default function HrInboxPage() {
                     Bypass Approve
                   </Button>
                 </div>
+                {overrideError?.leaveId === item.leave_id && (
+                  <p role="alert" className="w-full rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+                    {overrideError.message}
+                  </p>
+                )}
               </CardContent>
             </Card>
           ))}

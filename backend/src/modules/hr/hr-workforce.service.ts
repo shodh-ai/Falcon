@@ -470,9 +470,13 @@ export class HrWorkforceService {
        FROM staff_leave_requests r
        JOIN users u ON u.user_id = r.staff_user_id
        LEFT JOIN departments d ON d.dept_id = u.dept_id
+       LEFT JOIN hr_approval_workflow_steps hr_step
+         ON hr_step.workflow_id = r.workflow_id AND hr_step.step_order = r.current_step_order
        WHERE r.tenant_id = $1
          AND r.status IN ('PENDING', 'HOD_APPROVED')
          AND r.current_approver_user_id = $2
+         AND NOT (r.request_type IN ('LEAVE', 'ON_DUTY', 'REGULARIZATION')
+           AND ${finalHrReviewSql('r', 'hr_step')})
          ${typeClause}
          ${clause}
        ORDER BY r.applied_at ASC`,
@@ -938,6 +942,15 @@ export class HrWorkforceService {
 
     if (row.status !== 'PENDING' && row.status !== 'HOD_APPROVED') {
       throw new BadRequestException('Request has already been processed');
+    }
+
+    if (adminOverride && ['LEAVE', 'ON_DUTY', 'REGULARIZATION'].includes(row.request_type)) {
+      const stepType = await this.resolveCurrentStepApproverType(tenantId, row);
+      if (stepType && ['HR_ADMIN', 'HR_EXECUTIVE', 'ROLE:HR', 'ROLE:HRAdmin', 'ROLE:SuperAdmin'].includes(stepType)) {
+        throw new ConflictException(
+          'This request is at final HR review. Use Leave Management; an override cannot replace independent final sign-off.',
+        );
+      }
     }
 
     let overrideAuditParams: string[] | null = null;

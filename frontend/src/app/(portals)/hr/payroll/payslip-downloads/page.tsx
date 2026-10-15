@@ -7,6 +7,8 @@ import {
   FileText,
   Search,
   ShieldCheck,
+  SlidersHorizontal,
+  ChevronDown,
 } from 'lucide-react';
 import { HrPageHeader } from '@/components/hr/HrPageHeader';
 import { Badge } from '@/components/ui/badge';
@@ -98,14 +100,15 @@ export default function HrPayslipDownloadRequestsPage() {
                 <Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-sgvu-navy" />
                 <input aria-label="Search employee" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search employee" className="h-10 w-full rounded-xl border-2 border-gray-200 bg-white pl-9 pr-3 text-sm outline-none transition focus:border-sgvu-gold focus:ring-2 focus:ring-sgvu-gold/30 sm:w-52" />
               </label>
-              <label className="relative block">
-                <Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-sgvu-navy" />
-                <select aria-label="Search by request status" value={status} onChange={(event) => setStatus(event.target.value as 'ALL' | RequestStatus)} className="h-10 w-full appearance-none rounded-xl border-2 border-sgvu-gold bg-white pl-9 pr-8 text-sm font-semibold text-sgvu-navy shadow-sm outline-none focus:ring-2 focus:ring-sgvu-gold/30 sm:w-48">
+              <label className="relative block min-w-0">
+                <SlidersHorizontal aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-sgvu-navy" />
+                <select aria-label="Filter by request status" value={status} onChange={(event) => setStatus(event.target.value as 'ALL' | RequestStatus)} className="h-10 w-full appearance-none rounded-xl border-2 border-sgvu-gold bg-white pl-10 pr-10 text-sm font-semibold text-sgvu-navy shadow-sm outline-none focus:ring-2 focus:ring-sgvu-gold/30 sm:w-52">
                   <option value="ALL">All statuses</option>
                   <option value="PENDING_REVIEW">Pending review</option>
                   <option value="APPROVED">Approved</option>
                   <option value="REJECTED">Rejected</option>
                 </select>
+                <ChevronDown aria-hidden="true" className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-sgvu-navy" />
               </label>
             </div>
           </div>

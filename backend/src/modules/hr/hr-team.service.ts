@@ -17,6 +17,7 @@ import { HrWorkforceService } from './hr-workforce.service';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 import { CacheService } from '../../core/redis/cache.service';
 import { canAccessTeamApprovals } from './utils/reporting-officer.util';
+import { finalHrReviewSql } from './hr-final-review.sql';
 
 export type TeamRequestTab =
   | 'LEAVE'
@@ -520,10 +521,14 @@ export class HrTeamService {
     >(
       `SELECT r.request_type, COUNT(*)::text AS count
        FROM staff_leave_requests r
+       LEFT JOIN hr_approval_workflow_steps hr_step
+         ON hr_step.workflow_id = r.workflow_id AND hr_step.step_order = r.current_step_order
        WHERE r.tenant_id = $1
          AND r.status = 'PENDING'
          AND r.current_approver_user_id = $2
          AND r.staff_user_id = ANY($3::uuid[])
+         AND NOT (r.request_type IN ('LEAVE', 'ON_DUTY', 'REGULARIZATION')
+           AND ${finalHrReviewSql('r', 'hr_step')})
        GROUP BY r.request_type`,
       [tenantId, managerId, userIds],
     );
@@ -627,11 +632,15 @@ export class HrTeamService {
        FROM staff_leave_requests r
        JOIN users u ON u.user_id = r.staff_user_id
        LEFT JOIN hr_employee_profiles p ON p.user_id = u.user_id AND p.tenant_id = r.tenant_id
+       LEFT JOIN hr_approval_workflow_steps hr_step
+         ON hr_step.workflow_id = r.workflow_id AND hr_step.step_order = r.current_step_order
        WHERE r.tenant_id = $1
          AND r.status = 'PENDING'
          AND r.current_approver_user_id = $2
          AND r.request_type = $3
          AND r.staff_user_id = ANY($4::uuid[])
+         AND NOT (r.request_type IN ('LEAVE', 'ON_DUTY', 'REGULARIZATION')
+           AND ${finalHrReviewSql('r', 'hr_step')})
        ORDER BY r.applied_at ASC`,
       [tenantId, managerId, tabKey, userIds],
     );
@@ -1028,7 +1037,11 @@ export class HrTeamService {
        JOIN users u ON u.user_id = r.staff_user_id
        LEFT JOIN hr_employee_profiles p ON p.user_id = u.user_id AND p.tenant_id = r.tenant_id
        LEFT JOIN users approver ON approver.user_id = r.current_approver_user_id
+       LEFT JOIN hr_approval_workflow_steps hr_step
+         ON hr_step.workflow_id = r.workflow_id AND hr_step.step_order = r.current_step_order
        WHERE r.tenant_id = $1 AND r.status IN ('PENDING', 'HOD_APPROVED')${entityClause}
+         AND NOT (r.request_type IN ('LEAVE', 'ON_DUTY', 'REGULARIZATION')
+           AND ${finalHrReviewSql('r', 'hr_step')})
        ORDER BY r.applied_at ASC`,
       params,
     );

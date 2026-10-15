@@ -242,6 +242,7 @@ export function QuickActionMenu() {
               onChange={(e) => setLeaveForm((f) => ({ ...f, start_date: e.target.value }))}
               required
               />
+              <span className="text-xs font-normal text-muted-foreground">The first day of the leave period.</span>
             </label>
             <label className="grid gap-1 text-sm font-medium">End Date
               <Input
@@ -251,6 +252,7 @@ export function QuickActionMenu() {
               onChange={(e) => setLeaveForm((f) => ({ ...f, end_date: e.target.value }))}
               required
               />
+              <span className="text-xs font-normal text-muted-foreground">The last day of the leave period.</span>
             </label>
             <p className="text-xs text-muted-foreground">{inclusiveCalendarDays(leaveForm.start_date, leaveForm.end_date) ? `${inclusiveCalendarDays(leaveForm.start_date, leaveForm.end_date)} calendar day(s) selected. Choose the same date twice for a single day; HR policy determines chargeable leave.` : 'Select a start and end date to see the duration.'}</p>
             <Input
@@ -280,6 +282,7 @@ export function QuickActionMenu() {
               onChange={(e) => setOdForm((f) => ({ ...f, start_date: e.target.value }))}
               required
               />
+              <span className="text-xs font-normal text-muted-foreground">The first day of the on-duty period.</span>
             </label>
             <label className="grid gap-1 text-sm font-medium">End Date
               <Input
@@ -289,6 +292,7 @@ export function QuickActionMenu() {
               onChange={(e) => setOdForm((f) => ({ ...f, end_date: e.target.value }))}
               required
               />
+              <span className="text-xs font-normal text-muted-foreground">The last day of the on-duty period.</span>
             </label>
             <p className="text-xs text-muted-foreground">{inclusiveCalendarDays(odForm.start_date, odForm.end_date) ? `${inclusiveCalendarDays(odForm.start_date, odForm.end_date)} calendar day(s) selected.` : 'Select a start and end date to see the duration.'} Times are optional for a single-day OD.</p>
             <div className="grid grid-cols-2 gap-2">
