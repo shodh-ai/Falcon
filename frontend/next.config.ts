@@ -11,6 +11,9 @@ const nextConfig: NextConfig = {
     root: process.cwd(),
   },
   experimental: {
+    // CI/container builds start clean, so persisting the Turbopack build cache
+    // only consumes scarce disk space without speeding up the next build.
+    turbopackFileSystemCacheForBuild: false,
     // Keep production builds safe on the shared Coolify host. Without this,
     // Next.js sizes workers from host CPUs (nine workers on the current VPS),
     // which causes large simultaneous memory spikes while prerendering.
