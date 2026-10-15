@@ -50,6 +50,7 @@ export function CampusAdminShell({ children }: { children: ReactNode }) {
           { label: 'Departments', href: campusAdminRoutes.departments, icon: Building2 },
           { label: 'Programs & Courses', href: campusAdminRoutes.programsCourses, icon: BookOpen },
           { label: 'Faculty & Staff', href: campusAdminRoutes.facultyStaff, icon: UserRound },
+          { label: 'Staff HR Verification (View)', href: '/campus-admin/hr/staff-profile-verifications', icon: FileCheck2 },
           { label: 'Students', href: campusAdminRoutes.students, icon: GraduationCap },
         ],
       },

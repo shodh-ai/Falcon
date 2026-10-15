@@ -484,7 +484,7 @@ export class StudentVerificationAdminController {
 @Controller('api/staff/verifications')
 @BelongsToModule('CORE')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('CampusAdmin', 'SuperAdmin')
+@Roles('CampusAdmin', 'SuperAdmin', 'HRAdmin')
 export class StaffVerificationController {
   constructor(
     private readonly onboarding: StudentOnboardingService,
@@ -577,6 +577,8 @@ export class StaffVerificationController {
   }
 
   @Post(':targetUserId/approve')
+  @BelongsToModule('CORE')
+  @Roles('HRAdmin')
   async approve(
     @Req()
     req: {
@@ -596,6 +598,7 @@ export class StaffVerificationController {
   }
 
   @Post(':targetUserId/reject')
+  @Roles('HRAdmin')
   async reject(
     @Req()
     req: {
@@ -606,14 +609,7 @@ export class StaffVerificationController {
     @Param('targetUserId') targetUserId: string,
     @Body() body: { remarks: string },
   ) {
-    return this.onboarding.reject(
-      await this.tenant(req),
-      targetUserId,
-      body.remarks,
-      auditActor(req),
-      req.user,
-      'staff',
-    );
+    throw new BadRequestException('Use the HR staff profile review to request targeted corrections');
   }
 
   @Get(':targetUserId/documents/:docType/preview')
