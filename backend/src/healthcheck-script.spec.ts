@@ -12,10 +12,12 @@ describe('production container healthcheck', () => {
   );
 
   it('checks the local API response and expected health payload', () => {
-    expect(script).toContain("http://127.0.0.1:4000/health");
+    expect(script).toContain("hostname: '127.0.0.1'");
+    expect(script).toContain("const paths = ['/health']");
+    expect(script).toContain("paths.push('/health/notifications')");
     expect(script).toContain("JSON.parse(body).status === 'ok'");
     expect(script).toContain('response.statusCode === 200');
-    expect(script).toContain('request.setTimeout(4000');
+    expect(script).toContain('setTimeout(() => finish(false), 4000)');
   });
 
   it('uses the same bundled script for the Docker healthcheck', () => {

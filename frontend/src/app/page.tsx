@@ -217,13 +217,12 @@ export default function Home() {
                         setForgotSent(
                           data.requires_admin_reset
                             ? 'No verified university email is linked yet. Contact Campus Admin to reset your student account.'
-                            : data.reset_token
-                            ? `Reset token (dev): ${data.reset_token}`
-                            : 'If the account exists, a reset link was issued.',
+                            : "If an account exists for this email or student ID, you'll receive a password reset link shortly. Please check your inbox and spam folder.",
                         );
                         setLocalError(null);
                       } catch {
-                        setLocalError('Could not start password reset');
+                        setForgotSent(null);
+                        setLocalError('Unable to process your request. Please try again later.');
                       }
                     }}
                   >

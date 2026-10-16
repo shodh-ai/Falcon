@@ -7,26 +7,19 @@ import * as path from 'path';
 import { DataSource } from 'typeorm';
 import * as nodemailer from 'nodemailer';
 import { wrapFalconEmailHtml } from '../../common/email/falcon-email.template';
+import {
+  FALCON_EMAIL_FROM,
+  falconEmailTransportOptions,
+} from '../../common/email/falcon-email-sender';
 
 @Injectable()
 export class FinanceReceiptService {
   private readonly logger = new Logger(FinanceReceiptService.name);
-  private transporter: nodemailer.Transporter;
 
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly config: ConfigService,
-  ) {
-    this.transporter = nodemailer.createTransport({
-      host: this.config.get('EMAIL_HOST'),
-      port: parseInt(this.config.get('EMAIL_PORT') || '587', 10),
-      secure: false,
-      auth: {
-        user: this.config.get('EMAIL_USER'),
-        pass: this.config.get('EMAIL_PASSWORD'),
-      },
-    });
-  }
+  ) {}
 
   async generateAndStore(params: {
     tenantId: string;
@@ -181,20 +174,18 @@ export class FinanceReceiptService {
       frontend,
     );
     try {
-      await this.transporter.sendMail({
-        from: this.config.get(
-          'EMAIL_FROM',
-          'Falcon Finance <noreply@falcon.local>',
-        ),
+      const transporter = nodemailer.createTransport(
+        falconEmailTransportOptions((key) => this.config.get<unknown>(key)),
+      );
+      await transporter.sendMail({
+        from: FALCON_EMAIL_FROM,
         to: student.official_email,
         bcc: bcc.length ? bcc : undefined,
         subject: 'SGVU Fee Payment Receipt',
         html,
       });
-    } catch (err) {
-      this.logger.warn(
-        `Receipt email failed: ${err instanceof Error ? err.message : err}`,
-      );
+    } catch {
+      this.logger.warn('Receipt email failed (SMTP_FAILURE)');
     }
   }
 }

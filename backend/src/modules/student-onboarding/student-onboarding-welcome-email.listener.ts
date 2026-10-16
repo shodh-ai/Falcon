@@ -7,25 +7,18 @@ import {
   type StudentOnboardingApprovedPayload,
 } from '../../core/notifications/notification.events';
 import { wrapFalconEmailHtml } from '../../common/email/falcon-email.template';
+import {
+  FALCON_EMAIL_FROM,
+  falconEmailTransportOptions,
+} from '../../common/email/falcon-email-sender';
 
 @Injectable()
 export class StudentOnboardingWelcomeEmailListener {
   private readonly logger = new Logger(
     StudentOnboardingWelcomeEmailListener.name,
   );
-  private transporter: nodemailer.Transporter;
 
-  constructor(private readonly config: ConfigService) {
-    this.transporter = nodemailer.createTransport({
-      host: this.config.get('EMAIL_HOST'),
-      port: parseInt(this.config.get('EMAIL_PORT') || '587', 10),
-      secure: false,
-      auth: {
-        user: this.config.get('EMAIL_USER'),
-        pass: this.config.get('EMAIL_PASSWORD'),
-      },
-    });
-  }
+  constructor(private readonly config: ConfigService) {}
 
   @OnEvent(NotificationEvents.STUDENT_ONBOARDING_APPROVED)
   async onApproved(payload: StudentOnboardingApprovedPayload) {
@@ -48,21 +41,19 @@ export class StudentOnboardingWelcomeEmailListener {
     );
 
     try {
-      await this.transporter.sendMail({
-        from: this.config.get(
-          'EMAIL_FROM',
-          'Falcon Campus OS <noreply@falcon.local>',
-        ),
+      const transporter = nodemailer.createTransport(
+        falconEmailTransportOptions((key) => this.config.get<unknown>(key)),
+      );
+      await transporter.sendMail({
+        from: FALCON_EMAIL_FROM,
         to: payload.officialEmail,
         subject: `Welcome to Falcon — Your portal is unlocked`,
         html,
       });
-      this.logger.log(
-        `Student onboarding welcome email sent to ${payload.officialEmail}`,
-      );
-    } catch (err) {
+      this.logger.log('Student onboarding welcome email accepted by SMTP');
+    } catch {
       this.logger.warn(
-        `Student onboarding welcome email failed for ${payload.officialEmail}: ${err}`,
+        'Student onboarding welcome email failed (SMTP_FAILURE)',
       );
     }
   }

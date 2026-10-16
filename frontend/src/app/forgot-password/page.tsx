@@ -9,7 +9,6 @@ export default function ForgotPasswordPage() {
   const [identifier, setIdentifier] = useState('');
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   async function submit(e: React.FormEvent) {
@@ -22,13 +21,10 @@ export default function ForgotPasswordPage() {
       setMessage(
         res.requires_admin_reset
           ? 'No verified university email is linked yet. Contact Campus Admin to reset your student account.'
-          : res.reset_token
-          ? 'A reset token was generated for this development environment.'
-          : 'If the account exists, a reset link has been sent. If it does not arrive, contact Campus Admin.',
+          : "If an account exists for this email or student ID, you'll receive a password reset link shortly. Please check your inbox and spam folder.",
       );
-      setToken(res.reset_token ?? null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not start password reset');
+    } catch {
+      setError('Unable to process your request. Please try again later.');
     } finally {
       setLoading(false);
     }
@@ -52,14 +48,6 @@ export default function ForgotPasswordPage() {
         </button>
         {message ? <p className="text-sm text-emerald-700">{message}</p> : null}
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
-        {token ? (
-          <p className="break-all text-xs text-muted-foreground">
-            Dev token: {token} — use{' '}
-            <Link className="underline" href={`/reset-password?token=${token}`}>
-              reset page
-            </Link>
-          </p>
-        ) : null}
         <Link href="/" className="block text-center text-sm text-sgvu-navy underline">
           Back to login
         </Link>

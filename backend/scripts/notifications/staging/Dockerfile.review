@@ -1,0 +1,22 @@
+# BUILD PREPARATION ONLY. No pull/build is authorized by this file.
+# Backend/ is the build context. Supply approved Node 22 >=22.13 bookworm-slim
+# pinned by digest; never copy or mount the macOS node_modules symlink.
+ARG NOTIFICATION_STAGING_NODE_BASE
+FROM ${NOTIFICATION_STAGING_NODE_BASE} AS build
+WORKDIR /build
+RUN node -e "const [a,b]=process.versions.node.split('.').map(Number);if(a!==22||b<13)process.exit(1)"
+COPY package.json package-lock.json ./
+RUN npm ci --include=dev --no-audit --no-fund
+COPY tsconfig.json tsconfig.build.json ./
+COPY src ./src
+RUN node node_modules/typescript/bin/tsc -p tsconfig.build.json --incremental false --outDir /compiled
+RUN node -e "require('uuid');require('bcrypt');require('nodemailer');require('pg')"
+FROM ${NOTIFICATION_STAGING_NODE_BASE} AS runtime
+WORKDIR /app/backend
+COPY --from=build /compiled ./dist
+COPY --from=build /build/node_modules ./node_modules
+USER node
+ENV NODE_ENV=production
+ENTRYPOINT ["node", "dist/notifications-staging/main.js"]
+CMD ["--approved-notification-staging"]
+# No .env, migration directory/runner, seed, source mount or production CMD.

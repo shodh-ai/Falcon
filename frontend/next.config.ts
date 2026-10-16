@@ -6,6 +6,11 @@ const nextConfig: NextConfig = {
   output: 'standalone',
   compress: true,
   poweredByHeader: false,
+  // Recovery query strings contain bearer tokens; keep them out of dev logs.
+  logging: {
+    incomingRequests: false,
+    fetches: { fullUrl: false },
+  },
   turbopack: {
     // Pin root to frontend/ — avoids picking up stray lockfiles (e.g. ~/package-lock.json)
     root: process.cwd(),
