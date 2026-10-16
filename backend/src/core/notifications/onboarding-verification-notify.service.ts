@@ -12,7 +12,7 @@ const ADMISSIONS_ROLES = [
   'Registrar',
   'SuperAdmin',
 ] as const;
-const STAFF_VERIFICATION_ROLES = ['CampusAdmin', 'SuperAdmin'] as const;
+const STAFF_VERIFICATION_ROLES = ['HRAdmin'] as const;
 
 @Injectable()
 export class OnboardingVerificationNotifyService {
@@ -29,10 +29,12 @@ export class OnboardingVerificationNotifyService {
     const rows = await this.dataSource.query<Array<{ user_id: string }>>(
       `SELECT DISTINCT u.user_id
        FROM users u
-       JOIN user_roles ur ON ur.user_id = u.user_id
-       JOIN roles r ON r.role_id = ur.role_id
+       JOIN roles r ON r.role_id = u.role_id OR EXISTS (
+         SELECT 1 FROM user_roles ur WHERE ur.user_id = u.user_id AND ur.role_id = r.role_id
+       )
        WHERE u.tenant_id = $1
          AND u.is_active = true
+         AND u.deleted_at IS NULL
          AND r.role_name = ANY($2::text[])`,
       [tenantId, [...roleNames]],
     );
@@ -104,7 +106,7 @@ export class OnboardingVerificationNotifyService {
         pendingAdmins,
         {
           ...baseMessage,
-          actionLink: '/admin/faculty-verifications',
+          actionLink: '/hr/staff-profile-verifications',
         },
         { queueDelivery: false },
       );

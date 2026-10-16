@@ -4,15 +4,16 @@ import { StaffProfileFreezeGate } from '../StaffProfileFreezeGate';
 
 const mocks = vi.hoisted(() => ({
   get: vi.fn(), post: vi.fn(), patch: vi.fn(), logout: vi.fn(),
+  onboardingStatus: 'COMPLETED',
 }));
 vi.mock('@/lib/api', () => ({ useAuthedApi: () => mocks }));
 vi.mock('@/context/AuthContext', () => ({ useAuth: () => ({
-  user: { user_id: 'faculty-1', onboarding_status: 'COMPLETED', role: 'Faculty' },
+  user: { user_id: 'faculty-1', onboarding_status: mocks.onboardingStatus, role: 'Faculty' },
   logout: mocks.logout,
 }) }));
 
 describe('StaffProfileFreezeGate', () => {
-  beforeEach(() => { vi.clearAllMocks(); });
+  beforeEach(() => { vi.clearAllMocks(); mocks.onboardingStatus = 'COMPLETED'; });
 
   it('shows the freeze popup and does not render normal faculty work', async () => {
     mocks.get.mockResolvedValue({ status: 'PENDING_HR', source: 'PHARMACY_RECHECK' });
@@ -52,5 +53,15 @@ describe('StaffProfileFreezeGate', () => {
       '/api/staff/profile-review/me/corrections', { orcid_id: '0000-0002-1825-0097' },
     ));
     await waitFor(() => expect(mocks.post).toHaveBeenCalledWith('/api/staff/profile-review/me/resubmit'));
+  });
+
+  it('allows a new staff member to correct an initial HR review from onboarding', async () => {
+    mocks.onboardingStatus = 'PENDING_ADMIN_APPROVAL';
+    mocks.get.mockResolvedValue({ status: 'RETURNED_FOR_CORRECTION', source: 'INITIAL',
+      requested_fields: ['staff_mobile'], requested_docs: [], return_reason: 'Please update mobile number' });
+    render(<StaffProfileFreezeGate initialReview><p>Waiting for approval</p></StaffProfileFreezeGate>);
+    expect(await screen.findByRole('alertdialog')).toHaveTextContent('Corrections requested by HR');
+    expect(screen.getByPlaceholderText('Correct Mobile number')).toBeInTheDocument();
+    expect(screen.queryByText('Waiting for approval')).not.toBeInTheDocument();
   });
 });

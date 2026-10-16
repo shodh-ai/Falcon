@@ -1,7 +1,7 @@
 import { OnboardingVerificationNotifyService } from './onboarding-verification-notify.service';
 
 describe('OnboardingVerificationNotifyService', () => {
-  it('routes staff verification only to Campus Admin and Super Admin', async () => {
+  it('routes staff verification to the HR Admin review queue', async () => {
     const dispatch = {
       dispatchToMany: jest.fn().mockResolvedValue(undefined),
     };
@@ -32,8 +32,7 @@ describe('OnboardingVerificationNotifyService', () => {
     });
 
     expect(dataSource.query.mock.calls[0][1][1]).toEqual([
-      'CampusAdmin',
-      'SuperAdmin',
+      'HRAdmin',
     ]);
     expect(dispatch.dispatchToMany).toHaveBeenCalledWith(
       'a0000000-0000-4000-8000-000000000001',
@@ -42,7 +41,7 @@ describe('OnboardingVerificationNotifyService', () => {
         '10000000-0000-4000-8000-000000000002',
       ],
       expect.objectContaining({
-        actionLink: '/admin/faculty-verifications',
+        actionLink: '/hr/staff-profile-verifications',
       }),
       { queueDelivery: false },
     );
