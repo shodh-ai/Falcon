@@ -30,6 +30,50 @@ export class FinanceAccountsService {
     private readonly anomalyQueue: Queue<LeadershipAnomalyJob>,
   ) {}
 
+  async getDemoBook(tenantId: string, userId: string) {
+    const books = (await this.dataSource.query(
+      `SELECT b.book_id,b.code,b.title,b.created_at
+       FROM finance_demo_books b
+       JOIN users u ON u.user_id=b.owner_user_id AND u.tenant_id=b.tenant_id
+       JOIN tenants t ON t.tenant_id=b.tenant_id
+       WHERE b.tenant_id=$1 AND b.owner_user_id=$2 AND b.is_demo=true
+         AND t.subdomain='sgvu'
+         AND lower(u.official_email)='finance@mygyanvihar.com' AND u.is_active=true
+       ORDER BY b.created_at DESC LIMIT 1`,
+      [tenantId, userId],
+    )) as unknown as Array<{
+      book_id: string;
+      code: string;
+      title: string;
+      created_at: string;
+    }>;
+    if (!books.length) throw new NotFoundException('Demo book not available');
+    const book = books[0];
+    const records = (await this.dataSource.query(
+      `SELECT record_id,record_type,reference,description,amount::text AS amount,
+              status,occurred_on::text AS occurred_on,details
+       FROM finance_demo_records WHERE book_id=$1
+       ORDER BY occurred_on DESC,reference`,
+      [book.book_id],
+    )) as unknown as Array<{
+      record_id: string;
+      record_type: 'INVOICE' | 'EXPENSE' | 'PAYMENT' | 'JOURNAL';
+      reference: string;
+      description: string;
+      amount: string;
+      status: string;
+      occurred_on: string;
+      details: Record<string, unknown>;
+    }>;
+    return {
+      ...book,
+      demo_only: true,
+      disclaimer:
+        'SIMULATED DATA — not posted to the general ledger, not a payable, and not a settled payment.',
+      records,
+    };
+  }
+
   listTemplates(tenantId: string) {
     return this.dataSource.query(
       `SELECT * FROM finance_fee_templates WHERE tenant_id = $1 ORDER BY template_name`,
