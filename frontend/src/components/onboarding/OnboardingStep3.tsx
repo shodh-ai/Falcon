@@ -11,6 +11,7 @@ import {
 } from '@/lib/onboarding/portal-onboarding';
 import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/button';
+import { StaffProfileFreezeGate } from '@/components/onboarding/StaffProfileFreezeGate';
 
 export function OnboardingStep3({ config }: { config: PortalOnboardingConfig }) {
   const router = useRouter();
@@ -46,7 +47,7 @@ export function OnboardingStep3({ config }: { config: PortalOnboardingConfig }) 
     };
   }, [config.dashboardPath, config.portalPrefix, refreshUser, router]);
 
-  return (
+  const waitingPanel = (
     <OnboardingPanel
       icon={Clock3}
       title="You're in the waiting room"
@@ -95,4 +96,7 @@ export function OnboardingStep3({ config }: { config: PortalOnboardingConfig }) 
       </div>
     </OnboardingPanel>
   );
+  return config.kind === 'staff'
+    ? <StaffProfileFreezeGate initialReview>{waitingPanel}</StaffProfileFreezeGate>
+    : waitingPanel;
 }

@@ -9,6 +9,7 @@ import {
 import { DataSource, QueryRunner } from 'typeorm';
 import { CampusScopeService, type ScopedAuthUser } from '../../common/campus-scope/campus-scope.service';
 import { STAFF_ONBOARDING_DOC_TYPES } from './onboarding-portal.util';
+import { StaffProfileReviewNotificationService } from './staff-profile-review-notification.service';
 
 type Db = Pick<DataSource, 'query'> | Pick<QueryRunner, 'query'>;
 type Review = {
@@ -41,6 +42,7 @@ export class StaffProfileReviewService {
   constructor(
     private readonly db: DataSource,
     private readonly campusScope: CampusScopeService,
+    private readonly reviewNotifications: StaffProfileReviewNotificationService,
   ) {}
 
   private hash(value: unknown): string {
@@ -366,7 +368,14 @@ export class StaffProfileReviewService {
        WHERE review_id = $1 AND tenant_id = $2 ORDER BY revision`,
       [reviewId, tenantId],
     );
-    return { review, profile: snapshot.profile, documents: snapshot.documentManifest, events };
+    const [emailDelivery] = await this.db.query(
+      `SELECT status, sent_at, attempts FROM staff_profile_review_email_outbox
+       WHERE tenant_id = $1 AND review_id = $2 ORDER BY revision DESC LIMIT 1`,
+      [tenantId, reviewId],
+    );
+    return { review, profile: { ...snapshot.profile,
+      staff_mobile: snapshot.profile.staff_mobile ?? snapshot.user.phone ?? '' }, documents: snapshot.documentManifest,
+      events, email_delivery: emailDelivery ?? null };
   }
 
   async returnForCorrection(
@@ -403,8 +412,11 @@ export class StaffProfileReviewService {
         [tenantId, reviewId, fields, documents, reason],
       );
       await this.appendEvent(qr, { ...review, revision: review.revision + 1 }, 'RETURNED', actorId, reason);
+      await this.reviewNotifications.enqueueCorrection(qr,
+        { ...review, revision: review.revision + 1 }, { reason, fields, documents });
       await qr.commitTransaction();
-      return { status: 'RETURNED_FOR_CORRECTION' };
+      void this.reviewNotifications.deliverPending();
+      return { status: 'RETURNED_FOR_CORRECTION', email_status: 'QUEUED' };
     } catch (error) {
       await qr.rollbackTransaction();
       throw error;
@@ -535,22 +547,25 @@ export class StaffProfileReviewService {
       }
       const snapshot = await this.snapshot(tenantId, userId, qr);
       const edits = await qr.query(
-        `SELECT reason FROM staff_profile_review_events
+        `SELECT reason, event_type FROM staff_profile_review_events
          WHERE review_id = $1 AND tenant_id = $2
-           AND event_type = 'BEFORE_PROFILE_CORRECTION'
+           AND event_type IN ('BEFORE_PROFILE_CORRECTION', 'BEFORE_DOCUMENT_CORRECTION')
            AND revision > COALESCE((
              SELECT MAX(revision) FROM staff_profile_review_events
              WHERE review_id = $1 AND event_type = 'RETURNED'
            ), 0)`,
         [review.review_id, tenantId],
       );
-      const corrected = new Set(edits.flatMap((event: { reason: string | null }) =>
+      const corrected = new Set(edits.filter((event: { event_type: string }) => event.event_type === 'BEFORE_PROFILE_CORRECTION')
+        .flatMap((event: { reason: string | null }) =>
         String(event.reason ?? '').split(',').filter(Boolean)));
+      const correctedDocuments = new Set(edits.filter((event: { event_type: string }) =>
+        event.event_type === 'BEFORE_DOCUMENT_CORRECTION').map((event: { reason: string | null }) => event.reason));
       const missingFields = review.requested_fields.filter((field) => !corrected.has(field));
       if (missingFields.length) throw new BadRequestException(`Correct requested fields: ${missingFields.join(', ')}`);
       for (const doc of review.requested_docs) {
         const current = snapshot.documentManifest.find((item: { doc_type: string; status: string }) => item.doc_type === doc);
-        if (!current || current.status !== 'PENDING') {
+        if (!current || current.status !== 'PENDING' || !correctedDocuments.has(doc)) {
           throw new BadRequestException(`Upload a replacement for ${doc}`);
         }
       }

@@ -12,6 +12,7 @@ import { RegistrarIntegrationController } from './registrar-integration.controll
 import { StudentOnboardingService } from './student-onboarding.service';
 import { StudentOnboardingWelcomeEmailListener } from './student-onboarding-welcome-email.listener';
 import { StaffProfileReviewService } from './staff-profile-review.service';
+import { StaffProfileReviewNotificationService } from './staff-profile-review-notification.service';
 import { StaffProfileReviewAdminController, StaffProfileReviewSelfController } from './staff-profile-review.controller';
 
 @Module({
@@ -30,6 +31,7 @@ import { StaffProfileReviewAdminController, StaffProfileReviewSelfController } f
     StudentOnboardingWelcomeEmailListener,
     HrFieldEncryptionService,
     StaffProfileReviewService,
+    StaffProfileReviewNotificationService,
   ],
   exports: [StudentOnboardingService],
 })
