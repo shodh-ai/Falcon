@@ -7,6 +7,7 @@ import {
   needsPortalOnboarding,
 } from '@/lib/onboarding/portal-onboarding';
 import { isPathHiddenForLaunch, isRoleWorkspaceEnabled } from '@/lib/launch-modules';
+import { canAccessStudentPath, getStudentLandingPath } from '@/lib/student-access';
 import {
   campusAdminRoutes,
   expandCampusAdminRoles,
@@ -27,7 +28,7 @@ export function getDashboardPathForRole(role: string | undefined | null): string
   }
 
   if (r === 'student' || r === 'applicant') {
-    return '/student/dashboard';
+    return getStudentLandingPath(r);
   }
 
   if (r === 'hr' || r === 'hradmin') {
@@ -774,6 +775,10 @@ export function canRoleAccessPath(
     .map((role) => role.trim().toLowerCase());
   const roles = expandCampusAdminRoles(rawRoles);
 
+  if (pathname === '/student' || pathname.startsWith('/student/')) {
+    return canAccessStudentPath(rawRoles, pathname);
+  }
+
   if (
     pathname === '/campus-admin/entities' ||
     pathname.startsWith('/campus-admin/entities/') ||
@@ -1078,6 +1083,9 @@ export function getPostLoginPath(user: {
       landingRole,
     );
     if (onboardingPath) return onboardingPath;
+  }
+  if (landingRole?.trim().toLowerCase() === 'student' || landingRole?.trim().toLowerCase() === 'applicant') {
+    return getStudentLandingPath(roles);
   }
   return getDashboardPathForRole(landingRole);
 }

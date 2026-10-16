@@ -13,12 +13,14 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { StudentSafetyService } from './student-safety.service';
+import { requireTenantId } from '../../common/utils/require-tenant-id';
 
 type AuthUser = {
   user_id: string;
   tenant_id?: string;
   role?: string;
   primaryRole?: string;
+  roles?: string[];
 };
 
 @Controller('api/student-safety')
@@ -77,7 +79,11 @@ export class StudentSafetyController {
   @Get('dean/concerns')
   @Roles('Dean', 'SuperAdmin')
   deanConcerns(@Req() req: { user: AuthUser }) {
-    return this.safety.listForRole(this.tenant(req), 'Dean', req.user.user_id);
+    return this.safety.listForRole(
+      this.tenant(req),
+      this.reviewRole(req.user, 'Dean'),
+      req.user.user_id,
+    );
   }
 
   @Get('hr/concerns')
@@ -120,7 +126,7 @@ export class StudentSafetyController {
       resolution_summary?: string;
     },
   ) {
-    const role = req.user.primaryRole ?? req.user.role ?? 'SuperAdmin';
+    const role = this.reviewRole(req.user, 'SuperAdmin');
     return this.safety.updateConcern(
       this.tenant(req),
       req.user.user_id,
@@ -131,6 +137,11 @@ export class StudentSafetyController {
   }
 
   private tenant(req: { user: AuthUser }) {
-    return req.user.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
+    return requireTenantId(req.user.tenant_id);
+  }
+
+  private reviewRole(user: AuthUser, fallback: string) {
+    if (user.roles?.includes('SuperAdmin')) return 'SuperAdmin';
+    return user.primaryRole ?? user.role ?? fallback;
   }
 }

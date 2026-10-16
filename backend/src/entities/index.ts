@@ -31,6 +31,8 @@ export type { AssignmentNotificationDeliveryStatus } from './assignment-notifica
 export { CourseAttendanceLog } from './course-attendance-log.entity';
 export { CourseMaterial } from './course-material.entity';
 export { CourseModule } from './course-module.entity';
+export { CourseAllocation } from './course-allocation.entity';
+export { CourseMaterialVisibility } from './course-material-visibility.entity';
 export { AttendanceRecord } from './attendance-record.entity';
 export { ExamResult } from './exam-result.entity';
 export { ExamSchedule } from './exam-schedule.entity';

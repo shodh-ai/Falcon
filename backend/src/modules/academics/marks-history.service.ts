@@ -1,6 +1,21 @@
 import { Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import {
+  calculateStudentGradeSummary,
+  studentGradePoints,
+  type StudentGradeRow,
+} from './student-grade-summary';
+
+type HistoryEnrollment = StudentGradeRow & {
+  enrollment_id: string;
+  semester: number;
+  grade: string | null;
+  course_id: string;
+  course_code: string;
+  course_name: string;
+  is_elective: boolean;
+};
 
 const COMPONENT_LABELS: Record<string, string> = {
   DA1: 'Digital Assignment 1 (DA-1)',
@@ -24,13 +39,42 @@ const COMPONENT_LABELS: Record<string, string> = {
 export class MarksHistoryService {
   constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
 
+  async getPublishedExamReports(tenantId: string, studentUserId: string) {
+    return this.dataSource.query(
+      `SELECT r.report_id AS result_id, r.session_id, r.student_user_id, r.course_id,
+              r.exam_type, r.marks_obtained, r.max_marks, r.percent,
+              r.grade, r.grade AS grade_letter, r.grade_points, r.result_status,
+              r.report_summary, r.declared_at,
+              sub.subject_id, c.course_code, c.course_name,
+              s.declaration_note, s.semester
+       FROM student_exam_reports r
+       JOIN academic_courses c
+         ON c.course_id = r.course_id AND c.tenant_id = r.tenant_id
+       JOIN exam_result_sessions s
+         ON s.session_id = r.session_id AND s.tenant_id = r.tenant_id
+       LEFT JOIN LATERAL (
+         SELECT subject_id
+         FROM academic_subjects
+         WHERE subject_code = c.course_code
+            OR c.course_name ILIKE subject_name
+         ORDER BY CASE WHEN subject_code = c.course_code THEN 0 ELSE 1 END
+         LIMIT 1
+       ) sub ON TRUE
+       WHERE r.tenant_id = $1 AND r.student_user_id = $2
+         AND r.declared_at IS NOT NULL AND s.declared_at IS NOT NULL
+       ORDER BY r.declared_at DESC`,
+      [tenantId, studentUserId],
+    );
+  }
+
   async getHistory(tenantId: string, studentUserId: string) {
-    const enrollments = await this.dataSource.query(
+    const enrollments = await this.dataSource.query<HistoryEnrollment[]>(
       `SELECT e.enrollment_id, e.semester, e.grade, e.grade_points, e.status,
               c.course_id, c.course_code, c.course_name, c.credits, c.is_elective
        FROM student_course_enrollments e
-       JOIN academic_courses c ON c.course_id = e.course_id
+       JOIN academic_courses c ON c.course_id = e.course_id AND c.tenant_id = e.tenant_id
        WHERE e.tenant_id = $1 AND e.student_user_id = $2
+         AND e.deleted_at IS NULL AND c.deleted_at IS NULL
        ORDER BY e.semester, c.course_code`,
       [tenantId, studentUserId],
     );
@@ -40,7 +84,7 @@ export class MarksHistoryService {
         `SELECT m.course_id, m.exam_type, m.marks_obtained, m.max_marks, e.semester
          FROM academic_marks m
          JOIN student_course_enrollments e
-           ON e.course_id = m.course_id AND e.student_user_id = m.student_user_id
+           ON e.course_id = m.course_id AND e.student_user_id = m.student_user_id AND e.tenant_id = m.tenant_id
          WHERE m.student_user_id = $1 AND m.tenant_id = $2 AND m.status = 'PUBLISHED'
          ORDER BY e.semester, m.course_id, m.exam_type`,
         [studentUserId, tenantId],
@@ -51,9 +95,9 @@ export class MarksHistoryService {
       .query(
         `SELECT a.course_id, a.title, s.marks_awarded, a.max_marks, e.semester, s.submitted_at
          FROM assignment_submissions s
-         JOIN academic_assignments a ON a.assignment_id = s.assignment_id
+         JOIN academic_assignments a ON a.assignment_id = s.assignment_id AND a.tenant_id = s.tenant_id
          JOIN student_course_enrollments e
-           ON e.course_id = a.course_id AND e.student_user_id = s.student_user_id
+           ON e.course_id = a.course_id AND e.student_user_id = s.student_user_id AND e.tenant_id = s.tenant_id
          WHERE s.student_user_id = $1 AND s.tenant_id = $2 AND s.marks_awarded IS NOT NULL
          ORDER BY e.semester, a.course_id, s.submitted_at`,
         [studentUserId, tenantId],
@@ -65,8 +109,7 @@ export class MarksHistoryService {
       {
         semester_number: number;
         credits: number;
-        points: number;
-        completedCredits: number;
+        enrollments: HistoryEnrollment[];
         courses: unknown[];
       }
     >();
@@ -77,8 +120,7 @@ export class MarksHistoryService {
         semesterMap.set(sem, {
           semester_number: sem,
           credits: 0,
-          points: 0,
-          completedCredits: 0,
+          enrollments: [],
           courses: [],
         });
       }
@@ -86,7 +128,7 @@ export class MarksHistoryService {
       const credits = Number(row.credits);
       bucket.credits += credits;
 
-      const grade = row.grade ?? '—';
+      const grade = row.status === 'ENROLLED' ? '—' : (row.grade ?? '—');
       const status =
         row.status === 'FAILED'
           ? 'FAIL'
@@ -94,13 +136,7 @@ export class MarksHistoryService {
             ? 'PASS'
             : 'IN_PROGRESS';
 
-      if (
-        (row.status === 'COMPLETED' || row.status === 'FAILED') &&
-        row.grade_points != null
-      ) {
-        bucket.points += Number(row.grade_points) * credits;
-        bucket.completedCredits += credits;
-      }
+      bucket.enrollments.push(row);
 
       bucket.courses.push({
         course_id: row.course_id,
@@ -109,44 +145,25 @@ export class MarksHistoryService {
         course_type: this.inferCourseType(row),
         credits,
         grade,
+        grade_points: studentGradePoints(row),
         status,
       });
     }
 
     const semesters = [...semesterMap.values()]
       .sort((a, b) => a.semester_number - b.semester_number)
-      .map((sem) => ({
-        semester_number: sem.semester_number,
-        sgpa:
-          sem.completedCredits > 0
-            ? Number((sem.points / sem.completedCredits).toFixed(2))
-            : 0,
-        credits: sem.credits,
-        courses: sem.courses,
-      }));
-
-    const totalCreditsEarned = semesters.reduce((s, sem) => {
-      return (
-        s +
-        (sem.courses as { status: string; credits: number }[])
-          .filter((c) => c.status === 'PASS')
-          .reduce((sum, c) => sum + c.credits, 0)
-      );
-    }, 0);
-
-    let cgpaPoints = 0;
-    let cgpaCredits = 0;
-    for (const row of enrollments) {
-      if (
-        (row.status === 'COMPLETED' || row.status === 'FAILED') &&
-        row.grade_points != null
-      ) {
-        cgpaPoints += Number(row.grade_points) * Number(row.credits);
-        cgpaCredits += Number(row.credits);
-      }
-    }
-    const cgpa =
-      cgpaCredits > 0 ? Number((cgpaPoints / cgpaCredits).toFixed(2)) : 0;
+      .map((sem) => {
+        const grades = calculateStudentGradeSummary(sem.enrollments);
+        return {
+          semester_number: sem.semester_number,
+          sgpa: grades.gpa,
+          credits: sem.credits,
+          credits_attempted: grades.attemptedCredits,
+          credits_earned: grades.earnedCredits,
+          courses: sem.courses,
+        };
+      });
+    const grades = calculateStudentGradeSummary(enrollments);
 
     const componentBySemester = this.buildComponentMarks(
       enrollments,
@@ -188,23 +205,19 @@ export class MarksHistoryService {
         }),
       );
 
-    const examReports = await this.dataSource
-      .query(
-        `SELECT r.report_id, r.session_id, r.course_id, r.exam_type, r.marks_obtained, r.max_marks,
-                r.percent, r.grade, r.grade_points, r.result_status, r.report_summary, r.declared_at,
-                c.course_code, c.course_name, s.declaration_note, s.semester
-         FROM student_exam_reports r
-         JOIN academic_courses c ON c.course_id = r.course_id
-         JOIN exam_result_sessions s ON s.session_id = r.session_id
-         WHERE r.tenant_id = $2 AND r.student_user_id = $1
-         ORDER BY r.declared_at DESC`,
-        [studentUserId, tenantId],
-      )
-      .catch(() => []);
+    const examReports = await this.getPublishedExamReports(
+      tenantId,
+      studentUserId,
+    );
 
     const gradeCards = await this.dataSource
       .query(
-        `SELECT grade_card_id, semester, cgpa, status, published_at, payload
+        `SELECT grade_card_id, semester,
+                CASE WHEN status = 'PUBLISHED' AND COALESCE(payload->>'result_stage', '') <> 'DRAFT'
+                  THEN cgpa ELSE NULL END AS cgpa,
+                status, published_at,
+                CASE WHEN status = 'PUBLISHED' AND COALESCE(payload->>'result_stage', '') <> 'DRAFT'
+                  THEN payload ELSE jsonb_build_object('result_stage', payload->>'result_stage') END AS payload
          FROM grade_cards
          WHERE tenant_id = $1 AND student_user_id = $2
          ORDER BY semester DESC, created_at DESC`,
@@ -213,8 +226,9 @@ export class MarksHistoryService {
       .catch(() => []);
 
     return {
-      cgpa,
-      total_credits_earned: totalCreditsEarned,
+      cgpa: grades.gpa,
+      total_credits_earned: grades.earnedCredits,
+      total_credits_attempted: grades.attemptedCredits,
       semesters,
       component_marks_by_semester: componentBySemester,
       exam_reports: examReports,
@@ -228,7 +242,7 @@ export class MarksHistoryService {
 
   private inferCourseType(row: {
     course_code: string;
-    credits: number;
+    credits: number | string | null;
     is_elective: boolean;
   }) {
     const code = row.course_code.toUpperCase();

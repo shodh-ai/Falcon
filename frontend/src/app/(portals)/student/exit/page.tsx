@@ -1,6 +1,5 @@
 'use client';
 
-import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { StudentPageHeader } from '@/components/student/StudentPageHeader';
 import { StudentPageShell } from '@/components/student/StudentPageShell';
@@ -18,14 +17,9 @@ function tabFromSearchParam(value: string | null): Tab {
 export default function StudentGraduationHubPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [tab, setTab] = useState<Tab>(() => tabFromSearchParam(searchParams.get('tab')));
-
-  useEffect(() => {
-    setTab(tabFromSearchParam(searchParams.get('tab')));
-  }, [searchParams]);
+  const tab = tabFromSearchParam(searchParams.get('tab'));
 
   function selectTab(next: Tab) {
-    setTab(next);
     const query = next === 'exit' ? '' : `?tab=${next}`;
     router.replace(`/student/exit${query}`, { scroll: false });
   }

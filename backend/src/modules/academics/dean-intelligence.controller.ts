@@ -20,7 +20,12 @@ import {
 } from './dean-intelligence.service';
 import type { ListQueryParams } from '../../common/utils/pagination';
 
-type AuthUser = { user_id: string; tenant_id?: string; role?: string };
+type AuthUser = {
+  user_id: string;
+  tenant_id?: string;
+  role?: string;
+  roles?: string[];
+};
 
 @Controller('api/academics/dean/intelligence')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -29,6 +34,14 @@ export class DeanIntelligenceController {
 
   private tenant(req: { user: AuthUser }) {
     return req.user.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
+  }
+
+  private actorRole(req: { user: AuthUser }) {
+    return req.user.roles?.some(
+      (role) => role.trim().toLowerCase() === 'superadmin',
+    )
+      ? 'SuperAdmin'
+      : (req.user.role ?? 'Dean');
   }
 
   @Get('dashboard')
@@ -239,7 +252,7 @@ export class DeanIntelligenceController {
       dto.decision,
       dto.comment,
       {
-        role: req.user.role ?? 'Dean',
+        role: this.actorRole(req),
       },
     );
   }
@@ -252,7 +265,9 @@ export class DeanIntelligenceController {
   ) {
     return this.intelligence.getResultApprovalHistory(
       this.tenant(req),
+      req.user.user_id,
       sessionId,
+      this.actorRole(req),
     );
   }
 }

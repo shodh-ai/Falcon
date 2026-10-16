@@ -10,6 +10,7 @@ import {
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
+import { requireTenantId } from '../../common/utils/require-tenant-id';
 import { HelpdeskTicket } from '../../entities/helpdesk-ticket.entity';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketStatusDto } from './dto/update-ticket-status.dto';
@@ -63,8 +64,7 @@ export class TicketService {
     const student = await this.users.findOne({
       where: { user_id: studentUserId },
     });
-    const tenantId =
-      student?.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
+    const tenantId = requireTenantId(student?.tenant_id);
 
     if (dto.category !== 'MENTORSHIP') {
       await assertNoPendingRow(this.tickets, {
@@ -651,10 +651,7 @@ export class TicketService {
         const student = await this.users.findOne({
           where: { user_id: saved.student_user_id },
         });
-        const tenantId =
-          student?.tenant_id ??
-          saved.tenant_id ??
-          'a0000000-0000-4000-8000-000000000001';
+        const tenantId = requireTenantId(student?.tenant_id ?? saved.tenant_id);
         await this.notify.ticketReply({
           tenantId,
           userId: saved.student_user_id,
@@ -728,10 +725,7 @@ export class TicketService {
     // departments.hod_user_id link, or the user's own dept_id. Resolve the
     // same union used by the queue so a listed request can be approved.
     const deptIds = await this.resolveHodDepartmentIds(actor.userId);
-    if (
-      student.dept_id == null ||
-      !deptIds.includes(Number(student.dept_id))
-    ) {
+    if (student.dept_id == null || !deptIds.includes(Number(student.dept_id))) {
       throw new ForbiddenException('Ticket is outside your department scope');
     }
   }
@@ -791,8 +785,7 @@ export class TicketService {
       >(`SELECT tenant_id FROM users WHERE user_id = $1 LIMIT 1`, [
         ticket.student_user_id,
       ]);
-      const tenantId =
-        student[0]?.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
+      const tenantId = requireTenantId(student[0]?.tenant_id);
       this.notify.ticketReply({
         tenantId,
         userId: ticket.student_user_id,

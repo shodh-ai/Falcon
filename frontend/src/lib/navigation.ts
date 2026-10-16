@@ -1,5 +1,6 @@
 import type { LucideIcon } from 'lucide-react';
 import type { BusinessModuleKey } from '@/lib/launch-modules';
+import { isStudentLibraryLaunched } from '@/lib/student-library-launch';
 import {
   LayoutDashboard,
   LayoutGrid,
@@ -52,7 +53,6 @@ import {
   Calendar,
   CheckCircle,
   DollarSign,
-  Download,
   Network,
   Building2,
   Receipt,
@@ -97,7 +97,7 @@ import {
   FINANCE_DESK_ROLE_NAMES,
   getAccountSettingsHrefForPortal,
 } from '@/lib/auth-routing';
-import { rolesIncludeAny, rolesMatchForAccess } from '@/lib/campus-admin.roles';
+import { rolesMatchForAccess } from '@/lib/campus-admin.roles';
 import { selfServicePaths, type WorkspacePrefix } from '@/lib/workspace-self-service';
 
 export type HrModuleKey =
@@ -576,7 +576,12 @@ export const studentPortal: PortalConfig = {
         { label: 'Fees & Payments', href: '/student/finance', icon: Wallet, keywords: ['fees', 'pay', 'dues', 'razorpay'] },
         { label: 'Campus Life', href: '/student/campus-life', icon: Bus, keywords: ['hostel', 'mess', 'gate pass', 'wallet', 'campus'] },
         { label: 'Transport', href: '/student/transport', icon: BusFront, keywords: ['bus', 'route', 'transport'] },
-        { label: 'Library — Coming Soon', href: '/student/library', icon: Library, keywords: ['library', 'books', 'fines'] },
+        {
+          label: isStudentLibraryLaunched() ? 'Library' : 'Library — Coming Soon',
+          href: '/student/library',
+          icon: Library,
+          keywords: ['library', 'books', 'fines'],
+        },
         { label: 'Events', href: '/student/falcon-events', icon: PartyPopper, keywords: ['falcon events', 'clubs', 'chapters', 'tickets', 'ncc', 'nss', 'fest', 'membership'], shortLabel: 'Events' },
         { label: 'Innovation Hub', href: '/student/e-cell', icon: Rocket, keywords: ['startup', 'pitch', 'incubation', 'grant'] },
         { label: 'Research', href: '/student/research', icon: FlaskConical, keywords: ['rnd', 'research', 'grant', 'paper', 'project'] },
@@ -617,7 +622,11 @@ export const studentPortal: PortalConfig = {
     { label: 'Fees & Payments', href: '/student/finance', icon: Wallet },
     { label: 'Campus Life', href: '/student/campus-life', icon: Bus },
     { label: 'Transport', href: '/student/transport', icon: BusFront },
-    { label: 'Library — Coming Soon', href: '/student/library', icon: Library },
+    {
+      label: isStudentLibraryLaunched() ? 'Library' : 'Library — Coming Soon',
+      href: '/student/library',
+      icon: Library,
+    },
     { label: 'Events', href: '/student/falcon-events', icon: PartyPopper },
     { label: 'Innovation Hub', href: '/student/e-cell', icon: Rocket },
     { label: 'Research', href: '/student/research', icon: FlaskConical },

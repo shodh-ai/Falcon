@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import { ExternalLink, Loader2 } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Button } from '@/components/ui/button';
@@ -35,13 +35,10 @@ export function useStudentDeptPlacementDrives() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setLoadError(null);
-    try {
-      const rows = await api.get<Array<DeptPlacementDrive & { registered?: unknown }>>(
+  const load = useCallback(() => api.get<Array<DeptPlacementDrive & { registered?: unknown }>>(
         '/api/academics/student/placement/drives',
-      );
+      ).then((rows) => {
+      setLoadError(null);
       setDrives(
         rows.map((row) => ({
           ...row,
@@ -50,13 +47,12 @@ export function useStudentDeptPlacementDrives() {
           google_form_auto_sync: normalizeRegistered(row.google_form_auto_sync),
         })),
       );
-    } catch (e) {
+    }).catch((e: unknown) => {
       setDrives([]);
       setLoadError(e instanceof Error ? e.message : 'Could not load department drives');
-    } finally {
+    }).finally(() => {
       setLoading(false);
-    }
-  }, [api]);
+    }), [api]);
 
   useEffect(() => {
     void load();
@@ -77,18 +73,24 @@ export function StudentDeptDriveCard({
   compact?: boolean;
 }) {
   const formStorageKey = `dept-form-opened:${drive.drive_id}`;
-  const [formOpened, setFormOpened] = useState(false);
+  const formOpened = useSyncExternalStore(
+    useCallback((notify) => {
+      window.addEventListener('storage', notify);
+      window.addEventListener('dept-form-opened', notify);
+      return () => {
+        window.removeEventListener('storage', notify);
+        window.removeEventListener('dept-form-opened', notify);
+      };
+    }, []),
+    () => Boolean(drive.form_url && sessionStorage.getItem(formStorageKey)),
+    () => false,
+  );
   const [attested, setAttested] = useState(false);
-
-  useEffect(() => {
-    if (typeof window === 'undefined' || !drive.form_url) return;
-    setFormOpened(Boolean(sessionStorage.getItem(formStorageKey)));
-  }, [drive.drive_id, drive.form_url, formStorageKey]);
 
   function markFormOpened() {
     const at = Date.now();
     sessionStorage.setItem(formStorageKey, String(at));
-    setFormOpened(true);
+    window.dispatchEvent(new Event('dept-form-opened'));
   }
 
   function tryConfirmAfterGoogleForm() {

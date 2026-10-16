@@ -24,24 +24,17 @@ import { ObjectStorageService } from '../storage/object-storage.service';
 import { createReadStream, existsSync, mkdirSync, writeFileSync } from 'fs';
 import { basename, resolve } from 'path';
 import type { Response } from 'express';
+import { UploadsService } from './uploads.service';
+import {
+  isFileWithinRoot,
+  needsStudentFileOwnership,
+  SHARED_UPLOAD_ROLES,
+  type UploadUser,
+} from './upload-file-access';
+import { requireTenantId } from '../common/utils/require-tenant-id';
 
 /** Authenticated campus roles that may upload files through the shared endpoint. */
-const UPLOAD_ROLES = [
-  'Student',
-  'Faculty',
-  'HOD',
-  'Dean',
-  'SuperAdmin',
-  'Admin',
-  'IQAC',
-  'HR',
-  'HRAdmin',
-  'Registrar',
-  'President',
-  'ExamCell',
-  'Accountant',
-  'HostelAdmin',
-] as const;
+const UPLOAD_ROLES = SHARED_UPLOAD_ROLES;
 
 const ALLOWED_MIME_TYPES = [
   'application/pdf',
@@ -75,13 +68,16 @@ const multerOptions = {
   },
 };
 
-type AuthRequest = { user?: { tenant_id?: string } };
+type AuthRequest = { user?: UploadUser };
 
 @Controller(['uploads', 'api/uploads'])
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(...UPLOAD_ROLES)
 export class UploadsController {
-  constructor(private readonly objectStorage: ObjectStorageService) {}
+  constructor(
+    private readonly objectStorage: ObjectStorageService,
+    private readonly uploads: UploadsService,
+  ) {}
 
   @Post('single')
   @UseInterceptors(FileInterceptor('file', multerOptions))
@@ -92,7 +88,7 @@ export class UploadsController {
     if (!file) {
       throw new BadRequestException('No file uploaded');
     }
-    return this.persistFile(file, req.user?.tenant_id ?? 'unknown');
+    return this.persistFile(file, req.user);
   }
 
   @Post('multiple')
@@ -104,79 +100,97 @@ export class UploadsController {
     if (!files?.length) {
       throw new BadRequestException('No files uploaded');
     }
-    const tenantId = req.user?.tenant_id ?? 'unknown';
-    return Promise.all(files.map((f) => this.persistFile(f, tenantId)));
+    return Promise.all(files.map((f) => this.persistFile(f, req.user)));
   }
 
   @Get('download')
+  @Roles(...UPLOAD_ROLES, 'Applicant')
   async downloadFile(
     @Query('path') filePath: string,
     @Query('key') objectKey: string,
-    @Req() req: AuthRequest & { user?: { tenant_id?: string } },
+    @Req() req: AuthRequest,
     @Res() res: Response,
   ) {
-    // Class-level JwtAuthGuard applies (Bearer, access_token query, or auth cookie).
+    // Class-level JwtAuthGuard applies before storage or ownership is inspected.
     if (!req.user) {
       throw new UnauthorizedException(
         'Authentication required to download files',
       );
     }
 
-    if (objectKey && this.objectStorage.isEnabled()) {
-      const tenantId = req.user.tenant_id;
-      // Object keys are tenant-prefixed by ObjectStorageService.buildKey
-      if (tenantId && !objectKey.startsWith(`${tenantId}/`)) {
+    const tenantId = requireTenantId(req.user.tenant_id);
+    const keyReference =
+      objectKey ||
+      (filePath?.startsWith('s3://') || filePath?.startsWith(`${tenantId}/`)
+        ? filePath
+        : undefined);
+    if (keyReference && this.objectStorage.isEnabled()) {
+      const key = this.uploads.canonicalKey(keyReference, tenantId);
+      if (!key) {
         throw new NotFoundException('File not found');
       }
-      const stream = await this.objectStorage.getDownloadStream(objectKey);
-      res.setHeader(
-        'Content-Disposition',
-        `inline; filename="${basename(objectKey)}"`,
-      );
-      if (objectKey.endsWith('.pdf')) {
-        res.setHeader('Content-Type', 'application/pdf');
-      }
+      await this.uploads.assertStudentDownloadAccess(req.user, key);
+      const stream = await this.objectStorage.getDownloadStream(key);
+      this.setDownloadHeaders(res, key);
       return stream.pipe(res);
     }
 
-    if (!filePath) {
+    if (!filePath && !objectKey) {
       throw new BadRequestException('File path or object key is required');
     }
 
-    const uploadRoot = resolve(process.env.UPLOAD_PATH || './uploads');
-    let resolvedPath = resolve(filePath);
-
-    if (filePath.startsWith('/uploads/')) {
-      resolvedPath = resolve(uploadRoot, filePath.replace(/^\/uploads\//, ''));
-    }
-
-    if (!resolvedPath.startsWith(uploadRoot) || !existsSync(resolvedPath)) {
+    const uploadRoot = resolve(this.uploads.getUploadPath());
+    const key = this.uploads.canonicalKey(objectKey || filePath, tenantId);
+    if (!key) throw new NotFoundException('File not found');
+    const resolvedPath = resolve(uploadRoot, key);
+    const tenantRoot = resolve(uploadRoot, tenantId);
+    if (
+      !isFileWithinRoot(uploadRoot, resolvedPath) ||
+      !isFileWithinRoot(tenantRoot, resolvedPath) ||
+      !existsSync(resolvedPath)
+    ) {
       throw new NotFoundException('File not found');
     }
 
-    const tenantId = req.user.tenant_id;
-    if (tenantId) {
-      const tenantRoot = resolve(uploadRoot, tenantId);
-      if (!resolvedPath.startsWith(tenantRoot)) {
-        throw new NotFoundException('File not found');
-      }
-    }
+    await this.uploads.assertStudentDownloadAccess(req.user, key);
 
-    res.setHeader(
-      'Content-Disposition',
-      `inline; filename="${basename(resolvedPath)}"`,
-    );
-    if (resolvedPath.endsWith('.pdf')) {
-      res.setHeader('Content-Type', 'application/pdf');
-    }
+    this.setDownloadHeaders(res, resolvedPath);
     return createReadStream(resolvedPath).pipe(res);
   }
 
-  private async persistFile(file: Express.Multer.File, tenantId: string) {
+  private setDownloadHeaders(res: Response, filePath: string): void {
+    const contentTypes: Record<string, string> = {
+      '.pdf': 'application/pdf',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.png': 'image/png',
+    };
+    res.setHeader(
+      'Content-Disposition',
+      `inline; filename="${basename(filePath)}"`,
+    );
+    res.setHeader(
+      'Content-Type',
+      contentTypes[extname(filePath).toLowerCase()] ??
+        'application/octet-stream',
+    );
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Cache-Control', 'private, no-store');
+  }
+
+  private async persistFile(file: Express.Multer.File, user?: UploadUser) {
+    const tenantId = requireTenantId(user?.tenant_id);
+    const studentOwner =
+      user && needsStudentFileOwnership(user) ? user.user_id : undefined;
+    if (user && needsStudentFileOwnership(user) && !studentOwner)
+      throw new UnauthorizedException('Student identity required');
     const uniqueName = `${uuidv4()}${extname(file.originalname)}`;
 
     if (this.objectStorage.isEnabled()) {
-      const key = this.objectStorage.buildKey(tenantId, uniqueName);
+      // Keep Student ownership stable while retaining the existing staff layout.
+      const key = studentOwner
+        ? `${tenantId}/students/${studentOwner}/${uniqueName}`
+        : this.objectStorage.buildKey(tenantId, uniqueName);
       const stored = await this.objectStorage.upload(
         tenantId,
         key,
@@ -194,12 +208,15 @@ export class UploadsController {
       };
     }
 
-    const uploadPath = process.env.UPLOAD_PATH || './uploads';
+    const uploadPath = this.uploads.getUploadPath();
     const date = new Date();
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');
-    const relativePath = `${tenantId}/${year}/${month}/${uniqueName}`;
-    const targetDir = `${uploadPath}/${tenantId}/${year}/${month}`;
+    const folder = studentOwner
+      ? `${tenantId}/students/${studentOwner}`
+      : `${tenantId}/${year}/${month}`;
+    const relativePath = `${folder}/${uniqueName}`;
+    const targetDir = resolve(uploadPath, folder);
     mkdirSync(targetDir, { recursive: true });
     const fullPath = `${targetDir}/${uniqueName}`;
     writeFileSync(fullPath, file.buffer);

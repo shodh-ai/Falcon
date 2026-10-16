@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
   CheckCircle2,
@@ -17,6 +17,7 @@ import { StudentSectionCard } from '@/components/student/StudentSectionCard';
 import { StudentInfoTile } from '@/components/student/StudentInfoTile';
 import { StudentEmptyState } from '@/components/student/StudentEmptyState';
 import { StudentLoadingState } from '@/components/student/StudentLoadingState';
+import { StudentDocumentPdfPreview } from '@/components/student/StudentDocumentPdfPreview';
 import { OnboardingDocDropzone } from '@/components/student/OnboardingDocDropzone';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -31,17 +32,8 @@ import {
 import { Input } from '@/components/ui/input';
 import { useAuth } from '@/context/AuthContext';
 import { useAuthedApi } from '@/lib/api';
-import { withAccessToken } from '@/lib/authenticated-download-url';
-import {
-  buildDemoAdmissionVault,
-  DEMO_FEE_RECEIPT_DOCS,
-  DEMO_STUDENT,
-} from '@/lib/mock/student-portal-demo';
-import { isStudentDemoModeEnabled } from '@/lib/student-demo-mode';
-import {
-  buildVaultPdfBlob,
-  downloadVaultPdf,
-} from '@/lib/student/vault-pdf';
+import { vaultDownloadPath, vaultFileType } from '@/lib/student-vault-file';
+import { withStudentReadTimeout } from '@/lib/student-read-request';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { cn } from '@/lib/utils';
 
@@ -70,17 +62,7 @@ type PreviewItem = {
   subtitle?: string;
   meta: Array<{ label: string; value: string }>;
   downloadHref?: string | null;
-  mimeHint?: 'pdf' | 'image' | 'unknown';
-  isDemo?: boolean;
 };
-
-function guessMimeHint(pathOrUrl: string | null | undefined): PreviewItem['mimeHint'] {
-  if (!pathOrUrl) return 'unknown';
-  const lower = pathOrUrl.toLowerCase().split('?')[0] ?? '';
-  if (/\.(png|jpe?g|gif|webp)$/i.test(lower)) return 'image';
-  if (/\.pdf$/i.test(lower)) return 'pdf';
-  return 'pdf';
-}
 
 function triggerBrowserDownload(url: string, filename: string) {
   const a = document.createElement('a');
@@ -104,74 +86,6 @@ const DOC_TITLE_OPTIONS = [
   'Income Certificate',
   'Other',
 ] as const;
-
-function isVaultSparse(vault: Vault | null): boolean {
-  if (!vault) return true;
-  const hasProfile =
-    Boolean(vault.profile?.admission_type) ||
-    Boolean(vault.profile?.admission_number) ||
-    Boolean(vault.application?.application_no);
-  const hasContent =
-    (vault.documents?.length ?? 0) > 0 ||
-    (vault.admission_fee_receipts?.length ?? 0) > 0;
-  return !hasProfile && !hasContent;
-}
-
-function mergeVaultWithDemo(live: Vault | null): Vault {
-  const demo = buildDemoAdmissionVault();
-  if (!isStudentDemoModeEnabled()) {
-    return (
-      live ?? {
-        profile: null,
-        application: null,
-        entrance_exams: [],
-        counseling_rounds: [],
-        documents: [],
-        admission_fee_receipts: [],
-        timeline: [],
-      }
-    );
-  }
-  if (!live || isVaultSparse(live)) return demo;
-
-  const liveDocs = (live.documents ?? []).filter(
-    (d) => !String(d.title ?? '').toUpperCase().startsWith('SMOKE:'),
-  );
-
-  return {
-    profile: {
-      ...demo.profile,
-      ...(live.profile ?? {}),
-      admission_type:
-        live.profile?.admission_type ??
-        live.application?.admission_type ??
-        demo.profile.admission_type,
-      admission_number:
-        live.profile?.admission_number ??
-        live.application?.application_no ??
-        demo.profile.admission_number,
-      migration_certificate_status:
-        live.profile?.migration_certificate_status ??
-        demo.profile.migration_certificate_status,
-    },
-    application: live.application ?? demo.application,
-    entrance_exams:
-      (live.entrance_exams?.length ?? 0) > 0
-        ? live.entrance_exams
-        : demo.entrance_exams,
-    counseling_rounds:
-      (live.counseling_rounds?.length ?? 0) > 0
-        ? live.counseling_rounds
-        : demo.counseling_rounds,
-    documents: liveDocs.length > 0 ? liveDocs : demo.documents,
-    admission_fee_receipts:
-      (live.admission_fee_receipts?.length ?? 0) > 0
-        ? live.admission_fee_receipts
-        : demo.admission_fee_receipts,
-    timeline:
-      (live.timeline?.length ?? 0) > 0 ? live.timeline : demo.timeline,
-  };
-}
 
 function formatMoney(amount: unknown): string {
   const n = Number(amount);
@@ -273,15 +187,26 @@ function VaultTable({
 }
 
 export default function StudentAdmissionVaultPage() {
-  const api = useAuthedApi();
   const { user, token } = useAuth();
+  return <StudentAdmissionVaultContent key={`${user?.tenant_id}:${user?.user_id}:${token}`} />;
+}
+
+function StudentAdmissionVaultContent() {
+  const api = useAuthedApi();
   const [data, setData] = useState<Vault | null>(null);
   const [feeDocs, setFeeDocs] = useState<FeeDoc[]>([]);
   const [loading, setLoading] = useState(true);
   const [preview, setPreview] = useState<PreviewItem | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewFile, setPreviewFile] = useState<{
+    url: string; blob: Blob; kind: 'pdf' | 'image'; extension: string;
+  } | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [feeDocsError, setFeeDocsError] = useState(false);
+  const previewRequest = useRef(0);
+  const objectUrl = useRef<string | null>(null);
+  const mounted = useRef(true);
+  const loadRequest = useRef(0);
   const [previewLoading, setPreviewLoading] = useState(false);
-  const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [uploadTitle, setUploadTitle] =
     useState<(typeof DOC_TITLE_OPTIONS)[number]>('10th Marksheet');
@@ -290,49 +215,31 @@ export default function StudentAdmissionVaultPage() {
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
 
-  const loadVault = useCallback(
-    async (opts?: { showLoader?: boolean }) => {
-      if (opts?.showLoader !== false) setLoading(true);
-      try {
-        const [vaultRes, docsRes] = await Promise.allSettled([
-          api.get<Vault>('/api/student/admission-vault'),
-          api.get<{ documents: FeeDoc[] }>('/api/student/documents'),
-        ]);
-
-        const liveVault =
-          vaultRes.status === 'fulfilled' ? vaultRes.value : null;
-        setData(mergeVaultWithDemo(liveVault));
-
-        const liveFeeDocs =
-          docsRes.status === 'fulfilled'
-            ? (docsRes.value.documents ?? []).filter(
-                (d) => d.category === 'FEE_RECEIPTS',
-              )
-            : [];
-        setFeeDocs(
-          liveFeeDocs.length > 0
-            ? liveFeeDocs
-            : isStudentDemoModeEnabled()
-              ? DEMO_FEE_RECEIPT_DOCS.map((d) => ({ ...d }))
-              : [],
-        );
-      } catch {
-        if (isStudentDemoModeEnabled()) {
-          setData(buildDemoAdmissionVault());
-          setFeeDocs(DEMO_FEE_RECEIPT_DOCS.map((d) => ({ ...d })));
-        } else {
-          setData(null);
-          setFeeDocs([]);
-        }
-      } finally {
-        setLoading(false);
-      }
-    },
-    [api],
-  );
+  const loadVault = useCallback(async () => {
+    const request = ++loadRequest.current;
+    const [vaultRes, docsRes] = await Promise.allSettled([
+      withStudentReadTimeout(api.get<Vault>('/api/student/admission-vault')),
+      withStudentReadTimeout(api.get<{ documents: FeeDoc[] }>('/api/student/documents')),
+    ]);
+    if (!mounted.current || request !== loadRequest.current) return;
+    setData(vaultRes.status === 'fulfilled' ? vaultRes.value : null);
+    setFeeDocs(docsRes.status === 'fulfilled'
+      ? (docsRes.value.documents ?? []).filter((doc) => doc.category === 'FEE_RECEIPTS')
+      : []);
+    setFeeDocsError(docsRes.status === 'rejected');
+    setLoading(false);
+  }, [api]);
 
   useEffect(() => {
-    void loadVault({ showLoader: true });
+    mounted.current = true;
+    void loadVault();
+    return () => {
+      mounted.current = false;
+      loadRequest.current += 1;
+      previewRequest.current += 1;
+      if (objectUrl.current) URL.revokeObjectURL(objectUrl.current);
+      objectUrl.current = null;
+    };
   }, [loadVault]);
 
   const documentItems = useMemo<PreviewItem[]>(() => {
@@ -353,8 +260,6 @@ export default function StudentAdmissionVaultPage() {
         downloadHref: filePath
           ? `/api/uploads/download?path=${encodeURIComponent(filePath)}`
           : null,
-        mimeHint: guessMimeHint(filePath),
-        isDemo: !filePath,
       };
     });
   }, [data?.documents]);
@@ -378,8 +283,6 @@ export default function StudentAdmissionVaultPage() {
         },
       ],
       downloadHref: doc.file_url && doc.file_url !== '#' ? doc.file_url : null,
-      mimeHint: guessMimeHint(doc.file_url),
-      isDemo: !doc.file_url || doc.file_url === '#',
     }));
 
     const titleKeys = fromVault.map((r) => r.title.toLowerCase());
@@ -417,8 +320,6 @@ export default function StudentAdmissionVaultPage() {
             { label: 'Due / paid date', value: formatDate(r.due_date) },
           ],
           downloadHref: href,
-          mimeHint: guessMimeHint(href),
-          isDemo: !href,
         };
       })
       .filter(Boolean) as PreviewItem[];
@@ -426,105 +327,54 @@ export default function StudentAdmissionVaultPage() {
     return [...fromVault, ...fromPayments];
   }, [feeDocs, data?.admission_fee_receipts]);
 
-  const vaultPdfPayload = useCallback(
-    (item: PreviewItem) => ({
-      kind: item.kind,
-      title: item.title,
-      status: item.status,
-      fields: item.meta,
-      student: {
-        name: user?.name || DEMO_STUDENT.name,
-        enrollmentNo: DEMO_STUDENT.enrollment_no,
-        admissionNo: String(
-          data?.profile?.admission_number ??
-            data?.application?.application_no ??
-            DEMO_STUDENT.student_id,
-        ),
-        program: DEMO_STUDENT.program,
-      },
-    }),
-    [user?.name, data?.profile?.admission_number, data?.application?.application_no],
-  );
-
-  const resolveFileUrl = useCallback(
-    (item: PreviewItem) => {
-      if (!item.downloadHref) return null;
-      return withAccessToken(item.downloadHref, token);
-    },
-    [token],
-  );
-
-  const openPreview = useCallback(
-    async (item: PreviewItem) => {
-      setPreview(item);
-      setPreviewLoading(true);
-      setPreviewUrl((prev) => {
-        if (prev?.startsWith('blob:')) URL.revokeObjectURL(prev);
-        return null;
-      });
-
-      try {
-        const fileUrl = resolveFileUrl(item);
-        if (fileUrl) {
-          setPreviewUrl(fileUrl);
-          return;
-        }
-
-        // Demo / archived rows — show a generated PDF copy in the viewer.
-        const { blob } = await buildVaultPdfBlob(vaultPdfPayload(item));
-        setPreviewUrl(URL.createObjectURL(blob));
-      } catch (e) {
-        toast.error(
-          e instanceof Error ? e.message : 'Could not open document preview',
-        );
-        setPreview(null);
-      } finally {
-        setPreviewLoading(false);
-      }
-    },
-    [resolveFileUrl, vaultPdfPayload],
-  );
-
-  const closePreview = useCallback(() => {
-    setPreview(null);
-    setPreviewUrl((prev) => {
-      if (prev?.startsWith('blob:')) URL.revokeObjectURL(prev);
-      return null;
-    });
-    setPreviewLoading(false);
+  const clearPreviewFile = useCallback(() => {
+    if (objectUrl.current) URL.revokeObjectURL(objectUrl.current);
+    objectUrl.current = null;
+    setPreviewFile(null);
   }, []);
 
-  const handleDownload = useCallback(
-    async (item: PreviewItem) => {
-      if (downloadingId) return;
-      setDownloadingId(item.id);
-      try {
-        const fileUrl = resolveFileUrl(item);
-        if (fileUrl) {
-          triggerBrowserDownload(
-            fileUrl,
-            `${item.title.replace(/[^\w\- ]+/g, '').trim() || 'document'}.pdf`,
-          );
-          toast.success(
-            `${item.kind === 'receipt' ? 'Receipt' : 'Document'} download started`,
-          );
-          return;
-        }
+  const openPreview = useCallback(async (item: PreviewItem) => {
+    const request = ++previewRequest.current;
+    setPreview(item);
+    setPreviewError(null);
+    clearPreviewFile();
+    if (!item.downloadHref) {
+      setPreviewLoading(false);
+      setPreviewError('No original file is attached to this record. Please contact the university office for a copy.');
+      return;
+    }
+    setPreviewLoading(true);
+    try {
+      const path = vaultDownloadPath(item.downloadHref);
+      const blob = await withStudentReadTimeout(api.getBlob(path));
+      const type = vaultFileType(blob);
+      if (!mounted.current || request !== previewRequest.current) return;
+      const url = URL.createObjectURL(blob);
+      objectUrl.current = url;
+      setPreviewFile({ url, blob, ...type });
+    } catch {
+      if (!mounted.current || request !== previewRequest.current) return;
+      setPreviewError('We could not load the original file. Please retry. If it is still unavailable, contact the university office.');
+    } finally {
+      if (mounted.current && request === previewRequest.current) setPreviewLoading(false);
+    }
+  }, [api, clearPreviewFile]);
 
-        await downloadVaultPdf(vaultPdfPayload(item));
-        toast.success(
-          `${item.kind === 'receipt' ? 'Receipt' : 'Document'} PDF downloaded`,
-        );
-      } catch (e) {
-        toast.error(
-          e instanceof Error ? e.message : 'Could not download document',
-        );
-      } finally {
-        setDownloadingId(null);
-      }
-    },
-    [downloadingId, resolveFileUrl, vaultPdfPayload],
-  );
+  const closePreview = useCallback(() => {
+    previewRequest.current += 1;
+    setPreview(null);
+    clearPreviewFile();
+    setPreviewLoading(false);
+    setPreviewError(null);
+  }, [clearPreviewFile]);
+
+  const handleDownload = (item: PreviewItem) => {
+    if (!previewFile || preview?.id !== item.id) return;
+    triggerBrowserDownload(
+      previewFile.url,
+      `${item.title.replace(/[^\w -]+/g, '').trim() || 'document'}.${previewFile.extension}`,
+    );
+  };
 
   const resetUploadForm = () => {
     setUploadTitle('10th Marksheet');
@@ -563,49 +413,30 @@ export default function StudentAdmissionVaultPage() {
         message?: string;
       }>('/api/student/admission-documents', form);
 
+      if (!mounted.current) return;
       const cert = res.certificate;
       if (cert) {
         setData((prev) => {
-          const base = prev ?? buildDemoAdmissionVault();
+          const base = prev ?? {
+            profile: null, application: null, entrance_exams: [], counseling_rounds: [],
+            documents: [], admission_fee_receipts: [], timeline: [],
+          };
           return {
             ...base,
             documents: [cert, ...(base.documents ?? [])],
           };
         });
       } else {
-        await loadVault({ showLoader: false });
+        await loadVault();
       }
 
       toast.success(res.message ?? 'Document uploaded — pending verification');
       setUploadOpen(false);
       resetUploadForm();
-    } catch (e) {
-      if (isStudentDemoModeEnabled()) {
-        const demoCert = {
-          certificate_id: `demo-upload-${Date.now()}`,
-          title,
-          issuer: uploadIssuer.trim() || 'Student upload',
-          verification_status: 'PENDING',
-          file_path: null,
-          uploaded_at: new Date().toISOString(),
-        };
-        setData((prev) => {
-          const base = prev ?? buildDemoAdmissionVault();
-          return {
-            ...base,
-            documents: [demoCert, ...(base.documents ?? [])],
-          };
-        });
-        toast.success('Document added (demo) — pending verification');
-        setUploadOpen(false);
-        resetUploadForm();
-      } else {
-        toast.error(
-          e instanceof Error ? e.message : 'Could not upload document',
-        );
-      }
+    } catch {
+      if (mounted.current) toast.error('Could not upload document. Please try again.');
     } finally {
-      setUploading(false);
+      if (mounted.current) setUploading(false);
     }
   };
 
@@ -623,11 +454,12 @@ export default function StudentAdmissionVaultPage() {
       {!data ? (
         <StudentEmptyState
           title="Vault unavailable"
-          description="Could not load your documents. Confirm the backend is running, then refresh."
+          description="Could not load your documents. Please try again."
+          action={<Button onClick={() => { setLoading(true); void loadVault(); }}>Retry</Button>}
         />
       ) : (
         <>
-          <div className="grid gap-4 sm:grid-cols-3">
+          <div className="grid gap-4 sm:grid-cols-2">
             <StudentInfoTile
               label="Admission type"
               value={
@@ -645,11 +477,6 @@ export default function StudentAdmissionVaultPage() {
                 '—'
               }
               icon={FileCheck2}
-            />
-            <StudentInfoTile
-              label="Migration certificate"
-              value={data.profile?.migration_certificate_status ?? 'PENDING'}
-              icon={Receipt}
             />
           </div>
 
@@ -703,7 +530,13 @@ export default function StudentAdmissionVaultPage() {
             description="Auto-archived to your Document Vault when you pay via Finance"
             icon={Receipt}
           >
-            {receiptItems.length === 0 ? (
+            {feeDocsError ? (
+              <div role="alert" className="mb-4 flex flex-wrap items-center justify-between gap-3 text-sm">
+                <p>Some fee receipts could not be loaded.</p>
+                <Button variant="outline" onClick={() => { setLoading(true); void loadVault(); }}>Retry receipts</Button>
+              </div>
+            ) : null}
+            {receiptItems.length === 0 && !feeDocsError ? (
               <StudentEmptyState
                 icon={Wallet}
                 title="No fee receipts yet"
@@ -736,20 +569,19 @@ export default function StudentAdmissionVaultPage() {
           if (!open) closePreview();
         }}
       >
-        <DialogContent className="flex max-h-[min(92dvh,90vh)] w-[calc(100%-1.25rem)] max-w-3xl flex-col gap-4 overflow-hidden p-4 sm:p-6">
+        <DialogContent className="flex h-[90dvh] max-h-[90dvh] w-[calc(100%-1.25rem)] max-w-3xl flex-col gap-3 overflow-hidden p-4 sm:p-6">
           {preview ? (
             <>
-              <DialogHeader>
+              <DialogHeader className="shrink-0">
                 <DialogTitle className="pr-6">{preview.title}</DialogTitle>
                 <DialogDescription>
                   {preview.kind === 'receipt'
                     ? 'Fee payment receipt'
                     : 'Admission document'}
-                  {preview.isDemo ? ' · system copy' : ''}
                 </DialogDescription>
               </DialogHeader>
 
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex shrink-0 flex-wrap items-center gap-2">
                 <Badge variant={statusVariant(preview.status)}>
                   {preview.status}
                 </Badge>
@@ -766,54 +598,54 @@ export default function StudentAdmissionVaultPage() {
                 ))}
               </div>
 
-              <div className="min-h-[320px] flex-1 overflow-hidden rounded-xl border border-sgvu-navy/10 bg-slate-50">
+              <div className="min-h-0 flex-1 overflow-hidden rounded-xl border border-sgvu-navy/10 bg-slate-50">
                 {previewLoading ? (
-                  <div className="flex h-[420px] flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
+                  <div className="flex h-full flex-col items-center justify-center gap-2 text-sm text-muted-foreground" role="status">
                     <Loader2 className="h-6 w-6 animate-spin text-sgvu-navy" />
                     Opening document…
                   </div>
-                ) : previewUrl ? (
-                  preview.mimeHint === 'image' && !previewUrl.startsWith('blob:') ? (
+                ) : previewFile ? (
+                  previewFile.kind === 'image' ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
-                      src={previewUrl}
+                      src={previewFile.url}
                       alt={preview.title}
-                      className="mx-auto max-h-[60vh] w-full object-contain p-3"
+                      className="mx-auto h-full w-full object-contain p-3"
                     />
                   ) : (
-                    <iframe
-                      title={preview.title}
-                      src={previewUrl}
-                      className="h-[60vh] w-full bg-white"
-                    />
+                    <StudentDocumentPdfPreview blob={previewFile.blob} title={preview.title} />
                   )
                 ) : (
-                  <div className="flex h-[320px] flex-col items-center justify-center gap-2 p-6 text-center text-sm text-muted-foreground">
+                  <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center text-sm text-muted-foreground">
                     <FileText className="h-8 w-8 text-sgvu-navy/40" />
-                    Preview unavailable. Use download to get a PDF copy.
+                    <p role="alert">{previewError ?? 'Preview unavailable.'}</p>
+                    {preview.downloadHref ? (
+                      <Button variant="outline" onClick={() => void openPreview(preview)}>Retry</Button>
+                    ) : null}
                   </div>
                 )}
               </div>
 
-              <p className="flex items-start gap-2 text-xs text-muted-foreground">
+              {previewFile ? (
+                <a href={previewFile.url} target="_blank" rel="noopener noreferrer" className="shrink-0 text-sm font-semibold text-sgvu-navy underline">
+                  Open in new tab
+                </a>
+              ) : null}
+              <p className="flex shrink-0 items-start gap-2 text-xs text-muted-foreground">
                 <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600" />
                 Keep a copy for scholarship, bank, or verification requests.
               </p>
 
-              <DialogFooter className="gap-2 sm:gap-2">
+              <DialogFooter className="shrink-0 gap-2 sm:gap-2">
                 <Button variant="outline" onClick={closePreview}>
                   Close
                 </Button>
                 <Button
                   className="bg-sgvu-navy hover:bg-[#123A6D]"
-                  disabled={downloadingId === preview.id}
+                  disabled={!previewFile || previewLoading}
                   onClick={() => void handleDownload(preview)}
                 >
-                  {downloadingId === preview.id ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Download className="h-4 w-4" />
-                  )}
+                  <Download className="h-4 w-4" />
                   Download
                 </Button>
               </DialogFooter>

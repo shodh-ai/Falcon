@@ -7,6 +7,7 @@ import {
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
+import { resolveDeanScope } from '../academics/dean-scope.util';
 
 const CONCERN_TYPES = ['RAGGING', 'SEXUAL_HARASSMENT'] as const;
 const ACCUSED_TYPES = [
@@ -198,10 +199,17 @@ export class StudentSafetyService {
     );
   }
 
-  listForRole(tenantId: string, roleName: string, reviewerUserId: string) {
+  async listForRole(
+    tenantId: string,
+    roleName: string,
+    reviewerUserId: string,
+  ) {
     const normalized = this.normalizeRole(roleName);
     if (normalized === 'HOD') {
       return this.listForHod(tenantId, reviewerUserId);
+    }
+    if (normalized === 'Dean') {
+      return this.listForDean(tenantId, reviewerUserId);
     }
 
     return this.db.query(
@@ -214,7 +222,8 @@ export class StudentSafetyService {
        JOIN users reporter ON reporter.user_id = c.reporter_user_id
        LEFT JOIN users accused ON accused.user_id = c.accused_user_id
        LEFT JOIN departments d ON d.dept_id = reporter.dept_id
-       WHERE c.tenant_id = $1 AND $2 = ANY(c.routed_to_roles)
+       WHERE c.tenant_id = $1
+         AND ($2 = 'SuperAdmin' OR $2 = ANY(c.routed_to_roles))
        ORDER BY (c.status = 'SUBMITTED') DESC, (c.status = 'UNDER_REVIEW') DESC, c.created_at DESC`,
       [tenantId, normalized],
     );
@@ -260,8 +269,11 @@ export class StudentSafetyService {
     const concern = await this.loadConcern(tenantId, concernId);
     const role = this.normalizeRole(reviewerRole);
 
-    if (!concern.routed_to_roles?.includes(role)) {
+    if (role !== 'SuperAdmin' && !concern.routed_to_roles?.includes(role)) {
       throw new ForbiddenException('This concern is not in your review scope.');
+    }
+    if (role === 'Dean') {
+      await this.assertDeanCanAccessConcern(tenantId, reviewerUserId, concernId);
     }
 
     const nextStatus = dto.status ?? 'UNDER_REVIEW';
@@ -463,6 +475,79 @@ export class StudentSafetyService {
        ORDER BY (c.status = 'SUBMITTED') DESC, c.created_at DESC`,
       [tenantId, deptIds],
     );
+  }
+
+  private async listForDean(tenantId: string, deanUserId: string) {
+    const { schoolIds, departmentIds } = await resolveDeanScope(
+      this.db,
+      deanUserId,
+    );
+    if (!schoolIds.length && !departmentIds.length) return [];
+
+    return this.db.query(
+      `SELECT c.*,
+              reporter.name AS reporter_name,
+              accused.name AS accused_name,
+              accused.official_email AS accused_email,
+              d.dept_name AS reporter_dept_name
+       FROM student_safety_concerns c
+       JOIN users reporter
+         ON reporter.user_id = c.reporter_user_id
+        AND reporter.tenant_id = c.tenant_id
+       LEFT JOIN users accused ON accused.user_id = c.accused_user_id
+       LEFT JOIN departments d ON d.dept_id = reporter.dept_id
+       LEFT JOIN iam_programs p
+         ON p.dept_id = reporter.dept_id AND p.deleted_at IS NULL
+       LEFT JOIN schools s
+         ON (s.school_id = d.school_id OR s.school_id = p.school_id)
+        AND s.deleted_at IS NULL
+       WHERE c.tenant_id = $1
+         AND 'Dean' = ANY(c.routed_to_roles)
+         AND (
+           s.school_id = ANY($2::int[])
+           OR reporter.dept_id = ANY($3::int[])
+         )
+       ORDER BY (c.status = 'SUBMITTED') DESC, (c.status = 'UNDER_REVIEW') DESC, c.created_at DESC`,
+      [tenantId, schoolIds, departmentIds],
+    );
+  }
+
+  private async assertDeanCanAccessConcern(
+    tenantId: string,
+    deanUserId: string,
+    concernId: string,
+  ) {
+    const { schoolIds, departmentIds } = await resolveDeanScope(
+      this.db,
+      deanUserId,
+    );
+    if (!schoolIds.length && !departmentIds.length) {
+      throw new ForbiddenException('This concern is not in your review scope.');
+    }
+
+    const rows = await this.db.query(
+      `SELECT c.concern_id
+       FROM student_safety_concerns c
+       JOIN users reporter
+         ON reporter.user_id = c.reporter_user_id
+        AND reporter.tenant_id = c.tenant_id
+       LEFT JOIN departments d ON d.dept_id = reporter.dept_id
+       LEFT JOIN iam_programs p
+         ON p.dept_id = reporter.dept_id AND p.deleted_at IS NULL
+       LEFT JOIN schools s
+         ON (s.school_id = d.school_id OR s.school_id = p.school_id)
+        AND s.deleted_at IS NULL
+       WHERE c.concern_id = $1
+         AND c.tenant_id = $2
+         AND (
+           s.school_id = ANY($3::int[])
+           OR reporter.dept_id = ANY($4::int[])
+         )`,
+      [concernId, tenantId, schoolIds, departmentIds],
+    );
+    if (!rows[0]) {
+      throw new ForbiddenException('This concern is not in your review scope.');
+    }
   }
 
   private resolveRouting(

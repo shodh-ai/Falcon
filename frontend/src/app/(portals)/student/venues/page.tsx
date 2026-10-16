@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useStudentClock } from '@/components/student/useStudentClock';
 import { Building2, Clock, Users } from 'lucide-react';
 import QRCode from 'react-qr-code';
 import { toast } from '@/lib/notifications/falcon-toast';
@@ -78,7 +79,8 @@ export default function StudentVenuesPage() {
   const [tags, setTags] = useState<string[]>([]);
   const [activeTags, setActiveTags] = useState<string[]>([]);
   const [selectedVenue, setSelectedVenue] = useState<CampusVenue | null>(null);
-  const [selectedDate, setSelectedDate] = useState(toDateInput());
+  const [selectedDate, setSelectedDate] = useState(() => toDateInput());
+  const now = useStudentClock(60_000);
   const [slots, setSlots] = useState<VenueBookingSlot[]>([]);
   const [selectedSlotHour, setSelectedSlotHour] = useState<number | null>(null);
   const [purpose, setPurpose] = useState('');
@@ -87,21 +89,19 @@ export default function StudentVenuesPage() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
 
-  const loadCatalog = useCallback(async () => {
-    const [venueRows, tagRows, bookingRows] = await Promise.all([
+  const loadCatalog = useCallback(() => Promise.all([
       venueApi.listVenues(activeTags),
       venueApi.amenityTags(),
       venueApi.myBookings(),
-    ]);
+    ]).then(([venueRows, tagRows, bookingRows]) => {
     setVenues(venueRows);
     setTags(tagRows);
     setMyBookings(bookingRows);
-  }, [venueApi, activeTags]);
+  }), [venueApi, activeTags]);
 
-  const loadSlots = useCallback(async () => {
-    if (!selectedVenue) return;
-    const avail = await venueApi.availability(selectedVenue.venue_id, selectedDate);
-    setSlots(avail.bookings);
+  const loadSlots = useCallback(() => {
+    if (!selectedVenue) return Promise.resolve();
+    return venueApi.availability(selectedVenue.venue_id, selectedDate).then((avail) => setSlots(avail.bookings));
   }, [venueApi, selectedVenue, selectedDate]);
 
   useEffect(() => {
@@ -262,7 +262,7 @@ export default function StudentVenuesPage() {
                 {Array.from({ length: DAY_END_HOUR - DAY_START_HOUR }, (_, i) => DAY_START_HOUR + i).map((hour) => {
                   const status = slotStatus(hour, selectedDate, slots);
                   const isPast =
-                    new Date(buildSlotTimes(selectedDate, hour).start).getTime() < Date.now();
+                    new Date(buildSlotTimes(selectedDate, hour).start).getTime() < now;
                   const disabled = status !== 'available' || isPast;
                   return (
                     <button

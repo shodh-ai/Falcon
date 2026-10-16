@@ -40,6 +40,12 @@ export class UosGovernanceController {
     return Array.from(new Set(merged));
   }
 
+  private curriculumRole(user: AuthUser): string {
+    return user.roles?.includes('SuperAdmin')
+      ? 'SuperAdmin'
+      : this.role(user);
+  }
+
   // ALM
   @Get('assets/amc')
   @Roles(
@@ -218,7 +224,11 @@ export class UosGovernanceController {
     'LabAdmin',
   )
   listCurriculum(@Req() req: { user: AuthUser }) {
-    return this.uos.listCurriculum(this.tenant(req));
+    return this.uos.listCurriculum(
+      this.tenant(req),
+      req.user.user_id,
+      this.curriculumRole(req.user),
+    );
   }
 
   @Post('sis/curriculum')
@@ -243,7 +253,7 @@ export class UosGovernanceController {
     return this.uos.signCurriculumBos(
       this.tenant(req),
       req.user.user_id,
-      this.role(req.user),
+      this.curriculumRole(req.user),
       id,
     );
   }
@@ -251,7 +261,12 @@ export class UosGovernanceController {
   @Post('sis/curriculum/:id/finalize')
   @Roles('Dean', 'CampusAdmin', 'SuperAdmin')
   finalizeCurriculum(@Req() req: { user: AuthUser }, @Param('id') id: string) {
-    return this.uos.finalizeCurriculum(this.tenant(req), req.user.user_id, id);
+    return this.uos.finalizeCurriculum(
+      this.tenant(req),
+      req.user.user_id,
+      this.curriculumRole(req.user),
+      id,
+    );
   }
 
   // Legal

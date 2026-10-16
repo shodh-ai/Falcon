@@ -93,6 +93,12 @@ const ROUTES: Array<{ moduleKey: BusinessModuleKey; prefixes: string[] }> = [
       "/parent/academics",
       "/academics",
       "/student/academics",
+      "/student/registration",
+      "/student/timetable",
+      "/student/academic-calendar",
+      "/student/attendance",
+      "/student/mentorship",
+      "/student/policies",
       "/faculty",
     ],
   },
@@ -123,6 +129,9 @@ const ROUTES: Array<{ moduleKey: BusinessModuleKey; prefixes: string[] }> = [
       "/student/exams",
       "/student/certificates",
       "/student/transcripts",
+      "/student/marks",
+      "/student/exit",
+      "/student/profile/certificates",
       "/certificates",
     ],
   },
@@ -172,6 +181,9 @@ const ROUTES: Array<{ moduleKey: BusinessModuleKey; prefixes: string[] }> = [
       "/student/hostel",
       "/student/mess",
       "/student/dining",
+      "/student/campus-life",
+      "/student/gate-pass",
+      "/student/hostel-booking",
       "/hostel",
       "/mess",
     ],
@@ -207,6 +219,12 @@ const ROUTES: Array<{ moduleKey: BusinessModuleKey; prefixes: string[] }> = [
       "/research",
       "/phd",
       "/academic-rnd",
+      "/student/research",
+      "/student/phd",
+      "/student/e-cell",
+      "/student/challenges",
+      "/student/portfolio",
+      "/student/wetware",
     ],
   },
   {
@@ -240,6 +258,7 @@ const ROUTES: Array<{ moduleKey: BusinessModuleKey; prefixes: string[] }> = [
     prefixes: [
       "/clinic-admin",
       "/student/safety",
+      "/student/safety-concerns",
       "/faculty/safety",
       "/hod/safety",
       "/dean/safety",
@@ -255,6 +274,11 @@ const ROUTES: Array<{ moduleKey: BusinessModuleKey; prefixes: string[] }> = [
       "/admin/operations",
       "/admin-ops",
       "/student/venues",
+      "/student/events",
+      "/student/falcon-events",
+      "/student/clubs-chapters",
+      "/student/club-management",
+      "/student/extracurriculars",
       "/operations",
       "/labs",
       "/venues",
@@ -280,6 +304,7 @@ export function isPathHiddenForLaunch(
 ): boolean {
   // Server-rendered legacy call sites cannot see the authenticated runtime
   // manifest. RoleGate and AppShell apply the real client-side decision.
+  void pathname;
   return false;
 }
 
@@ -298,11 +323,12 @@ export function resolvePathModule(
   pathname: string | null | undefined,
 ): BusinessModuleKey | undefined {
   if (!pathname) return undefined;
+  const path = pathname.split(/[?#]/, 1)[0].replace(/\/+$/, '');
   return ROUTES.flatMap((item) =>
     item.prefixes.map((prefix) => ({ moduleKey: item.moduleKey, prefix })),
   )
     .sort((a, b) => b.prefix.length - a.prefix.length)
-    .find(({ prefix }) => matchesPathPrefix(pathname, prefix))?.moduleKey;
+    .find(({ prefix }) => matchesPathPrefix(path, prefix))?.moduleKey;
 }
 
 export function runtimeModuleForPath(

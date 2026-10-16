@@ -140,12 +140,10 @@ export function ExitAlumniPanel() {
     [form],
   );
 
-  const load = useCallback(async (): Promise<boolean> => {
-    try {
-      const next = await api.get<ExitData>('/api/student/exit');
+  const load = useCallback((): Promise<boolean> => api.get<ExitData>('/api/student/exit').then((next) => {
       applyPayload(next);
       return true;
-    } catch (e) {
+    }).catch((e: unknown) => {
       if (isStudentDemoModeEnabled()) {
         applyPayload(DEMO_EXIT as ExitData);
         return true;
@@ -153,8 +151,7 @@ export function ExitAlumniPanel() {
       const message = e instanceof Error ? e.message : 'Could not load exit status';
       setLoadError(message);
       return false;
-    }
-  }, [api, applyPayload]);
+    }), [api, applyPayload]);
 
   useEffect(() => {
     void load().finally(() => setLoading(false));

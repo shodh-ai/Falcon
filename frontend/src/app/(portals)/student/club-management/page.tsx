@@ -61,21 +61,20 @@ export default function ClubManagementPage() {
 
   const blockedSet = useMemo(() => new Set(blocked.map((b) => b.date.slice(0, 10))), [blocked]);
 
-  const load = useCallback(async () => {
-    const [c, e, v, b] = await Promise.all([
+  const load = useCallback(() => Promise.all([
       eventsApi.myClubs(),
       eventsApi.coordinatorEvents(),
       eventsApi.venues(),
       eventsApi.blockedDates(),
-    ]);
+    ]).then(([c, e, v, b]) => {
     setClubs(c);
     setEvents(e);
     setVenues(v);
     setBlocked(b);
     if (c[0]) setForm((f) => (f.club_id ? f : { ...f, club_id: c[0].club_id }));
     const live = e.filter((x) => x.status === 'LIVE');
-    if (live[0] && !scanEventId) setScanEventId(live[0].event_id);
-  }, [eventsApi, scanEventId]);
+    if (live[0]) setScanEventId((current) => current || live[0].event_id);
+  }), [eventsApi]);
 
   useEffect(() => {
     void load()

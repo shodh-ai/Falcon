@@ -7,6 +7,7 @@ import { Transaction } from '../../entities/transaction.entity';
 import { LateFinePolicy } from '../../entities/late-fine-policy.entity';
 import { CreateFeeDemandDto } from './dto/create-fee-demand.dto';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
+import { requireTenantId } from '../../common/utils/require-tenant-id';
 
 @Injectable()
 export class FinanceService {
@@ -37,13 +38,16 @@ export class FinanceService {
   }
 
   async createDemand(dto: CreateFeeDemandDto, tenantId: string) {
+    const scopedTenantId = requireTenantId(tenantId);
     const owners = await this.demands.manager.query<Array<{ tenant_id: string }>>(
       `SELECT tenant_id FROM users WHERE user_id = $1 LIMIT 1`,
       [dto.student_user_id],
     );
-    if (owners[0]?.tenant_id !== tenantId)
+    if (owners[0]?.tenant_id !== scopedTenantId)
       throw new BadRequestException('Student is not in this institution');
-    const saved = await this.demands.save(this.demands.create({ ...dto, tenant_id: tenantId }));
+    const saved = await this.demands.save(
+      this.demands.create({ ...dto, tenant_id: scopedTenantId }),
+    );
     this.notify.feeGenerated({
       tenantId,
       userId: saved.student_user_id,
@@ -369,9 +373,17 @@ export class FinanceService {
     return this.demands.save(activeDemand);
   }
 
-  async getPendingDues(studentUserId: string): Promise<FeeDemand[]> {
+  async getPendingDues(
+    studentUserId: string,
+    tenantId?: string,
+  ): Promise<FeeDemand[]> {
     const demands = await this.demands.find({
-      where: { student_user_id: studentUserId },
+      where: {
+        student_user_id: studentUserId,
+        ...(tenantId === undefined
+          ? {}
+          : { tenant_id: requireTenantId(tenantId) }),
+      },
       order: { due_date: 'ASC' },
     });
     return demands.filter((d) => {

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuthedApi } from '@/lib/api';
 import { createSpecialProgramsApi } from '@/lib/api/api.special-programs';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -8,22 +8,24 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { toast } from '@/lib/notifications/falcon-toast';
 
+type PortfolioArtifact = { artifact_id: string; artifact_type: string; title: string; url?: string | null };
+
 export default function Page() {
   const api = useAuthedApi();
   const sp = useMemo(() => createSpecialProgramsApi(api), [api]);
-  const [arts, setArts] = useState<any[]>([]);
+  const [arts, setArts] = useState<PortfolioArtifact[]>([]);
   const [title, setTitle] = useState('My capstone repo');
   const [url, setUrl] = useState('https://github.com/example/my-project');
 
-  const reload = () =>
+  const reload = useCallback(() =>
     sp
       .artifacts()
       .then(setArts)
-      .catch(() => toast.error('Failed to load portfolio artifacts'));
+      .catch(() => toast.error('Failed to load portfolio artifacts')), [sp]);
 
   useEffect(() => {
     void reload();
-  }, [sp]);
+  }, [reload]);
 
   return (
     <div className="space-y-6 p-6">

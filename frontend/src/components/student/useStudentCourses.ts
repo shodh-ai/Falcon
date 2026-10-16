@@ -1,10 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { useAuthedApi } from '@/lib/api';
-import { DEMO_STUDENT, DEMO_SUBJECTS } from '@/lib/mock/student-portal-demo';
-import { isStudentDemoModeEnabled } from '@/lib/student-demo-mode';
+import { withStudentReadTimeout } from '@/lib/student-read-request';
 
 export type StudentCourse = {
   course_id: string;
@@ -14,17 +13,6 @@ export type StudentCourse = {
   semester: number;
   course_type: string;
 };
-
-function demoCourses(): StudentCourse[] {
-  return DEMO_SUBJECTS.map((s) => ({
-    course_id: s.course_id,
-    course_code: s.course_code,
-    course_name: s.course_name,
-    credits: s.credits,
-    semester: s.semester,
-    course_type: s.course_type,
-  }));
-}
 
 type EnrollmentRow = {
   enrollment_id: string;
@@ -80,77 +68,71 @@ export function useStudentCourses() {
   const api = useAuthedApi();
   const { user } = useAuth();
   const userId = user?.user_id ?? null;
-  const [courses, setCourses] = useState<StudentCourse[]>([]);
-  const [currentSemester, setCurrentSemester] = useState<number | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const tenantId = user?.tenant_id ?? null;
+  const [revision, setRevision] = useState(0);
+  const [response, setResponse] = useState<{
+    api: ReturnType<typeof useAuthedApi>;
+    userId: string;
+    tenantId: string | null;
+    revision: number;
+    courses: StudentCourse[];
+    currentSemester: number | null;
+    error: string | null;
+  } | null>(null);
+  const retry = useCallback(() => setRevision((current) => current + 1), []);
 
   useEffect(() => {
-    if (!userId) {
-      setCourses([]);
-      setCurrentSemester(null);
-      setLoading(false);
-      return;
-    }
+    if (!userId) return;
 
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
+    let active = true;
 
     (async () => {
       try {
-        const payload = await api.get<EnrollmentResponse>(
-          '/api/academics/courses/my-enrollments',
+        const payload = await withStudentReadTimeout(
+          api.get<EnrollmentResponse>('/api/academics/courses/my-enrollments'),
         );
         const { currentSemester: semester, rows } =
           parseEnrollmentResponse(payload);
 
-        if (!cancelled) {
-          if (rows.length === 0) {
-            if (isStudentDemoModeEnabled()) {
-              setCurrentSemester(DEMO_STUDENT.semester);
-              setCourses(demoCourses());
-              setError(null);
-            } else {
-              setCurrentSemester(semester);
-              setCourses([]);
-              setError('No subjects enrolled for this semester yet.');
-            }
-          } else {
-            setCurrentSemester(semester);
-            setCourses(
-              rows.map((row) => ({
-                course_id: row.course.course_id,
-                course_code: row.course.course_code,
-                course_name: row.course.course_name,
-                credits: Number(row.course.credits) || 0,
-                semester: Number(row.semester),
-                course_type: row.course.is_elective ? 'ELECTIVE' : 'CORE',
-              })),
-            );
-            setError(null);
-          }
+        if (active) {
+          setResponse({
+            api, userId, tenantId, revision,
+            currentSemester: semester,
+            courses: rows.map((row) => ({
+              course_id: row.course.course_id,
+              course_code: row.course.course_code,
+              course_name: row.course.course_name,
+              credits: Number(row.course.credits) || 0,
+              semester: Number(row.semester),
+              course_type: row.course.is_elective ? 'ELECTIVE' : 'CORE',
+            })),
+            error: null,
+          });
         }
-      } catch (e) {
-        if (!cancelled) {
-          if (isStudentDemoModeEnabled()) {
-            setCurrentSemester(DEMO_STUDENT.semester);
-            setCourses(demoCourses());
-            setError(null);
-          } else {
-            setCourses([]);
-            setError(e instanceof Error ? e.message : 'Failed to load courses');
-          }
+      } catch {
+        if (active) {
+          setResponse({
+            api, userId, tenantId, revision,
+            courses: [],
+            currentSemester: null,
+            error: 'Your courses could not be loaded. Please try again. If the problem continues, contact Help & Support.',
+          });
         }
-      } finally {
-        if (!cancelled) setLoading(false);
       }
     })();
 
     return () => {
-      cancelled = true;
+      active = false;
     };
-  }, [api, userId]);
+  }, [api, userId, tenantId, revision]);
 
-  return { courses, currentSemester, loading, error };
+  const hasCurrentData = userId != null && response?.userId === userId &&
+    response?.tenantId === tenantId && response?.api === api && response?.revision === revision;
+  return {
+    courses: hasCurrentData ? response.courses : [],
+    currentSemester: hasCurrentData ? response.currentSemester : null,
+    loading: Boolean(userId && !hasCurrentData),
+    error: hasCurrentData ? response.error : null,
+    retry,
+  };
 }

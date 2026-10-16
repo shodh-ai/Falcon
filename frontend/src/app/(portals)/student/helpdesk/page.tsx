@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
@@ -161,10 +161,7 @@ export default function StudentHelpdeskPage() {
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL');
 
-  async function loadTickets() {
-    setLoading(true);
-    try {
-      const data = await api.get<TicketRow[]>('/api/helpdesk/tickets/my-tickets');
+  const loadTickets = useCallback(() => api.get<TicketRow[]>('/api/helpdesk/tickets/my-tickets').then((data) => {
       if ((!data || data.length === 0) && demoOn) {
         setTickets(DEMO_TICKETS);
         setUsingDemoTickets(true);
@@ -172,7 +169,7 @@ export default function StudentHelpdeskPage() {
         setTickets(data ?? []);
         setUsingDemoTickets(false);
       }
-    } catch {
+    }).catch(() => {
       if (demoOn) {
         setTickets(DEMO_TICKETS);
         setUsingDemoTickets(true);
@@ -181,10 +178,9 @@ export default function StudentHelpdeskPage() {
         setUsingDemoTickets(false);
         toast.error('Failed to load tickets');
       }
-    } finally {
+    }).finally(() => {
       setLoading(false);
-    }
-  }
+    }), [api, demoOn]);
 
   useEffect(() => {
     if (ticketFromQuery) {
@@ -230,8 +226,7 @@ export default function StudentHelpdeskPage() {
           setDemeritSummary(null);
         }
       });
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- load once on mount / api change
-  }, [api, demoOn]);
+  }, [api, demoOn, loadTickets]);
 
   async function handleCreateTicket() {
     if (form.subject.trim().length < 5 || form.description.trim().length < 10) {

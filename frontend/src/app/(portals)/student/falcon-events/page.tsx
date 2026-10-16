@@ -35,33 +35,27 @@ export default function FalconEventsPage() {
   const searchParams = useSearchParams();
   const api = useAuthedApi();
   const eventsApi = useMemo(() => createCampusEventsApi(api), [api]);
-  const [tab, setTab] = useState<Tab>(() => tabFromSearchParam(searchParams.get('tab')));
+  const tab = tabFromSearchParam(searchParams.get('tab'));
   const [events, setEvents] = useState<CampusEvent[]>([]);
   const [tickets, setTickets] = useState<EventRegistration[]>([]);
   const [extra, setExtra] = useState<ExtraData | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    setTab(tabFromSearchParam(searchParams.get('tab')));
-  }, [searchParams]);
-
-  const load = useCallback(async () => {
-    const [cal, tk, ex] = await Promise.all([
+  const load = useCallback(() => Promise.all([
       eventsApi.globalCalendar(),
       eventsApi.myTickets(),
       api.get<ExtraData>('/api/student/extracurriculars'),
-    ]);
+    ]).then(([cal, tk, ex]) => {
     setEvents(cal.live_events);
     setTickets(tk);
     setExtra(ex);
-  }, [api, eventsApi]);
+  }), [api, eventsApi]);
 
   useEffect(() => {
     void load().catch(() => toast.error('Could not load events & clubs')).finally(() => setLoading(false));
   }, [load]);
 
   function selectTab(next: Tab) {
-    setTab(next);
     const query = next === 'events' ? '' : `?tab=${next}`;
     router.replace(`/student/falcon-events${query}`, { scroll: false });
   }

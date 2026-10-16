@@ -8,21 +8,23 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/lib/notifications/falcon-toast';
 
+type Program = { program_id: string; code: string; name: string; description?: string | null };
+type Enrollment = { student_user_id: string; status: string };
+
 export default function Page() {
   const { user } = useAuth();
   const api = useAuthedApi();
   const sp = useMemo(() => createSpecialProgramsApi(api), [api]);
-  const [program, setProgram] = useState<any>(null);
-  const [myEnrollment, setMyEnrollment] = useState<any>(null);
+  const [program, setProgram] = useState<Program | null>(null);
+  const [myEnrollment, setMyEnrollment] = useState<Enrollment | null>(null);
   const [loading, setLoading] = useState(true);
 
   const reload = useCallback(() => {
-    setLoading(true);
     return sp
       .list()
       .then((all) => {
         const p = all.find((x) => x.code === 'WETWARE_BIOTECH');
-        setProgram(p);
+        setProgram(p ?? null);
         if (!p) {
           setMyEnrollment(null);
           return;
@@ -67,7 +69,7 @@ export default function Page() {
             <p className="text-sm text-muted-foreground">Loading…</p>
           ) : enrolled ? (
             <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800">
-              Enrolled — status: {myEnrollment.status}
+              Enrolled — status: {myEnrollment?.status}
             </p>
           ) : program ? (
             <Button

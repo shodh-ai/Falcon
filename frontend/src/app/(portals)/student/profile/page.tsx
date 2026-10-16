@@ -92,11 +92,6 @@ function formatCountdown(ms: number) {
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
-function displayValue(value: unknown) {
-  if (value === null || value === undefined || value === '') return 'Not on file';
-  return String(value);
-}
-
 function formatDateOfBirth(value: string | null) {
   if (!value) return 'Not on file';
   const parsed = new Date(value);
@@ -327,12 +322,11 @@ export default function StudentProfilePage() {
     [buildDemoProfile],
   );
 
-  const loadProfile = useCallback(async () => {
-    const data = await api.get<MasterProfile>('/api/student/profile');
+  const loadProfile = useCallback(() => api.get<MasterProfile>('/api/student/profile').then((data) => {
     const merged = isStudentDemoModeEnabled() ? mergeWithDemo(data) : data;
     applyProfileState(merged);
     return merged;
-  }, [api, applyProfileState, mergeWithDemo]);
+  }), [api, applyProfileState, mergeWithDemo]);
 
   useEffect(() => {
     void loadProfile()
@@ -344,11 +338,21 @@ export default function StudentProfilePage() {
       .finally(() => setLoading(false));
   }, [loadProfile, applyProfileState, buildDemoProfile]);
 
-  useEffect(() => {
-    if (!profile?.profile_unlocked_until || !isEditable) {
-      setCountdown('');
-      return;
+  const saveProfileEdits = useCallback(async (silent = false) => {
+    try {
+      await api.patch('/api/student/profile', {
+        parent_details: parentForm,
+        address: addressForm,
+      });
+      if (!silent) toast.success('Profile changes saved and locked.');
+      await loadProfile();
+    } catch (e) {
+      if (!silent) toast.error(e instanceof Error ? e.message : 'Save failed');
     }
+  }, [api, parentForm, addressForm, loadProfile]);
+
+  useEffect(() => {
+    if (!profile?.profile_unlocked_until || !isEditable) return;
     const tick = () => {
       const remaining = new Date(profile.profile_unlocked_until!).getTime() - Date.now();
       if (remaining <= 0) {
@@ -362,23 +366,9 @@ export default function StudentProfilePage() {
       }
       setCountdown(formatCountdown(remaining));
     };
-    tick();
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
-  }, [profile?.profile_unlocked_until, isEditable]);
-
-  async function saveProfileEdits(silent = false) {
-    try {
-      await api.patch('/api/student/profile', {
-        parent_details: parentForm,
-        address: addressForm,
-      });
-      if (!silent) toast.success('Profile changes saved and locked.');
-      await loadProfile();
-    } catch (e) {
-      if (!silent) toast.error(e instanceof Error ? e.message : 'Save failed');
-    }
-  }
+  }, [profile?.profile_unlocked_until, isEditable, saveProfileEdits]);
 
   async function saveBankDetails() {
     const { bank_name, account_number, ifsc_code } = bankData;

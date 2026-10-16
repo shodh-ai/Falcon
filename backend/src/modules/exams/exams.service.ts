@@ -1,4 +1,8 @@
-import { Injectable, ForbiddenException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  ForbiddenException,
+} from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { ExamSchedule } from '../../entities/exam-schedule.entity';
@@ -11,6 +15,7 @@ import {
   type AdmitCardExamRow,
 } from './pdf/admit-card-pdf.service';
 import { AttendanceEligibilityService } from '../attendance-policy/attendance-eligibility.service';
+import { requireTenantId } from '../../common/utils/require-tenant-id';
 
 export interface ExamEligibilityResult {
   eligible: boolean;
@@ -39,17 +44,38 @@ export class ExamsService {
 
   async listUpcomingSchedulesForStudent(
     studentUserId: string,
+    tenantId: string,
+    semester?: number,
   ): Promise<ExamSchedule[]> {
+    if (
+      semester !== undefined &&
+      (!Number.isSafeInteger(semester) || semester <= 0)
+    ) {
+      throw new BadRequestException('Semester must be a positive integer');
+    }
     const today = new Date().toISOString().slice(0, 10);
     return this.schedules
       .createQueryBuilder('s')
       .where('s.exam_date >= :today', { today })
+      .andWhere('s.tenant_id = :tenantId', {
+        tenantId: requireTenantId(tenantId),
+      })
+      .andWhere(
+        `EXISTS (
+        SELECT 1 FROM academic_subjects sub
+        JOIN academic_courses c ON (c.course_code = sub.subject_code OR c.course_name ILIKE sub.subject_name) AND c.tenant_id = :tenantId
+        JOIN student_course_enrollments e ON e.course_id = c.course_id AND e.tenant_id = :tenantId
+        WHERE sub.subject_id = s.subject_id AND e.student_user_id = :studentUserId AND e.status = 'ENROLLED' AND e.deleted_at IS NULL
+        ${semester === undefined ? '' : 'AND e.semester = :semester'}
+      )`,
+        { studentUserId, ...(semester === undefined ? {} : { semester }) },
+      )
       .orderBy('s.exam_date', 'ASC')
       .addOrderBy('s.start_time', 'ASC')
       .getMany();
   }
 
-  async listMyApplications(studentUserId: string) {
+  async listMyApplications(studentUserId: string, tenantId: string) {
     return this.db.query(
       `SELECT a.*,
               sub.subject_name,
@@ -58,16 +84,29 @@ export class ExamsService {
        FROM exam_applications a
        LEFT JOIN academic_subjects sub ON sub.subject_id = a.subject_id
        LEFT JOIN users f ON f.user_id = a.assigned_faculty_user_id
+       JOIN users u ON u.user_id = a.student_user_id AND u.tenant_id = $2
        WHERE a.student_user_id = $1
        ORDER BY a.created_at DESC`,
-      [studentUserId],
+      [studentUserId, requireTenantId(tenantId)],
     );
   }
 
   async createApplication(
     studentUserId: string,
     dto: CreateExamApplicationDto,
+    tenantId: string,
   ): Promise<ExamApplication> {
+    const tid = requireTenantId(tenantId);
+    const subjects = await this.db.query<Array<{ subject_id: number }>>(
+      `SELECT sub.subject_id FROM academic_subjects sub
+       JOIN academic_courses c ON (c.course_code = sub.subject_code OR c.course_name ILIKE sub.subject_name) AND c.tenant_id = $2
+       JOIN student_course_enrollments e ON e.course_id = c.course_id AND e.tenant_id = $2
+       WHERE sub.subject_id = $3 AND e.student_user_id = $1 AND e.deleted_at IS NULL
+         AND e.status IN ('ENROLLED', 'COMPLETED', 'FAILED') LIMIT 1`,
+      [studentUserId, tid, dto.subject_id],
+    );
+    if (!subjects[0])
+      throw new ForbiddenException('Subject is not in your enrolled courses');
     const application = this.applications.create({
       student_user_id: studentUserId,
       subject_id: dto.subject_id,
@@ -77,11 +116,6 @@ export class ExamsService {
     });
 
     if (dto.application_type === 'RE_EVALUATION') {
-      const student = await this.users.findOne({
-        where: { user_id: studentUserId },
-      });
-      const tenantId =
-        student?.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
       const academicYear = this.getAcademicYear();
       const dueDate = this.addDays(new Date(), 3).toISOString().slice(0, 10);
       const demand = await this.finance.createDemand(
@@ -92,7 +126,7 @@ export class ExamsService {
           total_amount: 500,
           due_date: dueDate,
         },
-        tenantId,
+        tid,
       );
       application.finance_demand_id = demand.demand_id;
     }
@@ -112,25 +146,22 @@ export class ExamsService {
   private isAdmitCardDemoBypassEnabled(): boolean {
     if (process.env.STRICT_ADMIT_CARD_ELIGIBILITY === 'true') return false;
     return (
-      process.env.ADMIT_CARD_DEMO_BYPASS === 'true' ||
+      process.env.ADMIT_CARD_DEMO_BYPASS === 'true' &&
       process.env.NODE_ENV !== 'production'
     );
   }
 
   async checkEligibility(
     studentUserId: string,
+    tenantId: string,
   ): Promise<ExamEligibilityResult> {
-    const student = await this.users.findOne({
-      where: { user_id: studentUserId },
-    });
-    const tenantId =
-      student?.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
+    const tid = requireTenantId(tenantId);
 
     const [attendance, pendingDues] = await Promise.all([
-      this.attendanceEligibility.evaluate(tenantId, studentUserId, {
+      this.attendanceEligibility.evaluate(tid, studentUserId, {
         context: 'EXAM_DESK',
       }),
-      this.finance.getPendingDues(studentUserId),
+      this.finance.getPendingDues(studentUserId, tid),
     ]);
 
     const blockingDues = pendingDues.filter(
@@ -207,12 +238,12 @@ export class ExamsService {
 
   /** Full timetable rows for the hall ticket (subject + venue split). */
   private async listAdmitCardExams(
-    _studentUserId: string,
+    studentUserId: string,
+    tenantId: string,
   ): Promise<AdmitCardExamRow[]> {
     const today = new Date().toISOString().slice(0, 10);
-    const rows = await this.db
-      .query(
-        `SELECT es.exam_date::text AS exam_date,
+    const rows = await this.db.query(
+      `SELECT es.exam_date::text AS exam_date,
                 es.start_time::text AS start_time,
                 es.end_time::text AS end_time,
                 es.exam_type,
@@ -222,12 +253,13 @@ export class ExamsService {
                 COALESCE(sub.subject_name, c.course_name, 'Examination') AS subject_name
          FROM exam_schedules es
          LEFT JOIN academic_subjects sub ON sub.subject_id = es.subject_id
-         LEFT JOIN academic_courses c ON c.course_code = sub.subject_code
-         WHERE es.exam_date >= $1::date
+         JOIN academic_courses c ON (c.course_code = sub.subject_code OR c.course_name ILIKE sub.subject_name) AND c.tenant_id = $2
+         WHERE es.exam_date >= $1::date AND es.tenant_id = $2
+           AND EXISTS (SELECT 1 FROM student_course_enrollments e
+             WHERE e.course_id = c.course_id AND e.student_user_id = $3 AND e.tenant_id = $2 AND e.status = 'ENROLLED' AND e.deleted_at IS NULL)
          ORDER BY es.exam_date ASC, es.start_time ASC`,
-        [today],
-      )
-      .catch(() => []);
+      [today, tenantId, studentUserId],
+    );
 
     if (Array.isArray(rows) && rows.length > 0) {
       return rows.map(
@@ -341,21 +373,19 @@ export class ExamsService {
     });
   }
 
-  private async loadAdmitCardStudent(studentUserId: string) {
-    const rows = await this.db
-      .query(
-        `SELECT u.user_id, u.name, u.official_email AS email,
+  private async loadAdmitCardStudent(studentUserId: string, tenantId: string) {
+    const rows = await this.db.query(
+      `SELECT u.user_id, u.name, u.official_email AS email,
                 sp.enrollment_number, sp.enrollment_no, sp.admission_number,
                 sp.batch, sp.section_code, sp.current_semester, sp.profile_photo_url,
                 d.dept_name AS department
          FROM users u
-         LEFT JOIN student_profiles sp ON sp.user_id = u.user_id
+         LEFT JOIN student_profiles sp ON sp.user_id = u.user_id AND sp.tenant_id = u.tenant_id
          LEFT JOIN departments d ON d.dept_id = u.dept_id
-         WHERE u.user_id = $1
+         WHERE u.user_id = $1 AND u.tenant_id = $2
          LIMIT 1`,
-        [studentUserId],
-      )
-      .catch(() => []);
+      [studentUserId, tenantId],
+    );
 
     const row = rows[0] as
       | {
@@ -375,7 +405,7 @@ export class ExamsService {
 
     if (!row) {
       const user = await this.users.findOne({
-        where: { user_id: studentUserId },
+        where: { user_id: studentUserId, tenant_id: tenantId },
       });
       return {
         user_id: studentUserId,
@@ -426,16 +456,22 @@ export class ExamsService {
     };
   }
 
-  async generateAdmitCardOrThrow(studentUserId: string): Promise<Buffer> {
-    const eligibility = await this.checkEligibility(studentUserId);
+  async generateAdmitCardOrThrow(
+    studentUserId: string,
+    tenantId: string,
+  ): Promise<Buffer> {
+    const eligibility = await this.checkEligibility(
+      studentUserId,
+      requireTenantId(tenantId),
+    );
     if (!eligibility.eligible) {
       const top = eligibility.reasons[0];
       throw new ForbiddenException(top?.message ?? 'Blocked');
     }
 
     const [student, exams] = await Promise.all([
-      this.loadAdmitCardStudent(studentUserId),
-      this.listAdmitCardExams(studentUserId),
+      this.loadAdmitCardStudent(studentUserId, tenantId),
+      this.listAdmitCardExams(studentUserId, tenantId),
     ]);
 
     return this.pdf.generate({

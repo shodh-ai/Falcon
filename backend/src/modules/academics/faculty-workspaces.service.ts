@@ -1121,50 +1121,79 @@ export class FacultyWorkspacesService {
       }
     }
 
-    if (dto.entries.length > 0) {
-      const valuePlaceholders: string[] = [];
-      const params: unknown[] = [
-        tenantId,
-        dto.course_id,
-        examType,
-        maxMarks,
-        facultyUserId,
-      ];
-      let paramIdx = 6;
-      for (const entry of dto.entries) {
-        valuePlaceholders.push(
-          `($1, $${paramIdx++}, $2, $3, $${paramIdx++}, $4, $${paramIdx++}, 'DRAFT', $5, NOW())`,
-        );
-        params.push(
-          entry.student_user_id,
-          entry.marks_obtained,
-          entry.co_mapped ?? null,
-        );
-      }
-      await this.dataSource.query(
-        `INSERT INTO academic_marks (
-           tenant_id, student_user_id, course_id, exam_type, marks_obtained, max_marks,
-           co_mapped, status, uploaded_by, updated_at
-         ) VALUES ${valuePlaceholders.join(', ')}
-         ON CONFLICT (tenant_id, student_user_id, course_id, exam_type) DO UPDATE SET
-           marks_obtained = CASE
-             WHEN academic_marks.status IN ('PENDING_COE', 'PUBLISHED') THEN academic_marks.marks_obtained
-             ELSE EXCLUDED.marks_obtained
-           END,
-           max_marks = EXCLUDED.max_marks,
-           co_mapped = CASE
-             WHEN academic_marks.status IN ('PENDING_COE', 'PUBLISHED') THEN academic_marks.co_mapped
-             ELSE EXCLUDED.co_mapped
-           END,
-           status = CASE
-             WHEN EXCLUDED.exam_type = 'QUIZ' THEN 'DRAFT'
-             WHEN academic_marks.status IN ('PENDING_COE', 'PUBLISHED') THEN academic_marks.status
-             ELSE 'DRAFT'
-           END,
-           uploaded_by = EXCLUDED.uploaded_by,
-           updated_at = NOW()`,
-        params,
+    const studentIds = dto.entries.map((entry) => entry.student_user_id);
+    if (new Set(studentIds).size !== studentIds.length) {
+      throw new BadRequestException(
+        'Each student can appear only once in a marks submission',
       );
+    }
+
+    if (dto.entries.length > 0) {
+      await this.dataSource.transaction(async (manager) => {
+        const enrolledRows = await manager.query<
+          Array<{ student_user_id: string }>
+        >(
+          `SELECT student_user_id
+           FROM student_course_enrollments
+           WHERE tenant_id = $1
+             AND course_id = $2
+             AND status = 'ENROLLED'
+             AND student_user_id = ANY($3::uuid[])`,
+          [tenantId, dto.course_id, studentIds],
+        );
+        const enrolledStudentIds = new Set(
+          enrolledRows.map((row) => row.student_user_id),
+        );
+        if (studentIds.some((studentId) => !enrolledStudentIds.has(studentId))) {
+          throw new ForbiddenException(
+            'One or more students are not actively enrolled in this course',
+          );
+        }
+
+        const valuePlaceholders: string[] = [];
+        const params: unknown[] = [
+          tenantId,
+          dto.course_id,
+          examType,
+          maxMarks,
+          facultyUserId,
+        ];
+        let paramIdx = 6;
+        for (const entry of dto.entries) {
+          valuePlaceholders.push(
+            `($1, $${paramIdx++}, $2, $3, $${paramIdx++}, $4, $${paramIdx++}, 'DRAFT', $5, NOW())`,
+          );
+          params.push(
+            entry.student_user_id,
+            entry.marks_obtained,
+            entry.co_mapped ?? null,
+          );
+        }
+        await manager.query(
+          `INSERT INTO academic_marks (
+             tenant_id, student_user_id, course_id, exam_type, marks_obtained, max_marks,
+             co_mapped, status, uploaded_by, updated_at
+           ) VALUES ${valuePlaceholders.join(', ')}
+           ON CONFLICT (tenant_id, student_user_id, course_id, exam_type) DO UPDATE SET
+             marks_obtained = CASE
+               WHEN academic_marks.status IN ('PENDING_COE', 'PUBLISHED') THEN academic_marks.marks_obtained
+               ELSE EXCLUDED.marks_obtained
+             END,
+             max_marks = EXCLUDED.max_marks,
+             co_mapped = CASE
+               WHEN academic_marks.status IN ('PENDING_COE', 'PUBLISHED') THEN academic_marks.co_mapped
+               ELSE EXCLUDED.co_mapped
+             END,
+             status = CASE
+               WHEN EXCLUDED.exam_type = 'QUIZ' THEN 'DRAFT'
+               WHEN academic_marks.status IN ('PENDING_COE', 'PUBLISHED') THEN academic_marks.status
+               ELSE 'DRAFT'
+             END,
+             uploaded_by = EXCLUDED.uploaded_by,
+             updated_at = NOW()`,
+          params,
+        );
+      });
     }
     return { saved: dto.entries.length, status: 'DRAFT' };
   }

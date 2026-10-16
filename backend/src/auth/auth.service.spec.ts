@@ -446,6 +446,7 @@ describe('AuthService.localLogin', () => {
 
 describe('AuthService password recovery', () => {
   let service: AuthService;
+  let environment: jest.ReplaceProperty<typeof process.env>;
   const mockDataSource = {
     query: jest.fn(),
     transaction: jest.fn(),
@@ -469,8 +470,11 @@ describe('AuthService password recovery', () => {
     mockDataSource.transaction.mockReset();
     mockTenantService.findBySubdomain.mockReset();
     mockTenantService.findBySubdomain.mockResolvedValue(TENANT);
+    environment = jest.replaceProperty(process, 'env', {
+      ...process.env,
+      NODE_ENV: 'test',
+    });
     delete process.env.FALCON_EXPOSE_DEV_RESET_TOKEN;
-    delete process.env.NODE_ENV;
     delete process.env.EMAIL_HOST;
     delete process.env.EMAIL_USER;
     delete process.env.EMAIL_PASSWORD;
@@ -493,14 +497,7 @@ describe('AuthService password recovery', () => {
   });
 
   afterEach(() => {
-    delete process.env.FALCON_EXPOSE_DEV_RESET_TOKEN;
-    delete process.env.NODE_ENV;
-    delete process.env.EMAIL_HOST;
-    delete process.env.EMAIL_USER;
-    delete process.env.EMAIL_PASSWORD;
-    delete process.env.EMAIL_FROM;
-    delete process.env.PASSWORD_RESET_EMAIL_FROM_NAME;
-    delete process.env.PASSWORD_RESET_EMAIL_FROM_ADDRESS;
+    environment.restore();
   });
 
   function mockTokenInsertUser(
@@ -537,7 +534,7 @@ describe('AuthService password recovery', () => {
   });
 
   it('never exposes a token even when the legacy development option is enabled', async () => {
-    process.env.NODE_ENV = 'development';
+    environment.replaceValue({ ...process.env, NODE_ENV: 'development' });
     process.env.FALCON_EXPOSE_DEV_RESET_TOKEN = 'true';
     mockTokenInsertUser();
     const result = await service.forgotPassword(
@@ -548,7 +545,7 @@ describe('AuthService password recovery', () => {
   });
 
   it('suppresses the token even when the developer flag is accidentally set in production', async () => {
-    process.env.NODE_ENV = 'production';
+    environment.replaceValue({ ...process.env, NODE_ENV: 'production' });
     process.env.FALCON_EXPOSE_DEV_RESET_TOKEN = 'true';
     mockTokenInsertUser();
     await expect(

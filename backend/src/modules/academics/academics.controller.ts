@@ -6,6 +6,7 @@ import {
   Headers,
   Param,
   ParseIntPipe,
+  ParseUUIDPipe,
   Patch,
   Post,
   Put,
@@ -32,6 +33,7 @@ import {
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles, Public } from '../../common/decorators/roles.decorator';
+import { requireTenantId } from '../../common/utils/require-tenant-id';
 import { AcademicsService } from './academics.service';
 import { AcademicsFacultyService } from './academics-faculty.service';
 import { AssignmentsService } from './assignments.service';
@@ -582,19 +584,28 @@ export class AcademicsController {
     if (!isSelf && !isStaff) {
       throw new ForbiddenException('You can only view your own results');
     }
-    return this.academics.listResultsForStudent(userId);
+    return this.marksHistoryService.getPublishedExamReports(
+      this.resolveTenantId(req.user),
+      userId,
+    );
   }
 
   @Get('student/dashboard-summary')
   @Roles('Student')
   studentDashboardSummary(@Req() req: { user: AuthUser }) {
-    return this.academics.getStudentDashboardSummary(req.user.user_id);
+    return this.academics.getStudentDashboardSummary(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+    );
   }
 
   @Get('dashboard/metrics')
   @Roles('Student')
   dashboardMetrics(@Req() req: { user: AuthUser }) {
-    return this.academics.getDashboardMetrics(req.user.user_id);
+    return this.academics.getDashboardMetrics(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+    );
   }
 
   @Get('dashboard/timetable/today')
@@ -2989,6 +3000,29 @@ export class AcademicsController {
     return file.stream.pipe(res);
   }
 
+  @Get('student/assignments/:assignmentId/submission/download')
+  @Roles('Student')
+  async downloadStudentSubmission(
+    @Param('assignmentId', ParseUUIDPipe) assignmentId: string,
+    @Req() req: { user: AuthUser },
+    @Res() res: Response,
+  ) {
+    const submission = await this.assignments.getSubmissionForStudentDownload(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      assignmentId,
+    );
+    const file = await this.assignments.streamSubmissionFile(submission);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader(
+      'Content-Disposition',
+      `inline; filename="${file.filename.replace(/["\r\n]/g, '_')}"`,
+    );
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    return file.stream.pipe(res);
+  }
+
   @Get('marks/history')
   @Roles('Student')
   getMarksHistory(@Req() req: { user: AuthUser }) {
@@ -3033,7 +3067,7 @@ export class AcademicsController {
   }
 
   private resolveTenantId(user: AuthUser) {
-    return user.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
+    return requireTenantId(user.tenant_id);
   }
 
   private auditMetaFromReq(req: {

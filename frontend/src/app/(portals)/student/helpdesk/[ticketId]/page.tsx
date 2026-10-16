@@ -1,11 +1,10 @@
 'use client';
 
-import { use, useEffect, useState } from 'react';
+import { use, useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import {
   ArrowLeft,
   CheckCircle2,
-  Clock,
   Headphones,
   Loader2,
   MessageSquare,
@@ -59,37 +58,27 @@ function isValidTicketIdentifier(id: string): boolean {
 function StudentHelpdeskTicketDetail({ ticketId }: { ticketId: string }) {
   const api = useAuthedApi();
   const [ticket, setTicket] = useState<TicketDetail | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(() => isValidTicketIdentifier(ticketId));
+  const [error, setError] = useState<string | null>(() => isValidTicketIdentifier(ticketId) ? null : 'Invalid ticket link.');
   const [message, setMessage] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  async function loadTicket() {
-    if (!isValidTicketIdentifier(ticketId)) {
-      setTicket(null);
-      setError('Invalid ticket link.');
-      setLoading(false);
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const data = await api.get<TicketDetail>(
+  const loadTicket = useCallback(() => api.get<TicketDetail>(
         `/api/helpdesk/tickets/${encodeURIComponent(ticketId)}`,
-      );
+      ).then((data) => {
       setTicket(data);
       setError(null);
-    } catch (e) {
+    }).catch((e: unknown) => {
       setTicket(null);
       setError(e instanceof Error ? e.message : 'Ticket not found');
-    } finally {
+    }).finally(() => {
       setLoading(false);
-    }
-  }
+    }), [api, ticketId]);
 
   useEffect(() => {
+    if (!isValidTicketIdentifier(ticketId)) return;
     void loadTicket();
-  }, [api, ticketId]);
+  }, [loadTicket, ticketId]);
 
   async function handleSendMessage() {
     if (!ticket || !message.trim()) {
@@ -241,5 +230,5 @@ export default function StudentHelpdeskTicketPage({
   params: Promise<{ ticketId: string }>;
 }) {
   const { ticketId } = use(params);
-  return <StudentHelpdeskTicketDetail ticketId={ticketId} />;
+  return <StudentHelpdeskTicketDetail key={ticketId} ticketId={ticketId} />;
 }
