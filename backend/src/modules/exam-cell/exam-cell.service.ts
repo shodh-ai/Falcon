@@ -12,6 +12,7 @@ import { AdmitCardPdfService } from '../exams/pdf/admit-card-pdf.service';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 import { NotificationEvents } from '../../core/notifications/notification.events';
 import { AttendanceEligibilityService } from '../attendance-policy/attendance-eligibility.service';
+import { ResultControlService } from './result-control.service';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -24,6 +25,7 @@ export class ExamCellService {
     private readonly notify: NotificationEmitterService,
     private readonly events: EventEmitter2,
     private readonly attendanceEligibility: AttendanceEligibilityService,
+    private readonly resultControl: ResultControlService,
   ) {}
 
   private async queryOrEmpty<T extends Record<string, unknown>>(
@@ -1573,48 +1575,26 @@ export class ExamCellService {
   async publishResults(
     tenantId: string,
     dto: { course_id: string; exam_type: string; batch_semester?: number },
+    actorUserId: string,
   ) {
-    const updated = await this.db.query(
-      `UPDATE academic_marks
-       SET status = 'PUBLISHED', published_at = NOW(), updated_at = NOW()
-       WHERE tenant_id = $1 AND course_id = $2 AND exam_type = $3 AND status = 'PENDING_COE'
-       RETURNING student_user_id, marks_obtained, max_marks`,
-      [tenantId, dto.course_id, dto.exam_type],
+    const session = await this.resultControl.getSessionForCourse(
+      tenantId,
+      dto.course_id,
+      dto.exam_type,
+      dto.batch_semester,
     );
-
-    if (!updated.length)
-      throw new BadRequestException('No PENDING_COE marks to publish');
-
-    const courseRows = await this.db.query(
-      `SELECT course_name FROM academic_courses WHERE course_id = $1`,
-      [dto.course_id],
-    );
-    const courseName = courseRows[0]?.course_name ?? 'Course';
-
-    const semester = dto.batch_semester ?? 4;
-    const students = await this.db.query(
-      `SELECT DISTINCT student_user_id FROM student_course_enrollments
-       WHERE tenant_id = $1 AND semester = $2`,
-      [tenantId, semester],
-    );
-
-    for (const s of students) {
-      this.events.emit(NotificationEvents.EXAM_RESULTS_PUBLISHED, {
-        tenantId,
-        userId: s.student_user_id,
-        courseName,
-        examType: dto.exam_type,
-        batchSemester: semester,
-      });
-      this.notify.examResultsPublished({
-        tenantId,
-        userId: s.student_user_id,
-        courseName,
-        examType: dto.exam_type,
-      });
+    if (!session) {
+      throw new BadRequestException(
+        'Result session not found; use the Result Control Centre workflow',
+      );
     }
 
-    return { published: updated.length, course_name: courseName };
+    return this.resultControl.declareSession(
+      tenantId,
+      session.session_id,
+      actorUserId,
+      { declaration_note: 'Published via legacy results endpoint' },
+    );
   }
 
   listReEvaluations(tenantId: string) {

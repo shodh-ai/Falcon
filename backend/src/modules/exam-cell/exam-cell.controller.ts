@@ -395,7 +395,11 @@ export class ExamCellController {
     dto: { course_id: string; exam_type: string; batch_semester?: number },
   ) {
     this.requireAction(req, 'publish_results');
-    return this.examCell.publishResults(this.tenant(req), dto);
+    return this.examCell.publishResults(
+      this.tenant(req),
+      dto,
+      req.user.user_id,
+    );
   }
 
   @Get('re-evaluations')

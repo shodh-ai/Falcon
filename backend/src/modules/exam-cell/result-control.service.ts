@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
+import { DataSource, EntityManager } from 'typeorm';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 import { ExamCellAuditService } from './exam-cell-audit.service';
 import { resolveDeanDepartmentIds } from '../academics/dean-scope.util';
@@ -259,9 +259,12 @@ export class ResultControlService {
     );
   }
 
-  private async loadGradeBands(session: { grading_policy_id?: number | null }) {
+  private async loadGradeBands(
+    session: { grading_policy_id?: number | null },
+    executor: DataSource | EntityManager = this.db,
+  ) {
     if (!session.grading_policy_id) return parseGradeBands(null);
-    const rows = await this.db.query<Array<{ rules: Record<string, unknown> }>>(
+    const rows = await executor.query<Array<{ rules: Record<string, unknown> }>>(
       `SELECT rules FROM academic_grading_policies WHERE policy_id = $1`,
       [session.grading_policy_id],
     );
@@ -773,154 +776,206 @@ export class ResultControlService {
     actorUserId: string,
     dto: DeclareResultSessionDto,
   ) {
-    const session = await this.getSession(tenantId, sessionId);
-    if (session.declared_at)
-      throw new BadRequestException('Results already declared');
+    const notifications: Array<{
+      tenantId: string;
+      userId: string;
+      courseName: string;
+      examType: string;
+      actionLink: string;
+      message: string;
+    }> = [];
 
-    const deanApproved = await this.db.query(
-      `SELECT 1 FROM exam_result_dean_approval_requests
-       WHERE tenant_id = $1 AND session_id = $2 AND status = 'APPROVED'
-       LIMIT 1`,
-      [tenantId, sessionId],
-    );
-    if (!deanApproved.length) {
-      const legacyApproved = await this.audit.hasAction(
-        tenantId,
-        sessionId,
-        'RESULT_DEAN_APPROVED',
-      );
-      if (!legacyApproved) {
-        throw new BadRequestException(
-          'Dean approval is required before publishing results',
-        );
-      }
-    }
-
-    const bands = await this.loadGradeBands(session);
-    const passMarks =
-      session.pass_marks != null ? Number(session.pass_marks) : null;
-
-    const marks = await this.db.query<
-      Array<{
-        mark_id: string;
-        student_user_id: string;
-        marks_obtained: string;
-        max_marks: string;
-      }>
-    >(
-      `SELECT mark_id, student_user_id, marks_obtained, max_marks FROM academic_marks
-       WHERE tenant_id = $1 AND course_id = $2 AND exam_type = $3 AND status = 'PENDING_COE'`,
-      [tenantId, session.course_id, session.exam_type],
-    );
-    if (!marks.length)
-      throw new BadRequestException('No PENDING_COE marks to declare');
-
-    const courseName = session.course_name ?? 'Course';
-    let declared = 0;
-
-    for (const row of marks) {
-      const obtained = Number(row.marks_obtained);
-      const max = Number(row.max_marks ?? session.max_marks);
-      const percent = max > 0 ? Number(((obtained / max) * 100).toFixed(2)) : 0;
-      const { grade, gradePoints } = computeGradeFromPercent(percent, bands);
-      const resultStatus = computePassFail(obtained, max, passMarks);
-      const summary = `${courseName} ${session.exam_type}: ${obtained}/${max} (${percent}%) — Grade ${grade}`;
-
-      await this.db.query(
-        `UPDATE academic_marks SET status = 'PUBLISHED', published_at = NOW(), updated_at = NOW() WHERE mark_id = $1`,
-        [row.mark_id],
-      );
-
-      await this.upsertExamResult(
-        tenantId,
-        row.student_user_id,
-        session.course_id,
-        session.exam_type,
-        obtained,
-        max,
-        grade,
-      );
-
-      await this.db.query(
-        `INSERT INTO student_exam_reports (
-           tenant_id, session_id, student_user_id, course_id, exam_type,
-           marks_obtained, max_marks, percent, grade, grade_points, result_status, report_summary, declared_at
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,NOW())
-         ON CONFLICT (session_id, student_user_id) DO UPDATE SET
-           marks_obtained = EXCLUDED.marks_obtained, max_marks = EXCLUDED.max_marks,
-           percent = EXCLUDED.percent, grade = EXCLUDED.grade, grade_points = EXCLUDED.grade_points,
-           result_status = EXCLUDED.result_status, report_summary = EXCLUDED.report_summary, declared_at = NOW()`,
-        [
+    try {
+      const publication = await this.db.transaction(async (manager) => {
+        const session = await this.getDeclarationSession(
+          manager,
           tenantId,
           sessionId,
-          row.student_user_id,
-          session.course_id,
-          session.exam_type,
-          obtained,
-          max,
-          percent,
-          grade,
-          gradePoints,
-          resultStatus,
-          summary,
-        ],
-      );
+        );
+        if (session.declared_at)
+          throw new BadRequestException('Results already declared');
 
-      if (
-        session.exam_type === 'END_TERM' ||
-        session.exam_type === 'INTERNAL'
-      ) {
-        await this.db.query(
-          `UPDATE student_course_enrollments
-           SET grade = $4, grade_points = $5,
-               status = CASE WHEN $6 = 'PASS' THEN 'COMPLETED' ELSE 'FAILED' END
-           WHERE tenant_id = $1 AND student_user_id = $2 AND course_id = $3 AND semester = $7`,
-          [
+        const deanApproved = await manager.query(
+          `SELECT 1 FROM exam_result_dean_approval_requests
+           WHERE tenant_id = $1 AND session_id = $2 AND status = 'APPROVED'
+           LIMIT 1`,
+          [tenantId, sessionId],
+        );
+        if (!deanApproved.length) {
+          const legacyApproved = await this.audit.hasAction(
+            tenantId,
+            sessionId,
+            'RESULT_DEAN_APPROVED',
+          );
+          if (!legacyApproved) {
+            throw new BadRequestException(
+              'Dean approval is required before publishing results',
+            );
+          }
+        }
+
+        const bands = await this.loadGradeBands(session, manager);
+        const passMarks =
+          session.pass_marks != null ? Number(session.pass_marks) : null;
+
+        const marks = await manager.query<
+          Array<{
+            mark_id: string;
+            student_user_id: string;
+            marks_obtained: string;
+            max_marks: string;
+          }>
+        >(
+          `SELECT mark_id, student_user_id, marks_obtained, max_marks FROM academic_marks
+           WHERE tenant_id = $1 AND course_id = $2 AND exam_type = $3 AND status = 'PENDING_COE'`,
+          [tenantId, session.course_id, session.exam_type],
+        );
+        if (!marks.length)
+          throw new BadRequestException('No PENDING_COE marks to declare');
+
+        const courseName = session.course_name ?? 'Course';
+        let declared = 0;
+
+        for (const row of marks) {
+          const obtained = Number(row.marks_obtained);
+          const max = Number(row.max_marks ?? session.max_marks);
+          const percent = max > 0 ? Number(((obtained / max) * 100).toFixed(2)) : 0;
+          const { grade, gradePoints } = computeGradeFromPercent(percent, bands);
+          const resultStatus = computePassFail(obtained, max, passMarks);
+          const summary = `${courseName} ${session.exam_type}: ${obtained}/${max} (${percent}%) — Grade ${grade}`;
+
+          await manager.query(
+            `UPDATE academic_marks SET status = 'PUBLISHED', published_at = NOW(), updated_at = NOW()
+             WHERE tenant_id = $1 AND mark_id = $2 AND status = 'PENDING_COE'`,
+            [tenantId, row.mark_id],
+          );
+
+          await this.upsertExamResult(
+            manager,
             tenantId,
             row.student_user_id,
             session.course_id,
+            session.exam_type,
+            obtained,
+            max,
             grade,
-            gradePoints,
-            resultStatus,
-            session.semester,
+          );
+
+          await manager.query(
+            `INSERT INTO student_exam_reports (
+               tenant_id, session_id, student_user_id, course_id, exam_type,
+               marks_obtained, max_marks, percent, grade, grade_points, result_status, report_summary, declared_at
+             ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,NOW())
+             ON CONFLICT (session_id, student_user_id) DO UPDATE SET
+               marks_obtained = EXCLUDED.marks_obtained, max_marks = EXCLUDED.max_marks,
+               percent = EXCLUDED.percent, grade = EXCLUDED.grade, grade_points = EXCLUDED.grade_points,
+               result_status = EXCLUDED.result_status, report_summary = EXCLUDED.report_summary, declared_at = NOW()`,
+            [
+              tenantId,
+              sessionId,
+              row.student_user_id,
+              session.course_id,
+              session.exam_type,
+              obtained,
+              max,
+              percent,
+              grade,
+              gradePoints,
+              resultStatus,
+              summary,
+            ],
+          );
+
+          if (
+            session.exam_type === 'END_TERM' ||
+            session.exam_type === 'INTERNAL'
+          ) {
+            await manager.query(
+              `UPDATE student_course_enrollments
+               SET grade = $4, grade_points = $5,
+                   status = CASE WHEN $6 = 'PASS' THEN 'COMPLETED' ELSE 'FAILED' END
+               WHERE tenant_id = $1 AND student_user_id = $2 AND course_id = $3 AND semester = $7`,
+              [
+                tenantId,
+                row.student_user_id,
+                session.course_id,
+                grade,
+                gradePoints,
+                resultStatus,
+                session.semester,
+              ],
+            );
+          }
+
+          notifications.push({
+            tenantId,
+            userId: row.student_user_id,
+            courseName,
+            examType: session.exam_type,
+            actionLink: `/student/marks?report=${sessionId}`,
+            message: summary,
+          });
+          declared += 1;
+        }
+
+        const declaredSession = await manager.query(
+          `UPDATE exam_result_sessions
+           SET declared_at = NOW(), declared_by = $3, declaration_note = $4,
+               entry_status = 'LOCKED', marks_locked = TRUE, updated_at = NOW()
+           WHERE tenant_id = $1 AND session_id = $2 AND declared_at IS NULL
+           RETURNING session_id`,
+          [
+            tenantId,
+            sessionId,
+            actorUserId,
+            dto.declaration_note?.trim() ?? null,
           ],
         );
-      }
+        if (!declaredSession.length) {
+          throw new BadRequestException('Results already declared');
+        }
 
-      this.notify.examResultsPublished({
-        tenantId,
-        userId: row.student_user_id,
-        courseName,
-        examType: session.exam_type,
-        actionLink: `/student/marks?report=${sessionId}`,
-        message: summary,
+        return {
+          declared,
+          course_name: courseName,
+          exam_type: session.exam_type,
+          session_id: sessionId,
+        };
       });
 
-      await this.db.query(
-        `UPDATE student_exam_reports SET notified_at = NOW() WHERE session_id = $1 AND student_user_id = $2`,
-        [sessionId, row.student_user_id],
-      );
-      declared += 1;
+      for (const notification of notifications) {
+        this.notify.examResultsPublished(notification);
+      }
+
+      await this.audit.log(tenantId, actorUserId, {
+        action: 'RESULT_DECLARED',
+        resource_type: 'exam_result_session',
+        resource_id: sessionId,
+        new_value: {
+          declared: publication.declared,
+          outcome: 'SUCCESS',
+        },
+      });
+
+      return publication;
+    } catch (error) {
+      try {
+        await this.audit.log(tenantId, actorUserId, {
+          action: 'RESULT_DECLARATION_FAILED',
+          resource_type: 'exam_result_session',
+          resource_id: sessionId,
+          new_value: { outcome: 'FAILED' },
+        });
+      } catch {
+        // ExamCellAuditService follows the existing best-effort audit policy.
+      }
+      throw error;
     }
-
-    await this.db.query(
-      `UPDATE exam_result_sessions
-       SET declared_at = NOW(), declared_by = $2, declaration_note = $3,
-           entry_status = 'LOCKED', marks_locked = TRUE, updated_at = NOW()
-       WHERE session_id = $1`,
-      [sessionId, actorUserId, dto.declaration_note?.trim() ?? null],
-    );
-
-    return {
-      declared,
-      course_name: courseName,
-      exam_type: session.exam_type,
-      session_id: sessionId,
-    };
   }
 
-  /** Best-effort mirror into legacy results table; RCC uses student_exam_reports. */
+  /** Required compatibility mirror; failures must abort the declaration transaction. */
   private async upsertExamResult(
+    executor: DataSource | EntityManager,
     tenantId: string,
     studentUserId: string,
     courseId: string,
@@ -929,41 +984,59 @@ export class ResultControlService {
     maxMarks: number,
     grade: string,
   ) {
-    try {
-      await this.db.query(
-        `DELETE FROM academic_exam_results
-         WHERE tenant_id = $1 AND student_user_id = $2 AND course_id = $3 AND exam_type = $4`,
-        [tenantId, studentUserId, courseId, examType],
-      );
-      await this.db.query(
-        `INSERT INTO academic_exam_results (
-           tenant_id, student_user_id, course_id, exam_type, marks_obtained, max_marks, grade, status
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,'PUBLISHED')`,
-        [
-          tenantId,
-          studentUserId,
-          courseId,
-          examType,
-          marksObtained,
-          maxMarks,
-          grade,
-        ],
-      );
-    } catch {
-      // Ignore schema drift on legacy table; declaration still succeeds via student_exam_reports.
-    }
+    await executor.query(
+      `DELETE FROM academic_exam_results
+       WHERE tenant_id = $1 AND student_user_id = $2 AND course_id = $3 AND exam_type = $4`,
+      [tenantId, studentUserId, courseId, examType],
+    );
+    await executor.query(
+      `INSERT INTO academic_exam_results (
+         tenant_id, student_user_id, course_id, exam_type, marks_obtained, max_marks, grade, status
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,'PUBLISHED')`,
+      [
+        tenantId,
+        studentUserId,
+        courseId,
+        examType,
+        marksObtained,
+        maxMarks,
+        grade,
+      ],
+    );
+  }
+
+  private async getDeclarationSession(
+    manager: EntityManager,
+    tenantId: string,
+    sessionId: string,
+  ) {
+    const rows = await manager.query(
+      `SELECT s.*, c.course_code, c.course_name, gp.policy_name AS grading_policy_name
+       FROM exam_result_sessions s
+       JOIN academic_courses c ON c.course_id = s.course_id AND c.tenant_id = s.tenant_id
+       LEFT JOIN academic_grading_policies gp ON gp.policy_id = s.grading_policy_id
+       WHERE s.tenant_id = $1 AND s.session_id = $2
+       FOR UPDATE OF s`,
+      [tenantId, sessionId],
+    );
+    if (!rows[0]) throw new NotFoundException('Result session not found');
+    return rows[0];
   }
 
   async getSessionForCourse(
     tenantId: string,
     courseId: string,
     examType: string,
+    semester?: number,
   ) {
+    const params: unknown[] = [tenantId, courseId, examType];
+    const semesterFilter =
+      semester == null ? '' : ` AND semester = $${params.push(semester)}`;
     const rows = await this.db.query(
       `SELECT * FROM exam_result_sessions
-       WHERE tenant_id = $1 AND course_id = $2 AND exam_type = $3
+       WHERE tenant_id = $1 AND course_id = $2 AND exam_type = $3${semesterFilter}
        ORDER BY created_at DESC LIMIT 1`,
-      [tenantId, courseId, examType],
+      params,
     );
     return rows[0] ?? null;
   }
