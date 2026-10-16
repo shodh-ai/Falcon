@@ -6,6 +6,7 @@ import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { StaffDocumentPreview } from "@/components/onboarding/StaffDocumentPreview";
 import {
   Dialog,
   DialogContent,
@@ -98,11 +99,6 @@ export default function StaffProfileVerificationsPage() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [previewDoc, setPreviewDoc] = useState("");
-  const [preview, setPreview] = useState<{
-    url: string;
-    image: boolean;
-  } | null>(null);
-  const [previewError, setPreviewError] = useState("");
   const load = useCallback(() => api.get<Row[]>("/api/hr/staff-profile-reviews")
     .then((data) => { setRows(data); setError(""); })
     .catch((cause) => setError(cause instanceof Error ? cause.message : "Could not load staff profiles. Please retry."))
@@ -110,30 +106,6 @@ export default function StaffProfileVerificationsPage() {
   useEffect(() => {
     void load();
   }, [load]);
-  useEffect(() => {
-    if (!selected || !previewDoc) return;
-    let disposed = false;
-    let objectUrl: string | undefined;
-    void api
-      .getBlob(
-        `/api/staff/verifications/${selected.review.user_id}/documents/${previewDoc}/preview`,
-      )
-      .then((blob) => {
-        if (disposed) return;
-        objectUrl = URL.createObjectURL(blob);
-        setPreview({ url: objectUrl, image: blob.type.startsWith("image/") });
-      })
-      .catch(() => {
-        if (!disposed)
-          setPreviewError(
-            "Could not open this document. Please refresh and try again.",
-          );
-      });
-    return () => {
-      disposed = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [api, selected, previewDoc]);
   const departments = useMemo(
     () =>
       [
@@ -158,8 +130,6 @@ export default function StaffProfileVerificationsPage() {
       const detail = await api.get<Detail>(
         `/api/hr/staff-profile-reviews/${row.review_id}`,
       );
-      setPreview(null);
-      setPreviewError("");
       setSelected(detail);
       setPreviewDoc(detail.documents[0]?.doc_type ?? "");
       setReason("");
@@ -472,11 +442,7 @@ export default function StaffProfileVerificationsPage() {
                             size="sm"
                             variant={previewDoc === key ? "default" : "outline"}
                             onClick={() => {
-                              if (previewDoc !== key) {
-                                setPreview(null);
-                                setPreviewError("");
-                                setPreviewDoc(key);
-                              }
+                              setPreviewDoc(key);
                             }}
                           >
                             View {title}
@@ -493,30 +459,16 @@ export default function StaffProfileVerificationsPage() {
                   <h2 className="mb-3 font-semibold">
                     {DOCS[previewDoc] ?? "Document preview"}
                   </h2>
-                  {previewError ? (
-                    <p role="alert" className="p-4 text-sm text-red-700">
-                      {previewError}
-                    </p>
-                  ) : preview ? (
-                    preview.image ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={preview.url}
-                        alt={DOCS[previewDoc] ?? "Submitted document"}
-                        className="max-h-[520px] w-full object-contain"
-                      />
-                    ) : (
-                      <iframe
-                        title="Submitted document preview"
-                        src={preview.url}
-                        className="h-[520px] w-full rounded border bg-white"
-                      />
-                    )
+                  {previewDoc ? (
+                    <StaffDocumentPreview
+                      key={`${selected.review.user_id}:${previewDoc}`}
+                      userId={selected.review.user_id}
+                      docType={previewDoc}
+                      title={DOCS[previewDoc] ?? "Submitted document"}
+                    />
                   ) : (
                     <p className="p-6 text-sm text-muted-foreground">
-                      {previewDoc
-                        ? "Loading document…"
-                        : "Select a document to view it here."}
+                      Select a document to view it here.
                     </p>
                   )}
                 </section>
