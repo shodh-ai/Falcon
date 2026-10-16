@@ -42,6 +42,7 @@ import {
   type PendingPracticalBatch,
   selectStudentTimetableRows,
 } from './student-timetable-visibility';
+import { calculateStudentGradeSummary } from './student-grade-summary';
 
 type TimetableRange = {
   timetable_id?: string;
@@ -170,32 +171,29 @@ export class AcademicsService {
     return this.gradingPolicies.save(this.gradingPolicies.create(dto));
   }
 
-  async getStudentDashboardSummary(studentUserId: string) {
-    return this.getDashboardMetrics(studentUserId);
+  async getStudentDashboardSummary(studentUserId: string, tenantId: string) {
+    return this.getDashboardMetrics(studentUserId, tenantId);
   }
 
-  async getDashboardMetrics(studentUserId: string) {
+  async getDashboardMetrics(studentUserId: string, tenantId: string) {
     const enrollments = await this.courseEnrollments.find({
-      where: { student_user_id: studentUserId },
+      where: {
+        student_user_id: studentUserId,
+        tenant_id: tenantId,
+        course: { tenant_id: tenantId },
+      },
       relations: ['course'],
       order: { semester: 'ASC' },
     });
 
-    const completed = enrollments.filter(
-      (row) => row.status === 'COMPLETED' && row.grade_points !== null,
+    const completed = enrollments.filter((row) => row.status === 'COMPLETED');
+    const grades = calculateStudentGradeSummary(
+      enrollments.map((row) => ({
+        status: row.status,
+        grade_points: row.grade_points,
+        credits: row.course.credits,
+      })),
     );
-    const weightedGradePoints = completed.reduce(
-      (sum, row) => sum + Number(row.grade_points) * row.course.credits,
-      0,
-    );
-    const creditsCompleted = completed.reduce(
-      (sum, row) => sum + row.course.credits,
-      0,
-    );
-    const cgpa =
-      creditsCompleted > 0
-        ? Number((weightedGradePoints / creditsCompleted).toFixed(2))
-        : 0;
 
     const attendanceRows = enrollments.filter(
       (row) => row.attendance_percent !== null,
@@ -213,8 +211,9 @@ export class AcademicsService {
         : 0;
 
     return {
-      cgpa,
-      credits_completed: creditsCompleted,
+      cgpa: grades.gpa,
+      credits_completed: grades.earnedCredits,
+      credits_attempted: grades.attemptedCredits,
       credits_required: 160,
       attendance_percent: attendancePercent,
       completed_courses: completed.map((row) => this.toEnrollmentDto(row)),

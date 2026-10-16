@@ -440,6 +440,7 @@ describe('AuthService.localLogin', () => {
 
 describe('AuthService password recovery', () => {
   let service: AuthService;
+  let environment: jest.ReplaceProperty<typeof process.env>;
   const mockDataSource = {
     query: jest.fn(),
     transaction: jest.fn(),
@@ -459,8 +460,11 @@ describe('AuthService password recovery', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    environment = jest.replaceProperty(process, 'env', {
+      ...process.env,
+      NODE_ENV: 'test',
+    });
     delete process.env.FALCON_EXPOSE_DEV_RESET_TOKEN;
-    delete process.env.NODE_ENV;
     delete process.env.EMAIL_HOST;
     (bcrypt.hash as jest.Mock).mockResolvedValue('new-hash');
     const module: TestingModule = await Test.createTestingModule({
@@ -478,9 +482,7 @@ describe('AuthService password recovery', () => {
   });
 
   afterEach(() => {
-    delete process.env.FALCON_EXPOSE_DEV_RESET_TOKEN;
-    delete process.env.NODE_ENV;
-    delete process.env.EMAIL_HOST;
+    environment.restore();
   });
 
   function mockTokenInsertUser() {
@@ -495,7 +497,7 @@ describe('AuthService password recovery', () => {
   });
 
   it('only exposes a token for explicitly opted-in non-production smoke tests', async () => {
-    process.env.NODE_ENV = 'development';
+    environment.replaceValue({ ...process.env, NODE_ENV: 'development' });
     process.env.FALCON_EXPOSE_DEV_RESET_TOKEN = 'true';
     mockTokenInsertUser();
     const result = await service.forgotPassword('faculty@mygyanvihar.com', 'sgvu');
@@ -504,7 +506,7 @@ describe('AuthService password recovery', () => {
   });
 
   it('suppresses the token even when the developer flag is accidentally set in production', async () => {
-    process.env.NODE_ENV = 'production';
+    environment.replaceValue({ ...process.env, NODE_ENV: 'production' });
     process.env.FALCON_EXPOSE_DEV_RESET_TOKEN = 'true';
     mockTokenInsertUser();
     await expect(service.forgotPassword('faculty@mygyanvihar.com', 'sgvu')).resolves.toEqual({ sent: true });

@@ -7,6 +7,7 @@ import { Transaction } from '../../entities/transaction.entity';
 import { LateFinePolicy } from '../../entities/late-fine-policy.entity';
 import { CreateFeeDemandDto } from './dto/create-fee-demand.dto';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
+import { requireTenantId } from '../../common/utils/require-tenant-id';
 
 @Injectable()
 export class FinanceService {
@@ -32,7 +33,9 @@ export class FinanceService {
   }
 
   async createDemand(dto: CreateFeeDemandDto, tenantId: string) {
-    const saved = await this.demands.save(this.demands.create(dto));
+    const saved = await this.demands.save(
+      this.demands.create({ ...dto, tenant_id: requireTenantId(tenantId) }),
+    );
     this.notify.feeGenerated({
       tenantId,
       userId: saved.student_user_id,
@@ -347,9 +350,17 @@ export class FinanceService {
     return this.demands.save(activeDemand);
   }
 
-  async getPendingDues(studentUserId: string): Promise<FeeDemand[]> {
+  async getPendingDues(
+    studentUserId: string,
+    tenantId?: string,
+  ): Promise<FeeDemand[]> {
     const demands = await this.demands.find({
-      where: { student_user_id: studentUserId },
+      where: {
+        student_user_id: studentUserId,
+        ...(tenantId === undefined
+          ? {}
+          : { tenant_id: requireTenantId(tenantId) }),
+      },
       order: { due_date: 'ASC' },
     });
     return demands.filter((d) => {

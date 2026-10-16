@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { useMemo, useState, useSyncExternalStore, type ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
@@ -54,8 +54,14 @@ export function AppShell({ config, children, profileHref, headerExtra, contentMa
     getSidebarCollapsedSnapshot,
     getSidebarCollapsedServerSnapshot,
   );
-  const [mobileOpen, setMobileOpen] = useState(false);
   const pathname = usePathname();
+  const [mobileDrawer, setMobileDrawer] = useState({ pathname, open: false });
+  // Reset only the drawer state when navigation changes, before rendering it.
+  if (mobileDrawer.pathname !== pathname) {
+    setMobileDrawer({ pathname, open: false });
+  }
+  const mobileOpen = mobileDrawer.pathname === pathname && mobileDrawer.open;
+  const setMobileOpen = (open: boolean) => setMobileDrawer({ pathname, open });
   const { user } = useAuth();
   const { manifest } = useModuleRuntime();
   const launchConfig = useMemo(() => {
@@ -69,11 +75,6 @@ export function AppShell({ config, children, profileHref, headerExtra, contentMa
   const isHome = pathname === launchConfig.homeHref;
   const mobileItems = launchConfig.mobileNavItems ?? launchConfig.commandItems.slice(0, 4);
   const mobileHrefs = mobileItems.map((item) => item.href);
-
-  // Close the mobile drawer after route changes (sidebar Link navigation).
-  useEffect(() => {
-    setMobileOpen(false);
-  }, [pathname]);
 
   const sidebar = (
     <AppSidebar

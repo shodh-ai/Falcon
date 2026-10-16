@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { toast } from '@/lib/notifications/falcon-toast';
-import { ThumbsUp, ThumbsDown, CheckCircle2, FileText, Shield } from 'lucide-react';
+import { ThumbsUp, ThumbsDown, FileText, Shield } from 'lucide-react';
 import { StudentEmptyState } from '@/components/student/StudentEmptyState';
 import { StudentSectionCard } from '@/components/student/StudentSectionCard';
 import { Button } from '@/components/ui/button';
@@ -28,21 +28,18 @@ export function StudentPoliciesPanel() {
   const [policies, setPolicies] = useState<Policy[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const load = () => {
-    setLoading(true);
-    api
+  const load = useCallback(() => api
       .get<Policy[]>('/api/student/policies')
       .then(setPolicies)
       .catch((err) => {
         setPolicies([]);
         toast.error(err instanceof Error ? err.message : 'Failed to load policies');
       })
-      .finally(() => setLoading(false));
-  };
+      .finally(() => setLoading(false)), [api]);
 
   useEffect(() => {
     load();
-  }, [api]);
+  }, [load]);
 
   async function acknowledge(id: string, vote?: 'YES' | 'NO') {
     try {

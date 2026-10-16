@@ -41,9 +41,6 @@ const APPROVAL_STEPS = [
   { key: 'finance', label: 'Finance', detail: 'Budget & ticketing' },
 ] as const;
 
-const selectClass =
-  'flex h-10 w-full rounded-lg border border-input bg-background px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sgvu-gold/40';
-
 const textareaClass =
   'min-h-[96px] w-full resize-y rounded-lg border border-input bg-background px-3 py-2.5 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sgvu-gold/40';
 

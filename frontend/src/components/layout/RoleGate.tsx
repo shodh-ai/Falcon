@@ -8,6 +8,7 @@ import { canRoleAccessPath, getDashboardPathForRole, type HrCapabilities } from 
 import { FalconLoader } from '@/components/brand/FalconLoader';
 import { useModuleRuntime } from '@/context/ModuleRuntimeContext';
 import { runtimeModuleForPath } from '@/lib/launch-modules';
+import { getStudentLandingPath, isApplicantOnly } from '@/lib/student-access';
 
 export function RoleGate({ children }: { children: React.ReactNode }) {
   const { user, isAuthenticated, isLoading } = useAuth();
@@ -45,7 +46,10 @@ export function RoleGate({ children }: { children: React.ReactNode }) {
     }
     if (user && !allowed && !moduleUnavailable) {
       redirectingRef.current = true;
-      const target = getDashboardPathForRole(user.primaryRole ?? user.role);
+      const roles = user.roles?.length ? user.roles : user.primaryRole ?? user.role;
+      const target = (pathname === '/student' || pathname.startsWith('/student/')) && isApplicantOnly(roles)
+        ? getStudentLandingPath(roles)
+        : getDashboardPathForRole(user.primaryRole ?? user.role);
       const timer = window.setTimeout(() => {
         try {
           router.replace(target);
@@ -55,7 +59,7 @@ export function RoleGate({ children }: { children: React.ReactNode }) {
       }, 1200);
       return () => window.clearTimeout(timer);
     }
-  }, [allowed, hasHydrated, isAuthenticated, isLoading, moduleUnavailable, router, user]);
+  }, [allowed, hasHydrated, isAuthenticated, isLoading, moduleUnavailable, pathname, router, user]);
 
   if (!hasHydrated || isLoading || moduleLoading || !isAuthenticated || !user) {
     return <FalconLoader label="Switching Falcon workspace…" className="min-h-screen" />;

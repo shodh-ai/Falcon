@@ -6,6 +6,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { DataSource, QueryRunner } from 'typeorm';
+import { requireTenantId } from '../../common/utils/require-tenant-id';
 import * as bcrypt from 'bcrypt';
 import { HrFieldEncryptionService } from '../../common/crypto/hr-field-encryption.service';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
@@ -106,8 +107,6 @@ type ProfileBody = {
   specialization?: string;
 };
 
-const DEFAULT_TENANT_ID = 'a0000000-0000-4000-8000-000000000001';
-
 export type OnboardingAuditActor = {
   userId: string;
   role?: string;
@@ -127,8 +126,7 @@ export class StudentOnboardingService {
   ) {}
 
   resolveTenantId(tenantId?: string | null) {
-    const value = tenantId?.trim();
-    return value || DEFAULT_TENANT_ID;
+    return requireTenantId(tenantId);
   }
 
   async getStatus(tenantId: string, userId: string) {

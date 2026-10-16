@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
   UnauthorizedException,
@@ -8,20 +9,32 @@ import {
 import { InjectDataSource } from '@nestjs/typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DataSource } from 'typeorm';
-import { createReadStream, existsSync, mkdirSync, writeFileSync } from 'fs';
-import { extname, join, resolve } from 'path';
+import { requireTenantId } from '../../common/utils/require-tenant-id';
+import {
+  createReadStream,
+  existsSync,
+  mkdirSync,
+  realpathSync,
+  writeFileSync,
+} from 'fs';
+import { extname, join, relative, resolve } from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import {
-  openDocumentReadStream,
-  resolveDocumentDiskPath,
-} from '../hr/utils/document-file-path.util';
+  canonicalUploadKey,
+  isFileWithinRoot,
+} from '../../uploads/upload-file-access';
 import { HrFieldEncryptionService } from '../../common/crypto/hr-field-encryption.service';
 import { AlumniConversionService } from '../alumni/alumni-conversion.service';
 import { TicketService } from '../helpdesk/ticket.service';
 import { WorkflowRoutingService } from '../../core/workflow/workflow-routing.service';
 import { WorkflowNotificationService } from '../../core/workflow/workflow-notification.service';
 import { ObjectStorageService } from '../../storage/object-storage.service';
-import { resolvePlacementSchema } from '../placement/placement-schema';
+import {
+  resolvePlacementSchema,
+  driveRoleExpr,
+  drivePackageExpr,
+  driveDeadlineExpr,
+} from '../placement/placement-schema';
 import { FinanceReceiptService } from '../finance/finance-receipt.service';
 import { GatewayPaymentService } from '../finance/gateway-payment.service';
 import { StudentEnrollmentSyncService } from '../academics/student-enrollment-sync.service';
@@ -92,12 +105,14 @@ export class StudentPortalService {
                   SELECT MAX(e.semester)
                   FROM student_course_enrollments e
                   WHERE e.student_user_id = u.user_id
+                    AND e.tenant_id = u.tenant_id
                     AND e.status = 'ENROLLED'
                 ),
                 (
                   SELECT MAX(e.semester)
                   FROM student_course_enrollments e
                   WHERE e.student_user_id = u.user_id
+                    AND e.tenant_id = u.tenant_id
                 ),
                 1
               ) AS current_semester,
@@ -119,7 +134,7 @@ export class StudentPortalService {
                 '[]'::jsonb
               ) AS onboarding_documents
        FROM users u
-       LEFT JOIN student_profiles sp ON sp.user_id = u.user_id
+       LEFT JOIN student_profiles sp ON sp.user_id = u.user_id AND sp.tenant_id = u.tenant_id
        LEFT JOIN departments d ON d.dept_id = u.dept_id
        WHERE u.tenant_id = $1 AND u.user_id = $2`,
       [tenantId, userId],
@@ -188,7 +203,6 @@ export class StudentPortalService {
       profile_photo_url: await this.resolveDisplayProfilePhotoUrl(
         tenantId,
         userId,
-        row.profile_photo_url,
       ),
       bank_details: row.bank_details,
       onboarding_status: row.onboarding_status,
@@ -208,14 +222,19 @@ export class StudentPortalService {
       address?: { permanent?: string; current?: string };
     },
   ) {
+    if (dto.profile_photo_url !== undefined) {
+      throw new BadRequestException(
+        'Use the profile photo upload endpoint to change your photo',
+      );
+    }
     const profileRows = await this.dataSource.query<
       Array<{
         profile_unlocked_until: Date | null;
         parent_info: Record<string, any> | null;
       }>
     >(
-      `SELECT profile_unlocked_until, parent_info FROM student_profiles WHERE user_id = $1`,
-      [userId],
+      `SELECT profile_unlocked_until, parent_info FROM student_profiles WHERE user_id = $1 AND tenant_id = $2`,
+      [userId, tenantId],
     );
     const profileRow = profileRows[0];
     if (!profileRow) throw new NotFoundException('Student profile not found');
@@ -224,18 +243,6 @@ export class StudentPortalService {
     const values: any[] = [];
     let queryIdx = 1;
 
-    if (dto.profile_photo_url !== undefined) {
-      if (
-        typeof dto.profile_photo_url === 'string' &&
-        dto.profile_photo_url.startsWith('data:')
-      ) {
-        throw new BadRequestException(
-          'Profile photo is too large to save this way. Use the photo upload button with a JPG, PNG, or WEBP file under 5 MB.',
-        );
-      }
-      setChunks.push(`profile_photo_url = $${queryIdx++}`);
-      values.push(dto.profile_photo_url);
-    }
     if (dto.bank_details !== undefined) {
       setChunks.push(`bank_details = $${queryIdx++}`);
       values.push(dto.bank_details);
@@ -266,9 +273,9 @@ export class StudentPortalService {
 
     if (setChunks.length === 0) return { success: true };
 
-    values.push(userId);
+    values.push(userId, tenantId);
     await this.dataSource.query(
-      `UPDATE student_profiles SET ${setChunks.join(', ')} WHERE user_id = $${queryIdx}`,
+      `UPDATE student_profiles SET ${setChunks.join(', ')} WHERE user_id = $${queryIdx} AND tenant_id = $${queryIdx + 1}`,
       values,
     );
     return { success: true, locked: wantsLockedFields };
@@ -311,34 +318,52 @@ export class StudentPortalService {
   }
 
   async openProfilePhotoStream(tenantId: string, userId: string) {
-    const filePath = await this.getProfilePhotoPath(tenantId, userId);
+    const tid = requireTenantId(tenantId);
+    const filePath = await this.getProfilePhotoPath(tid, userId);
     if (!filePath) throw new NotFoundException('Profile photo not found');
-
-    const stream = await openDocumentReadStream(filePath, this.objectStorage);
-    if (stream) return { stream, filePath };
-
-    const diskPath = resolveDocumentDiskPath(filePath);
-    if (!diskPath) throw new NotFoundException('Profile photo file missing');
-    return { stream: createReadStream(diskPath), filePath: diskPath };
+    const uploadRoot = resolve(process.env.UPLOAD_PATH || './uploads');
+    const key = canonicalUploadKey(filePath, tid, uploadRoot);
+    const diskPath = key ? resolve(uploadRoot, key) : null;
+    if (!key || !diskPath || !isFileWithinRoot(uploadRoot, diskPath)) {
+      throw new ForbiddenException(
+        'Profile photo is outside your permitted storage',
+      );
+    }
+    if (this.objectStorage.isEnabled()) {
+      return {
+        stream: await this.objectStorage.getDownloadStream(key),
+        filePath: key,
+      };
+    }
+    if (!existsSync(diskPath))
+      throw new NotFoundException('Profile photo file missing');
+    const realRoot = realpathSync(uploadRoot);
+    const realTenantRoot = realpathSync(resolve(uploadRoot, tid));
+    const realFile = realpathSync(diskPath);
+    if (
+      relative(resolve(realRoot, tid), realTenantRoot) !== '' ||
+      !isFileWithinRoot(realRoot, realFile) ||
+      !isFileWithinRoot(realTenantRoot, realFile)
+    ) {
+      throw new ForbiddenException(
+        'Profile photo is outside your permitted storage',
+      );
+    }
+    return { stream: createReadStream(realFile), filePath: key };
   }
 
-  private displayProfilePhotoUrl(stored: string | null): string | null {
-    if (!stored?.trim()) return null;
-    if (stored.startsWith('data:')) return stored;
-    if (stored.startsWith('/api/student/profile/photo')) return stored;
-    return '/api/student/profile/photo';
-  }
-
-  /** Prefer stored URL; also expose photo when only onboarding PHOTO doc exists. */
+  /** Expose the photo endpoint only after checking its storage ownership. */
   private async resolveDisplayProfilePhotoUrl(
     tenantId: string,
     userId: string,
-    stored: string | null,
   ): Promise<string | null> {
-    const fromColumn = this.displayProfilePhotoUrl(stored);
-    if (fromColumn) return fromColumn;
-    const path = await this.getProfilePhotoPath(tenantId, userId);
-    return path ? '/api/student/profile/photo' : null;
+    try {
+      const path = await this.getProfilePhotoPath(tenantId, userId);
+      return path ? '/api/student/profile/photo' : null;
+    } catch (error) {
+      if (error instanceof ForbiddenException) return null;
+      throw error;
+    }
   }
 
   private async getProfilePhotoPath(
@@ -351,7 +376,15 @@ export class StudentPortalService {
        ORDER BY uploaded_at DESC LIMIT 1`,
       [tenantId, userId],
     );
-    if (doc?.file_path) return doc.file_path;
+    const uploadRoot = resolve(process.env.UPLOAD_PATH || './uploads');
+    if (doc?.file_path) {
+      const key = canonicalUploadKey(doc.file_path, tenantId, uploadRoot);
+      if (!key)
+        throw new ForbiddenException(
+          'Profile photo is outside your permitted storage',
+        );
+      return key;
+    }
 
     const [profile] = await this.dataSource.query<
       Array<{ profile_photo_url: string | null }>
@@ -360,9 +393,14 @@ export class StudentPortalService {
       [tenantId, userId],
     );
     const url = profile?.profile_photo_url;
-    if (typeof url === 'string' && url.trim() && !url.startsWith('data:'))
-      return url;
-    return null;
+    if (!url?.trim()) return null;
+    const key = canonicalUploadKey(url, tenantId, uploadRoot);
+    if (!key?.startsWith(`${tenantId}/students/${userId}/`)) {
+      throw new ForbiddenException(
+        'Profile photo does not belong to your account',
+      );
+    }
+    return key;
   }
 
   private async persistProfilePhotoFile(
@@ -411,8 +449,8 @@ export class StudentPortalService {
     const profile = await this.dataSource.query(
       `SELECT admission_type, admission_number, migration_certificate_status,
               admission_status, degree_award_status
-       FROM student_profiles WHERE user_id = $1`,
-      [userId],
+       FROM student_profiles WHERE user_id = $1 AND tenant_id = $2`,
+      [userId, tenantId],
     );
 
     const application = await this.dataSource
@@ -446,9 +484,9 @@ export class StudentPortalService {
       .query(
         `SELECT certificate_id, title, issuer, verification_status, file_path, uploaded_at
        FROM student_certificates
-       WHERE student_user_id = $1
+       WHERE student_user_id = $1 AND tenant_id = $2
        ORDER BY uploaded_at DESC`,
-        [userId],
+        [userId, tenantId],
       )
       .catch(() => []);
 
@@ -457,10 +495,10 @@ export class StudentPortalService {
         `SELECT f.demand_id, f.fee_head, f.total_amount, f.paid_amount, f.status, f.due_date,
               t.receipt_url
        FROM finance_fee_demands f
-       LEFT JOIN finance_transactions t ON t.demand_id = f.demand_id AND t.status = 'SUCCESS'
-       WHERE f.student_user_id = $1 AND f.fee_head ILIKE '%admission%'
+       LEFT JOIN finance_transactions t ON t.demand_id = f.demand_id AND t.status = 'SUCCESS' AND t.tenant_id = f.tenant_id
+       WHERE f.student_user_id = $1 AND f.tenant_id = $2 AND f.fee_head ILIKE '%admission%'
        ORDER BY f.created_at DESC LIMIT 5`,
-        [userId],
+        [userId, tenantId],
       )
       .catch(() => []);
 
@@ -581,7 +619,7 @@ export class StudentPortalService {
          AND COALESCE(c.course_type, CASE WHEN c.is_elective THEN 'ELECTIVE' ELSE 'CORE' END) = 'ELECTIVE'
          AND NOT EXISTS (
            SELECT 1 FROM student_course_enrollments e
-           WHERE e.course_id = c.course_id AND e.student_user_id = $2 AND e.semester = $3
+           WHERE e.course_id = c.course_id AND e.student_user_id = $2 AND e.semester = $3 AND e.tenant_id = c.tenant_id
          )
        ORDER BY c.course_code`,
       [tenantId, userId, currentSemester],
@@ -757,9 +795,9 @@ export class StudentPortalService {
         `SELECT m.exam_type, m.marks_obtained, m.max_marks, m.status,
               c.course_code, c.course_name, e.semester
        FROM academic_marks m
-       JOIN academic_courses c ON c.course_id = m.course_id
+       JOIN academic_courses c ON c.course_id = m.course_id AND c.tenant_id = m.tenant_id
        LEFT JOIN student_course_enrollments e
-         ON e.course_id = m.course_id AND e.student_user_id = m.student_user_id
+         ON e.course_id = m.course_id AND e.student_user_id = m.student_user_id AND e.tenant_id = m.tenant_id
        WHERE m.student_user_id = $1 AND m.tenant_id = $2 AND m.status = 'PUBLISHED'
        ORDER BY e.semester NULLS LAST, c.course_code, m.exam_type`,
         [userId, tenantId],
@@ -781,8 +819,8 @@ export class StudentPortalService {
               c.course_code, c.course_name, c.credits
        FROM student_course_enrollments e
        JOIN academic_courses c ON c.course_id = e.course_id
-       WHERE e.student_user_id = $1`,
-      [userId],
+       WHERE e.student_user_id = $1 AND e.tenant_id = $2 AND c.tenant_id = $2`,
+      [userId, tenantId],
     );
 
     const backlogs = enrollments.filter(
@@ -1009,8 +1047,8 @@ export class StudentPortalService {
 
     const profile = await this.dataSource.query(
       `SELECT no_dues_status, degree_issued_at, degree_award_status, final_result, alumni_conversion_flag
-       FROM student_profiles WHERE user_id = $1`,
-      [userId],
+       FROM student_profiles WHERE user_id = $1 AND tenant_id = $2`,
+      [userId, tenantId],
     );
 
     const tasks = await this.dataSource
@@ -1028,9 +1066,10 @@ export class StudentPortalService {
       .query<Array<{ has_hostel: boolean }>>(
         `SELECT EXISTS (
            SELECT 1 FROM hostel_allocations a
-           WHERE a.student_user_id = $1 AND a.status = 'ACTIVE'
+           JOIN users u ON u.user_id = a.student_user_id
+           WHERE a.student_user_id = $1 AND u.tenant_id = $2 AND a.status = 'ACTIVE'
          ) AS has_hostel`,
-        [userId],
+        [userId, tenantId],
       )
       .catch(() => [{ has_hostel: false }]);
     const hostelApplicable = Boolean(hostelApplicableRows[0]?.has_hostel);
@@ -1203,8 +1242,8 @@ export class StudentPortalService {
     );
 
     const student = await this.dataSource.query<Array<{ name: string }>>(
-      `SELECT name FROM users WHERE user_id = $1`,
-      [userId],
+      `SELECT name FROM users WHERE user_id = $1 AND tenant_id = $2`,
+      [userId, tenantId],
     );
     try {
       const proctor = await this.workflowRouting.getStudentProctor(userId);
@@ -1256,9 +1295,15 @@ export class StudentPortalService {
   async getLibrary(tenantId: string, userId: string) {
     const books = await this.dataSource
       .query(
-        `SELECT title, author, available_copies, shelf_location
-       FROM operations_library_books
-       ORDER BY title LIMIT 20`,
+        `SELECT c.title, c.author,
+                COUNT(ic.copy_id) FILTER (WHERE ic.status = 'AVAILABLE')::int AS available_copies,
+                MIN(ic.shelf_location) AS shelf_location
+       FROM lib_catalog c
+       LEFT JOIN lib_inventory_copies ic ON ic.catalog_id = c.catalog_id AND ic.tenant_id = c.tenant_id
+       WHERE c.tenant_id = $1
+       GROUP BY c.catalog_id, c.title, c.author
+       ORDER BY c.title LIMIT 20`,
+        [tenantId],
       )
       .catch(() => []);
 
@@ -1266,9 +1311,9 @@ export class StudentPortalService {
       .query(
         `SELECT fee_head, total_amount - paid_amount AS outstanding, status
        FROM finance_fee_demands
-       WHERE student_user_id = $1 AND fee_head ILIKE '%library%'
+       WHERE student_user_id = $1 AND tenant_id = $2 AND fee_head ILIKE '%library%'
        ORDER BY due_date DESC`,
-        [userId],
+        [userId, tenantId],
       )
       .catch(() => []);
 
@@ -1310,15 +1355,33 @@ export class StudentPortalService {
   async getTransport(tenantId: string, userId: string) {
     const routes = await this.dataSource
       .query(
-        `SELECT route_code, route_name, bus_number, capacity, annual_fee, stops
-       FROM operations_transport_routes
-       WHERE is_active = true
-       ORDER BY route_name`,
+        `SELECT r.route_id AS route_code, r.route_name, v.registration_no AS bus_number,
+                r.total_seats AS capacity,
+                COALESCE((SELECT MAX(s.fee_amount) FROM transport_stops s WHERE s.route_id = r.route_id AND s.tenant_id = r.tenant_id), 0) AS annual_fee,
+                COALESCE((SELECT jsonb_agg(s.stop_name ORDER BY s.stop_order) FROM transport_stops s WHERE s.route_id = r.route_id AND s.tenant_id = r.tenant_id), '[]'::jsonb) AS stops
+       FROM transport_routes r
+       LEFT JOIN fleet_vehicles v ON v.vehicle_id = r.vehicle_id AND v.tenant_id = r.tenant_id
+       WHERE r.tenant_id = $1 AND r.is_active = true
+       ORDER BY r.route_name`,
+        [tenantId],
+      )
+      .catch(() => []);
+
+    const allocations = await this.dataSource
+      .query<Array<Record<string, unknown>>>(
+        `SELECT r.route_id AS route_code, r.route_name, v.registration_no AS bus_number,
+              r.total_seats AS capacity, s.fee_amount AS annual_fee, s.stop_name
+       FROM transport_allocations a
+       JOIN transport_routes r ON r.route_id = a.route_id AND r.tenant_id = a.tenant_id
+       JOIN transport_stops s ON s.stop_id = a.stop_id AND s.tenant_id = a.tenant_id
+       LEFT JOIN fleet_vehicles v ON v.vehicle_id = r.vehicle_id AND v.tenant_id = r.tenant_id
+       WHERE a.tenant_id = $1 AND a.student_user_id = $2 LIMIT 1`,
+        [tenantId, userId],
       )
       .catch(() => []);
 
     return {
-      assigned_route: routes[0] ?? null,
+      assigned_route: allocations[0] ?? null,
       all_routes: routes,
       note: routes.length
         ? null
@@ -1352,36 +1415,43 @@ export class StudentPortalService {
          FROM placement_ats_drive_applications a
          JOIN placement_ats_drives d ON d.drive_id = a.drive_id
          JOIN placement_companies c ON c.company_id = d.company_id
-         WHERE a.student_user_id = $1
+         WHERE a.student_user_id = $1 AND a.tenant_id = $2 AND d.tenant_id = $2
          ORDER BY a.applied_at DESC`,
-          [userId],
+          [userId, tenantId],
         )
         .catch(() => []);
 
       return { open_jobs: drives, my_applications: applications };
     }
 
+    // Legacy placement drives have no tenant column: never expose a global list.
+    if (!s?.tenantScoped) return { open_jobs: [], my_applications: [] };
+
     const drives = await this.dataSource
       .query(
-        `SELECT d.placement_drive_id AS drive_id,
-              COALESCE(d.job_role, d.role_title) AS job_title, d.min_cgpa,
-              d.deadline AS application_deadline, d.package_lpa, d.company_name, d.description
-       FROM placement_drives d
-       WHERE d.status IN ('ACTIVE', 'OPEN')
+        `SELECT d.${s.driveIdCol} AS drive_id,
+              ${driveRoleExpr(s)} AS job_title, d.min_cgpa,
+              ${driveDeadlineExpr(s)} AS application_deadline, ${drivePackageExpr(s)} AS package_lpa,
+              ${s.companyJoin ? 'c.company_name' : 'd.company_name'} AS company_name, d.description
+       FROM ${s.drivesTable} d
+       ${s.companyJoin ? 'JOIN placement_companies c ON c.company_id = d.company_id AND c.tenant_id = d.tenant_id' : ''}
+       WHERE d.tenant_id = $1 AND d.status IN ('ACTIVE', 'OPEN')
        ORDER BY d.created_at DESC`,
+        [tenantId],
       )
       .catch(() => []);
 
     const applications = await this.dataSource
       .query(
-        `SELECT a.application_id, COALESCE(a.status, 'APPLIED') AS status,
-              a.applied_at, COALESCE(d.job_role, d.role_title) AS job_title,
-              d.company_name, d.placement_drive_id AS drive_id
-       FROM placement_applications a
-       JOIN placement_drives d ON d.placement_drive_id = a.placement_drive_id
-       WHERE a.student_user_id = $1
+        `SELECT a.application_id, a.pipeline_stage AS status,
+              a.applied_at, ${driveRoleExpr(s)} AS job_title,
+              ${s.companyJoin ? 'c.company_name' : 'd.company_name'} AS company_name, d.${s.driveIdCol} AS drive_id
+       FROM ${s.appsTable} a
+       JOIN ${s.drivesTable} d ON d.${s.driveIdCol} = a.drive_id
+       ${s.companyJoin ? 'JOIN placement_companies c ON c.company_id = d.company_id AND c.tenant_id = d.tenant_id' : ''}
+       WHERE a.student_user_id = $1 AND a.tenant_id = $2 AND d.tenant_id = $2
        ORDER BY a.applied_at DESC NULLS LAST`,
-        [userId],
+        [userId, tenantId],
       )
       .catch(() => []);
 
@@ -1453,15 +1523,16 @@ export class StudentPortalService {
     };
   }
 
-  async getFinanceLedger(userId: string, tenantId?: string) {
+  async getFinanceLedger(userId: string, tenantId: string) {
+    const authenticatedTenant = requireTenantId(tenantId);
     const allDemands = await this.dataSource.query(
       `SELECT d.demand_id, d.fee_head, d.academic_year, d.semester, d.total_amount, d.paid_amount, d.due_date, d.status, d.fee_breakup
        FROM finance_fee_demands d
        JOIN users u ON u.user_id = d.student_user_id
        WHERE d.student_user_id = $1
-         AND ($2::uuid IS NULL OR u.tenant_id = $2::uuid)
+         AND u.tenant_id = $2::uuid AND d.tenant_id = $2::uuid
        ORDER BY COALESCE(d.semester, 99) ASC, d.due_date ASC NULLS LAST, d.created_at ASC`,
-      [userId, tenantId ?? null],
+      [userId, authenticatedTenant],
     );
 
     const fee_structure = (
@@ -1492,9 +1563,9 @@ export class StudentPortalService {
        JOIN users u ON u.user_id = t.student_user_id
        WHERE t.student_user_id = $1
          AND t.status = 'SUCCESS'
-         AND ($2::uuid IS NULL OR u.tenant_id = $2::uuid)
+         AND u.tenant_id = $2::uuid AND t.tenant_id = $2::uuid
        ORDER BY t.created_at DESC`,
-      [userId, tenantId ?? null],
+      [userId, authenticatedTenant],
     );
 
     const total_outstanding = pending_demands.reduce(
@@ -1504,9 +1575,10 @@ export class StudentPortalService {
 
     const hostelFinesPending = await this.dataSource
       .query<Array<{ count: string }>>(
-        `SELECT COUNT(*)::text AS count FROM operations_hostel_fines
-       WHERE student_user_id = $1 AND status = 'PENDING'`,
-        [userId],
+        `SELECT COUNT(*)::text AS count FROM operations_hostel_fines f
+       JOIN users u ON u.user_id = f.student_user_id
+       WHERE f.student_user_id = $1 AND u.tenant_id = $2 AND f.status = 'PENDING'`,
+        [userId, authenticatedTenant],
       )
       .catch(() => [{ count: '0' }]);
 
@@ -1832,12 +1904,12 @@ export class StudentPortalService {
       await manager
         .query(
           `UPDATE student_profiles SET no_dues_status = 'CLEARED'
-           WHERE user_id = $1
+           WHERE user_id = $1 AND tenant_id = $2
              AND NOT EXISTS (
                SELECT 1 FROM finance_fee_demands fd
-               WHERE fd.student_user_id = $1 AND fd.status NOT IN ('PAID', 'WAIVED')
+               WHERE fd.student_user_id = $1 AND fd.tenant_id = $2 AND fd.status NOT IN ('PAID', 'WAIVED')
              )`,
-          [userId],
+          [userId, tenantId],
         )
         .catch(() => undefined);
 

@@ -571,6 +571,13 @@ export class ResultControlService {
       throw new NotFoundException('Pending result approval request not found');
     }
 
+    await this.assertDeanCanAccessResultSession(
+      tenantId,
+      deanUserId,
+      pending.session_id,
+      actorRole,
+    );
+
     await this.db.query(
       `UPDATE exam_result_dean_approval_requests
        SET status = $3, decided_by = $4, decided_at = NOW(),
@@ -607,7 +614,19 @@ export class ResultControlService {
     };
   }
 
-  async getDeanResultApprovalHistory(tenantId: string, sessionId: string) {
+  async getDeanResultApprovalHistory(
+    tenantId: string,
+    deanUserId: string,
+    sessionId: string,
+    actorRole = 'Dean',
+  ) {
+    await this.assertDeanCanAccessResultSession(
+      tenantId,
+      deanUserId,
+      sessionId,
+      actorRole,
+    );
+
     return this.db
       .query(
         `SELECT h.*, u.name AS actor_name
@@ -618,6 +637,50 @@ export class ResultControlService {
         [tenantId, sessionId],
       )
       .catch(() => []);
+  }
+
+  /**
+   * A result session is Dean-visible only when a tenant timetable assigns its
+   * course to faculty in one of that Dean's authorized departments. Reuse the
+   * same ownership rule as the Dean approval list and fail closed when a
+   * session has no attributable timetable/faculty department.
+   */
+  private async assertDeanCanAccessResultSession(
+    tenantId: string,
+    deanUserId: string,
+    sessionId: string,
+    actorRole: string,
+  ) {
+    if (actorRole.trim().toLowerCase() === 'superadmin') return;
+
+    const departmentIds = await resolveDeanDepartmentIds(this.db, deanUserId);
+    if (!departmentIds.length) {
+      throw new NotFoundException('Result approval record not found');
+    }
+
+    const rows = await this.db.query<Array<{ session_id: string }>>(
+      `SELECT s.session_id
+       FROM exam_result_sessions s
+       INNER JOIN academic_courses c ON c.course_id = s.course_id
+       WHERE s.tenant_id = $1
+         AND s.session_id = $2
+         AND EXISTS (
+           SELECT 1
+           FROM academic_timetables t
+           INNER JOIN users faculty ON faculty.user_id = t.faculty_user_id
+           WHERE t.course_id = c.course_id
+             AND t.tenant_id = s.tenant_id
+             AND faculty.dept_id = ANY($3::int[])
+         )
+       LIMIT 1`,
+      [tenantId, sessionId, departmentIds],
+    );
+
+    if (!rows[0]) {
+      // Deliberately indistinguishable from a missing record to avoid turning
+      // a request/session UUID into an existence oracle across schools.
+      throw new NotFoundException('Result approval record not found');
+    }
   }
 
   private async appendDeanApprovalHistory(

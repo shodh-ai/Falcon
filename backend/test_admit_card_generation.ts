@@ -8,7 +8,7 @@ async function bootstrap() {
   const db = app.get(DataSource);
   
   // get user id
-  const rows = await db.query(`SELECT user_id FROM users WHERE official_email = 'student4@mygyanvihar.com'`);
+  const rows = await db.query(`SELECT user_id, tenant_id FROM users WHERE official_email = 'student4@mygyanvihar.com'`);
   const studentUserId = rows[0]?.user_id;
   
   if (!studentUserId) {
@@ -18,7 +18,7 @@ async function bootstrap() {
   
   const examsService = app.get(ExamsService);
   try {
-    const pdfBuffer = await examsService.generateAdmitCardOrThrow(studentUserId);
+    const pdfBuffer = await examsService.generateAdmitCardOrThrow(studentUserId, rows[0]?.tenant_id);
     console.log('PDF generated! Size:', pdfBuffer.length);
   } catch (err: any) {
     console.error('Error generating PDF:', err.message);

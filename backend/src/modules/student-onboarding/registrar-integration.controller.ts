@@ -12,6 +12,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { EnterpriseAuditService } from '../../core/audit/enterprise-audit.service';
+import { requireTenantId } from '../../common/utils/require-tenant-id';
 import { OfficialTranscriptService } from '../exam-cell/official-transcript.service';
 
 type AuthUser = {
@@ -52,7 +53,7 @@ export class RegistrarIntegrationController {
   ) {}
 
   private tenant(req: { user: AuthUser }) {
-    return req.user.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
+    return requireTenantId(req.user.tenant_id);
   }
 
   @Get('transcripts')

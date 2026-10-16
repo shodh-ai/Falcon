@@ -27,6 +27,7 @@ import {
   CampusScopeService,
   type ScopedAuthUser,
 } from '../../common/campus-scope/campus-scope.service';
+import { resolveDeanScope } from '../academics/dean-scope.util';
 
 const HELD_VENUE_STATUSES = [
   'PENDING_HOD',
@@ -657,6 +658,9 @@ export class CampusEventsService {
       );
     }
 
+    const { schoolIds } = await resolveDeanScope(this.dataSource, deanUserId);
+    if (!schoolIds.length) return [];
+
     return this.dataSource.query(
       `SELECT e.*, c.name AS club_name, e.venue AS venue_asset_name
        FROM campus_events e
@@ -665,18 +669,9 @@ export class CampusEventsService {
          AND e.status = 'PENDING_DEAN'
          AND e.dean_approval = 'PENDING'
          AND e.hod_approval = 'APPROVED'
-         AND (
-           EXISTS (
-             SELECT 1 FROM campus_clubs c2
-             JOIN users fa ON fa.user_id = c2.faculty_advisor_id
-             JOIN iam_programs p ON p.dept_id = fa.dept_id AND p.deleted_at IS NULL
-             JOIN schools s ON s.school_id = p.school_id AND s.deleted_at IS NULL
-             WHERE c2.club_id = e.club_id AND s.dean_user_id = $2
-           )
-           OR EXISTS (SELECT 1 FROM schools s WHERE s.dean_user_id = $2 AND s.deleted_at IS NULL)
-         )
+         AND ${this.deanEventOwnershipPredicate('e', '$2')}
        ORDER BY e.created_at ASC`,
-      [tenantId, deanUserId],
+      [tenantId, schoolIds],
     );
   }
 
@@ -824,29 +819,56 @@ export class CampusEventsService {
     eventId: string,
   ) {
     if (roles.includes('SuperAdmin')) return;
-    const rows = await this.dataSource.query(
-      `SELECT e.event_id,
-              EXISTS (
-                SELECT 1 FROM campus_clubs c
-                JOIN users fa ON fa.user_id = c.faculty_advisor_id
-                JOIN iam_programs p ON p.dept_id = fa.dept_id AND p.deleted_at IS NULL
-                JOIN schools s ON s.school_id = p.school_id AND s.deleted_at IS NULL
-                WHERE c.club_id = e.club_id AND s.dean_user_id = $3
-              ) AS scoped_match,
-              EXISTS (
-                SELECT 1 FROM schools s
-                WHERE s.dean_user_id = $3 AND s.deleted_at IS NULL
-              ) AS is_dean
-       FROM campus_events e
-       WHERE e.event_id = $1 AND e.tenant_id = $2`,
-      [eventId, tenantId, userId],
+    const eventRows = await this.dataSource.query(
+      `SELECT event_id FROM campus_events
+       WHERE event_id = $1 AND tenant_id = $2`,
+      [eventId, tenantId],
     );
-    if (!rows[0]) throw new NotFoundException('Event not found');
-    if (!rows[0].scoped_match && !rows[0].is_dean) {
+    if (!eventRows[0]) throw new NotFoundException('Event not found');
+
+    const { schoolIds } = await resolveDeanScope(this.dataSource, userId);
+    if (!schoolIds.length) {
       throw new ForbiddenException(
         'Only the school Dean may approve this event',
       );
     }
+
+    const scopedRows = await this.dataSource.query(
+      `SELECT e.event_id
+       FROM campus_events e
+       WHERE e.event_id = $1 AND e.tenant_id = $2
+         AND ${this.deanEventOwnershipPredicate('e', '$3')}`,
+      [eventId, tenantId, schoolIds],
+    );
+    if (!scopedRows[0]) {
+      throw new ForbiddenException(
+        'Only the school Dean may approve this event',
+      );
+    }
+  }
+
+  /**
+   * An event is Dean-owned only when its club advisor has a department that
+   * resolves to one of the Dean's authorized schools. Keeping this predicate
+   * shared by list and direct-ID paths prevents an ID from bypassing scope.
+   */
+  private deanEventOwnershipPredicate(
+    eventAlias: 'e',
+    schoolIdsParameter: '$2' | '$3',
+  ) {
+    return `EXISTS (
+      SELECT 1
+      FROM campus_clubs c2
+      JOIN users fa ON fa.user_id = c2.faculty_advisor_id
+      JOIN departments d ON d.dept_id = fa.dept_id
+      LEFT JOIN iam_programs p
+        ON p.dept_id = d.dept_id AND p.deleted_at IS NULL
+      JOIN schools s
+        ON (s.school_id = d.school_id OR s.school_id = p.school_id)
+       AND s.deleted_at IS NULL
+      WHERE c2.club_id = ${eventAlias}.club_id
+        AND s.school_id = ANY(${schoolIdsParameter}::int[])
+    )`;
   }
 
   async approveDeanEvent(

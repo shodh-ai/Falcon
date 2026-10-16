@@ -1,5 +1,6 @@
 import {
   Body,
+  ForbiddenException,
   Controller,
   Get,
   Header,
@@ -17,8 +18,15 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { PlacementService } from './placement.service';
 import type { PlacementPipelineStage } from './placement.constants';
+import { requireTenantId } from '../../common/utils/require-tenant-id';
+import { rolesIntersect } from '../../common/config/campus-admin.roles';
 
-type AuthUser = { user_id: string; tenant_id?: string };
+type AuthUser = {
+  user_id: string;
+  tenant_id?: string;
+  role?: string;
+  roles?: string[];
+};
 
 @Controller(['api/placement', 'placements'])
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -26,7 +34,14 @@ export class PlacementController {
   constructor(private readonly placement: PlacementService) {}
 
   private tenant(req: { user: AuthUser }) {
-    return req.user.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
+    return requireTenantId(req.user.tenant_id);
+  }
+
+  private canManagePlacement(user: AuthUser) {
+    return rolesIntersect(
+      [...(user.roles ?? []), ...(user.role ? [user.role] : [])],
+      ['SuperAdmin', 'PlacementCell'],
+    );
   }
 
   @Get('dashboard')
@@ -61,13 +76,18 @@ export class PlacementController {
     return this.placement.drives(this.tenant(req), active === 'true', {
       limit: limit ? Number(limit) : undefined,
       offset: offset ? Number(offset) : undefined,
+      requireTenantScope: !this.canManagePlacement(req.user),
     });
   }
 
   @Get('drives/:driveId')
   @Roles('SuperAdmin', 'PlacementCell', 'Student')
   getDrive(@Req() req: { user: AuthUser }, @Param('driveId') driveId: string) {
-    return this.placement.getDrive(this.tenant(req), driveId);
+    return this.placement.getDrive(
+      this.tenant(req),
+      driveId,
+      !this.canManagePlacement(req.user),
+    );
   }
 
   @Post('drives')
@@ -192,12 +212,19 @@ export class PlacementController {
     @Req() req: { user: AuthUser },
     @Param('studentUserId') studentUserId: string,
   ) {
+    const canSelectStudent = this.canManagePlacement(req.user);
+    if (!canSelectStudent && studentUserId !== req.user.user_id) {
+      throw new ForbiddenException('You can only generate your own resume');
+    }
     return this.placement.generateResumePdf(this.tenant(req), studentUserId);
   }
 
   @Get('mock-interviews')
   mockInterviews(@Req() req: { user: AuthUser }) {
-    return this.placement.mockInterviews(this.tenant(req));
+    return this.placement.mockInterviews(
+      this.tenant(req),
+      this.canManagePlacement(req.user) ? undefined : req.user.user_id,
+    );
   }
 
   @Get('skill-matrix')

@@ -718,6 +718,56 @@ export class AssignmentsService {
     return submission;
   }
 
+  async getSubmissionForStudentDownload(
+    studentUserId: string,
+    tenantId: string,
+    assignmentId: string,
+  ) {
+    // TypeORM ignores undefined where-values, so fail closed before querying.
+    if (!studentUserId || !tenantId || !assignmentId) {
+      throw new NotFoundException('Submission not found');
+    }
+    const submission = await this.submissions.findOne({
+      where: {
+        tenant_id: tenantId,
+        assignment_id: assignmentId,
+        student_user_id: studentUserId,
+      },
+      relations: ['assignment'],
+    });
+    // Never accept a student ID or a storage path supplied by the caller.
+    // The related assignment must also be active and in this tenant.
+    if (
+      !submission ||
+      submission.deleted_at ||
+      submission.tenant_id !== tenantId ||
+      submission.student_user_id !== studentUserId ||
+      submission.assignment_id !== assignmentId ||
+      !submission.assignment ||
+      submission.assignment.deleted_at ||
+      submission.assignment.tenant_id !== tenantId ||
+      submission.assignment.assignment_id !== assignmentId
+    ) {
+      throw new NotFoundException('Submission not found');
+    }
+
+    const enrollment = await this.enrollments.findOne({
+      where: {
+        tenant_id: tenantId,
+        student_user_id: studentUserId,
+        course_id: submission.assignment.course_id,
+        status: 'ENROLLED',
+      },
+    });
+    if (!enrollment || enrollment.deleted_at) {
+      throw new ForbiddenException('You are not enrolled in this course');
+    }
+    this.assertEnrollmentMatchesAssignment(submission.assignment, enrollment);
+
+    // Submission deadlines restrict uploads, not viewing an existing solution.
+    return submission;
+  }
+
   async streamSubmissionFile(submission: AssignmentSubmission) {
     if (submission.file_key && this.objectStorage.isEnabled()) {
       const stream = await this.objectStorage.getDownloadStream(

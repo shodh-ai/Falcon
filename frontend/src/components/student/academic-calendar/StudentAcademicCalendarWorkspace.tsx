@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import {
-  CalendarDays,
   ChevronLeft,
   ChevronRight,
   Download,
@@ -16,7 +15,6 @@ import {
 import { StudentPageHeader } from '@/components/student/StudentPageHeader';
 import { StudentPageShell } from '@/components/student/StudentPageShell';
 import { StudentEmptyState } from '@/components/student/StudentEmptyState';
-import { StudentStatCard } from '@/components/student/StudentStatCard';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
@@ -86,47 +84,39 @@ export function StudentAcademicCalendarWorkspace() {
   const now = useMemo(() => new Date(), []);
   const todayIso = useMemo(() => now.toISOString().slice(0, 10), [now]);
 
-  const [year, setYear] = useState(now.getFullYear());
-  const [month, setMonth] = useState(now.getMonth());
   const [events, setEvents] = useState<AcademicCalendarEvent[]>([]);
+  const eventId = searchParams.get('event');
+  const queryEvent = events.find((event) => event.event_id === eventId) ?? null;
+  const queryDate = queryEvent ? new Date(`${queryEvent.date}T12:00:00`) : now;
+  const [monthChoice, setMonthChoice] = useState<{ eventId: string | null; year: number; month: number } | null>(null);
+  const year = monthChoice?.eventId === eventId ? monthChoice.year : queryDate.getFullYear();
+  const month = monthChoice?.eventId === eventId ? monthChoice.month : queryDate.getMonth();
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [activeCategories, setActiveCategories] = useState<Set<AcademicEventCategory>>(
     () => new Set(ACADEMIC_EVENT_CATEGORIES.map((c) => c.id)),
   );
-  const [selectedEvent, setSelectedEvent] = useState<AcademicCalendarEvent | null>(null);
-  const [selectedDay, setSelectedDay] = useState<string | null>(todayIso);
+  const [eventChoice, setEventChoice] = useState<{ eventId: string | null; value: AcademicCalendarEvent | null } | null>(null);
+  const selectedEvent = eventChoice?.eventId === eventId ? eventChoice.value : queryEvent;
+  const setSelectedEvent = (value: AcademicCalendarEvent | null) => setEventChoice({ eventId, value });
+  const [dayChoice, setDayChoice] = useState<{ eventId: string | null; value: string | null } | null>(null);
+  const selectedDay = dayChoice?.eventId === eventId ? dayChoice.value : queryEvent?.date ?? todayIso;
+  const setSelectedDay = (value: string | null) => setDayChoice({ eventId, value });
 
-  const loadEvents = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await api.get<{ events: AcademicCalendarEvent[] }>(
+  const loadEvents = useCallback(() => api.get<{ events: AcademicCalendarEvent[] }>(
         '/api/student/academic-calendar',
-      );
+      ).then((res) => {
       setEvents(mergeCalendarEvents(res.events));
-    } catch {
+    }).catch(() => {
       setEvents(mergeCalendarEvents([]));
-    } finally {
+      toast.error('Could not load academic calendar updates');
+    }).finally(() => {
       setLoading(false);
-    }
-  }, [api]);
+    }), [api]);
 
   useEffect(() => {
     void loadEvents();
   }, [loadEvents]);
-
-  useEffect(() => {
-    const eventId = searchParams.get('event');
-    if (!eventId || !events.length) return;
-    const found = events.find((e) => e.event_id === eventId);
-    if (found) {
-      setSelectedEvent(found);
-      const d = new Date(`${found.date}T12:00:00`);
-      setYear(d.getFullYear());
-      setMonth(d.getMonth());
-      setSelectedDay(found.date);
-    }
-  }, [searchParams, events]);
 
   const filteredEvents = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -153,18 +143,6 @@ export function StudentAcademicCalendarWorkspace() {
     );
   }, [filteredEvents, year, month]);
 
-  const stats = useMemo(() => {
-    const upcoming = filteredEvents.filter((e) => e.date >= todayIso).length;
-    const examinations = filteredEvents.filter((e) => e.category === 'EXAMINATION').length;
-    const holidays = filteredEvents.filter((e) => e.category === 'HOLIDAYS').length;
-    return {
-      total: filteredEvents.length,
-      upcoming,
-      examinations,
-      holidays,
-    };
-  }, [filteredEvents, todayIso]);
-
   const soonAlerts = useMemo(
     () =>
       filteredEvents
@@ -184,8 +162,7 @@ export function StudentAcademicCalendarWorkspace() {
 
   function shiftMonth(delta: number) {
     const d = new Date(year, month + delta, 1);
-    setYear(d.getFullYear());
-    setMonth(d.getMonth());
+    setMonthChoice({ eventId, year: d.getFullYear(), month: d.getMonth() });
   }
 
   function toggleCategory(id: AcademicEventCategory) {
@@ -231,25 +208,6 @@ export function StudentAcademicCalendarWorkspace() {
         }
       />
 
-      <section className="rounded-[1.5rem] border border-sgvu-navy/10 bg-white p-4 shadow-sm sm:p-5">
-        <p className="text-xs font-bold uppercase tracking-[0.18em] text-sgvu-gold">How to read this</p>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Tap a coloured day to see details. Red = holiday (no class). Blue = exam. Green = class / registration.
-          Gold alerts below mean something important is within 7 days.
-        </p>
-        <div className="mt-3 flex flex-wrap gap-2">
-          {ACADEMIC_EVENT_CATEGORIES.map((cat) => (
-            <span
-              key={cat.id}
-              className={cn('inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold', cat.chipClass)}
-            >
-              <span className={cn('h-2 w-2 rounded-full', cat.dotClass)} />
-              {cat.shortLabel}: {cat.studentHint}
-            </span>
-          ))}
-        </div>
-      </section>
-
       {soonAlerts.length > 0 ? (
         <div className="space-y-2">
           {soonAlerts.map(({ event, days }) => (
@@ -273,13 +231,6 @@ export function StudentAcademicCalendarWorkspace() {
           ))}
         </div>
       ) : null}
-
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StudentStatCard label="All dates" value={stats.total} helper="In your current filters" icon={CalendarDays} />
-        <StudentStatCard label="Coming up" value={stats.upcoming} helper="Still ahead from today" tone="gold" />
-        <StudentStatCard label="Exam dates" value={stats.examinations} helper="Mid-term, practical, end-term" />
-        <StudentStatCard label="Holidays & festivals" value={stats.holidays} helper="Days with no classes" />
-      </div>
 
       <section className="rounded-[1.5rem] border border-sgvu-navy/10 bg-white p-4 shadow-sm sm:p-5">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
@@ -330,8 +281,7 @@ export function StudentAcademicCalendarWorkspace() {
                 variant="outline"
                 className="min-h-11 sm:min-h-9"
                 onClick={() => {
-                  setYear(now.getFullYear());
-                  setMonth(now.getMonth());
+                  setMonthChoice({ eventId, year: now.getFullYear(), month: now.getMonth() });
                   setSelectedDay(todayIso);
                 }}
               >

@@ -17,6 +17,10 @@ export class StudentProfile extends BaseSoftDeleteEntity {
   @Column({ type: 'uuid' })
   user_id: string;
 
+  /** Existing nullable column; populated from users by the student migrations. */
+  @Column({ type: 'uuid', nullable: true })
+  tenant_id: string | null;
+
   @Column({ length: 50, nullable: true })
   enrollment_no: string;
 
