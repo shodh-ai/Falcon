@@ -1,0 +1,166 @@
+{
+  "status": "approved-local-schema-and-fixtures-executed-hosted-unverified",
+  "database": "falcon_notification_staging",
+  "server": "172.30.71.2:5432",
+  "schema": "public",
+  "owner": "notification_staging_owner",
+  "runtimeRole": "notification_staging_app",
+  "sourceOfTruth": [
+    "backend/src/entities",
+    "backend/src/auth/auth.service.ts",
+    "backend/src/modules/hr/hr-entity-context.service.ts",
+    "backend/src/modules/hr/hr-access-control.service.ts"
+  ],
+  "requiredObjects": {
+    "notification_staging_environment": "Owner-owned ordinary table: boolean primary key id CHECK(id), fixed environment falcon-notification-staging, integer version=1; exactly one row. Runtime SELECT only.",
+    "tenants": "Active synthetic tenant, subdomain notification-staging, public schema; actual Tenant entity columns including branding/settings/domains.",
+    "tenant_subscriptions": "TenantService branding/feature lookup; SELECT only.",
+    "roles": "Existing Role entity; one synthetic Faculty role; SELECT only.",
+    "campuses": "School/campus FK prerequisites only; no imported data.",
+    "schools": "Department school FK prerequisite only; no imported data.",
+    "departments": "Actual Department entity, nullable HOD and school FKs with SET NULL; SELECT only.",
+    "org_entities": "User entity FK and real auth entity-context lookup; SELECT only.",
+    "users": "Actual User entity plus auth query columns onboarding_profile,last_login_at. One active Faculty with canonical notification-staging@example.invalid, completed onboarding, active account. Password chosen/hashed privately during approved owner provisioning; never stored in this contract.",
+    "user_roles": "Actual composite user_id/role_id mapping. Existing AuthService role synchronization uses SELECT/INSERT/UPDATE. No role creation or DELETE required for the predefined Faculty email.",
+    "user_entity_access": "Existing auth entity-context lookup; SELECT only.",
+    "hr_permissions": "Existing profile capability lookup; SELECT only.",
+    "hr_access_controls": "Existing profile capability lookup; SELECT only.",
+    "admin_login_history": "Existing AuthService normal login records; append-only INSERT plus owner verification SELECT.",
+    "admin_control_audit": "Existing AuthService normal login audit; append-only INSERT plus owner verification SELECT.",
+    "falcon_notifications": "Actual entity plus tenant_id/user_id FK scope, jsonb metadata, deleted_at/created_at timestamptz. SELECT/INSERT and scoped metadata/read/dismiss UPDATE; no DELETE. Base user_id/created_at index; reviewed outbox index is a separate autocommit phase."
+  },
+  "runtimeUserUpdateColumns": [
+    "last_login_at",
+    "account_status",
+    "updated_at"
+  ],
+  "denyRuntime": [
+    "SUPERUSER",
+    "CREATEDB",
+    "CREATEROLE",
+    "REPLICATION",
+    "BYPASSRLS",
+    "role memberships",
+    "object ownership",
+    "database CREATE",
+    "schema CREATE",
+    "schema synchronization",
+    "migrations",
+    "extension creation",
+    "user provisioning",
+    "password updates",
+    "task/compliance tables",
+    "real account imports"
+  ],
+  "excludedWorkflows": [
+    "password reset",
+    "OAuth",
+    "parent OTP",
+    "student enrollment correction",
+    "HR jobs",
+    "storage",
+    "payments",
+    "scheduled alerts",
+    "direct SMTP listeners"
+  ],
+  "execution": "Under separate 2026-10-16 local approval, reviewed administrator roles, guarded base/grants and four synthetic records were executed and verified only in falcon_notification_staging, followed by the separately reviewed concurrent index. Do not rerun or rebaseline the populated target. No general migrations, schema synchronization, existing-record imports or production access occurred. Hosted targets and any further write operation require separate owner approval.",
+  "initialPreparationStatus": "review-only-not-executed",
+  "localExecutionEvidence": {
+    "date": "2026-10-16",
+    "rolesVerified": true,
+    "baseCatalogVerified": true,
+    "leastPrivilegeGrantsVerified": true,
+    "deniedRuntimeOperationsVerified": [
+      "users.password_hash UPDATE",
+      "admin_control_audit UPDATE",
+      "falcon_notifications DELETE",
+      "DDL"
+    ],
+    "syntheticRecordsCreated": {
+      "tenants": 1,
+      "roles": 1,
+      "users": 1,
+      "user_roles": 1
+    },
+    "outboxConcurrentIndexVerified": true,
+    "outboxIndexExplainPathDemonstrated": true,
+    "backendDatabaseRedisWorkerHealthVerified": true,
+    "syntheticBrowserLoginVerified": true,
+    "successfulLoginHistoryObserved": 1,
+    "notificationsObserved": 1,
+    "acceptedNotificationReceiptsObserved": 1,
+    "mailpitCaptureObserved": 1,
+    "tenantRoleActiveStatusUnchanged": true,
+    "browserReadDismissVerified": true,
+    "restartAcceptanceVerified": true,
+    "productionAccessed": false,
+    "hostedSchemaVerified": false,
+    "negativeAuthorizationVerified": {
+      "unauthenticated": 401,
+      "wrongTenant": 401,
+      "forgedNotificationId": 404
+    },
+    "actualSyntheticTransactionRollbackVerified": true,
+    "redisDownHealth503Verified": true,
+    "socketIoPushInstrumented": false,
+    "redisRestorationVerified": true,
+    "redisAofEnabledVerified": true,
+    "redisAofLastWriteOkVerified": true,
+    "duplicateOneShotRefused": true,
+    "mailpitCountAfterRestart": 1,
+    "healthyRedisShutdownVerified": true,
+    "healthyRedisShutdownExitCode": 0,
+    "postOutageShutdownVerified": true,
+    "shutdownRaceCorrectionRetestPending": false,
+    "finalLinuxAppImage": "sha256:fbe292de1d4e592d624cceb791c78516c9afd2867991e7febba5996f71ede73e",
+    "redisRestartSigtermExitCode": 0,
+    "redisRestartSigtermSeconds": 7.561,
+    "redisUnavailableSigtermExitCode": 0,
+    "redisUnavailableSigtermSeconds": 4.094,
+    "shutdownOomObserved": false,
+    "activeDeliveryJobsDuringShutdownTests": 0,
+    "inFlightSmtpShutdownVerified": "offline-mocks-only",
+    "backendRestoredHealthVerified": true,
+    "duplicateOneShotResult": "EXISTING_STAGING_INTENT",
+    "finalNotificationCounts": {
+      "total": 1,
+      "accepted": 1,
+      "read": 1,
+      "dismissed": 1,
+      "unfinished": 0
+    },
+    "finalQueueCounts": {
+      "completed": 1,
+      "failed": 0,
+      "waiting": 0,
+      "active": 0
+    },
+    "offlineChecks": {
+      "jestSuites": 26,
+      "jestTestsPassed": 600,
+      "nodeTestsPassed": 28,
+      "schemaNodeTestsPassed": 14,
+      "preparationNodeTestsPassed": 8,
+      "healthcheckNodeTestsPassed": 6,
+      "typeScriptPassed": true,
+      "targetedEslintPassed": true,
+      "linuxBuildPassed": true
+    },
+    "retainedPreDrainContainer": "falcon-notification-staging-backend-pre-drain-review",
+    "retainedPreDrainContainerState": "stopped-and-disconnected",
+    "originalApplicationTouched": false,
+    "dataVolumesDeleted": false,
+    "supersededShutdownFailures": [
+      {
+        "timeoutSeconds": 20,
+        "exitCode": 137,
+        "stage": "initial-Redis-restart-SIGTERM"
+      },
+      {
+        "timeoutSeconds": 15,
+        "exitCode": 137,
+        "stage": "intermediate-bounded-cache-QUIT-Bull-fetch-reconnect"
+      }
+    ]
+  }
+}

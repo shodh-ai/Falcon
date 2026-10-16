@@ -164,6 +164,7 @@ export const MODULE_CATALOGUE: readonly ModuleDefinition[] = [
       '/api/hr',
       '/api/staff/onboarding',
       '/api/staff/verifications',
+      '/api/staff/profile-review',
       '/api/attendance-policy',
     ],
     ['HRHead', 'Registrar'],
@@ -326,6 +327,7 @@ export const MODULE_CATALOGUE: readonly ModuleDefinition[] = [
 ] as const;
 
 export const CORE_API_PREFIXES = [
+  '/health',
   '/api/auth',
   '/auth',
   '/api/tenants',
