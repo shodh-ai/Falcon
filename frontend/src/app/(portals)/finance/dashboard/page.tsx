@@ -6,6 +6,7 @@ import { FinancePageHeader, formatInr } from '@/components/finance/FinancePageHe
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { useAuthedApi } from '@/lib/api';
+import { useAuth } from '@/context/AuthContext';
 
 type Dashboard = {
   todays_collection: number;
@@ -45,6 +46,7 @@ type Dashboard = {
 
 export default function FinanceDashboardPage() {
   const api = useAuthedApi();
+  const { user } = useAuth();
   const [data, setData] = useState<Dashboard | null>(null);
 
   useEffect(() => {
@@ -57,6 +59,11 @@ export default function FinanceDashboardPage() {
         title="Finance Dashboard"
         description="Real-time cash flow: gateway collections, outstanding dues, and departmental budget utilization."
       />
+      {user?.email?.toLowerCase() === 'finance@mygyanvihar.com' && (
+        <Link href="/finance/demo-book" className="block rounded-lg border-2 border-amber-500 bg-amber-50 p-4 text-sm font-semibold text-amber-950 underline underline-offset-2">
+          Open SGVU Finance demo book — synthetic invoices, expenses, payments and journals (not official records)
+        </Link>
+      )}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Card>
           <CardContent className="p-4">

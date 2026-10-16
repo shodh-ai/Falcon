@@ -69,6 +69,12 @@ export class FinanceController {
     return this.finance.getDashboard(this.tenant(req));
   }
 
+  @Get('demo-book')
+  @Roles(...FINANCE_DESK)
+  demoBook(@Req() req: { user: AuthUser }) {
+    return this.accounts.getDemoBook(this.tenant(req), req.user.user_id);
+  }
+
   @Get('fee-templates')
   @Roles(...FINANCE_DESK)
   feeTemplates(@Req() req: { user: AuthUser }) {
