@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Get,
+  NotFoundException,
   Param,
   Post,
   Query,
@@ -644,9 +645,13 @@ export class StaffVerificationController {
 
     const uploadRoot = resolve(process.env.UPLOAD_PATH || './uploads');
     const resolvedPath = resolve(filePath);
-    if (!resolvedPath.startsWith(uploadRoot) || !existsSync(resolvedPath)) {
-      throw new BadRequestException('File not found');
+    if (!resolvedPath.startsWith(`${uploadRoot}/`) || !existsSync(resolvedPath)) {
+      throw new NotFoundException({
+        code: 'DOCUMENT_FILE_UNAVAILABLE',
+        message: 'The document record exists, but its original file is missing from storage. Restore the uploads backup or request a replacement upload from the faculty member.',
+      });
     }
+    res.setHeader('Cache-Control', 'private, no-store');
     res.setHeader('Content-Type', documentContentType(resolvedPath));
     res.setHeader(
       'Content-Disposition',
