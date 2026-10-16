@@ -1,0 +1,16 @@
+{
+  "status": "reviewed-input-checksums",
+  "database": "falcon_notification_staging",
+  "files": {
+    "base.review.sql": "1aa94cc9f72a880e97158a471b661aba7ecd2535e16e217d1d6848eed2a5edad",
+    "runtime-grants.review.sql": "6b6074785d118f3c2b1e68cb0bd43c8da599007586c94e3f9c14e8a0b6ae33cf",
+    "roles.review.sql": "bcb37a9e06470d2c4d8887037c51cdebd44d4ebe99bb4c5cacade9ee7df9b486",
+    "catalog.review.json": "1a413c724457527cc22ee8883e3989b1e3b0675e8189ca70a2bf32191bfeb9f1",
+    "policy.cjs": "068d00aa7ee0114fe105dc599ec0f058a4e82ff94ad93882dfdf7a0983086f9d",
+    "bootstrap.cjs": "0f34515dbd94651f379ec09415e90b2549e7afa3675fc30aa9335143579f5c3a",
+    "fixtures.cjs": "84a4816d8b8c5d8e7d68ec658dad4e45f0b19e011d46c0b53489cfbe274bfa2a",
+    "runner.review.yml": "ed54ec01096baf63be7f2912c7084a195a363afdfc3d4adea49260b6032af1dc",
+    "preparation.spec.cjs": "4e40471625dbd49bae694a50a5706249374d55fa8f9a73e433c4f3b33fa1ef16"
+  },
+  "executionEvidence": "See OWNER_REVIEW.md and backend/docs/notification-release-checklist.md; this manifest is not an execution authorization."
+}

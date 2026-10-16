@@ -9,6 +9,11 @@ import { TasksService } from '../tasks/tasks.service';
 import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
 import { wrapFalconEmailHtml } from '../common/email/falcon-email.template';
+import {
+  FALCON_EMAIL_ADDRESS,
+  FALCON_EMAIL_FROM,
+  falconEmailTransportOptions,
+} from '../common/email/falcon-email-sender';
 import { LeadershipService } from '../modules/leadership/leadership.service';
 import { DepartmentScoreService } from '../modules/leadership/department-score.service';
 import { FinancialGeminiService } from '../modules/leadership-ai/financial-gemini.service';
@@ -17,7 +22,6 @@ import { OwnerDailyBrief } from '../entities/owner-daily-brief.entity';
 @Injectable()
 export class SchedulerService {
   private readonly logger = new Logger(SchedulerService.name);
-  private emailTransporter: nodemailer.Transporter;
 
   constructor(
     @InjectRepository(TaskAssignment)
@@ -31,9 +35,7 @@ export class SchedulerService {
     private leadershipService: LeadershipService,
     private departmentScoreService: DepartmentScoreService,
     private financialGemini: FinancialGeminiService,
-  ) {
-    this.initializeEmailTransporter();
-  }
+  ) {}
 
   /** Owner vital-sign ratios — 5:00 AM */
   @Cron('0 5 * * *')
@@ -322,18 +324,6 @@ export class SchedulerService {
     }
   }
 
-  private initializeEmailTransporter() {
-    this.emailTransporter = nodemailer.createTransport({
-      host: this.configService.get('EMAIL_HOST'),
-      port: parseInt(this.configService.get('EMAIL_PORT') || '587'),
-      secure: false,
-      auth: {
-        user: this.configService.get('EMAIL_USER'),
-        pass: this.configService.get('EMAIL_PASSWORD'),
-      },
-    });
-  }
-
   // Task Distributor - Runs on the 1st of every month at 12:00 AM
   @Cron(CronExpression.EVERY_1ST_DAY_OF_MONTH_AT_MIDNIGHT)
   async distributeMonthlyTasks() {
@@ -352,7 +342,7 @@ export class SchedulerService {
 
       // Send notification to IQAC
       await this.sendNotificationEmail(
-        this.configService.get('EMAIL_FROM') || 'noreply@mygyanvihar.org',
+        this.configService.get('EMAIL_FROM') || FALCON_EMAIL_ADDRESS,
         'Task Distribution Completed',
         `Monthly task distribution for ${currentMonth} has been completed. Total assignments: ${assignments.length}`,
       );
@@ -488,13 +478,22 @@ export class SchedulerService {
       `;
 
     const mailOptions = {
-      from: this.configService.get('EMAIL_FROM') || 'noreply@mygyanvihar.org',
+      from: FALCON_EMAIL_FROM,
       to: email,
       subject: 'Falcon Reminder: Pending Task Submission',
       html: wrapFalconEmailHtml(bodyHtml, frontendUrl),
     };
 
-    await this.emailTransporter.sendMail(mailOptions);
+    const transporter = nodemailer.createTransport(
+      falconEmailTransportOptions((key) =>
+        this.configService.get<unknown>(key),
+      ),
+    );
+    try {
+      await transporter.sendMail(mailOptions);
+    } catch {
+      throw new Error('Scheduled email delivery failed (SMTP_FAILURE)');
+    }
   }
 
   private async sendNotificationEmail(
@@ -511,13 +510,22 @@ export class SchedulerService {
       `;
 
     const mailOptions = {
-      from: this.configService.get('EMAIL_FROM'),
+      from: FALCON_EMAIL_FROM,
       to,
       subject: `[Falcon] ${subject}`,
       html: wrapFalconEmailHtml(bodyHtml, frontendUrl),
     };
 
-    await this.emailTransporter.sendMail(mailOptions);
+    const transporter = nodemailer.createTransport(
+      falconEmailTransportOptions((key) =>
+        this.configService.get<unknown>(key),
+      ),
+    );
+    try {
+      await transporter.sendMail(mailOptions);
+    } catch {
+      throw new Error('Scheduled email delivery failed (SMTP_FAILURE)');
+    }
   }
 
   private generateDefaulterReportContent(

@@ -16,21 +16,32 @@ import { NotificationEmitterService } from './notification-emitter.service';
 import { NotificationDispatchService } from './notification-dispatch.service';
 import { OnboardingVerificationNotifyService } from './onboarding-verification-notify.service';
 import { NotificationsGateway } from './notifications.gateway';
+import { notificationQueuePrefix } from './notification-activation';
+import { NotificationOutboxService } from './notification-outbox.service';
+import { NotificationReadinessService } from './notification-readiness.service';
+import { NotificationReadinessController } from './notification-readiness.controller';
 
 @Global()
 @Module({
   imports: [
     TypeOrmModule.forFeature([FalconNotification]),
-    BullModule.registerQueue({ name: NOTIFICATION_DELIVERY_QUEUE }),
+    BullModule.registerQueueAsync({
+      name: NOTIFICATION_DELIVERY_QUEUE,
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => ({
+        prefix: notificationQueuePrefix((key) => config.get<unknown>(key)),
+      }),
+    }),
     JwtModule.registerAsync({
       imports: [ConfigModule],
-      useFactory: async (configService: ConfigService) => ({
+      useFactory: (configService: ConfigService) => ({
         secret: resolveJwtSecret(configService),
       }),
       inject: [ConfigService],
     }),
   ],
-  controllers: [FalconNotificationsController],
+  controllers: [FalconNotificationsController, NotificationReadinessController],
   providers: [
     NotificationsService,
     FalconNotificationsService,
@@ -39,6 +50,8 @@ import { NotificationsGateway } from './notifications.gateway';
     NotificationCronService,
     NotificationEmitterService,
     NotificationDispatchService,
+    NotificationOutboxService,
+    NotificationReadinessService,
     OnboardingVerificationNotifyService,
     NotificationsGateway,
   ],
@@ -47,6 +60,7 @@ import { NotificationsGateway } from './notifications.gateway';
     FalconNotificationsService,
     NotificationEmitterService,
     NotificationDispatchService,
+    NotificationOutboxService,
     OnboardingVerificationNotifyService,
     NotificationsGateway,
   ],

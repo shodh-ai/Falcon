@@ -474,6 +474,9 @@ describe('AuthService password recovery', () => {
     delete process.env.EMAIL_HOST;
     delete process.env.EMAIL_USER;
     delete process.env.EMAIL_PASSWORD;
+    delete process.env.EMAIL_FROM;
+    delete process.env.PASSWORD_RESET_EMAIL_FROM_NAME;
+    delete process.env.PASSWORD_RESET_EMAIL_FROM_ADDRESS;
     (bcrypt.hash as jest.Mock).mockResolvedValue('new-hash');
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -495,6 +498,9 @@ describe('AuthService password recovery', () => {
     delete process.env.EMAIL_HOST;
     delete process.env.EMAIL_USER;
     delete process.env.EMAIL_PASSWORD;
+    delete process.env.EMAIL_FROM;
+    delete process.env.PASSWORD_RESET_EMAIL_FROM_NAME;
+    delete process.env.PASSWORD_RESET_EMAIL_FROM_ADDRESS;
   });
 
   function mockTokenInsertUser(
@@ -530,7 +536,7 @@ describe('AuthService password recovery', () => {
     ).resolves.toEqual({ sent: true });
   });
 
-  it('only exposes a token for explicitly opted-in non-production smoke tests', async () => {
+  it('never exposes a token even when the legacy development option is enabled', async () => {
     process.env.NODE_ENV = 'development';
     process.env.FALCON_EXPOSE_DEV_RESET_TOKEN = 'true';
     mockTokenInsertUser();
@@ -538,8 +544,7 @@ describe('AuthService password recovery', () => {
       'faculty@mygyanvihar.com',
       'sgvu',
     );
-    expect(result.sent).toBe(true);
-    expect(result.reset_token).toEqual(expect.any(String));
+    expect(result).toEqual({ sent: true });
   });
 
   it('suppresses the token even when the developer flag is accidentally set in production', async () => {
@@ -565,6 +570,45 @@ describe('AuthService password recovery', () => {
         html: expect.stringContaining('/reset-password?token='),
       }),
     );
+  });
+
+  it.each([
+    'sender@example.test',
+    'Existing Name <sender@example.test>',
+    undefined,
+  ])(
+    'uses the institutional reset sender independently of shared sender %s',
+    async (from) => {
+      const sendMail = mockSmtp();
+      if (from) process.env.EMAIL_FROM = from;
+      mockTokenInsertUser();
+
+      await service.forgotPassword('faculty@mygyanvihar.com', 'sgvu');
+
+      expect(sendMail).toHaveBeenCalledWith(
+        expect.objectContaining({
+          from: [{ name: 'Falcon', address: 'noreply.ums@mygyanvihar.com' }],
+        }),
+      );
+      expect(process.env.EMAIL_FROM).toBe(from);
+      expect(process.env.EMAIL_USER).toBe('noreply@example.test');
+    },
+  );
+
+  it('uses the password-reset-only display-name setting', async () => {
+    const sendMail = mockSmtp();
+    process.env.EMAIL_FROM = 'Shared Sender <sender@example.test>';
+    process.env.PASSWORD_RESET_EMAIL_FROM_NAME = 'Falcon';
+    mockTokenInsertUser();
+
+    await service.forgotPassword('faculty@mygyanvihar.com', 'sgvu');
+
+    expect(sendMail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        from: [{ name: 'Falcon', address: 'noreply.ums@mygyanvihar.com' }],
+      }),
+    );
+    expect(process.env.EMAIL_FROM).toBe('Shared Sender <sender@example.test>');
   });
 
   it.each(['Admin', 'Dean', 'Faculty', 'Student'])(
@@ -611,7 +655,6 @@ describe('AuthService password recovery', () => {
 
     await expect(service.forgotPassword('2548727', 'sgvu')).resolves.toEqual({
       sent: true,
-      requires_admin_reset: true,
     });
     expect(mockDataSource.query).toHaveBeenCalledTimes(1);
     expect(sendMail).not.toHaveBeenCalled();

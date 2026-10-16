@@ -2,11 +2,79 @@ name: Falcon CI
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main, develop, testing]
   pull_request:
-    branches: [main, develop]
+    branches: [main, develop, testing]
 
 jobs:
+  notification-security:
+    name: Notification and sender security
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      NODE_ENV: test
+      PORTAL_EMAIL_DELIVERY_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # Match the reviewed Linux notification staging artifact.
+          node-version: '22.23.3'
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install locked backend dependencies
+        run: npm ci --prefix backend
+
+      # These specs mock persistence, queues and SMTP. No application starts.
+      - name: Test notification and password-reset sender safeguards offline
+        working-directory: backend
+        run: |
+          npm test -- --runInBand --runTestsByPath \
+            src/core/notifications/notification-activation.spec.ts \
+            src/core/notifications/notification-cron.service.spec.ts \
+            src/core/notifications/notification-delivery.processor.spec.ts \
+            src/core/notifications/notification-delivery-policy.spec.ts \
+            src/core/notifications/notification-dispatch.service.spec.ts \
+            src/core/notifications/notification-email-body.spec.ts \
+            src/core/notifications/notification-message.catalog.spec.ts \
+            src/core/notifications/notification-outbox.service.spec.ts \
+            src/core/notifications/notification-outbox-index.spec.ts \
+            src/core/notifications/notification-readiness.spec.ts \
+            src/core/notifications/notification-worker-lifecycle.spec.ts \
+            src/core/notifications/notification-release.config.spec.ts \
+            src/core/notifications/notification-startup.spec.ts \
+            src/core/notifications/notifications.gateway.spec.ts \
+            src/core/notifications/notifications.service.spec.ts \
+            src/core/redis/redis-connection.config.spec.ts \
+            src/core/redis/redis.service.spec.ts \
+            src/notifications-staging/config.spec.ts \
+            src/notifications-staging/capture.spec.ts \
+            src/notifications-staging/module.spec.ts \
+            src/common/email/falcon-email-sender.spec.ts \
+            src/common/email/falcon-email-consumers.spec.ts \
+            src/auth/password-reset-sender.spec.ts \
+            src/auth/password-reset.security.spec.ts
+
+      - name: Validate notification staging preparation offline
+        working-directory: backend
+        run: |
+          node --test scripts/notifications/staging/preparation.spec.cjs
+          node --test scripts/notifications/staging/schema/preparation.spec.cjs
+          node --test scripts/healthcheck.spec.cjs
+          node --check scripts/notifications/staging/ingress.cjs
+          node --check scripts/notifications/staging/review-plan.cjs
+
+      - name: Typecheck backend without emitting files
+        working-directory: backend
+        run: npx --no-install tsc --noEmit --incremental false -p tsconfig.json
+
+      - name: Build backend without startup or migration hooks
+        working-directory: backend
+        run: npm run build --ignore-scripts
+
   ci:
     runs-on: ubuntu-latest
 

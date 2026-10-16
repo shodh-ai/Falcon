@@ -726,7 +726,7 @@ export class LibraryService {
 
       if (finePerDay <= 0) continue;
 
-      this.notify.libraryOverdue({
+      await this.notify.libraryOverdue({
         tenantId: loan.tenant_id,
         userId: loan.user_id,
         bookTitle: loan.title,

@@ -1,6 +1,7 @@
 import {
   Inject,
   Injectable,
+  Optional,
   Logger,
   UnauthorizedException,
   BadRequestException,
@@ -11,6 +12,10 @@ import { DataSource, Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import { createHash, randomBytes } from 'crypto';
 import * as nodemailer from 'nodemailer';
+import {
+  PASSWORD_RESET_SENDER,
+  selectPasswordResetSender,
+} from './password-reset-sender';
 import { User } from '../entities/user.entity';
 import { UserRole } from '../entities/user-role.entity';
 import { Tenant } from '../entities/tenant.entity';
@@ -25,6 +30,11 @@ import { normalizeOnboardingStatusForWizard } from '../modules/student-onboardin
 import { isStudentEnrollmentEmail } from './utils/student-enrollment-email.util';
 import { hasDirectReports } from '../modules/hr/utils/reporting-officer.util';
 import { wrapFalconEmailHtml } from '../common/email/falcon-email.template';
+
+import {
+  PASSWORD_RESET_DELIVERY,
+  type PasswordResetDelivery,
+} from './password-reset-delivery';
 
 type LoginCredentialRow = {
   user_id: string;
@@ -78,6 +88,9 @@ export class AuthService {
     private readonly tenantService: TenantService,
     private readonly dataSource: DataSource,
     private readonly hrEntityCtx: HrEntityContextService,
+    @Optional()
+    @Inject(PASSWORD_RESET_DELIVERY)
+    private readonly resetDelivery?: PasswordResetDelivery,
   ) {}
 
   getProviderId(): string {
@@ -408,8 +421,6 @@ export class AuthService {
     tenantSubdomain?: string,
   ): Promise<{
     sent: true;
-    reset_token?: string;
-    requires_admin_reset?: true;
   }> {
     const loginIdentifier = identifier?.trim() ?? '';
     const subdomain = resolveTenantSubdomain(tenantSubdomain);
@@ -487,20 +498,26 @@ export class AuthService {
     // the canonical address stored on the matched account.
     const canonicalEmail = user.official_email?.trim();
     if (!canonicalEmail) {
-      return user.onboarding_profile?.email_pending === true && !isEmailIdentifier
-        ? { sent: true, requires_admin_reset: true }
-        : { sent: true };
+      return { sent: true };
     }
 
     const normalizedTargetEmail = canonicalEmail.toLowerCase();
+    const syntheticAllowed =
+      this.resetDelivery?.allowsSyntheticAccount({
+        userId: user.user_id,
+        tenantId: tenant.tenant_id,
+        email: canonicalEmail,
+      }) ?? false;
+    // A bound acceptance delivery is closed to every non-allowlisted account.
+    if (this.resetDelivery && !syntheticAllowed) return { sent: true };
     // Student accounts created before their university email is available use
     // a reserved non-deliverable address. Do not create a token for them.
     if (
       user.onboarding_profile?.email_pending === true ||
-      normalizedTargetEmail.endsWith('.invalid') ||
+      (normalizedTargetEmail.endsWith('.invalid') && !syntheticAllowed) ||
       normalizedTargetEmail.includes('@pending.')
     ) {
-      return { sent: true, requires_admin_reset: true };
+      return { sent: true };
     }
 
     const raw = randomBytes(24).toString('hex');
@@ -519,15 +536,30 @@ export class AuthService {
     // Delivery and the public response remain deliberately non-enumerating.
     await this.sendPasswordResetEmail(canonicalEmail, raw);
 
-    // A raw token is available only for an explicit non-production smoke-test
-    // opt-in. It is never rendered by the normal UI.
-    return process.env.FALCON_EXPOSE_DEV_RESET_TOKEN === 'true' &&
-      process.env.NODE_ENV !== 'production'
-      ? { sent: true, reset_token: raw }
-      : { sent: true };
+    // Recovery authorization is delivered only through the matched account's
+    // mailbox. Public responses never expose tokens or account eligibility.
+    return { sent: true };
   }
 
   private async sendPasswordResetEmail(email: string, token: string) {
+    if (this.resetDelivery) {
+      // Acceptance configuration never reads normal SMTP or URL environment values.
+      const frontend = this.resetDelivery.frontendUrl;
+      const resetUrl = `${frontend}/reset-password?token=${encodeURIComponent(token)}`;
+      try {
+        await this.resetDelivery.send({
+          to: email,
+          html: wrapFalconEmailHtml(
+            `<h2>Reset your Falcon password</h2><p>This link is valid for one hour and can be used once.</p><p><a href="${resetUrl}">Reset password</a></p>`,
+            frontend,
+          ),
+          text: `Reset your Falcon password. This link is valid for one hour and can be used once.\n${resetUrl}`,
+        });
+      } catch {
+        this.logger.warn('Password reset email delivery failed (SMTP_FAILURE)');
+      }
+      return;
+    }
     const host = process.env.EMAIL_HOST;
     const user = process.env.EMAIL_USER;
     const pass = process.env.EMAIL_PASSWORD;
@@ -549,22 +581,51 @@ export class AuthService {
     );
 
     try {
+      const sender = selectPasswordResetSender(process.env);
+      // Gmail may rewrite From to its authenticated identity. Refuse an
+      // unapproved principal rather than emit another personal-sender message.
+      if (
+        host.toLowerCase() === 'smtp.gmail.com' &&
+        user.trim().toLowerCase() !== PASSWORD_RESET_SENDER
+      ) {
+        throw new Error('Institutional password-reset SMTP principal required');
+      }
       const transporter = nodemailer.createTransport({
         host,
         port: Number(process.env.EMAIL_PORT || 587),
         secure: String(process.env.EMAIL_SECURE || '').toLowerCase() === 'true',
+        // An explicitly authorized reset sender must never downgrade to plaintext.
+        ...(sender.requireTLS ? { requireTLS: true } : {}),
         auth: { user, pass },
       });
       await transporter.sendMail({
-        from: process.env.EMAIL_FROM || user,
+        from: sender.from,
         to: email,
         subject: 'Reset your Falcon password',
         html,
       });
     } catch (error) {
-      this.logger.warn(
-        `Password reset email delivery failed: ${error instanceof Error ? error.message : String(error)}`,
-      );
+      // Provider messages may contain addresses, credentials or recovery URLs.
+      // Log only known categories; never interpolate the message/response/stack.
+      const code =
+        error && typeof error === 'object' && 'code' in error
+          ? (error as { code?: unknown }).code
+          : undefined;
+      const category =
+        typeof code === 'string' &&
+        [
+          'EAUTH',
+          'ECONNECTION',
+          'ETIMEDOUT',
+          'ESOCKET',
+          'EDNS',
+          'EENVELOPE',
+          'EMESSAGE',
+          'ESTREAM',
+        ].includes(code)
+          ? code
+          : 'SMTP_FAILURE';
+      this.logger.warn(`Password reset email delivery failed (${category})`);
     }
   }
 

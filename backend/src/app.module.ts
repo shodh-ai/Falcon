@@ -84,6 +84,7 @@ import { AssetRetirementModule } from './modules/asset-retirement/asset-retireme
 import { PhysicalIdentityModule } from './modules/physical-identity/physical-identity.module';
 import { AuditModule } from './core/audit/audit.module';
 import { RedisModule } from './core/redis/redis.module';
+import { redisConnectionOptions } from './core/redis/redis-connection.config';
 import { ImpersonationReadOnlyGuard } from './common/guards/impersonation-readonly.guard';
 import { TenantModule } from './tenant/tenant.module';
 import { StorageModule } from './storage/storage.module';
@@ -108,11 +109,9 @@ import { DatabaseExceptionFilter } from './common/filters/database-exception.fil
     BullModule.forRootAsync({
       imports: [ConfigModule],
       useFactory: (configService: ConfigService) => ({
-        connection: {
-          host: configService.get('REDIS_HOST', '127.0.0.1'),
-          port: configService.get<number>('REDIS_PORT', 6379),
-          password: configService.get<string>('REDIS_PASSWORD') || undefined,
-        },
+        connection: redisConnectionOptions((key) =>
+          configService.get<unknown>(key),
+        ),
       }),
       inject: [ConfigService],
     }),

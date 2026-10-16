@@ -2,24 +2,58 @@ import { Injectable, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
 import { BED_LOCK_TTL_SEC } from '../../common/constants/hostel-tatkal.constants';
+import { redisConnectionOptions } from './redis-connection.config';
 
 @Injectable()
 export class RedisService implements OnModuleDestroy {
   readonly client: Redis;
+  private shutdown?: Promise<void>;
 
   constructor(config: ConfigService) {
     this.client = new Redis({
-      host: config.get('REDIS_HOST', '127.0.0.1'),
-      port: config.get<number>('REDIS_PORT', 6379),
-      password: config.get<string>('REDIS_PASSWORD') || undefined,
+      ...redisConnectionOptions((key) => config.get<unknown>(key)),
       // Bound retries so cache/auth paths fail fast when Redis is unreachable.
       maxRetriesPerRequest: 2,
       connectTimeout: 3000,
     });
   }
 
-  async onModuleDestroy() {
-    await this.client.quit();
+  onModuleDestroy(): Promise<void> {
+    if (!this.shutdown) this.shutdown = this.closeClient();
+    return this.shutdown;
+  }
+
+  private disconnectClient(): void {
+    try {
+      this.client.disconnect();
+    } catch {
+      // Never let private connector errors abort remaining Nest cleanup hooks.
+    }
+  }
+
+  private async closeClient(): Promise<void> {
+    // QUIT can remain in ioredis's offline queue during a Redis restart. There
+    // is no useful cache drain while disconnected; stop reconnecting instead.
+    if (this.client.status !== 'ready') {
+      this.disconnectClient();
+      return;
+    }
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const quit = Promise.resolve()
+      .then(() => this.client.quit())
+      .then(
+        () => true,
+        () => false,
+      );
+    const deadline = new Promise<boolean>((resolve) => {
+      timeout = setTimeout(() => resolve(false), 3_000);
+      timeout.unref?.();
+    });
+    try {
+      if (!(await Promise.race([quit, deadline]))) this.disconnectClient();
+    } finally {
+      if (timeout) clearTimeout(timeout);
+    }
   }
 
   bedLockKey(bedId: string) {

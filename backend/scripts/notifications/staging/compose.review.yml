@@ -1,0 +1,117 @@
+# PREPARATION ONLY. All services require an explicitly enabled profile.
+# Use --env-file /dev/null; never load either checkout's .env.
+name: falcon-notification-staging
+x-safety: &safety
+  profiles: [reviewed-notification-staging]
+  pull_policy: never
+  restart: 'no'
+  labels:
+    com.falcon.environment: notification-staging
+  security_opt: [no-new-privileges:true]
+services:
+  postgres:
+    <<: *safety
+    image: ${NOTIFICATION_STAGING_POSTGRES_IMAGE:?approved PostgreSQL 16 image digest required}
+    container_name: falcon-notification-staging-postgres
+    environment:
+      POSTGRES_DB: falcon_notification_staging
+      POSTGRES_USER: notification_staging_bootstrap
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_bootstrap_password
+    secrets: [postgres_bootstrap_password]
+    volumes: [pg16:/var/lib/postgresql/data]
+    networks:
+      isolated: {ipv4_address: 172.30.71.2}
+    # No initdb scripts, existing volumes, published ports or app credentials.
+  redis:
+    <<: *safety
+    image: ${NOTIFICATION_STAGING_REDIS_IMAGE:?approved Redis image digest required}
+    container_name: falcon-notification-staging-redis
+    command: [redis-server, /usr/local/etc/redis/redis.conf]
+    secrets: [redis_acl]
+    volumes:
+      - redis:/data
+      - ./redis.review.conf:/usr/local/etc/redis/redis.conf:ro
+    networks:
+      isolated: {ipv4_address: 172.30.71.3}
+  mail:
+    <<: *safety
+    image: ${NOTIFICATION_STAGING_MAILPIT_IMAGE:?approved compatible Mailpit image digest required}
+    container_name: falcon-notification-staging-mail
+    environment:
+      MP_DATABASE: /data/mailpit.db
+      MP_UI_BIND_ADDR: 0.0.0.0:8025
+      MP_SMTP_BIND_ADDR: 0.0.0.0:1025
+      MP_SMTP_ALLOWED_RECIPIENTS: '^notification-staging@example\.invalid$$'
+      MP_SMTP_IGNORE_REJECTED_RECIPIENTS: 'false'
+      MP_DISABLE_VERSION_CHECK: 'true'
+      MP_SMTP_DISABLE_RDNS: 'true'
+      MP_SMTP_RELAY_ALL: 'false'
+      MP_SMTP_RELAY_CONFIG: ''
+      MP_SMTP_RELAY_HOST: ''
+      MP_SMTP_FORWARD_CONFIG: ''
+      MP_SMTP_FORWARD_HOST: ''
+      MP_WEBHOOK_URL: ''
+      MP_MAX_MESSAGES: '0'
+    volumes: [mail:/data]
+    networks:
+      isolated: {ipv4_address: 172.30.71.4}
+    # No SMTP/UI published ports, relay, forwarding, webhook, or auto-cleanup.
+  backend:
+    <<: *safety
+    # Allow bounded cache/outbox shutdown plus the 25-second delivery drain.
+    stop_grace_period: 45s
+    image: ${NOTIFICATION_STAGING_APP_IMAGE:?reviewed Linux-native artifact image digest required}
+    container_name: falcon-notification-staging-backend
+    entrypoint: [node, dist/notifications-staging/main.js]
+    command: [--approved-notification-staging]
+    env_file:
+      - ${NOTIFICATION_STAGING_RUNTIME_CONFIG_FILE:?new private staging config file required}
+    environment:
+      NODE_ENV: production
+    networks:
+      isolated: {ipv4_address: 172.30.71.5}
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    user: '1000:1000'
+    # Deliberately no ports, normal main.js, automatic migrations or source mounts.
+  ingress:
+    <<: *safety
+    image: ${NOTIFICATION_STAGING_NODE_IMAGE:?approved compatible Node image digest required}
+    container_name: falcon-notification-staging-ingress
+    entrypoint: [node, /review/ingress.cjs]
+    command: [--reviewed-notification-staging-ingress]
+    environment:
+      NOTIFICATION_STAGING_FRONTEND_URL: ${NOTIFICATION_STAGING_FRONTEND_URL:?owner-approved HTTPS frontend origin required}
+    volumes: ['./ingress.cjs:/review/ingress.cjs:ro']
+    ports: ['127.0.0.1:4111:4111']
+    networks:
+      isolated: {ipv4_address: 172.30.71.6}
+      ingress: {}
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    user: '1000:1000'
+networks:
+  isolated:
+    name: falcon-notification-staging-isolated
+    internal: true
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.gateway_mode_ipv4: isolated
+    ipam:
+      config: [{subnet: 172.30.71.0/24}]
+  ingress:
+    name: falcon-notification-staging-ingress
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.host_binding_ipv4: 127.0.0.1
+volumes:
+  pg16: {name: falcon-notification-staging-pg16}
+  redis: {name: falcon-notification-staging-redis}
+  mail: {name: falcon-notification-staging-mailpit}
+secrets:
+  postgres_bootstrap_password:
+    file: ${NOTIFICATION_STAGING_POSTGRES_PASSWORD_FILE:?new bootstrap secret file required}
+  redis_acl:
+    file: ${NOTIFICATION_STAGING_REDIS_ACL_FILE:?new authenticated Redis ACL file required}

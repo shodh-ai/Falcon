@@ -1,0 +1,34 @@
+# REVIEW ONLY. Separate one-shot runner, never part of runtime service defaults.
+name: falcon-notification-staging-schema
+services:
+  runner:
+    profiles: [manual-notification-schema]
+    image: ${NOTIFICATION_STAGING_APP_IMAGE:?reviewed compatible Linux artifact required}
+    pull_policy: never
+    working_dir: /app/backend
+    entrypoint: [node, scripts/notifications/staging/schema/bootstrap.cjs]
+    command: [--phase=base, --dry-run]
+    env_file:
+      - ${NOTIFICATION_STAGING_SCHEMA_CONFIG_FILE:?NEW private restricted-owner-only config required}
+    volumes:
+      - ./bootstrap.cjs:/app/backend/scripts/notifications/staging/schema/bootstrap.cjs:ro
+      - ./policy.cjs:/app/backend/scripts/notifications/staging/schema/policy.cjs:ro
+      - ./fixtures.cjs:/app/backend/scripts/notifications/staging/schema/fixtures.cjs:ro
+      - ./base.review.sql:/app/backend/scripts/notifications/staging/schema/base.review.sql:ro
+      - ./runtime-grants.review.sql:/app/backend/scripts/notifications/staging/schema/runtime-grants.review.sql:ro
+      - ./catalog.review.json:/app/backend/scripts/notifications/staging/schema/catalog.review.json:ro
+      - ./reviewed-manifest.json:/app/backend/scripts/notifications/staging/schema/reviewed-manifest.json:ro
+    networks: [isolated]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    user: '1000:1000'
+    restart: 'no'
+    labels:
+      com.falcon.environment: notification-staging
+networks:
+  isolated:
+    external: true
+    name: falcon-notification-staging-isolated
+# No ports, Docker socket, role SQL, general migration directory or normal .env.
