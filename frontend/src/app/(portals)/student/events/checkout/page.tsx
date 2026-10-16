@@ -31,9 +31,7 @@ export default function EventCheckoutPage() {
   const [loading, setLoading] = useState(true);
   const expiredRef = useRef(false);
 
-  const loadHold = useCallback(async () => {
-    if (!registrationId) return;
-    const data = await eventsApi.getRegistration(registrationId);
+  const loadHold = useCallback(() => eventsApi.getRegistration(registrationId).then((data) => {
     setHold(data);
     const serverOffset = data.server_now ? new Date(data.server_now).getTime() - Date.now() : 0;
     const expiresMs = data.expires_at ? new Date(data.expires_at).getTime() : 0;
@@ -41,7 +39,7 @@ export default function EventCheckoutPage() {
       ? Math.max(0, Math.floor((expiresMs - (Date.now() + serverOffset)) / 1000))
       : (data.remaining_seconds ?? 0);
     setRemaining(rem);
-  }, [eventsApi, registrationId]);
+  }), [eventsApi, registrationId]);
 
   useEffect(() => {
     if (!registrationId) {

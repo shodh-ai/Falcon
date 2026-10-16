@@ -62,8 +62,11 @@ export const academicsApi = {
     }),
   markAttendance: (token: string, payload: MarkAttendancePayload) =>
     apiFetch<unknown>(token, { url: `${ACADEMICS}/attendance`, method: 'POST', headers: {}, data: payload }),
-  studentResults: (token: string, studentUserId: string) =>
-    apiFetch<unknown[]>(token, { url: `${ACADEMICS}/results/student/${studentUserId}`, headers: {} }),
+  studentResults: (token: string) =>
+    apiFetch<{ exam_reports?: unknown[] }>(token, {
+      url: `${ACADEMICS}/marks/history`,
+      headers: {},
+    }),
   listGradingPolicies: (token: string) =>
     apiFetch<unknown[]>(token, { url: `${ACADEMICS}/grading-policies`, headers: {} }),
   createGradingPolicy: (token: string, dto: Record<string, unknown>) =>

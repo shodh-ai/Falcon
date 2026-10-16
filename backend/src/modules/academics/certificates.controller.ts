@@ -18,6 +18,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CertificatesService } from './certificates.service';
+import { requireTenantId } from '../../common/utils/require-tenant-id';
 import type {
   UploadCertificateInput,
   VerifyCertificateInput,
@@ -106,6 +107,6 @@ export class CertificatesController {
   }
 
   private resolveTenantId(user: AuthUser) {
-    return user.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
+    return requireTenantId(user.tenant_id);
   }
 }

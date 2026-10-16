@@ -15,6 +15,7 @@ import { StudentPageHeader } from '@/components/student/StudentPageHeader';
 import { StudentPageShell } from '@/components/student/StudentPageShell';
 import { StudentLoadingState } from '@/components/student/StudentLoadingState';
 import { StudentEmptyState } from '@/components/student/StudentEmptyState';
+import { StudentInternalMarksPanel } from '@/components/student/StudentInternalMarksPanel';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useAuthedApi } from '@/lib/api';
@@ -23,8 +24,8 @@ import { useAuth } from '@/context/AuthContext';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { cn } from '@/lib/utils';
 import { isLaunchModuleEnabled } from '@/lib/launch-modules';
-import { DEMO_MARKS } from '@/lib/mock/student-portal-demo';
-import { isStudentDemoModeEnabled } from '@/lib/student-demo-mode';
+import { withStudentReadTimeout } from '@/lib/student-read-request';
+import { getSemesterGpa } from '@/lib/student-semester-gpa';
 
 type CourseRow = {
   course_id: string;
@@ -33,13 +34,16 @@ type CourseRow = {
   course_type: string;
   credits: number;
   grade: string;
+  grade_points?: number | null;
   status: string;
 };
 
 type SemesterRow = {
   semester_number: number;
-  sgpa: number;
+  sgpa: number | null;
   credits: number;
+  credits_earned?: number;
+  credits_attempted?: number;
   courses: CourseRow[];
 };
 
@@ -81,8 +85,11 @@ type ExamReport = {
 };
 
 type MarksHistory = {
-  cgpa: number;
+  cgpa: number | null;
   total_credits_earned: number;
+  total_credits_attempted?: number;
+  total_semesters?: number;
+  current_semester?: number;
   semesters: SemesterRow[];
   component_marks_by_semester: { semester_number: number; subjects: ComponentSubject[] }[];
   exam_reports?: ExamReport[];
@@ -92,40 +99,6 @@ type MarksHistory = {
     cleared: { course_code: string; course_name: string; semester: number }[];
   };
 };
-
-const COMPONENT_COLUMNS = [
-  { key: 'WT1', label: 'Weekly 1', max: 5, aliases: ['WT1'] },
-  { key: 'WT2', label: 'Weekly 2', max: 5, aliases: ['WT2'] },
-  { key: 'GA1', label: 'Assign 1', max: 5, aliases: ['GA1'] },
-  { key: 'GA2', label: 'Assign 2', max: 5, aliases: ['GA2'] },
-  { key: 'MT1', label: 'Mid 1', max: 10, aliases: ['MT1', 'MTE1'] },
-  { key: 'MT2', label: 'Mid 2', max: 10, aliases: ['MT2', 'MTE2'] },
-  { key: 'ETE', label: 'End term', max: 40, aliases: ['ETE', 'END_TERM'] },
-] as const;
-
-function findComponentMark(
-  components: ComponentSubject['components'],
-  aliases: readonly string[],
-) {
-  return components.find((c) =>
-    aliases.some((alias) => c.key.toUpperCase().startsWith(alias)),
-  );
-}
-
-function weeklyMarksSummary(components: ComponentSubject['components'] | undefined) {
-  if (!components?.length) {
-    return { obtained: null as number | null, max: 10, label: '—' };
-  }
-  const wt1 = findComponentMark(components, ['WT1']);
-  const wt2 = findComponentMark(components, ['WT2']);
-  const parts = [wt1, wt2].filter(Boolean);
-  if (!parts.length) {
-    return { obtained: null as number | null, max: 10, label: '—' };
-  }
-  const obtained = parts.reduce((sum, part) => sum + Number(part!.marks_obtained ?? 0), 0);
-  const max = parts.reduce((sum, part) => sum + Number(part!.max_marks ?? 5), 0) || 10;
-  return { obtained, max, label: `${obtained}/${max}` };
-}
 
 function courseStatusMeta(status: string) {
   const normalized = status.toUpperCase();
@@ -156,13 +129,13 @@ function cardStageMeta(status: string, stage: string) {
   if (status === 'WITHHELD') {
     return { label: 'Held', className: 'bg-destructive text-white', hint: 'Contact exam cell' };
   }
-  if (stage === 'FINAL') {
+  if (status === 'PUBLISHED' && stage === 'FINAL') {
     return { label: 'Final', className: 'bg-sgvu-navy text-white', hint: 'Official final card' };
   }
-  if (stage === 'PROVISIONAL') {
+  if (status === 'PUBLISHED' && stage === 'PROVISIONAL') {
     return { label: 'Provisional', className: 'bg-sgvu-gold text-sgvu-navy', hint: 'Temporary result' };
   }
-  return { label: 'Upcoming', className: 'bg-white text-sgvu-navy border border-sgvu-navy/20', hint: 'Not published yet' };
+  return { label: 'Awaiting grade card', className: 'bg-white text-sgvu-navy border border-sgvu-navy/20', hint: 'The official semester grade card is not published yet.' };
 }
 
 function examTypeLabel(examType: string) {
@@ -173,41 +146,87 @@ function examTypeLabel(examType: string) {
 }
 
 export function StudentMarksWorkspace() {
+  const { token } = useAuth();
+  return <StudentMarksContent key={token} />;
+}
+
+function formatGpa(value: number | null | undefined) {
+  return value != null && Number.isFinite(Number(value)) ? Number(value).toFixed(2) : '—';
+}
+
+function semesterNumber(value: unknown): number | null {
+  const number = Number(value);
+  return Number.isInteger(number) && number > 0 ? number : null;
+}
+
+function semesterEarnedCredits(semester: SemesterRow | null): number | null {
+  if (!semester) return null;
+  if (semester.credits_earned !== undefined) {
+    const credits = Number(semester.credits_earned);
+    return semester.credits_earned != null && Number.isFinite(credits) && credits >= 0 ? credits : null;
+  }
+  // Legacy history responses omit earned credits; only passed courses earn them.
+  if (!Array.isArray(semester.courses)) return null;
+  let total = 0;
+  for (const course of semester.courses) {
+    if (!['PASS', 'COMPLETED'].includes(course.status.toUpperCase())) continue;
+    const credits = Number(course.credits);
+    if (course.credits == null || !Number.isFinite(credits) || credits < 0) return null;
+    total += credits;
+  }
+  return total;
+}
+
+function StudentMarksContent() {
   const api = useAuthedApi();
   const { token } = useAuth();
   const [data, setData] = useState<MarksHistory | null>(null);
   const [loading, setLoading] = useState(true);
-  const [selectedSemester, setSelectedSemester] = useState<number | null>(null);
+  const [semesterSelection, setSelectedSemester] = useState<number | null>(null);
+  const [profileSemester, setProfileSemester] = useState<number | null>(null);
+  const [profileLoading, setProfileLoading] = useState(true);
   const [view, setView] = useState<'subjects' | 'internals' | 'downloads'>('subjects');
+  const [loadError, setLoadError] = useState(false);
+  const [loadAttempt, setLoadAttempt] = useState(0);
 
   useEffect(() => {
-    setLoading(true);
-    void api
-      .get<MarksHistory>('/api/academics/marks/history')
+    let cancelled = false;
+    void withStudentReadTimeout(api.get<MarksHistory>('/api/academics/marks/history'))
       .then((payload) => {
-        const useDemo = !payload?.semesters?.length && isStudentDemoModeEnabled();
-        const next = useDemo ? (DEMO_MARKS as MarksHistory) : payload;
-        setData(next);
-        const latest =
-          next.semesters.at(-1)?.semester_number ??
-          next.component_marks_by_semester.at(-1)?.semester_number ??
-          next.grade_cards?.at(-1)?.semester ??
-          null;
-        setSelectedSemester(latest != null ? Number(latest) : null);
+        if (cancelled) return;
+        if (!payload || !Array.isArray(payload.semesters)) throw new Error('Invalid results');
+        setData(payload);
+        setLoadError(false);
       })
       .catch(() => {
-        if (isStudentDemoModeEnabled()) {
-          setData(DEMO_MARKS as MarksHistory);
-          setSelectedSemester(5);
-        } else {
-          setData(null);
-          setSelectedSemester(null);
-        }
+        if (cancelled) return;
+        setData(null);
+        setSelectedSemester(null);
+        setLoadError(true);
       })
-      .finally(() => setLoading(false));
-  }, [api]);
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [api, loadAttempt]);
 
-  const semesterNumbers = [1, 2, 3, 4, 5, 6, 7, 8] as const;
+  useEffect(() => {
+    let cancelled = false;
+    void withStudentReadTimeout(api.get<{ semester?: number | string }>('/api/student/profile'))
+      .then((profile) => { if (!cancelled) setProfileSemester(semesterNumber(profile?.semester)); })
+      .catch(() => { if (!cancelled) setProfileSemester(null); })
+      .finally(() => { if (!cancelled) setProfileLoading(false); });
+    return () => { cancelled = true; };
+  }, [api, loadAttempt]);
+
+  const currentSemester = profileSemester ?? semesterNumber(data?.current_semester);
+  const selectedSemester = semesterSelection ?? currentSemester;
+
+  const semesterNumbers = useMemo(() => {
+    const available = [...(data?.semesters ?? []).map((s) => s.semester_number),
+      ...(data?.component_marks_by_semester ?? []).map((s) => s.semester_number),
+      ...(data?.grade_cards ?? []).map((s) => s.semester), currentSemester ?? 0];
+    const count = Math.max(Number(data?.total_semesters ?? 0), ...available.map(Number));
+    return Array.from({ length: Math.max(0, count) }, (_, i) => i + 1);
+  }, [data, currentSemester]);
 
   const semestersWithData = useMemo(() => {
     const nums = new Set<number>();
@@ -228,14 +247,6 @@ export function StudentMarksWorkspace() {
         ?.subjects ?? [],
     [data, selectedSemester],
   );
-
-  const componentsByCourseId = useMemo(() => {
-    const map = new Map<string, ComponentSubject>();
-    for (const subject of selectedComponents) {
-      map.set(subject.course_id, subject);
-    }
-    return map;
-  }, [selectedComponents]);
 
   const selectedGradeCard = useMemo(
     () => data?.grade_cards?.find((c) => Number(c.semester) === selectedSemester) ?? null,
@@ -279,65 +290,83 @@ export function StudentMarksWorkspace() {
     return <StudentLoadingState label="Loading your scorecard…" />;
   }
 
+  if (loadError || !data) {
+    return <StudentPageShell width="full" className="max-w-[1400px]">
+      <StudentPageHeader title="Results" description="Your grades and academic progress." eyebrow="Academic scorecard" />
+      <div role="alert" className="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-950">
+        <p>Could not load your results. Please try again.</p>
+        <Button className="mt-3" variant="outline" onClick={() => { setLoading(true); setLoadAttempt((attempt) => attempt + 1); }}>Retry results</Button>
+      </div>
+    </StudentPageShell>;
+  }
+
   const stage = selectedGradeCard?.payload?.result_stage ?? 'DRAFT';
   const stageMeta = cardStageMeta(selectedGradeCard?.status ?? 'DRAFT', stage);
   const canProvisional =
     !!selectedGradeCard &&
-    selectedGradeCard.status !== 'WITHHELD' &&
+    selectedGradeCard.status === 'PUBLISHED' &&
     (stage === 'PROVISIONAL' || stage === 'FINAL');
   const canFinal =
-    !!selectedGradeCard && selectedGradeCard.status !== 'WITHHELD' && stage === 'FINAL';
-  const sgpa =
-    selectedSemesterData?.sgpa ??
-    Number(selectedGradeCard?.payload?.sgpa ?? 0);
+    !!selectedGradeCard && selectedGradeCard.status === 'PUBLISHED' && stage === 'FINAL';
+  const sgpa = getSemesterGpa(selectedSemesterData);
+  const earnedCredits = semesterEarnedCredits(selectedSemesterData);
+  const semesterBacklogCount = selectedSemester == null || !selectedSemesterData || !Array.isArray(data.backlogs?.uncleared)
+    ? null
+    : new Set(uncleared.filter((item) => Number(item.semester) === selectedSemester).map((item) => item.course_id)).size;
+  const semesterContext = selectedSemester == null ? 'Select a semester' : `Semester ${selectedSemester}`;
+  const hasSemesterResults = sgpa != null || (earnedCredits ?? 0) > 0 ||
+    selectedSemesterData?.courses.some((course) => ['PASS', 'FAIL', 'COMPLETED', 'FAILED'].includes(course.status.toUpperCase()));
 
   return (
     <StudentPageShell width="full" className="max-w-[1400px]">
       <StudentPageHeader
         title="Results"
-        description="One place to check your overall GPA, pick a semester, and see subject grades, internal marks, and downloads."
+        description="View your current semester’s GPA, compare semester results, and check each subject’s grades."
         eyebrow="Academic scorecard"
       />
 
       {/* Score hero */}
-      <section className="relative overflow-hidden rounded-[1.75rem] border border-sgvu-navy/10 bg-[#08234a] text-white shadow-sm">
-        <div className="absolute -right-16 -top-16 h-56 w-56 rounded-full bg-sgvu-gold/20 blur-3xl" />
-        <div className="absolute bottom-0 left-1/3 h-40 w-40 rounded-full bg-white/5 blur-2xl" />
-        <div className="relative grid gap-4 p-4 sm:gap-6 sm:p-6 md:grid-cols-[1.2fr_1fr_1fr] md:p-8">
-          <div>
-            <p className="text-xs font-bold uppercase tracking-[0.22em] text-sgvu-gold">Overall CGPA</p>
-            <p className="mt-2 text-5xl font-black tracking-tight sm:text-6xl">
-              {data?.cgpa != null ? data.cgpa.toFixed(2) : '—'}
+      <section aria-label="Semester academic summary" className="overflow-hidden rounded-[1.5rem] border border-sgvu-navy/10 bg-white shadow-sm">
+        <div className="grid md:grid-cols-[1.2fr_1fr_1fr]">
+          <div className="bg-sgvu-navy p-5 text-white sm:p-6">
+            <p className="text-xs font-bold uppercase tracking-[0.22em] text-sgvu-gold">{selectedSemester == null ? 'Semester GPA (SGPA)' : `Semester ${selectedSemester} GPA (SGPA)`}</p>
+            <p className="mt-3 text-4xl font-black tracking-tight sm:text-5xl">
+              {formatGpa(sgpa)}
             </p>
             <p className="mt-2 max-w-sm text-sm text-white/70">
-              Your average grade across completed semesters. Higher is better.
+              {selectedSemester == null ? (profileLoading ? 'Loading current semester…' : 'Choose a semester below') : sgpa == null ? 'Awaiting grades' : 'Selected semester · Credit-weighted'}
             </p>
           </div>
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-5 backdrop-blur-sm">
-            <div className="flex items-center gap-2 text-sgvu-gold">
+          <div className="border-b border-sgvu-navy/10 p-5 text-sgvu-navy sm:p-6 md:border-b-0 md:border-r">
+            <div className="flex items-center gap-2 text-sgvu-navy">
               <Award className="h-4 w-4" />
               <p className="text-xs font-bold uppercase tracking-[0.18em]">Credits earned</p>
             </div>
-            <p className="mt-3 text-3xl font-black">{data?.total_credits_earned ?? '—'}</p>
-            <p className="mt-1 text-sm text-white/65">Credits completed so far in your program</p>
+            <p className="mt-3 text-3xl font-black">{earnedCredits ?? '—'}</p>
+            <p className="mt-1 text-sm text-muted-foreground">{semesterContext} · {hasSemesterResults ? 'Passed subjects only' : 'Awaiting results'}</p>
+            {selectedSemesterData?.credits_attempted != null ? <p className="mt-2 text-xs text-muted-foreground">{selectedSemesterData.credits_attempted} graded credits in this semester</p> : null}
           </div>
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-5 backdrop-blur-sm">
-            <div className="flex items-center gap-2 text-sgvu-gold">
-              {uncleared.length === 0 ? (
+          <div className="p-5 text-sgvu-navy sm:p-6">
+            <div className="flex items-center gap-2 text-sgvu-navy">
+              {(semesterBacklogCount ?? 0) === 0 ? (
                 <CheckCircle2 className="h-4 w-4" />
               ) : (
                 <AlertTriangle className="h-4 w-4" />
               )}
               <p className="text-xs font-bold uppercase tracking-[0.18em]">Subjects to clear</p>
             </div>
-            <p className="mt-3 text-3xl font-black">{uncleared.length}</p>
-            <p className="mt-1 text-sm text-white/65">
-              {uncleared.length === 0
-                ? 'No failed papers pending — you are clear'
-                : 'Failed papers that still need to be cleared'}
+            <p className="mt-3 text-3xl font-black">{semesterBacklogCount ?? '—'}</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {semesterContext} · {(semesterBacklogCount ?? 0) > 0
+                ? 'Failed subjects to clear'
+                : hasSemesterResults ? 'No failed subjects recorded' : 'Awaiting results'}
             </p>
           </div>
         </div>
+        <details className="border-t border-sgvu-navy/10 bg-slate-50/70 px-5 py-3 text-xs text-muted-foreground">
+          <summary className="cursor-pointer font-semibold text-sgvu-navy">How semester GPA is calculated</summary>
+          <p className="mt-2">Total (subject credits × grade points) ÷ total graded credits in the selected semester. Failed subjects count; subjects without a grade do not. Awaiting grades means no GPA is available yet, not a score of zero.</p>
+        </details>
       </section>
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
@@ -350,17 +379,21 @@ export function StudentMarksWorkspace() {
               </p>
               <h2 className="mt-1 text-lg font-bold text-sgvu-navy">Your semester scorecard</h2>
               <p className="mt-1 text-sm text-muted-foreground">
-                Choose any semester from 1 to 8. Semesters with results are solid; others are upcoming.
+                Select a semester to update the GPA above and see its subjects. Your current semester opens by default.
               </p>
+              {!profileLoading && currentSemester == null ? <p role="status" className="mt-2 text-sm text-amber-800">Current semester unavailable. Select a semester below.</p> : null}
             </div>
-            <div className="grid grid-cols-4 gap-2 sm:flex sm:flex-wrap sm:overflow-x-auto sm:pb-1">
+            <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:pb-1">
               {semesterNumbers.map((n) => {
                 const active = n === selectedSemester;
                 const hasData = semestersWithData.has(n);
+                const semesterGpa = getSemesterGpa(data.semesters.find((s) => s.semester_number === n));
                 return (
                   <button
                     key={n}
                     type="button"
+                    aria-pressed={active}
+                    aria-label={`Semester ${n}`}
                     onClick={() => {
                       setSelectedSemester(n);
                       setView('subjects');
@@ -374,10 +407,8 @@ export function StudentMarksWorkspace() {
                           : 'border-dashed border-sgvu-navy/15 bg-slate-50 text-muted-foreground hover:border-sgvu-navy/30',
                     )}
                   >
-                    <span className="block text-[10px] font-semibold uppercase tracking-wide opacity-80">
-                      Sem
-                    </span>
-                    <span className="block text-lg font-black leading-none">{n}</span>
+                    <span className="block text-sm font-bold">Semester {n}</span>
+                    <span className="mt-1 block text-[10px] opacity-80">{semesterGpa != null ? `GPA ${formatGpa(semesterGpa)}` : hasData ? 'Awaiting grades' : 'No results yet'}</span>
                   </button>
                 );
               })}
@@ -405,16 +436,18 @@ export function StudentMarksWorkspace() {
               </div>
               <div className="grid grid-cols-2 gap-3 sm:min-w-[240px]">
                 <div className="rounded-xl bg-slate-50 px-3 py-2.5">
-                  <p className="text-[11px] text-muted-foreground">Semester GPA</p>
+                  <p className="text-[11px] text-muted-foreground">Semester GPA (SGPA)</p>
                   <p className="text-xl font-black text-sgvu-navy">
-                    {selectedSemesterData || selectedGradeCard ? sgpa.toFixed(2) : '—'}
+                    {formatGpa(sgpa)}
                   </p>
+                  {selectedSemester != null && sgpa == null ? <p className="mt-1 text-[11px] text-muted-foreground">Awaiting grades</p> : null}
                 </div>
                 <div className="rounded-xl bg-slate-50 px-3 py-2.5">
-                  <p className="text-[11px] text-muted-foreground">Credits this sem</p>
+                  <p className="text-[11px] text-muted-foreground">Credits earned</p>
                   <p className="text-xl font-black text-sgvu-navy">
-                    {selectedSemesterData?.credits ?? '—'}
+                    {earnedCredits ?? '—'}
                   </p>
+                  {selectedSemesterData?.credits_attempted != null ? <p className="mt-1 text-[11px] text-muted-foreground">of {selectedSemesterData.credits_attempted} graded credits</p> : null}
                 </div>
               </div>
             </div>
@@ -460,9 +493,6 @@ export function StudentMarksWorkspace() {
                   <div className="space-y-3">
                     {selectedSemesterData.courses.map((course) => {
                       const meta = courseStatusMeta(course.status);
-                      const weekly = weeklyMarksSummary(
-                        componentsByCourseId.get(course.course_id)?.components,
-                      );
                       return (
                         <div
                           key={course.course_id}
@@ -477,9 +507,9 @@ export function StudentMarksWorkspace() {
                           <div className="flex flex-wrap items-center gap-3">
                             <div className="rounded-xl border border-sgvu-gold/40 bg-sgvu-gold/15 px-3 py-2 text-center shadow-sm">
                               <p className="text-[10px] uppercase tracking-wide text-sgvu-navy/70">
-                                Weekly marks
+                                Grade points
                               </p>
-                              <p className="text-lg font-black text-sgvu-navy">{weekly.label}</p>
+                              <p className="text-lg font-black text-sgvu-navy">{formatGpa(course.grade_points)}</p>
                             </div>
                             <div className="rounded-xl bg-white px-3 py-2 text-center shadow-sm">
                               <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
@@ -508,62 +538,7 @@ export function StudentMarksWorkspace() {
                     className="py-10"
                   />
                 ) : (
-                  <div className="space-y-4">
-                    {selectedComponents.map((sub) => {
-                      const weekly = weeklyMarksSummary(sub.components);
-                      return (
-                        <div
-                          key={sub.course_id}
-                          className="rounded-2xl border border-sgvu-navy/10 bg-white p-4"
-                        >
-                          <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
-                            <div>
-                              <p className="font-semibold text-sgvu-navy">{sub.course_name}</p>
-                              <p className="text-xs text-muted-foreground">{sub.course_code}</p>
-                            </div>
-                            <p className="text-xs font-medium text-muted-foreground">
-                              Internal total:{' '}
-                              <span className="font-bold text-sgvu-navy">
-                                {sub.total_internal_obtained}/{sub.total_internal_max}
-                              </span>
-                            </p>
-                          </div>
-                          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-8">
-                            <div className="rounded-xl border border-sgvu-gold/50 bg-sgvu-gold/20 px-2.5 py-2 text-center">
-                              <p className="text-[10px] font-semibold uppercase tracking-wide text-sgvu-navy/80">
-                                Weekly total
-                              </p>
-                              <p className="mt-1 text-sm font-bold text-sgvu-navy">
-                                {weekly.obtained == null ? '—' : weekly.obtained}
-                                <span className="text-[10px] font-normal text-muted-foreground">
-                                  /{weekly.max}
-                                </span>
-                              </p>
-                            </div>
-                            {COMPONENT_COLUMNS.map((col) => {
-                              const mark = findComponentMark(sub.components, col.aliases);
-                              return (
-                                <div
-                                  key={col.key}
-                                  className="rounded-xl border border-sgvu-navy/10 bg-slate-50 px-2.5 py-2 text-center"
-                                >
-                                  <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                                    {col.label}
-                                  </p>
-                                  <p className="mt-1 text-sm font-bold text-sgvu-navy">
-                                    {mark ? mark.marks_obtained : '—'}
-                                    <span className="text-[10px] font-normal text-muted-foreground">
-                                      /{col.max}
-                                    </span>
-                                  </p>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
+                  <StudentInternalMarksPanel subjects={selectedComponents} />
                 )
               ) : null}
 
@@ -640,7 +615,7 @@ export function StudentMarksWorkspace() {
                     >
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
-                          <p className="truncate text-sm font-semibold text-sgvu-navy">
+                          <p className="break-words text-sm font-semibold text-sgvu-navy">
                             {report.course_name}
                           </p>
                           <p className="text-[11px] text-muted-foreground">

@@ -44,15 +44,13 @@ export default function HostelBookingCheckoutPage() {
   const [loading, setLoading] = useState(true);
   const expiredRef = useRef(false);
 
-  const loadHold = useCallback(async () => {
-    if (!holdId) return;
-    const data = await api.get<HoldDetail>(`/api/hostel-tatkal/holds/${holdId}`);
+  const loadHold = useCallback(() => api.get<HoldDetail>(`/api/hostel-tatkal/holds/${holdId}`).then((data) => {
     setHold(data);
     const serverOffset = new Date(data.server_now).getTime() - Date.now();
     const expiresMs = new Date(data.expires_at).getTime();
     const rem = Math.max(0, Math.floor((expiresMs - (Date.now() + serverOffset)) / 1000));
     setRemaining(rem);
-  }, [api, holdId]);
+  }), [api, holdId]);
 
   useEffect(() => {
     if (!holdId) {

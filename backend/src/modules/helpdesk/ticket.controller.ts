@@ -13,6 +13,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { TicketService } from './ticket.service';
+import { requireTenantId } from '../../common/utils/require-tenant-id';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketStatusDto } from './dto/update-ticket-status.dto';
 import { AddTicketMessageDto } from './dto/add-ticket-message.dto';
@@ -181,7 +182,7 @@ export class TicketController {
   }
 
   private tenant(req: { user: AuthUser }) {
-    return req.user.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
+    return requireTenantId(req.user.tenant_id);
   }
 
   @Patch(':ticketId/status')

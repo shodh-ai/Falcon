@@ -14,6 +14,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useAuthedApi } from '@/lib/api';
+import { useStudentClock } from '@/components/student/useStudentClock';
 
 type WeeklyTest = {
   test_id: string;
@@ -32,6 +33,7 @@ export default function StudentWeeklyTestsPage() {
   const api = useAuthedApi();
   const [tests, setTests] = useState<WeeklyTest[]>([]);
   const [loading, setLoading] = useState(true);
+  const now = useStudentClock();
 
   useEffect(() => {
     let cancelled = false;
@@ -79,11 +81,10 @@ export default function StudentWeeklyTestsPage() {
               {tests.map(test => {
                 const startTime = new Date(test.start_time);
                 const endTime = new Date(test.end_time);
-                const now = new Date();
                 
-                const isCompleted = test.status === 'COMPLETED' || now > endTime;
-                const isOngoing = !isCompleted && now >= startTime && now <= endTime;
-                const isUpcoming = !isCompleted && now < startTime;
+                const isCompleted = test.status === 'COMPLETED' || now > endTime.getTime();
+                const isOngoing = !isCompleted && now >= startTime.getTime() && now <= endTime.getTime();
+                const isUpcoming = !isCompleted && now < startTime.getTime();
                 const isInactive = test.is_active === false;
                 const isAttempted = Boolean(test.submitted_at);
                 

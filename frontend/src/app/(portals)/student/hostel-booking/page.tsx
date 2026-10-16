@@ -553,23 +553,22 @@ export default function StudentHostelBookingPage() {
   const [acFilter, setAcFilter] = useState('ALL');
   const [saleActive, setSaleActive] = useState<boolean | null>(null);
 
-  async function load() {
-    const settings = await api.get<{ is_hostel_sale_active: boolean }>('/api/student/campus-settings');
+  const load = useCallback(() => api.get<{ is_hostel_sale_active: boolean }>('/api/student/campus-settings').then(async (settings) => {
     setSaleActive(settings.is_hostel_sale_active);
     if (!settings.is_hostel_sale_active) return;
     const c = await api.get<HostelBlock[]>('/api/hostel-tatkal/catalog');
     setCatalog(c);
-    if (!selectedHostel && c[0]) setSelectedHostel(c[0].hostel_block);
-  }
+    if (c[0]) setSelectedHostel((current) => current || c[0].hostel_block);
+  }), [api]);
 
   useEffect(() => {
-    setLoading(true);
-    void load().finally(() => setLoading(false));
-  }, [api]);
+    void load().catch(() => toast.error('Could not load hostel availability')).finally(() => setLoading(false));
+  }, [load]);
 
   useEffect(() => {
+    const tenantId = user?.tenant_id;
+    if (!tenantId) return;
     const socket: Socket = io(`${getApiBaseUrl()}/hostel-tatkal`, { transports: ['websocket'] });
-    const tenantId = user?.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
     socket.emit('joinSale', { tenant_id: tenantId });
     socket.on('bed.update', (payload: { bed_id?: string; bedId?: string; display_status?: string; status?: string }) => {
       const bedId = payload.bedId ?? payload.bed_id;
@@ -594,8 +593,9 @@ export default function StudentHostelBookingPage() {
   }, [user?.tenant_id]);
 
   const hostel = catalog.find((h) => h.hostel_block === selectedHostel);
-  const floor = hostel?.floors.find((f) => f.floor === selectedFloor);
-  const floorKind = getFloorKind(selectedFloor);
+  const activeFloor = selectedFloor || hostel?.floors[0]?.floor || '';
+  const floor = hostel?.floors.find((f) => f.floor === activeFloor);
+  const floorKind = getFloorKind(activeFloor);
 
   let visibleRooms = floor?.rooms ?? [];
   if (roomTypeFilter !== 'ALL') {
@@ -608,10 +608,6 @@ export default function StudentHostelBookingPage() {
       return acFilter === 'AC' ? isAC : !isAC;
     });
   }
-
-  useEffect(() => {
-    if (hostel?.floors[0] && !selectedFloor) setSelectedFloor(hostel.floors[0].floor);
-  }, [hostel, selectedFloor]);
 
   async function selectBed(bedId: string) {
     setLocking(true);
@@ -749,7 +745,7 @@ export default function StudentHostelBookingPage() {
                         key={f.floor}
                         onClick={() => setSelectedFloor(f.floor)}
                         className={`rounded-full border px-5 py-2.5 text-sm font-semibold shadow-sm transition-all ${
-                          selectedFloor === f.floor
+                          activeFloor === f.floor
                             ? 'border-blue-600 bg-blue-600 text-white ring-2 ring-blue-600/20 ring-offset-1'
                             : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
                         }`}
@@ -848,7 +844,7 @@ export default function StudentHostelBookingPage() {
 
                 <FloorMapFit>
                   <HostelFloorMap
-                    floorName={selectedFloor}
+                    floorName={activeFloor}
                     allRooms={floor.rooms}
                     visibleRooms={visibleRooms}
                     floorKind={floorKind}

@@ -90,7 +90,7 @@ function isProtectedPortalPath(pathname: string): boolean {
   );
 }
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const subdomain = extractSubdomain(request);
   const { pathname } = request.nextUrl;
 

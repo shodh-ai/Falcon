@@ -916,8 +916,18 @@ export class DeanIntelligenceService {
     return result;
   }
 
-  getResultApprovalHistory(tenantId: string, sessionId: string) {
-    return this.resultControl.getDeanResultApprovalHistory(tenantId, sessionId);
+  getResultApprovalHistory(
+    tenantId: string,
+    deanUserId: string,
+    sessionId: string,
+    actorRole = 'Dean',
+  ) {
+    return this.resultControl.getDeanResultApprovalHistory(
+      tenantId,
+      deanUserId,
+      sessionId,
+      actorRole,
+    );
   }
 
   async getDeanNotifications(

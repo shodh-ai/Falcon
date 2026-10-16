@@ -59,10 +59,7 @@ export default function StudentTranscriptsPage() {
   const [loading, setLoading] = useState(true);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const data = await api.get<TranscriptRow[]>('/api/student/transcripts');
+  const load = useCallback(() => api.get<TranscriptRow[]>('/api/student/transcripts').then((data) => {
       const live = Array.isArray(data) ? data : [];
       if (live.length > 0) {
         setRows(live);
@@ -71,16 +68,15 @@ export default function StudentTranscriptsPage() {
       } else {
         setRows([]);
       }
-    } catch {
+    }).catch(() => {
       setRows(
         isStudentDemoModeEnabled()
           ? DEMO_TRANSCRIPTS.map((r) => ({ ...r }))
           : [],
       );
-    } finally {
+    }).finally(() => {
       setLoading(false);
-    }
-  }, [api]);
+    }), [api]);
 
   useEffect(() => {
     void load();

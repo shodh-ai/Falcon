@@ -35,6 +35,7 @@ import { ExamCellOperationsService } from './exam-cell-operations.service';
 import { ExamCellEnterpriseService } from './exam-cell-enterprise.service';
 import { ExamCellDevService } from './exam-cell-dev.service';
 import { OfficialTranscriptService } from './official-transcript.service';
+import { requireTenantId } from '../../common/utils/require-tenant-id';
 import { EXAM_CELL_ACCESS_ROLES } from './exam-cell.constants';
 import {
   assertExamCellAction,
@@ -394,7 +395,11 @@ export class ExamCellController {
     dto: { course_id: string; exam_type: string; batch_semester?: number },
   ) {
     this.requireAction(req, 'publish_results');
-    return this.examCell.publishResults(this.tenant(req), dto);
+    return this.examCell.publishResults(
+      this.tenant(req),
+      dto,
+      req.user.user_id,
+    );
   }
 
   @Get('re-evaluations')
@@ -1404,7 +1409,7 @@ export class ExamCellController {
   }
 
   private tenant(req: { user: AuthUser }) {
-    return req.user.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
+    return requireTenantId(req.user.tenant_id);
   }
 
   private requireAction(req: { user: AuthUser }, action: ExamCellAction) {

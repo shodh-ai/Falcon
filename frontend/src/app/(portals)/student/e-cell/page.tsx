@@ -106,17 +106,16 @@ export default function StudentEcellPage() {
   const founderUnlocked = Boolean(founderStatus?.unlocked);
   const founderProject = founderStatus?.project;
 
-  const load = useCallback(async () => {
-    const [config, mine, founder] = await Promise.all([
+  const load = useCallback(() => Promise.all([
       ecellApi.activeConfig(),
       ecellApi.myProjects(),
       ecellApi.founderStatus().catch(() => ({ unlocked: false, project: null })),
-    ]);
+    ]).then(([config, mine, founder]) => {
     setCohortOpen(Boolean(config));
     setProjects(mine);
     setFounderStatus(founder);
     if (mine.length > 0 && !founder.unlocked) setPreTab('tracker');
-  }, [ecellApi]);
+  }), [ecellApi]);
 
   useEffect(() => {
     void load()

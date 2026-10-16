@@ -22,6 +22,33 @@ import { toast } from '@/lib/notifications/falcon-toast';
 import { extractApiErrorMessage } from '@/lib/notifications/parse-api-error';
 
 type TabKey = 'schedule' | 'admit' | 'reeval';
+type StudentResult = {
+  result_id?: string;
+  subject_id?: number;
+  course_code?: string;
+  course_name?: string;
+  grade?: string;
+  grade_letter?: string;
+};
+
+function parseStudentResults(payload: unknown): StudentResult[] {
+  const rows = Array.isArray(payload)
+    ? payload
+    : payload != null && typeof payload === 'object' && Array.isArray((payload as { exam_reports?: unknown[] }).exam_reports)
+      ? (payload as { exam_reports: unknown[] }).exam_reports
+      : [];
+  return rows.filter((row) => row != null && typeof row === 'object').map((row) => {
+    const value = row as Record<string, unknown>;
+    return {
+      result_id: typeof value.result_id === 'string' ? value.result_id : undefined,
+      subject_id: Number(value.subject_id) || undefined,
+      course_code: typeof value.course_code === 'string' ? value.course_code : undefined,
+      course_name: typeof value.course_name === 'string' ? value.course_name : undefined,
+      grade: typeof value.grade === 'string' ? value.grade : undefined,
+      grade_letter: typeof value.grade_letter === 'string' ? value.grade_letter : undefined,
+    };
+  });
+}
 
 function reEvalStatusLabel(status: string) {
   switch (status) {
@@ -106,16 +133,17 @@ export default function StudentExamsPage() {
   const { token, user } = useAuth();
   const api = useAuthedApi();
   const searchParams = useSearchParams();
-  const [tab, setTab] = useState<TabKey>(
-    searchParams.get('intent') === 'revaluation' ? 'reeval' : 'schedule',
-  );
+  const intent = searchParams.get('intent');
+  const [tabChoice, setTabChoice] = useState<{ intent: string | null; tab: TabKey } | null>(null);
+  const tab = tabChoice?.intent === intent ? tabChoice.tab : intent === 'revaluation' ? 'reeval' : 'schedule';
+  const setTab = (next: TabKey) => setTabChoice({ intent, tab: next });
   const [examDesk, setExamDesk] = useState<ExamDesk | null>(null);
   const [schedules, setSchedules] = useState<ExamSchedule[]>([]);
   const [eligibility, setEligibility] = useState<ExamEligibilityResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [applications, setApplications] = useState<ExamApplication[]>([]);
-  const [results, setResults] = useState<unknown[]>([]);
+  const [results, setResults] = useState<StudentResult[]>([]);
   const [downloadingAdmit, setDownloadingAdmit] = useState(false);
 
   const ineligibleMessage = useMemo(() => {
@@ -127,8 +155,10 @@ export default function StudentExamsPage() {
     if (attendanceReason) {
       lines.push(`Attendance is ${eligibility.attendance_percent}% (minimum ${eligibility.min_required ?? 75}% required).`);
     }
-    if (duesReason && Array.isArray((duesReason as any).details)) {
-      const dues = (duesReason as any).details as Array<{ fee_head: string; outstanding: number }>;
+    if (duesReason && Array.isArray(duesReason.details)) {
+      const dues = duesReason.details.filter((detail): detail is { fee_head: string; outstanding: number | string } =>
+        detail != null && typeof detail === 'object' && typeof detail.fee_head === 'string' && Number.isFinite(Number(detail.outstanding)),
+      );
       if (dues.length > 0) {
         const parts = dues.map((d) => `${d.fee_head} of ₹${Math.round(Number(d.outstanding))}`).join(' and ');
         lines.push(`Please clear your ${parts} to unlock.`);
@@ -138,10 +168,6 @@ export default function StudentExamsPage() {
     }
     return lines.join(' ');
   }, [eligibility]);
-
-  useEffect(() => {
-    if (searchParams.get('intent') === 'revaluation') setTab('reeval');
-  }, [searchParams]);
 
   useEffect(() => {
     const load = async () => {
@@ -176,8 +202,8 @@ export default function StudentExamsPage() {
         setApplications(apps);
 
         if (user?.user_id) {
-          const studentResults = await academicsApi.studentResults(token, user.user_id);
-          setResults(studentResults);
+          const studentResults = await academicsApi.studentResults(token);
+          setResults(parseStudentResults(studentResults));
         }
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Failed to load examinations data');
@@ -520,10 +546,12 @@ export default function StudentExamsPage() {
                     <p className="text-sm text-muted-foreground">No results found.</p>
                   ) : (
                     <div className="space-y-2">
-                      {results.slice(0, 6).map((row: any, idx) => (
+                      {results.slice(0, 6).map((row, idx) => (
                         <div key={String(row?.result_id ?? idx)} className="flex items-center justify-between rounded-xl border px-4 py-3">
                           <div className="min-w-0">
-                            <p className="truncate text-sm font-medium text-sgvu-navy">Subject #{row?.subject_id ?? '—'}</p>
+                            <p className="truncate text-sm font-medium text-sgvu-navy">
+                              {`Subject #${row?.subject_id ?? row?.course_code ?? '—'}`}
+                            </p>
                             <p className="text-xs text-muted-foreground">Grade: {row?.grade ?? row?.grade_letter ?? '—'}</p>
                           </div>
                           <Button size="sm" onClick={() => applyReevaluation(Number(row?.subject_id ?? 0))} disabled={!row?.subject_id}>

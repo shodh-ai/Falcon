@@ -8,14 +8,14 @@ import { StudentSectionCard } from '@/components/student/StudentSectionCard';
 import { StudentLoadingState } from '@/components/student/StudentLoadingState';
 import { StudentEmptyState } from '@/components/student/StudentEmptyState';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { StudentLiveClassUpdates } from '@/components/lms/StudentLiveClassUpdates';
 import { useStudentCourses } from '@/components/student/useStudentCourses';
 
 export default function StudentCoursesIndexPage() {
-  const { courses, currentSemester, loading, error } = useStudentCourses();
+  const { courses, currentSemester, loading, error, retry } = useStudentCourses();
 
   const totalCredits = courses.reduce((sum, c) => sum + c.credits, 0);
-  const isFetchError = error && error !== 'No subjects enrolled for this semester yet.';
 
   if (loading) {
     return <StudentLoadingState label="Loading your courses…" />;
@@ -38,8 +38,14 @@ export default function StudentCoursesIndexPage() {
       <StudentLiveClassUpdates />
 
       {courses.length === 0 ? (
-        isFetchError ? (
-          <StudentEmptyState title="Could not load courses" description={error!} />
+        error ? (
+          <div role="alert">
+            <StudentEmptyState
+              title="Could not load courses"
+              description={error}
+              action={<Button type="button" onClick={retry}>Try again</Button>}
+            />
+          </div>
         ) : (
           <StudentEmptyState
             title="No enrolled subjects"

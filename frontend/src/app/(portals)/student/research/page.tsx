@@ -1,7 +1,7 @@
 'use client';
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
-import { FlaskConical, Loader2 } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
+import { Loader2 } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { StudentPageHeader } from '@/components/student/StudentPageHeader';
 import { StudentPageShell } from '@/components/student/StudentPageShell';
@@ -95,16 +95,15 @@ export default function StudentResearchPage() {
     budget_url: '',
   });
 
-  const load = useCallback(async () => {
-    const [cfg, mine] = await Promise.all([rndApi.activeConfig(), rndApi.myApplications()]);
+  const load = useCallback(() => Promise.all([rndApi.activeConfig(), rndApi.myApplications()]).then(([cfg, mine]) => {
     setOpen(Boolean(cfg));
     setConfig(cfg);
     setApplications(mine);
     if (mine.length > 0) setTab('tracker');
-  }, [rndApi]);
+  }), [rndApi]);
 
   useEffect(() => {
-    void load().finally(() => setLoading(false));
+    void load().catch(() => toast.error('Could not load research applications')).finally(() => setLoading(false));
   }, [load]);
 
   async function onUpload(file: File, field: 'proposal_url' | 'budget_url') {

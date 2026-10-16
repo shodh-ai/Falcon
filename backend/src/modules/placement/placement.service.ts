@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -7,6 +8,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 import { ObjectStorageService } from '../../storage/object-storage.service';
+import { requireTenantId } from '../../common/utils/require-tenant-id';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import * as ExcelJS from 'exceljs';
 import * as fs from 'fs';
@@ -41,7 +43,7 @@ export class PlacementService {
   ) {}
 
   private tenant(tenantId?: string) {
-    return tenantId ?? 'a0000000-0000-4000-8000-000000000001';
+    return requireTenantId(tenantId);
   }
 
   private async schema(): Promise<PlacementSchema> {
@@ -90,6 +92,7 @@ export class PlacementService {
 
   private async getStudentAcademics(
     studentUserId: string,
+    tenantId: string,
   ): Promise<StudentAcademics> {
     const rows = await this.db.query(
       `SELECT
@@ -103,8 +106,8 @@ export class PlacementService {
          )::int AS backlogs
        FROM student_course_enrollments e
        JOIN academic_courses c ON c.course_id = e.course_id
-       WHERE e.student_user_id = $1`,
-      [studentUserId],
+       WHERE e.student_user_id = $1 AND e.tenant_id = $2 AND c.tenant_id = $2`,
+      [studentUserId, tenantId],
     );
     const row = rows[0] as { cgpa: string; backlogs: number };
     return {
@@ -113,11 +116,11 @@ export class PlacementService {
     };
   }
 
-  private async getPlacementLock(studentUserId: string) {
+  private async getPlacementLock(studentUserId: string, tenantId: string) {
     const rows = await this.db.query(
       `SELECT is_placement_locked, placement_offer_lpa, placement_lock_reason
-       FROM student_profiles WHERE user_id = $1`,
-      [studentUserId],
+       FROM student_profiles WHERE user_id = $1 AND tenant_id = $2`,
+      [studentUserId, tenantId],
     );
     const row = rows[0] as
       | {
@@ -190,7 +193,7 @@ export class PlacementService {
   async drives(
     tenantId?: string,
     activeOnly = false,
-    options?: { limit?: number; offset?: number },
+    options?: { limit?: number; offset?: number; requireTenantScope?: boolean },
   ): Promise<PaginatedResponse<Record<string, unknown>>> {
     const { limit, offset } = parsePageParams(
       options?.limit,
@@ -198,6 +201,9 @@ export class PlacementService {
       DEFAULT_PAGE_LIMIT,
     );
     const s = await this.schema();
+    if (options?.requireTenantScope && !s.tenantScoped) {
+      throw new ForbiddenException('Tenant-scoped placement data required');
+    }
     const d = this.driveSelect(s);
     const statusFilter = activeOnly ? `AND ${this.activeFilter()}` : '';
     const tenantFilter = s.tenantScoped
@@ -226,8 +232,15 @@ export class PlacementService {
     return { data, total, limit, offset };
   }
 
-  async getDrive(tenantId: string, driveId: string) {
+  async getDrive(
+    tenantId: string,
+    driveId: string,
+    requireTenantScope = false,
+  ) {
     const s = await this.schema();
+    if (requireTenantScope && !s.tenantScoped) {
+      throw new ForbiddenException('Tenant-scoped placement data required');
+    }
     const d = this.driveSelect(s);
     const tenantClause = s.tenantScoped ? `AND d.tenant_id = $2` : '';
     const params = s.tenantScoped
@@ -437,12 +450,16 @@ export class PlacementService {
     tenantId?: string,
   ) {
     const s = await this.schema();
+    const tid = this.tenant(tenantId);
+    if (!s.tenantScoped) {
+      throw new ForbiddenException('Tenant-scoped placement data required');
+    }
     const d = this.driveSelect(s);
 
     const drives = await this.db.query(
       `SELECT d.*, ${d.pkgExpr} AS package_lpa, ${d.backlogExpr} AS max_active_backlogs
-       FROM ${s.drivesTable} d WHERE d.${s.driveIdCol} = $1`,
-      [driveId],
+       FROM ${s.drivesTable} d WHERE d.${s.driveIdCol} = $1 AND d.tenant_id = $2`,
+      [driveId, tid],
     );
     const drive = drives[0] as
       | {
@@ -454,8 +471,11 @@ export class PlacementService {
       | undefined;
     if (!drive) throw new NotFoundException('Drive not found');
 
-    const { cgpa, backlogs } = await this.getStudentAcademics(studentUserId);
-    const lock = await this.getPlacementLock(studentUserId);
+    const { cgpa, backlogs } = await this.getStudentAcademics(
+      studentUserId,
+      tid,
+    );
+    const lock = await this.getPlacementLock(studentUserId, tid);
     const packageLpa = Number(drive.package_lpa ?? 0);
     const minCgpa = Number(drive.min_cgpa);
     const maxBacklogs = Number(drive.max_active_backlogs);
@@ -486,7 +506,7 @@ export class PlacementService {
         `Placement locked: You hold an offer of ₹${lock.offerLpa} LPA. Lower-tier drives are unavailable.`;
     }
 
-    const existing = await this.findApplication(s, driveId, studentUserId);
+    const existing = await this.findApplication(s, driveId, studentUserId, tid);
 
     return {
       eligible,
@@ -509,11 +529,12 @@ export class PlacementService {
     s: PlacementSchema,
     driveId: string,
     studentUserId: string,
+    tenantId: string,
   ) {
     if (s.appsTable === 'placement_applications') {
       const profile = await this.db.query(
-        `SELECT student_profile_id FROM student_profiles WHERE user_id = $1 LIMIT 1`,
-        [studentUserId],
+        `SELECT student_profile_id FROM student_profiles WHERE user_id = $1 AND tenant_id = $2 LIMIT 1`,
+        [studentUserId, tenantId],
       );
       const profileId = (
         profile[0] as { student_profile_id?: string } | undefined
@@ -523,8 +544,8 @@ export class PlacementService {
         `SELECT placement_application_id AS application_id,
                 COALESCE(status, 'APPLIED') AS pipeline_stage
          FROM placement_applications
-         WHERE placement_drive_id = $1 AND student_profile_id = $2`,
-        [driveId, profileId],
+         WHERE placement_drive_id = $1 AND student_profile_id = $2 AND tenant_id = $3`,
+        [driveId, profileId, tenantId],
       );
       return rows[0] as {
         application_id: string;
@@ -534,8 +555,8 @@ export class PlacementService {
 
     const rows = await this.db.query(
       `SELECT application_id, pipeline_stage FROM ${s.appsTable}
-       WHERE drive_id = $1 AND student_user_id = $2`,
-      [driveId, studentUserId],
+       WHERE drive_id = $1 AND student_user_id = $2 AND tenant_id = $3`,
+      [driveId, studentUserId, tenantId],
     );
     return (
       (rows[0] as
@@ -552,8 +573,8 @@ export class PlacementService {
     if (resumeFilePath?.trim()) return resumeFilePath.trim();
 
     const profile = await this.db.query(
-      `SELECT resume_pdf_path FROM student_resume_profiles WHERE student_user_id = $1`,
-      [studentUserId],
+      `SELECT resume_pdf_path FROM student_resume_profiles WHERE student_user_id = $1 AND tenant_id = $2`,
+      [studentUserId, tenantId],
     );
     const existing = (profile[0] as { resume_pdf_path?: string } | undefined)
       ?.resume_pdf_path;
@@ -589,8 +610,8 @@ export class PlacementService {
 
     if (s.appsTable === 'placement_applications') {
       const profile = await this.db.query(
-        `SELECT student_profile_id FROM student_profiles WHERE user_id = $1 LIMIT 1`,
-        [studentUserId],
+        `SELECT student_profile_id FROM student_profiles WHERE user_id = $1 AND tenant_id = $2 LIMIT 1`,
+        [studentUserId, tenantId],
       );
       const profileId = (profile[0] as { student_profile_id: string })
         .student_profile_id;
@@ -630,6 +651,9 @@ export class PlacementService {
 
   async getStudentPlacementsHub(tenantId: string, studentUserId: string) {
     const s = await this.schema();
+    if (!s.tenantScoped) {
+      throw new ForbiddenException('Tenant-scoped placement data required');
+    }
     const openDrivesPage = await this.drives(tenantId, true, {
       limit: 100,
       offset: 0,
@@ -668,8 +692,11 @@ export class PlacementService {
       );
     }
 
-    const lock = await this.getPlacementLock(studentUserId);
-    const { cgpa, backlogs } = await this.getStudentAcademics(studentUserId);
+    const lock = await this.getPlacementLock(studentUserId, tenantId);
+    const { cgpa, backlogs } = await this.getStudentAcademics(
+      studentUserId,
+      tenantId,
+    );
 
     const enrichedDrives = await Promise.all(
       openDrives.map(async (drive) => {
@@ -1023,15 +1050,15 @@ export class PlacementService {
     );
   }
 
-  mockInterviews(tenantId?: string) {
+  mockInterviews(tenantId?: string, studentUserId?: string) {
     return this.db.query(
       `SELECT m.*, u.name AS student_name, interviewer.name AS interviewer_name
        FROM placement_mock_interviews m
        JOIN users u ON u.user_id = m.student_user_id
        LEFT JOIN users interviewer ON interviewer.user_id = m.interviewer_user_id
-       WHERE m.tenant_id = $1
+       WHERE m.tenant_id = $1 AND ($2::uuid IS NULL OR m.student_user_id = $2::uuid)
        ORDER BY m.scheduled_at DESC`,
-      [this.tenant(tenantId)],
+      [this.tenant(tenantId), studentUserId ?? null],
     );
   }
 
@@ -1050,13 +1077,17 @@ export class PlacementService {
   }
 
   async generateResumePdf(tenantId: string, studentUserId: string) {
-    const user = await this.db.query(
-      `SELECT name, official_email FROM users WHERE user_id = $1`,
-      [studentUserId],
+    const tid = this.tenant(tenantId);
+    const user = await this.db.query<
+      Array<{ name: string; official_email: string }>
+    >(
+      `SELECT name, official_email FROM users WHERE user_id = $1 AND tenant_id = $2`,
+      [studentUserId, tid],
     );
+    if (!user[0]) throw new NotFoundException('Student not found');
     const resume = await this.db.query(
-      `SELECT * FROM student_resume_profiles WHERE student_user_id = $1`,
-      [studentUserId],
+      `SELECT * FROM student_resume_profiles WHERE student_user_id = $1 AND tenant_id = $2`,
+      [studentUserId, tid],
     );
     const u = user[0] as { name: string; official_email: string };
     const r = resume[0] as

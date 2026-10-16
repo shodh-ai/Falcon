@@ -39,6 +39,33 @@ describe('module catalogue', () => {
     expect(resolveApiModule('/api/academics/calendar')).toBe('sis_academics');
   });
 
+  it.each([
+    ['/api/student/profile/photo', 'CORE'],
+    ['/api/student/profile/update-request', 'CORE'],
+    ['/api/student/campus-settings', 'CORE'],
+    ['/api/student/portal-bootstrap', 'sis_academics'],
+    ['/api/academics/marks/history', 'examinations_credentials'],
+    ['/api/academics/marksheet/download/1', 'examinations_credentials'],
+    ['/api/student/admission-vault', 'admissions_onboarding'],
+    ['/api/student/admission-documents', 'admissions_onboarding'],
+    ['/api/student/documents', 'admissions_onboarding'],
+    ['/api/student/attendance', 'sis_academics'],
+    ['/api/student/exam-desk', 'examinations_credentials'],
+    ['/api/student/marks', 'examinations_credentials'],
+    ['/api/student/transcripts', 'examinations_credentials'],
+    ['/api/student/exit', 'examinations_credentials'],
+    ['/api/student/exit/alumni-register', 'placements_alumni'],
+    ['/api/student/finance/pay/order', 'finance_procurement'],
+    ['/api/student/library', 'library'],
+    ['/api/student/transport', 'transport'],
+    ['/api/student/placements', 'placements_alumni'],
+    ['/api/student/mentorship/alumni', 'placements_alumni'],
+    ['/api/student/discipline', 'clinic_safety'],
+    ['/api/student/extracurriculars', 'campus_operations'],
+  ])('routes student API %s through its owning module %s', (path, module) => {
+    expect(resolveApiModule(path)).toBe(module);
+  });
+
   it('does not overlap API prefixes across business modules', () => {
     const prefixes = MODULE_CATALOGUE.flatMap((item) =>
       item.apiPrefixes.map((prefix) => `${prefix}:${item.moduleKey}`),

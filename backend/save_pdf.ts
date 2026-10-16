@@ -7,11 +7,11 @@ async function bootstrap() {
   const app = await NestFactory.createApplicationContext(AppModule);
   const db = app.get(DataSource);
   
-  const rows = await db.query(`SELECT user_id FROM users WHERE official_email = 'student4@mygyanvihar.com'`);
+  const rows = await db.query(`SELECT user_id, tenant_id FROM users WHERE official_email = 'student4@mygyanvihar.com'`);
   const studentUserId = rows[0]?.user_id;
   
   const examsService = app.get(ExamsService);
-  const pdfBuffer = await examsService.generateAdmitCardOrThrow(studentUserId);
+  const pdfBuffer = await examsService.generateAdmitCardOrThrow(studentUserId, rows[0]?.tenant_id);
   require('fs').writeFileSync('admit-card.pdf', pdfBuffer);
   console.log('Saved to admit-card.pdf');
   

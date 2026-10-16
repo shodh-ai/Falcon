@@ -8,7 +8,6 @@ import {
   Bell,
   BookOpen,
   Briefcase,
-  CalendarClock,
   CalendarDays,
   CheckCircle2,
   ChevronRight,
@@ -20,13 +19,13 @@ import {
   IdCard,
   LifeBuoy,
   MapPin,
-  Sparkles,
   Ticket,
   UserRoundCheck,
   UserRoundCog,
   Wallet,
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
+import { useModuleRuntime } from '@/context/ModuleRuntimeContext';
 import { useAuthedApi } from '@/lib/api';
 import { NoticeBoardWidget } from '@/components/dashboard/NoticeBoardWidget';
 import { StudentPageShell } from '@/components/student/StudentPageShell';
@@ -41,17 +40,28 @@ import { notificationsApi } from '@/lib/api/notifications';
 import { handleNotificationAction } from '@/lib/notifications/notification-actions';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { cn } from '@/lib/utils';
-import type { PlacementHub } from '@/lib/placement';
+import { resolvePathModule } from '@/lib/launch-modules';
+import type { BusinessModuleKey } from '@/lib/launch-modules';
+import { withStudentReadTimeout } from '@/lib/student-read-request';
 import {
-  DEMO_ASSIGNMENTS,
+  getCurrentAttendanceSemester,
+  getSemesterAttendance,
+  type StudentAttendanceData,
+} from '@/lib/student-attendance';
+import { getSemesterGpa } from '@/lib/student-semester-gpa';
+import type { PlacementHub } from '@/lib/placement';
+import type { ExamSchedule } from '@/lib/api/api.exams';
+import {
   DEMO_DASHBOARD_METRICS,
-  DEMO_EXAMS,
   DEMO_PLACEMENTS,
   DEMO_STUDENT,
-  DEMO_TODAY_SCHEDULE,
   isDemoNotificationId,
 } from '@/lib/mock/student-portal-demo';
 import { isStudentDemoModeEnabled } from '@/lib/student-demo-mode';
+import {
+  isStudentLibraryLaunched,
+  isStudentLibraryLoanDue,
+} from '@/lib/student-library-launch';
 import {
   getIstMinutesNow,
   getTimetableSlotStatus,
@@ -59,10 +69,9 @@ import {
 } from '@/lib/timetable-ist';
 
 type Summary = {
-  cgpa: number;
+  cgpa: number | null;
   credits_completed: number;
   credits_required: number;
-  attendance_percent: number;
 };
 
 type Profile = {
@@ -95,19 +104,35 @@ type Ledger = {
   };
 };
 
-type ExamDesk = {
-  upcoming_exams?: Array<{
-    subject?: string;
-    course_name?: string;
-    exam_date?: string;
-    date?: string;
-    start_time?: string;
-    time?: string;
-    hall?: string;
-    room?: string;
+type SemesterCourses = {
+  current_semester: number;
+  enrollments: Array<{
+    semester: number;
+    status: string;
+    course: { course_id: string; course_code: string; course_name: string; credits: number };
   }>;
-  admit_cards?: unknown[];
 };
+
+type SemesterGrade = {
+  semester_number: number;
+  sgpa: number | string | null;
+  credits_attempted?: number;
+  courses?: Array<{
+    credits: number | string;
+    grade?: string | null;
+    grade_points?: number | string | null;
+    status: string;
+  }>;
+};
+
+type MarksHistory = { semesters: SemesterGrade[] };
+
+function semesterCourseRows(payload: SemesterCourses | null) {
+  return (payload?.enrollments ?? []).filter((row) =>
+    Number(row.semester) === Number(payload?.current_semester) &&
+    ['ENROLLED', 'COMPLETED'].includes(row.status) && row.course?.course_id,
+  );
+}
 
 type ScheduleItem = {
   id: string;
@@ -125,7 +150,22 @@ type AssignmentItem = {
   title: string;
   dueAt: string;
   courseId?: string;
-  status: 'Pending' | 'Due soon' | 'Submitted';
+  status: 'Pending' | 'Due soon' | 'Submitted' | 'Returned for revision';
+  actionLabel: 'Submit' | 'Re-upload' | 'Review';
+};
+
+type DashboardDataKey = 'metrics' | 'gpa' | 'attendance' | 'courses' | 'profile' | 'placements' | 'finance' | 'exams' | 'timetable' | 'assignments';
+const DASHBOARD_SOURCES: Record<DashboardDataKey, { label: string; module?: BusinessModuleKey }> = {
+  metrics: { label: 'Academic summary', module: 'sis_academics' },
+  gpa: { label: 'GPA', module: 'sis_academics' },
+  attendance: { label: 'Attendance', module: 'sis_academics' },
+  courses: { label: 'Semester courses', module: 'sis_academics' },
+  profile: { label: 'Profile' },
+  placements: { label: 'Placements', module: 'placements_alumni' },
+  finance: { label: 'Fees', module: 'finance_procurement' },
+  exams: { label: 'Exams', module: 'examinations_credentials' },
+  timetable: { label: 'Timetable', module: 'sis_academics' },
+  assignments: { label: 'Assignments', module: 'lms_learning' },
 };
 
 const QUICK_ACTIONS = [
@@ -153,13 +193,6 @@ function formatToday() {
     year: 'numeric',
     timeZone: 'Asia/Kolkata',
   }).format(new Date());
-}
-
-function classesNeededToReach75(currentPct: number, assumedHeld = 40): number {
-  if (currentPct >= 75) return 0;
-  const present = Math.round((currentPct / 100) * assumedHeld);
-  const need = Math.ceil(4 * (0.75 * assumedHeld - present));
-  return Math.max(0, need);
 }
 
 function relativeTime(iso?: string) {
@@ -221,30 +254,6 @@ function assignmentUrgency(dueAt: string, now = new Date()): AssignmentFilter {
   if (due < endOfToday) return 'today';
   if (due < endOfWeek) return 'week';
   return 'later';
-}
-
-function buildDemoSchedule(): ScheduleItem[] {
-  const now = getIstMinutesNow();
-  return DEMO_TODAY_SCHEDULE.map((row) => ({
-    id: row.id,
-    subject: row.subject,
-    faculty: row.faculty,
-    room: row.room,
-    start: row.start,
-    end: row.end,
-    status: getTimetableSlotStatus(row.start, row.end, now),
-  })).sort((a, b) => timeStringToMinutes(a.start) - timeStringToMinutes(b.start));
-}
-
-function buildDemoAssignments(): AssignmentItem[] {
-  return DEMO_ASSIGNMENTS.map((a) => ({
-    id: a.id,
-    subject: a.subject,
-    title: a.title,
-    dueAt: a.dueAt,
-    courseId: a.courseId,
-    status: a.status,
-  }));
 }
 
 function KpiCard({
@@ -356,54 +365,117 @@ function Panel({
 }
 
 export function StudentEnterpriseDashboard() {
+  const { token } = useAuth();
+  const { manifest, module: runtimeModule } = useModuleRuntime();
+  const disabledModules = Object.values(DASHBOARD_SOURCES)
+    .flatMap((source) => source.module && runtimeModule(source.module)?.available === false ? [source.module] : []);
+  // A changed account or module policy must not display the previous snapshot.
+  return <StudentDashboardWorkspace key={`${token}:${manifest?.revision ?? ''}:${disabledModules.join(',')}`} disabledModules={disabledModules} />;
+}
+
+function StudentDashboardWorkspace({ disabledModules }: { disabledModules: BusinessModuleKey[] }) {
   const router = useRouter();
   const { user, token } = useAuth();
+  const { module: runtimeModule } = useModuleRuntime();
   const api = useAuthedApi();
   const { notifications, refresh: refreshNotifications } = useNotificationHistory();
 
   const [summary, setSummary] = useState<Summary | null>(null);
+  const [marksHistory, setMarksHistory] = useState<MarksHistory | null>(null);
+  const [attendanceData, setAttendanceData] = useState<StudentAttendanceData | null>(null);
+  const [semesterCourses, setSemesterCourses] = useState<SemesterCourses | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [hub, setHub] = useState<PlacementHub | null>(null);
   const [ledger, setLedger] = useState<Ledger | null>(null);
-  const [examDesk, setExamDesk] = useState<ExamDesk | null>(null);
+  const [examSchedules, setExamSchedules] = useState<ExamSchedule[]>([]);
   const [schedule, setSchedule] = useState<ScheduleItem[]>([]);
   const [assignments, setAssignments] = useState<AssignmentItem[]>([]);
   const [libraryDueCount, setLibraryDueCount] = useState(0);
+  const libraryLaunched =
+    isStudentLibraryLaunched() &&
+    runtimeModule('library')?.available === true;
   const [loading, setLoading] = useState(true);
   const [idCardOpen, setIdCardOpen] = useState(false);
   const [nowMinutes, setNowMinutes] = useState(() => getIstMinutesNow());
   const [assignmentFilter, setAssignmentFilter] = useState<AssignmentFilter>('all');
   const [markingAllRead, setMarkingAllRead] = useState(false);
+  const [failedSources, setFailedSources] = useState<DashboardDataKey[]>([]);
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const sourceEnabled = (key: DashboardDataKey) => {
+    const moduleKey = DASHBOARD_SOURCES[key].module;
+    return !moduleKey || !disabledModules.includes(moduleKey);
+  };
+  const canOpen = (href: string) => {
+    const moduleKey = resolvePathModule(href);
+    return !moduleKey || runtimeModule(moduleKey)?.available !== false;
+  };
+  const dataMessage = (key: DashboardDataKey) => {
+    if (!sourceEnabled(key)) return `${DASHBOARD_SOURCES[key].label} module is unavailable`;
+    if (loading) return 'Loading…';
+    if (failedSources.includes(key)) return `${DASHBOARD_SOURCES[key].label} could not be loaded`;
+    return null;
+  };
+  const retryDashboard = () => {
+    setLoading(true);
+    setLoadAttempt((attempt) => attempt + 1);
+  };
+
+  const academicMessage = (key: 'timetable' | 'assignments' | 'exams') =>
+    !sourceEnabled(key) ? dataMessage(key) : dataMessage('courses') ?? dataMessage(key);
+  const kpiMessage = (key: DashboardDataKey) => {
+    if (key === 'gpa') {
+      if (!sourceEnabled('gpa')) return 'GPA module is unavailable';
+      if (loading) return 'Loading…';
+      return gpaSemester == null || dataMessage('gpa') ? 'GPA unavailable' : null;
+    }
+    return key === 'assignments' ? academicMessage('assignments') : dataMessage(key);
+  };
 
   useEffect(() => {
     const tick = () => setNowMinutes(getIstMinutesNow());
-    tick();
     const id = window.setInterval(tick, 30_000);
     return () => window.clearInterval(id);
   }, []);
 
   useEffect(() => {
-    setSchedule((prev) =>
-      prev.map((slot) => ({
-        ...slot,
-        status: getTimetableSlotStatus(slot.start, slot.end, nowMinutes),
-      })),
-    );
-  }, [nowMinutes]);
-
-  useEffect(() => {
     let cancelled = false;
     async function load() {
-      setLoading(true);
-      const [metricsR, profileR, hubR, financeR, examR, todayR, assignR, libraryR] =
+      const enabled = (key: DashboardDataKey) => {
+        const moduleKey = DASHBOARD_SOURCES[key].module;
+        return !moduleKey || !disabledModules.includes(moduleKey);
+      };
+      const request = <T,>(key: DashboardDataKey, path: string) =>
+        enabled(key) ? withStudentReadTimeout(api.get<T>(path)) : Promise.resolve(null);
+      const coursesRequest = request<SemesterCourses>('courses', '/api/academics/courses/my-enrollments')
+        .then((payload) => {
+          if (payload != null && (!Number.isSafeInteger(Number(payload.current_semester)) || Number(payload.current_semester) < 1 || !Array.isArray(payload.enrollments))) {
+            throw new Error('Current semester courses are unavailable');
+          }
+          return payload;
+        });
+      const examsRequest = enabled('exams') ? coursesRequest.then((courses) => {
+        if (!courses) throw new Error('Current semester is unavailable');
+        return request<ExamSchedule[]>('exams', `/api/academics/exams/schedule?semester=${Number(courses.current_semester)}`);
+      }) : Promise.resolve(null);
+      const marksRequest = request<MarksHistory>('gpa', '/api/academics/marks/history')
+        .then((payload) => {
+          if (payload != null && !Array.isArray(payload.semesters)) {
+            throw new Error('Semester grades are unavailable');
+          }
+          return payload;
+        });
+      const [metricsR, marksR, attendanceR, coursesR, profileR, hubR, financeR, examR, todayR, assignR] =
         await Promise.allSettled([
-          api.get<Summary>('/api/academics/dashboard/metrics'),
-          api.get<Profile>('/api/student/profile'),
-          api.get<PlacementHub>('/api/placement/student/hub'),
-          api.get<Ledger>('/api/student/finance'),
-          api.get<ExamDesk>('/api/student/exam-desk'),
-          api.get<Array<Record<string, unknown>>>('/api/academics/dashboard/timetable/today'),
-          api.get<
+          request<Summary>('metrics', '/api/academics/dashboard/metrics'),
+          marksRequest,
+          request<StudentAttendanceData>('attendance', '/api/student/attendance'),
+          coursesRequest,
+          request<Profile>('profile', '/api/student/profile'),
+          request<PlacementHub>('placements', '/api/placement/student/hub'),
+          request<Ledger>('finance', '/api/student/finance'),
+          examsRequest,
+          request<Array<Record<string, unknown>>>('timetable', '/api/academics/dashboard/timetable/today'),
+          request<
             Array<{
               assignment: {
                 assignment_id: string;
@@ -412,28 +484,39 @@ export function StudentEnterpriseDashboard() {
                 course_id?: string;
               };
               status?: string;
-              submission?: unknown;
+              submission?: { revision_due_at?: string | null } | null;
+              can_resubmit?: boolean;
             }>
-          >('/api/academics/assignments/my'),
-          api.get<{
-            active_loans?: Array<{ status?: string; due_date?: string }>;
-          }>('/api/student/library'),
+          >('assignments', '/api/academics/assignments/my'),
         ]);
       if (cancelled) return;
-      if (metricsR.status === 'fulfilled') setSummary(metricsR.value);
-      if (profileR.status === 'fulfilled') setProfile(profileR.value);
-      if (hubR.status === 'fulfilled') setHub(hubR.value);
-      if (financeR.status === 'fulfilled') setLedger(financeR.value);
-      if (examR.status === 'fulfilled') setExamDesk(examR.value);
+      const keys: DashboardDataKey[] = ['metrics', 'gpa', 'attendance', 'courses', 'profile', 'placements', 'finance', 'exams', 'timetable', 'assignments'];
+      const results = [metricsR, marksR, attendanceR, coursesR, profileR, hubR, financeR, examR, todayR, assignR];
+      setFailedSources(keys.filter((key, index) => {
+        const result = results[index];
+        return enabled(key) && (result.status === 'rejected' || result.value == null);
+      }));
+      setSummary(metricsR.status === 'fulfilled' ? metricsR.value : null);
+      setMarksHistory(marksR.status === 'fulfilled' ? marksR.value : null);
+      setAttendanceData(attendanceR.status === 'fulfilled' ? attendanceR.value : null);
+      const courses = coursesR.status === 'fulfilled' ? coursesR.value : null;
+      setSemesterCourses(courses);
+      const activeCourses = new Map(semesterCourseRows(courses)
+        .filter((row) => row.status === 'ENROLLED')
+        .map((row) => [row.course.course_id, row.course]));
+      setProfile(profileR.status === 'fulfilled' ? profileR.value : null);
+      setHub(hubR.status === 'fulfilled' ? hubR.value : null);
+      setLedger(financeR.status === 'fulfilled' ? financeR.value : null);
+      setExamSchedules(examR.status === 'fulfilled' && Array.isArray(examR.value) ? examR.value : []);
 
       if (todayR.status === 'fulfilled' && Array.isArray(todayR.value) && todayR.value.length) {
         const now = getIstMinutesNow();
-        const mapped: ScheduleItem[] = todayR.value.slice(0, 8).map((row, i) => {
-          const start = String(row.start_time ?? row.start ?? '09:00').slice(0, 5);
-          const end = String(row.end_time ?? row.end ?? '10:00').slice(0, 5);
+        const mapped: ScheduleItem[] = todayR.value.filter((row) => activeCourses.has(String(row.course_id))).slice(0, 8).map((row, i) => {
+          const start = String(row.start_time ?? row.start ?? '').slice(0, 5);
+          const end = String(row.end_time ?? row.end ?? '').slice(0, 5);
           return {
-            id: String(row.id ?? i),
-            subject: String(row.subject ?? row.course_name ?? row.title ?? 'Class'),
+            id: String(row.timetable_id ?? row.id ?? i),
+            subject: activeCourses.get(String(row.course_id))!.course_name,
             faculty: String(row.faculty_name ?? row.faculty ?? 'Faculty'),
             room: String(row.room ?? row.room_number ?? 'TBA'),
             start,
@@ -442,8 +525,6 @@ export function StudentEnterpriseDashboard() {
           };
         });
         setSchedule(mapped);
-      } else if (isStudentDemoModeEnabled()) {
-        setSchedule(buildDemoSchedule());
       } else {
         setSchedule([]);
       }
@@ -451,37 +532,27 @@ export function StudentEnterpriseDashboard() {
       if (assignR.status === 'fulfilled' && Array.isArray(assignR.value)) {
         const mapped: AssignmentItem[] = assignR.value
           .filter((row) => {
+            if (!row.assignment.course_id || !activeCourses.has(row.assignment.course_id)) return false;
             const status = String(row.status ?? '').toUpperCase();
+            if (status === 'RETURNED_FOR_REVISION') return true;
             return !['SUBMITTED', 'GRADED', 'CLOSED'].includes(status) && !row.submission;
           })
-          .slice(0, 12)
           .map((row) => ({
             id: row.assignment.assignment_id,
-            subject: 'Course work',
+            subject: activeCourses.get(row.assignment.course_id!)!.course_name,
             title: row.assignment.title,
-            dueAt: row.assignment.due_date,
+            dueAt: row.status === 'RETURNED_FOR_REVISION'
+              ? row.submission?.revision_due_at ?? row.assignment.due_date
+              : row.assignment.due_date,
             courseId: row.assignment.course_id,
-            status: 'Pending' as const,
+            status: row.status === 'RETURNED_FOR_REVISION' ? 'Returned for revision' as const : 'Pending' as const,
+            actionLabel: row.status === 'RETURNED_FOR_REVISION'
+              ? row.can_resubmit === false ? 'Review' as const : 'Re-upload' as const
+              : row.can_resubmit === false ? 'Review' as const : 'Submit' as const,
           }));
-        setAssignments(
-          mapped.length || !isStudentDemoModeEnabled() ? mapped : buildDemoAssignments(),
-        );
+        setAssignments(mapped);
       } else {
-        setAssignments(isStudentDemoModeEnabled() ? buildDemoAssignments() : []);
-      }
-
-      if (libraryR.status === 'fulfilled') {
-        const loans = libraryR.value.active_loans ?? [];
-        const dueSoon = loans.filter((b) => {
-          const status = String(b.status ?? '').toUpperCase();
-          if (status === 'OVERDUE') return true;
-          if (!b.due_date) return false;
-          const due = new Date(b.due_date).getTime();
-          return Number.isFinite(due) && due <= Date.now() + 7 * 24 * 60 * 60 * 1000;
-        });
-        setLibraryDueCount(dueSoon.length);
-      } else {
-        setLibraryDueCount(0);
+        setAssignments([]);
       }
 
       setLoading(false);
@@ -490,7 +561,37 @@ export function StudentEnterpriseDashboard() {
     return () => {
       cancelled = true;
     };
-  }, [api]);
+  }, [api, disabledModules, loadAttempt]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!libraryLaunched) {
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    void api
+      .get<{
+        active_loans?: Array<{ status?: string; due_date?: string }>;
+      }>('/api/student/library')
+      .then((payload) => {
+        if (cancelled) return;
+        setLibraryDueCount(
+          (payload.active_loans ?? []).filter((book) =>
+            isStudentLibraryLoanDue(book),
+          ).length,
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setLibraryDueCount(0);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [api, libraryLaunched]);
 
   const alertItems = useMemo(
     () => notifications.map(toAppNotification).filter((n) => n.unread).slice(0, 3),
@@ -510,15 +611,28 @@ export function StudentEnterpriseDashboard() {
       profile?.profile_photo_url ?? (demoOn ? DEMO_STUDENT.profile_photo_url : null),
   };
 
-  const cgpa = summary?.cgpa ?? (demoOn ? DEMO_DASHBOARD_METRICS.cgpa : 0);
   const creditsDone =
     summary?.credits_completed ?? (demoOn ? DEMO_DASHBOARD_METRICS.credits_completed : 0);
   const creditsReq =
     summary?.credits_required || (demoOn ? DEMO_DASHBOARD_METRICS.credits_required : 160);
   const creditPct = Math.round((creditsDone / Math.max(1, creditsReq)) * 100);
-  const attendance =
-    summary?.attendance_percent ?? (demoOn ? DEMO_DASHBOARD_METRICS.attendance_percent : 0);
-  const needClasses = classesNeededToReach75(attendance);
+  const attendanceSemester = getCurrentAttendanceSemester(attendanceData);
+  const attendanceTotals = getSemesterAttendance(attendanceData?.subject_wise ?? [], attendanceSemester);
+  const attendance = attendanceTotals.percent;
+  const attendanceValue = attendance == null ? 'Not recorded' : `${Number(attendance.toFixed(2))}%`;
+  const attendanceContext = attendanceSemester == null ? 'Current semester' : `Semester ${attendanceSemester}`;
+  const attendanceEmptyMessage = attendanceSemester == null
+    ? 'No current semester attendance records are available yet.'
+    : `No classes have been marked for Semester ${attendanceSemester} yet.`;
+  const needClasses = attendanceTotals.classesNeeded;
+  const currentCourses = semesterCourseRows(semesterCourses);
+  const currentSemester = semesterCourses == null ? null : Number(semesterCourses.current_semester);
+  const semesterContext = currentSemester == null ? 'Current semester' : `Semester ${currentSemester}`;
+  const profileSemester = Number(profile?.semester);
+  const gpaSemester = Number.isSafeInteger(profileSemester) && profileSemester > 0 ? profileSemester : currentSemester;
+  const gpaContext = gpaSemester == null ? 'Current semester' : `Semester ${gpaSemester}`;
+  const semesterGpa = getSemesterGpa(marksHistory?.semesters.find((row) => Number(row.semester_number) === gpaSemester));
+  const currentCredits = currentCourses.reduce((sum, row) => sum + Number(row.course.credits), 0);
 
   const pendingRows =
     ledger?.pending_demands ??
@@ -562,22 +676,7 @@ export function StudentEnterpriseDashboard() {
     start.setHours(0, 0, 0, 0);
     return due < start;
   }).length;
-  const upcomingExams = (examDesk?.upcoming_exams ?? []).slice(0, 4);
-  const examCards =
-    upcomingExams.length > 0
-      ? upcomingExams
-      : demoOn
-        ? DEMO_EXAMS.slice(0, 4).map((ex) => ({
-            subject: ex.subject,
-            course_name: ex.subject,
-            exam_date: ex.exam_date,
-            date: ex.exam_date,
-            start_time: ex.start_time,
-            time: ex.start_time,
-            hall: `${ex.hall} · Seat ${ex.seat}`,
-            room: ex.hall,
-          }))
-        : [];
+  const examCards = examSchedules.slice(0, 4);
 
   const openDrives = hub?.open_drives?.length ?? (demoOn ? DEMO_PLACEMENTS.open_drives.length : 0);
   const applications =
@@ -590,12 +689,14 @@ export function StudentEnterpriseDashboard() {
 
   const sortedSchedule = useMemo(() => {
     const rank = { ongoing: 0, upcoming: 1, done: 2 } as const;
-    return [...schedule].sort((a, b) => {
+    return schedule.map((slot) => ({
+      ...slot, status: getTimetableSlotStatus(slot.start, slot.end, nowMinutes),
+    })).sort((a, b) => {
       const r = rank[a.status] - rank[b.status];
       if (r !== 0) return r;
       return timeStringToMinutes(a.start) - timeStringToMinutes(b.start);
     });
-  }, [schedule]);
+  }, [schedule, nowMinutes]);
 
   const scheduleHeadline = useMemo(() => {
     const live = sortedSchedule.find((s) => s.status === 'ongoing');
@@ -661,7 +762,6 @@ export function StudentEnterpriseDashboard() {
         <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between lg:items-center">
           <div className="min-w-0 flex-1">
             <p className="flex flex-wrap items-center gap-2 text-xs font-medium text-sgvu-gold sm:text-sm">
-              <Sparkles className="h-4 w-4 shrink-0" />
               <span className="min-w-0">
                 {greeting()} · {formatToday()}
               </span>
@@ -670,13 +770,13 @@ export function StudentEnterpriseDashboard() {
               Hi, {firstName}
             </h1>
             <div className="mt-4 flex flex-wrap gap-2">
-              <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-white/90">
+              <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-white">
                 {program}
               </span>
-              <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-white/90">
+              <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-white">
                 {semester}
               </span>
-              <span className="rounded-full bg-sgvu-gold/20 px-3 py-1 text-xs font-semibold text-sgvu-gold">
+              <span className="rounded-full bg-sgvu-gold/20 px-3 py-1 text-xs font-semibold text-white">
                 ENR {enrollment}
               </span>
             </div>
@@ -696,7 +796,14 @@ export function StudentEnterpriseDashboard() {
 
       <NoticeBoardWidget />
 
-      {libraryDueCount > 0 ? (
+      {failedSources.length > 0 ? (
+        <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+          <p>Some dashboard data is unavailable: {failedSources.map((key) => DASHBOARD_SOURCES[key].label).join(', ')}.</p>
+          <Button variant="outline" size="sm" disabled={loading} onClick={retryDashboard}>Retry dashboard</Button>
+        </div>
+      ) : null}
+
+      {libraryLaunched && libraryDueCount > 0 ? (
         <Link
           href="/student/library"
           className="flex items-center justify-between gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950 transition hover:border-amber-300 hover:bg-amber-100/80"
@@ -709,57 +816,61 @@ export function StudentEnterpriseDashboard() {
         </Link>
       ) : null}
 
-      {/* KPI row — 1 / 2 / 3 / 6 across breakpoints */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3 xl:grid-cols-6">
+      {/* KPI row — 1 / 2 / 3 / 5 across breakpoints */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3 xl:grid-cols-5">
         {[
           {
-            label: 'Overall CGPA',
-            value: loading ? '—' : cgpa.toFixed(2),
-            helper: 'Cumulative grade points',
+            label: 'Current semester GPA',
+            value: loading || semesterGpa == null ? '—' : semesterGpa.toFixed(2),
+            helper: `${gpaContext} · ${semesterGpa == null ? 'Awaiting grades' : 'Credit-weighted semester GPA'}`,
             icon: GraduationCap,
             tone: 'gold' as const,
-            progress: Math.min(100, (cgpa / 10) * 100),
+            progress: semesterGpa == null ? undefined : Math.min(100, (semesterGpa / 10) * 100),
             href: '/student/marks',
             delay: 'delay-0',
+            source: 'gpa' as const,
           },
           {
             label: 'Attendance',
-            value: loading ? '—' : `${attendance}%`,
-            helper: attendance >= 75 ? 'Above 75% minimum' : 'Below 75% minimum',
+            value: loading ? '—' : attendanceValue,
+            helper: attendance == null ? attendanceEmptyMessage : `${attendanceContext} · ${attendance >= 75 ? 'Meeting 75% minimum' : 'Below 75% minimum'}`,
             icon: UserRoundCheck,
-            tone: (attendance >= 75 ? 'success' : 'warning') as 'success' | 'warning',
-            progress: attendance,
+            tone: (attendance == null ? 'default' : attendance >= 75 ? 'success' : 'warning') as 'default' | 'success' | 'warning',
+            progress: attendance ?? undefined,
             href: '/student/attendance',
             delay: 'delay-75',
+            source: 'attendance' as const,
           },
           {
             label: 'Degree Progress',
             value: loading ? '—' : `${creditsDone}/${creditsReq}`,
-            helper: `${creditPct}% credits completed`,
+            helper: `Overall degree · ${creditPct}% credits completed`,
             icon: CreditCard,
             tone: 'default' as const,
             progress: creditPct,
             href: '/student/exit',
             delay: 'delay-100',
+            source: 'metrics' as const,
           },
           {
             label: 'Fee Status',
             value: feeClear ? 'Clear' : `₹${pendingFee.toLocaleString('en-IN')}`,
-            helper: feeClear ? 'No pending demands' : 'Pending dues',
+            helper: feeClear ? 'All semesters · No pending demands' : 'All semesters · Outstanding dues',
             icon: Wallet,
             tone: (feeClear ? 'success' : 'danger') as 'success' | 'danger',
             href: '/student/finance',
             delay: 'delay-150',
+            source: 'finance' as const,
           },
           {
             label: 'Pending Assignments',
             value: String(pendingAssignmentCount),
             helper:
               overdueCount > 0
-                ? `${dueTodayCount} due today · ${overdueCount} overdue`
+                ? `${semesterContext} · ${dueTodayCount} due today · ${overdueCount} overdue`
                 : dueTodayCount > 0
-                  ? `${dueTodayCount} due today`
-                  : 'No overdue work',
+                  ? `${semesterContext} · ${dueTodayCount} due today`
+                  : `${semesterContext} · No overdue work`,
             icon: ClipboardList,
             tone: (overdueCount > 0
               ? 'danger'
@@ -768,38 +879,54 @@ export function StudentEnterpriseDashboard() {
                 : 'success') as 'danger' | 'warning' | 'success',
             href: '/student/courses',
             delay: 'delay-200',
-          },
-          {
-            label: 'Upcoming Exams',
-            value: String(examCards.length),
-            helper: 'Scheduled assessments',
-            icon: CalendarClock,
-            tone: 'default' as const,
-            href: '/student/exams',
-            delay: 'delay-300',
+            source: 'assignments' as const,
           },
         ].map((kpi) => (
           <KpiCard
             key={kpi.label}
             label={kpi.label}
-            value={kpi.value}
-            helper={kpi.helper}
+            value={kpiMessage(kpi.source) ? '—' : kpi.value}
+            helper={kpiMessage(kpi.source) ?? kpi.helper}
             icon={kpi.icon}
-            tone={kpi.tone}
-            progress={kpi.progress}
-            href={kpi.href}
+            tone={kpiMessage(kpi.source) ? 'default' : kpi.tone}
+            progress={kpiMessage(kpi.source) ? undefined : kpi.progress}
+            href={canOpen(kpi.href) ? kpi.href : undefined}
             className={cn('animate-in fade-in slide-in-from-bottom-2 fill-mode-both', kpi.delay)}
           />
         ))}
       </div>
 
       {/* Main grid */}
+      <Panel
+        title="Current Semester Courses"
+        description={`${semesterContext} · Current academic activity below uses these subjects only`}
+        icon={BookOpen}
+        action={canOpen('/student/courses') ? <Link href="/student/courses" className="text-xs font-semibold text-sgvu-navy hover:underline">Open course workspaces</Link> : undefined}
+      >
+        {dataMessage('courses') ? <StudentEmptyState title={dataMessage('courses')!} className="py-6" /> : currentCourses.length === 0 ? (
+          <StudentEmptyState title="No current-semester courses" description="Your subjects will appear once you are registered for this semester." className="py-6" />
+        ) : (
+          <div className="space-y-3">
+            <p className="text-xs font-medium text-muted-foreground">{currentCourses.length} subjects · {currentCredits} registered credits this semester</p>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {currentCourses.map((row) => (
+                <Link key={row.course.course_id} href={`/student/courses/${row.course.course_id}`} className="rounded-xl border border-sgvu-navy/10 bg-slate-50/70 p-3 transition hover:border-sgvu-gold/50 hover:bg-sgvu-gold/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sgvu-gold/50">
+                  <p className="text-xs font-bold text-sgvu-navy">{row.course.course_code}</p>
+                  <p className="mt-1 text-sm font-semibold text-sgvu-navy">{row.course.course_name}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">{row.course.credits} credits · Open workspace</p>
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
+      </Panel>
+
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
-        {/* Alerts — 4 cols */}
-        <div className="xl:col-span-4 animate-in fade-in slide-in-from-bottom-2 delay-100 fill-mode-both">
+        {/* Six overview cards share the same desktop width and minimum height. */}
+        <div className="xl:col-span-4 xl:min-h-[17rem] animate-in fade-in slide-in-from-bottom-2 delay-100 fill-mode-both">
           <Panel
             title="Alerts"
-            description="Latest unread updates"
+            description="Account & campus updates"
             icon={Bell}
             action={
               <div className="flex items-center gap-2">
@@ -867,14 +994,14 @@ export function StudentEnterpriseDashboard() {
           </Panel>
         </div>
 
-        {/* Attendance detail — 4 cols */}
-        <div className="xl:col-span-4">
-          <Panel title="Attendance" description="Current semester standing" icon={UserRoundCheck}>
-            <div className="space-y-4">
+        {/* Attendance detail */}
+        <div className="xl:col-span-4 xl:min-h-[17rem]">
+          <Panel title="Attendance" description={`${attendanceContext} · Current semester standing`} icon={UserRoundCheck}>
+            {dataMessage('attendance') ? <StudentEmptyState title={dataMessage('attendance')!} className="py-6" /> : attendance == null ? <StudentEmptyState title="No classes marked yet" description={attendanceEmptyMessage} className="py-6" /> : <div className="space-y-4">
               <div className="flex items-end justify-between">
                 <div>
                   <p className="text-xs font-medium text-muted-foreground">Current %</p>
-                  <p className="text-3xl font-black text-sgvu-navy">{attendance}%</p>
+                  <p className="text-3xl font-black text-sgvu-navy">{attendanceValue}</p>
                 </div>
                 <div className="text-right">
                   <p className="text-xs font-medium text-muted-foreground">Minimum required</p>
@@ -886,8 +1013,8 @@ export function StudentEnterpriseDashboard() {
                 <p className="text-xs text-muted-foreground">Classes needed to reach 75%</p>
                 <p className="text-sm font-bold text-sgvu-navy">
                   {needClasses === 0
-                    ? 'You are already above the minimum'
-                    : `${needClasses} consecutive present class${needClasses === 1 ? '' : 'es'} (estimate)`}
+                    ? 'You meet the minimum requirement'
+                    : `${needClasses} consecutive present class${needClasses === 1 ? '' : 'es'}`}
                 </p>
               </div>
               <Link
@@ -897,14 +1024,14 @@ export function StudentEnterpriseDashboard() {
                 Subject-wise breakdown
                 <ChevronRight className="h-3.5 w-3.5" />
               </Link>
-            </div>
+            </div>}
           </Panel>
         </div>
 
-        {/* Degree progress — 4 cols */}
-        <div className="xl:col-span-4">
-          <Panel title="Degree Progress" description="Credits toward graduation" icon={GraduationCap}>
-            <div className="space-y-4">
+        {/* Degree progress */}
+        <div className="xl:col-span-4 xl:min-h-[17rem]">
+          <Panel title="Degree Progress" description="Overall credits toward graduation" icon={GraduationCap}>
+            {dataMessage('metrics') ? <StudentEmptyState title={dataMessage('metrics')!} className="py-6" /> : <div className="space-y-4">
               <div className="flex items-end justify-between">
                 <div>
                   <p className="text-xs text-muted-foreground">Credits completed</p>
@@ -929,28 +1056,28 @@ export function StudentEnterpriseDashboard() {
                 Graduation & alumni
                 <ChevronRight className="h-3.5 w-3.5" />
               </Link>
-            </div>
+            </div>}
           </Panel>
         </div>
 
-        {/* Today's schedule — 5 cols */}
-        <div className="xl:col-span-5 animate-in fade-in slide-in-from-bottom-2 delay-150 fill-mode-both">
+        {/* Today's schedule */}
+        <div className="xl:col-span-4 xl:min-h-[17rem] animate-in fade-in slide-in-from-bottom-2 delay-150 fill-mode-both">
           <Panel
             title="Today's Schedule"
-            description={scheduleHeadline}
+            description={academicMessage('timetable') ?? `${semesterContext} · ${scheduleHeadline}`}
             icon={CalendarDays}
             action={
-              <Link href="/student/timetable" className="text-xs font-semibold text-sgvu-navy hover:underline">
+              canOpen('/student/timetable') && <Link href="/student/timetable" className="text-xs font-semibold text-sgvu-navy hover:underline">
                 Full timetable
               </Link>
             }
           >
             <div className="space-y-2">
-              {sortedSchedule.length === 0 ? (
+              {academicMessage('timetable') ? <StudentEmptyState title={academicMessage('timetable')!} className="py-6" /> : sortedSchedule.length === 0 ? (
                 <StudentEmptyState
                   icon={CalendarDays}
                   title="No classes today"
-                  description="Your timetable is clear for today."
+                  description={`No classes are scheduled for ${semesterContext} today.`}
                   className="py-6"
                 />
               ) : (
@@ -1014,14 +1141,14 @@ export function StudentEnterpriseDashboard() {
           </Panel>
         </div>
 
-        {/* Assignments — 4 cols */}
-        <div className="xl:col-span-4 animate-in fade-in slide-in-from-bottom-2 delay-200 fill-mode-both">
+        {/* Assignments */}
+        <div className="xl:col-span-4 xl:min-h-[17rem] animate-in fade-in slide-in-from-bottom-2 delay-200 fill-mode-both">
           <Panel
             title="Pending Assignments"
-            description="Filter by urgency"
+            description={`${semesterContext} · Filter by urgency`}
             icon={ClipboardList}
             action={
-              <Link href="/student/courses" className="text-xs font-semibold text-sgvu-navy hover:underline">
+              canOpen('/student/courses') && <Link href="/student/courses" className="text-xs font-semibold text-sgvu-navy hover:underline">
                 Courses
               </Link>
             }
@@ -1051,7 +1178,7 @@ export function StudentEnterpriseDashboard() {
               ))}
             </div>
             <div className="space-y-2">
-              {filteredAssignments.length === 0 ? (
+              {academicMessage('assignments') ? <StudentEmptyState title={academicMessage('assignments')!} className="py-6" /> : filteredAssignments.length === 0 ? (
                 <StudentEmptyState
                   icon={ClipboardList}
                   title="Nothing in this filter"
@@ -1059,7 +1186,7 @@ export function StudentEnterpriseDashboard() {
                   className="py-6"
                 />
               ) : (
-                filteredAssignments.map((a) => (
+                filteredAssignments.slice(0, 12).map((a) => (
                   <div
                     key={a.id}
                     className="flex items-center justify-between gap-3 rounded-xl border border-sgvu-navy/10 bg-slate-50/80 px-3 py-2.5 transition hover:border-sgvu-gold/40 hover:bg-sgvu-gold/5"
@@ -1067,8 +1194,8 @@ export function StudentEnterpriseDashboard() {
                     <div className="min-w-0">
                       <p className="truncate text-sm font-semibold text-sgvu-navy">{a.title}</p>
                       <p className="text-xs text-muted-foreground">
-                        {a.subject} · Due{' '}
-                        {new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short' }).format(
+                        {a.status === 'Returned for revision' ? 'Returned for revision · ' : ''}{a.subject} · Due{' '}
+                        {new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short', timeZone: 'Asia/Kolkata' }).format(
                           new Date(a.dueAt),
                         )}
                       </p>
@@ -1078,7 +1205,7 @@ export function StudentEnterpriseDashboard() {
                       className="h-8 shrink-0 bg-sgvu-navy text-white transition active:scale-[0.98] hover:bg-[#123A6D]"
                       asChild
                     >
-                      <Link href={`/student/courses/${a.courseId}`}>Submit</Link>
+                      <Link href={a.courseId ? `/student/courses/${a.courseId}` : '/student/courses'}>{a.actionLabel}</Link>
                     </Button>
                   </div>
                 ))
@@ -1087,39 +1214,38 @@ export function StudentEnterpriseDashboard() {
           </Panel>
         </div>
 
-        {/* Exams — 3 cols */}
-        <div className="xl:col-span-3 animate-in fade-in slide-in-from-bottom-2 delay-200 fill-mode-both">
+        {/* Exams */}
+        <div className="xl:col-span-4 xl:min-h-[17rem] animate-in fade-in slide-in-from-bottom-2 delay-200 fill-mode-both">
           <Panel
             title="Upcoming Exams"
-            description="Date · time · hall"
+            description={`${semesterContext} · Upcoming assessments`}
             icon={Ticket}
             action={
-              <Link href="/student/exams" className="text-xs font-semibold text-sgvu-navy hover:underline">
+              canOpen('/student/exams') && <Link href="/student/exams" className="text-xs font-semibold text-sgvu-navy hover:underline">
                 Exam desk
               </Link>
             }
           >
             <div className="space-y-2">
-              {examCards.length === 0 ? (
+              {academicMessage('exams') ? <StudentEmptyState title={academicMessage('exams')!} className="py-6" /> : examCards.length === 0 ? (
                 <StudentEmptyState
                   icon={Ticket}
                   title="No upcoming exams"
-                  description="Scheduled assessments will appear here."
+                  description={`No upcoming assessments are scheduled for ${semesterContext}.`}
                   className="py-6"
                 />
               ) : (
-                examCards.map((ex, i) => (
+                examCards.map((ex) => (
                   <Link
-                    key={i}
+                    key={ex.exam_schedule_id}
                     href="/student/exams"
                     className="block rounded-xl border border-sgvu-navy/10 px-3 py-2.5 transition hover:-translate-y-0.5 hover:border-sgvu-gold/40 hover:bg-sgvu-gold/5 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sgvu-gold/50"
                   >
                     <p className="text-sm font-semibold text-sgvu-navy">
-                      {ex.subject ?? ex.course_name ?? 'Exam'}
+                      {ex.exam_type.replaceAll('_', ' ')} examination
                     </p>
                     <p className="mt-0.5 text-xs text-muted-foreground">
-                      {ex.exam_date ?? ex.date ?? 'TBA'} · {ex.start_time ?? ex.time ?? '—'} ·{' '}
-                      {ex.hall ?? ex.room ?? 'Hall TBA'}
+                      {ex.exam_date} · {to12h(ex.start_time)} · View details in Exam desk
                     </p>
                   </Link>
                 ))
@@ -1135,12 +1261,12 @@ export function StudentEnterpriseDashboard() {
             description="Campus & department recruitment"
             icon={Briefcase}
             action={
-              <Link href="/student/placements" className="text-xs font-semibold text-sgvu-navy hover:underline">
+              canOpen('/student/placements') && <Link href="/student/placements" className="text-xs font-semibold text-sgvu-navy hover:underline">
                 Placements hub
               </Link>
             }
           >
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            {dataMessage('placements') ? <StudentEmptyState title={dataMessage('placements')!} className="py-6" /> : <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
               {[
                 { label: 'Eligible Companies', value: openDrives },
                 { label: 'Applications', value: applications },
@@ -1158,8 +1284,8 @@ export function StudentEnterpriseDashboard() {
                   </p>
                 </Link>
               ))}
-            </div>
-            {openDrives === 0 && applications === 0 ? (
+            </div>}
+            {!dataMessage('placements') && openDrives === 0 && applications === 0 ? (
               <div className="mt-4">
                 <StudentEmptyState
                   icon={Briefcase}
@@ -1177,6 +1303,7 @@ export function StudentEnterpriseDashboard() {
           <Panel title="Quick Actions" description="Common student tasks" icon={Download}>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-1">
               {QUICK_ACTIONS.map((action) => {
+                if ('href' in action && !canOpen(action.href)) return null;
                 const Icon = action.icon;
                 const className =
                   'group flex w-full items-center gap-3 rounded-xl border border-sgvu-navy/10 bg-white px-3 py-2.5 text-left transition hover:-translate-y-0.5 hover:border-sgvu-gold/40 hover:bg-sgvu-gold/5 hover:shadow-sm active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sgvu-gold/50';

@@ -13,8 +13,15 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { LibraryService } from './library.service';
+import { requireTenantId } from '../../common/utils/require-tenant-id';
+import { rolesIntersect } from '../../common/config/campus-admin.roles';
 
-type AuthUser = { user_id: string; tenant_id?: string };
+type AuthUser = {
+  user_id: string;
+  tenant_id?: string;
+  role?: string;
+  roles?: string[];
+};
 
 @Controller('api/library')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -22,7 +29,7 @@ export class LibraryController {
   constructor(private readonly library: LibraryService) {}
 
   private tenant(req: { user: AuthUser }) {
-    return req.user.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
+    return requireTenantId(req.user.tenant_id);
   }
 
   @Get('search')
@@ -93,7 +100,25 @@ export class LibraryAdminController {
   constructor(private readonly library: LibraryService) {}
 
   private tenant(req: { user: AuthUser }) {
-    return req.user.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
+    return requireTenantId(req.user.tenant_id);
+  }
+
+  private async gateUser(
+    req: { user: AuthUser },
+    dto: { user_id?: string; barcode?: string },
+  ): Promise<string> {
+    const tenantId = this.tenant(req);
+    const canSelectPatron = rolesIntersect(
+      [...(req.user.roles ?? []), ...(req.user.role ? [req.user.role] : [])],
+      ['Librarian', 'SuperAdmin'],
+    );
+    if (!canSelectPatron) return req.user.user_id;
+    // Resolve even explicit IDs so a librarian cannot create a cross-tenant entry.
+    const patron = (await this.library.resolveUserByBarcode(
+      tenantId,
+      dto.user_id ?? dto.barcode ?? req.user.user_id,
+    )) as { user_id: string };
+    return patron.user_id;
   }
 
   @Get('patron-lookup')
@@ -171,14 +196,7 @@ export class LibraryAdminController {
     @Body() dto: { user_id?: string; barcode?: string },
   ) {
     const tenantId = this.tenant(req);
-    const userId =
-      dto.user_id ??
-      (
-        await this.library.resolveUserByBarcode(
-          tenantId,
-          dto.barcode ?? req.user.user_id,
-        )
-      ).user_id;
+    const userId = await this.gateUser(req, dto);
     return this.library.gateCheckIn(tenantId, userId);
   }
 
@@ -189,15 +207,9 @@ export class LibraryAdminController {
     @Body() dto: { user_id?: string; barcode?: string },
   ) {
     const tenantId = this.tenant(req);
-    const userId =
-      dto.user_id ??
-      (
-        await this.library.resolveUserByBarcode(
-          tenantId,
-          dto.barcode ?? req.user.user_id,
-        )
-      ).user_id;
-    return this.library.gateCheckOut(tenantId, userId);
+    const userId = await this.gateUser(req, dto);
+    const visit: unknown = await this.library.gateCheckOut(tenantId, userId);
+    return visit;
   }
 
   @Get('gate/stats')

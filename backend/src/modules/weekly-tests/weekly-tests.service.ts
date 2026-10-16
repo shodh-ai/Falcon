@@ -8,6 +8,24 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
+import { requireTenantId } from '../../common/utils/require-tenant-id';
+
+type StudentWeeklyTest = {
+  test_id: string;
+  course_id: string;
+  test_type: string;
+  question_paper_url: string;
+  start_time: Date | string;
+  end_time: Date | string;
+  status: string;
+  is_active: boolean;
+};
+
+type StudentTestResponse = {
+  submitted_at: Date | string | null;
+  answers: string[] | string | null;
+  score: number | string | null;
+};
 
 @Injectable()
 export class WeeklyTestsService {
@@ -204,26 +222,42 @@ export class WeeklyTestsService {
       `SELECT t.test_id, t.course_id, c.course_code, c.course_name, t.test_type, t.start_time, t.end_time, t.status, t.is_active,
               r.submitted_at
        FROM weekly_tests t
-       JOIN student_course_enrollments e ON e.course_id = t.course_id AND e.student_user_id = $2
-       JOIN academic_courses c ON c.course_id = t.course_id
+       JOIN academic_courses c ON c.course_id = t.course_id AND c.tenant_id = t.tenant_id
        LEFT JOIN weekly_test_responses r ON r.test_id = t.test_id AND r.student_user_id = $2
        WHERE t.tenant_id = $1 AND t.status IN ('SCHEDULED', 'ACTIVE', 'COMPLETED')
+         AND EXISTS (SELECT 1 FROM student_course_enrollments e
+           WHERE e.course_id = t.course_id AND e.tenant_id = t.tenant_id
+             AND e.student_user_id = $2 AND e.status = 'ENROLLED' AND e.deleted_at IS NULL)
        ORDER BY t.start_time ASC`,
-      [tenantId, studentId],
+      [requireTenantId(tenantId), studentId],
     );
   }
 
   async getTestForAttempt(tenantId: string, studentId: string, testId: string) {
-    const test = await this.dataSource.query(
+    const test = await this.dataSource.query<StudentWeeklyTest[]>(
       `SELECT t.test_id, t.course_id, t.test_type, t.question_paper_url, t.start_time, t.end_time, t.status, t.is_active
        FROM weekly_tests t
-       JOIN student_course_enrollments e ON e.course_id = t.course_id AND e.student_user_id = $2
-       WHERE t.test_id = $3 AND t.tenant_id = $1`,
-      [tenantId, studentId, testId],
+       JOIN academic_courses c ON c.course_id = t.course_id AND c.tenant_id = t.tenant_id
+       WHERE t.test_id = $3 AND t.tenant_id = $1
+         AND EXISTS (SELECT 1 FROM student_course_enrollments e
+           WHERE e.course_id = t.course_id AND e.tenant_id = t.tenant_id
+             AND e.student_user_id = $2 AND e.status = 'ENROLLED' AND e.deleted_at IS NULL)`,
+      [requireTenantId(tenantId), studentId, testId],
     );
 
     if (!test.length) throw new NotFoundException('Test not found');
     const testData = test[0];
+    this.assertStudentTestOpen(testData);
+
+    const resp = await this.getStudentResponse(tenantId, studentId, testId);
+    if (resp?.submitted_at) {
+      throw new BadRequestException('Test already submitted');
+    }
+
+    return testData;
+  }
+
+  private assertStudentTestOpen(testData: StudentWeeklyTest) {
     if (!testData.is_active) {
       throw new BadRequestException('Test is currently inactive');
     }
@@ -231,19 +265,39 @@ export class WeeklyTestsService {
     if (new Date(testData.start_time) > now) {
       throw new BadRequestException('Test has not started yet');
     }
-    if (new Date(testData.end_time) < now || testData.status === 'COMPLETED') {
+    if (
+      new Date(testData.end_time) <= now ||
+      !['SCHEDULED', 'ACTIVE'].includes(testData.status)
+    ) {
       throw new BadRequestException('Test has ended');
     }
+  }
 
-    const resp = await this.dataSource.query(
-      `SELECT submitted_at FROM weekly_test_responses WHERE test_id = $1 AND student_user_id = $2`,
-      [testId, studentId],
+  private async getStudentResponse(
+    tenantId: string,
+    studentId: string,
+    testId: string,
+  ) {
+    const responses = await this.dataSource.query<StudentTestResponse[]>(
+      `SELECT r.submitted_at, r.answers, r.score FROM weekly_test_responses r
+       JOIN weekly_tests t ON t.test_id = r.test_id AND t.tenant_id = $3
+       WHERE r.test_id = $1 AND r.student_user_id = $2`,
+      [testId, studentId, tenantId],
     );
-    if (resp.length && resp[0].submitted_at) {
-      throw new BadRequestException('Test already submitted');
-    }
+    return responses[0];
+  }
 
-    return testData;
+  private submittedResult(response: StudentTestResponse, answers: string[]) {
+    const savedAnswers: unknown =
+      typeof response.answers === 'string'
+        ? JSON.parse(response.answers)
+        : response.answers;
+    if (JSON.stringify(savedAnswers) !== JSON.stringify(answers)) {
+      throw new BadRequestException(
+        'Test already submitted; answers cannot be changed',
+      );
+    }
+    return { success: true, score: Number(response.score ?? 0) };
   }
 
   async submitTest(
@@ -252,11 +306,37 @@ export class WeeklyTestsService {
     testId: string,
     data: { answers: string[]; violation_count: number },
   ) {
-    const test = await this.dataSource.query(
-      `SELECT answer_key, end_time FROM weekly_tests WHERE test_id = $1 AND tenant_id = $2`,
-      [testId, tenantId],
+    const tid = requireTenantId(tenantId);
+    if (
+      !data ||
+      !Array.isArray(data.answers) ||
+      !data.answers.every((answer) => typeof answer === 'string') ||
+      !Number.isInteger(data.violation_count) ||
+      data.violation_count < 0
+    ) {
+      throw new BadRequestException(
+        'Valid answers and violation count are required',
+      );
+    }
+    const test = await this.dataSource.query<
+      Array<StudentWeeklyTest & { answer_key: string[] | string | null }>
+    >(
+      `SELECT t.test_id, t.course_id, t.test_type, t.question_paper_url,
+              t.answer_key, t.start_time, t.end_time, t.status, t.is_active
+       FROM weekly_tests t
+       JOIN academic_courses c ON c.course_id = t.course_id AND c.tenant_id = t.tenant_id
+       WHERE t.test_id = $1 AND t.tenant_id = $2
+         AND EXISTS (SELECT 1 FROM student_course_enrollments e
+           WHERE e.course_id = t.course_id AND e.tenant_id = t.tenant_id
+             AND e.student_user_id = $3 AND e.status = 'ENROLLED' AND e.deleted_at IS NULL)`,
+      [testId, tid, studentId],
     );
     if (!test.length) throw new NotFoundException('Test not found');
+
+    const previous = await this.getStudentResponse(tid, studentId, testId);
+    if (previous?.submitted_at)
+      return this.submittedResult(previous, data.answers);
+    this.assertStudentTestOpen(test[0]);
 
     const answerKey = Array.isArray(test[0].answer_key)
       ? (test[0].answer_key as string[])
@@ -266,24 +346,37 @@ export class WeeklyTestsService {
       if (data.answers[i] === answerKey[i]) score += 1;
     }
 
-    await this.dataSource.query(
+    const inserted = await this.dataSource.query<
+      Array<{ score: number | string }>
+    >(
       `INSERT INTO weekly_test_responses (test_id, student_user_id, answers, score, submitted_at, violation_count)
-       VALUES ($1, $2, $3, $4, NOW(), $5)
-       ON CONFLICT (test_id, student_user_id) DO UPDATE SET
-         answers = EXCLUDED.answers,
-         score = EXCLUDED.score,
-         submitted_at = NOW(),
-         violation_count = EXCLUDED.violation_count`,
+       SELECT t.test_id, $2::uuid, $3::jsonb, $4, clock_timestamp(), $5
+       FROM weekly_tests t
+       JOIN academic_courses c ON c.course_id = t.course_id AND c.tenant_id = t.tenant_id
+       WHERE t.test_id = $1 AND t.tenant_id = $6
+         AND t.is_active = true AND t.status IN ('SCHEDULED', 'ACTIVE')
+         AND t.start_time <= clock_timestamp() AND t.end_time > clock_timestamp()
+         AND EXISTS (SELECT 1 FROM student_course_enrollments e
+           WHERE e.course_id = t.course_id AND e.tenant_id = t.tenant_id
+             AND e.student_user_id = $2 AND e.status = 'ENROLLED' AND e.deleted_at IS NULL)
+       FOR SHARE OF t
+       ON CONFLICT (test_id, student_user_id) DO NOTHING
+       RETURNING score`,
       [
         testId,
         studentId,
         JSON.stringify(data.answers),
         score,
         data.violation_count,
+        tid,
       ],
     );
 
-    return { success: true, score };
+    if (inserted[0]) return { success: true, score: Number(inserted[0].score) };
+    // A competing request may have submitted while the first read was in flight.
+    const saved = await this.getStudentResponse(tid, studentId, testId);
+    if (saved?.submitted_at) return this.submittedResult(saved, data.answers);
+    throw new BadRequestException('Test is no longer available for submission');
   }
 
   @Cron(CronExpression.EVERY_MINUTE)
@@ -305,15 +398,17 @@ export class WeeklyTestsService {
       for (const t of testsToPublish) {
         const missingStudents = await this.dataSource.query(
           `SELECT e.student_user_id FROM student_course_enrollments e
-           WHERE e.course_id = $1
+           WHERE e.course_id = $1 AND e.tenant_id = $3
+             AND e.status = 'ENROLLED' AND e.deleted_at IS NULL
              AND NOT EXISTS (SELECT 1 FROM weekly_test_responses r WHERE r.test_id = $2 AND r.student_user_id = e.student_user_id)`,
-          [t.course_id, t.test_id],
+          [t.course_id, t.test_id, t.tenant_id],
         );
 
         for (const s of missingStudents) {
           await this.dataSource.query(
             `INSERT INTO weekly_test_responses (test_id, student_user_id, answers, score, submitted_at, violation_count)
-             VALUES ($1, $2, '[]'::jsonb, 0, NOW(), 0)`,
+             VALUES ($1, $2, '[]'::jsonb, 0, NOW(), 0)
+             ON CONFLICT (test_id, student_user_id) DO NOTHING`,
             [t.test_id, s.student_user_id],
           );
         }

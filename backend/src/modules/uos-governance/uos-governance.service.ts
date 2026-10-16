@@ -8,6 +8,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { DofaEngineService } from '../dofa-engine/dofa-engine.service';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
+import { resolveDeanScope } from '../academics/dean-scope.util';
 
 @Injectable()
 export class UosGovernanceService {
@@ -615,10 +616,18 @@ export class UosGovernanceService {
     ]));
   }
 
-  listCurriculum(tenantId?: string) {
+  async listCurriculum(
+    tenantId: string | undefined,
+    userId: string,
+    roleName: string,
+  ) {
+    const tid = this.tenant(tenantId);
+    if (roleName === 'Dean') {
+      return this.listDeanCurriculum(tid, userId);
+    }
     return this.db.query(
       `SELECT * FROM sis_curriculum_proposals WHERE tenant_id = $1 ORDER BY created_at DESC`,
-      [this.tenant(tenantId)],
+      [tid],
     );
   }
 
@@ -664,6 +673,9 @@ export class UosGovernanceService {
     );
     const p = rows[0];
     if (!p) throw new NotFoundException('Curriculum proposal not found');
+    if (roleName === 'Dean') {
+      await this.assertDeanCanAccessCurriculum(tid, userId, proposalId);
+    }
     if (p.status !== 'PENDING_BOS') {
       throw new BadRequestException('Not awaiting BoS signatures');
     }
@@ -689,24 +701,92 @@ export class UosGovernanceService {
   async finalizeCurriculum(
     tenantId: string | undefined,
     userId: string,
+    roleName: string,
     proposalId: string,
   ) {
+    const tid = this.tenant(tenantId);
+    if (roleName === 'Dean') {
+      await this.assertDeanCanAccessCurriculum(tid, userId, proposalId);
+    }
     const out = await this.db.query(
       `UPDATE sis_curriculum_proposals
        SET status = 'APPROVED', dean_by = $2, dean_at = NOW(), updated_at = NOW()
        WHERE proposal_id = $1 AND tenant_id = $3 AND status = 'PENDING_DEAN'
        RETURNING *`,
-      [proposalId, userId, this.tenant(tenantId)],
+      [proposalId, userId, tid],
     );
     if (!out[0]) throw new BadRequestException('Not ready for Dean finalize');
     await this.recordEvidence(
-      this.tenant(tenantId),
+      tid,
       'SIS',
       proposalId,
       'Curriculum BoS approved',
       { title: out[0].title },
     );
     return out[0];
+  }
+
+  private async listDeanCurriculum(tenantId: string, deanUserId: string) {
+    const { schoolIds, departmentIds } = await resolveDeanScope(
+      this.db,
+      deanUserId,
+    );
+    if (!schoolIds.length && !departmentIds.length) return [];
+
+    return this.db.query(
+      `SELECT cp.*
+       FROM sis_curriculum_proposals cp
+       JOIN iam_programs p
+         ON p.program_code IS NOT NULL
+        AND cp.program_code IS NOT NULL
+        AND upper(BTRIM(p.program_code)) = upper(BTRIM(cp.program_code))
+        AND p.deleted_at IS NULL
+       LEFT JOIN departments d ON d.dept_id = p.dept_id
+       WHERE cp.tenant_id = $1
+         AND (
+           p.school_id = ANY($2::int[])
+           OR p.dept_id = ANY($3::int[])
+           OR d.school_id = ANY($2::int[])
+         )
+       ORDER BY cp.created_at DESC`,
+      [tenantId, schoolIds, departmentIds],
+    );
+  }
+
+  private async assertDeanCanAccessCurriculum(
+    tenantId: string,
+    deanUserId: string,
+    proposalId: string,
+  ) {
+    const { schoolIds, departmentIds } = await resolveDeanScope(
+      this.db,
+      deanUserId,
+    );
+    if (!schoolIds.length && !departmentIds.length) {
+      throw new ForbiddenException('This curriculum proposal is not in your scope.');
+    }
+
+    const rows = await this.db.query(
+      `SELECT cp.proposal_id
+       FROM sis_curriculum_proposals cp
+       JOIN iam_programs p
+         ON p.program_code IS NOT NULL
+        AND cp.program_code IS NOT NULL
+        AND upper(BTRIM(p.program_code)) = upper(BTRIM(cp.program_code))
+        AND p.deleted_at IS NULL
+       LEFT JOIN departments d ON d.dept_id = p.dept_id
+       WHERE cp.proposal_id = $1
+         AND cp.tenant_id = $2
+         AND (
+           p.school_id = ANY($3::int[])
+           OR p.dept_id = ANY($4::int[])
+           OR d.school_id = ANY($3::int[])
+         )`,
+      [proposalId, tenantId, schoolIds, departmentIds],
+    );
+    if (!rows[0]) {
+      throw new ForbiddenException('This curriculum proposal is not in your scope.');
+    }
   }
 
   // --- Legal MOU ---

@@ -8,7 +8,7 @@ async function bootstrap() {
   const app = await NestFactory.createApplicationContext(AppModule);
   const db = app.get(DataSource);
   
-  const rows = await db.query(`SELECT user_id FROM users WHERE official_email = 'student4@mygyanvihar.com'`);
+  const rows = await db.query(`SELECT user_id, tenant_id FROM users WHERE official_email = 'student4@mygyanvihar.com'`);
   const studentUserId = rows[0]?.user_id;
   
   // Check what's in DB
@@ -31,7 +31,7 @@ async function bootstrap() {
   
   const examsService = app.get(ExamsService);
   try {
-    const pdfBuffer = await examsService.generateAdmitCardOrThrow(studentUserId);
+    const pdfBuffer = await examsService.generateAdmitCardOrThrow(studentUserId, rows[0]?.tenant_id);
     fs.writeFileSync('test-admit-card.pdf', pdfBuffer);
     console.log('PDF saved! Size:', pdfBuffer.length);
   } catch (err: any) {

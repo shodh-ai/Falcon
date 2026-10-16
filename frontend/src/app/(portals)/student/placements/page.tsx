@@ -249,8 +249,7 @@ export default function StudentPlacementsPage() {
     [fetchDriveEligibility, hub?.placement_lock, hub?.student_backlogs, hub?.student_cgpa, usingDemoData],
   );
 
-  const load = useCallback(async () => {
-    setHubDegraded(false);
+  const load = useCallback(() => {
     const emptyHub = (): PlacementHub => ({
       open_drives: [],
       my_applications: [],
@@ -260,8 +259,8 @@ export default function StudentPlacementsPage() {
     });
     const fallbackHub = () => (demoOn ? buildDemoHub(readDemoApps()) : emptyHub());
 
-    try {
-      const data = await api.get<PlacementHub>('/api/placement/student/hub');
+    return api.get<PlacementHub>('/api/placement/student/hub').then((data) => {
+      setHubDegraded(false);
       if (!data.open_drives?.length && demoOn) {
         setUsingDemoData(true);
         setHub(fallbackHub());
@@ -275,7 +274,7 @@ export default function StudentPlacementsPage() {
         const match = pool.find((d) => d.drive_id === driveParam);
         if (match) setSelectedDrive(match);
       }
-    } catch {
+    }).catch(async () => {
       setHubDegraded(true);
       try {
         const fallback = await api.get<{
@@ -318,7 +317,7 @@ export default function StudentPlacementsPage() {
         setUsingDemoData(demoOn);
         setHub(fallbackHub());
       }
-    }
+    });
   }, [api, demoOn, searchParams, enrichDrivesWithEligibility]);
 
   useEffect(() => {
