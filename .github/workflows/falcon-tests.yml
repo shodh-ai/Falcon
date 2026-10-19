@@ -138,6 +138,10 @@ jobs:
         working-directory: tests
         run: npm run test:ci
 
+      - name: Test HR correction email against PostgreSQL and TypeORM
+        working-directory: backend
+        run: node scripts/test-staff-review-email-driver.cjs
+
       - name: Upload coverage (unit)
         if: always()
         uses: actions/upload-artifact@v4
