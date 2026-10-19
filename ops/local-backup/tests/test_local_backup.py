@@ -235,8 +235,70 @@ class FinalizationTests(unittest.TestCase):
         with gzip.open(self.stage / 'uploads.tar.gz', 'wb') as stream:
             stream.write(header.tobuf(format=tarfile.GNU_FORMAT))
             stream.write(b'x' * header.size)
-        with self.assertRaisesRegex(backup.BackupError, 'Only USTAR'):
+        with self.assertRaisesRegex(backup.BackupError, 'oversized GNU longname'):
             backup.inspect_upload_archive(self.stage / 'uploads.tar.gz', 1024)
+
+    def longname_archive(self, name, following_name=None, orphan=False, repeat=False, payload=None):
+        import gzip
+        raw = name.encode('utf-8')
+        payload = payload if payload is not None else raw + b'\0'
+        extension = tarfile.TarInfo('././@LongLink')
+        extension.type = tarfile.GNUTYPE_LONGNAME
+        extension.size = len(payload)
+        block = extension.tobuf(format=tarfile.GNU_FORMAT) + payload + b'\0' * ((-len(payload)) % 512)
+        with gzip.open(self.stage / 'uploads.tar.gz', 'wb') as stream:
+            stream.write(block)
+            if repeat:
+                stream.write(block)
+            if not orphan:
+                member = tarfile.TarInfo(following_name if following_name is not None else raw[:100].decode('ascii'))
+                member.size = len(self.contents)
+                stream.write(member.tobuf(format=tarfile.GNU_FORMAT))
+                stream.write(self.contents)
+                stream.write(b'\0' * ((-len(self.contents)) % 512))
+            stream.write(b'\0' * 1024)
+
+    def test_bounded_gnu_longname_and_matching_inventory_finalize(self):
+        name = 'a' * 200 + '.pdf'
+        self.longname_archive(name)
+        digest = hashlib.sha256(self.contents).hexdigest().encode()
+        for inventory in ('uploads-before.sha256', 'uploads-after.sha256'):
+            (self.stage / inventory).write_bytes(digest + b'  /source/' + name.encode() + b'\0')
+        manifest = backup.finalize(self.c, self.run_id)
+        self.assertEqual(manifest['uploads']['file_sha256'], {name: digest.decode()})
+
+    def test_gnu_longname_mismatched_next_header_refused(self):
+        self.longname_archive('a' * 200, following_name='wrong')
+        with self.assertRaisesRegex(backup.BackupError, 'does not match'):
+            backup.inspect_upload_archive(self.stage / 'uploads.tar.gz', 1024)
+
+    def test_gnu_longname_orphan_and_repeat_refused(self):
+        for kwargs in ({'orphan': True}, {'repeat': True}):
+            self.longname_archive('a' * 200, **kwargs)
+            with self.assertRaises(backup.BackupError):
+                backup.inspect_upload_archive(self.stage / 'uploads.tar.gz', 1024)
+
+    def test_gnu_longname_unsafe_or_bad_termination_refused(self):
+        cases = [('a' * 200, b'a' * 200),
+                 ('a' * 200, b'a' * 200 + b'\0extra\0'),
+                 ('../' + 'a' * 200, None),
+                 ('/' + 'a' * 200, None),
+                 ('a' * 199 + '\n', None),
+                 ('a' * 199 + '\x7f', None),
+                 ('a' * 200, b'\xff' * 200 + b'\0')]
+        for name, payload in cases:
+            self.longname_archive(name, following_name='unused', payload=payload)
+            with self.assertRaises(backup.BackupError):
+                backup.inspect_upload_archive(self.stage / 'uploads.tar.gz', 1024)
+
+    def test_gnu_longname_actual_utf8_prefix_can_end_inside_codepoint(self):
+        name = '\u092a' * 60 + '.pdf'
+        with tarfile.open(self.stage / 'uploads.tar.gz', 'w:gz', format=tarfile.GNU_FORMAT) as stream:
+            item = tarfile.TarInfo(name)
+            item.size = len(self.contents)
+            stream.addfile(item, io.BytesIO(self.contents))
+        result = backup.inspect_upload_archive(self.stage / 'uploads.tar.gz', 1024)
+        self.assertIn(name, result['file_sha256'])
 
     def test_ordinary_busybox_gnu_headers_accepted(self):
         with tarfile.open(self.stage / 'uploads.tar.gz', 'w:gz', format=tarfile.GNU_FORMAT) as stream:

@@ -56,7 +56,8 @@ COPY --from=builder /app/data ./data
 # pip and pypdf in every API image only increases deploy/unpack pressure.
 RUN mkdir -p /app/uploads && chown node:node /app/uploads
 
-USER node
+# Explicit numeric identity for deployment inspection and upload ACL review.
+USER 1000:1000
 
 EXPOSE 4000
 

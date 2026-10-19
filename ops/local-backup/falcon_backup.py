@@ -302,6 +302,7 @@ def inspect_upload_archive(path, max_bytes, max_members=10000, guard=None):
     """
     total, count, seen = 0, 0, set()
     files = {}
+    pending_longname = None
     deadline = time.monotonic() + 120
     expanded = 0
     with gzip.open(path, 'rb') as compressed:
@@ -324,6 +325,8 @@ def inspect_upload_archive(path, max_bytes, max_members=10000, guard=None):
             if len(header) != 512:
                 raise BackupError('Truncated USTAR header')
             if header == b'\0' * 512:
+                if pending_longname is not None:
+                    raise BackupError('Orphan GNU longname record')
                 if read(512) != b'\0' * 512:
                     raise BackupError('Invalid USTAR end marker')
                 # Consume through gzip EOF/CRC without permitting hidden members.
@@ -340,8 +343,9 @@ def inspect_upload_archive(path, max_bytes, max_members=10000, guard=None):
             gnu = header[257:265] == b'ustar  \0'
             # BusyBox emits ordinary GNU headers. Its tail must be zero here:
             # never interpret GNU sparse/extended fields as a POSIX path prefix.
+            kind = header[156:157]
             if (not (posix or gnu) or (gnu and any(header[345:512]))
-                    or header[156:157] not in (b'0', b'\0', b'5')):
+                    or kind not in (b'0', b'\0', b'5', b'L')):
                 raise BackupError('Only USTAR regular files/directories are accepted')
             try:
                 checksum_text = header[148:156].strip(b'\0 ')
@@ -352,16 +356,46 @@ def inspect_upload_archive(path, max_bytes, max_members=10000, guard=None):
                 size = int(size_text, 8)
                 name = header[:100].split(b'\0', 1)[0]
                 prefix = header[345:500].split(b'\0', 1)[0] if posix else b''
-                member_name = ((prefix + b'/') if prefix else b'') + name
-                member_name = member_name.decode('utf-8', 'strict')
+                raw_member_name = ((prefix + b'/') if prefix else b'') + name
             except (ValueError, UnicodeError):
                 raise BackupError('Invalid USTAR metadata')
             if sum(header[:148]) + 256 + sum(header[156:]) != checksum:
                 raise BackupError('Invalid USTAR header checksum')
+            if kind == b'L':
+                # Check BEFORE reading extension data. Never delegate metadata
+                # parsing to tarfile or allocate according to an arbitrary size.
+                if not gnu or pending_longname is not None or not 100 < size <= 4096:
+                    raise BackupError('Invalid, repeated or oversized GNU longname')
+                payload = read(size)
+                if len(payload) != size or not payload.endswith(b'\0') or b'\0' in payload[:-1]:
+                    raise BackupError('GNU longname must have exactly one terminating NUL')
+                padding = (512 - size % 512) % 512
+                if read(padding) != b'\0' * padding:
+                    raise BackupError('Invalid GNU longname padding')
+                try:
+                    longname = payload[:-1].decode('utf-8', 'strict')
+                except UnicodeError:
+                    raise BackupError('GNU longname is not valid UTF-8')
+                parts = PurePosixPath(longname).parts
+                if (not parts or longname.startswith('/') or '..' in parts or '\\' in longname
+                        or any(ord(char) < 32 or 127 <= ord(char) <= 159 for char in longname)):
+                    raise BackupError('Unsafe GNU longname path')
+                pending_longname = (payload[:-1], longname)
+                continue
+            try:
+                if pending_longname is not None:
+                    raw_longname, member_name = pending_longname
+                    if not gnu or raw_member_name != raw_longname[:100]:
+                        raise BackupError('GNU longname does not match the following header')
+                    pending_longname = None
+                else:
+                    member_name = raw_member_name.decode('utf-8', 'strict')
+            except UnicodeError:
+                raise BackupError('Invalid USTAR path encoding')
             count += 1
             parts = PurePosixPath(member_name).parts
             key = '/'.join(parts)
-            is_file = header[156:157] in (b'0', b'\0')
+            is_file = kind in (b'0', b'\0')
             if (count > max_members or member_name.startswith('/') or '..' in parts
                     or '\\' in member_name or key in seen or (is_file and not key)
                     or any(ord(char) < 32 for char in member_name) or (not is_file and size)):
