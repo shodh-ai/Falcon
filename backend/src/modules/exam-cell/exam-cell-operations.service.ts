@@ -9,6 +9,7 @@ import { AttendanceEligibilityService } from '../attendance-policy/attendance-el
 import { FinanceService } from '../finance/finance.service';
 import { ExamCellAuditService } from './exam-cell-audit.service';
 import { NotificationDispatchService } from '../../core/notifications/notification-dispatch.service';
+import { SemesterResultsService } from './semester-results.service';
 
 @Injectable()
 export class ExamCellOperationsService {
@@ -18,6 +19,7 @@ export class ExamCellOperationsService {
     private readonly finance: FinanceService,
     private readonly audit: ExamCellAuditService,
     private readonly notificationDispatch: NotificationDispatchService,
+    private readonly semesterResults: SemesterResultsService,
   ) {}
 
   private async queryOrEmpty<T extends Record<string, unknown>>(
@@ -461,28 +463,21 @@ export class ExamCellOperationsService {
   async getReportsSummary(tenantId: string, semester?: number) {
     const sem = semester ?? 4;
     const [passFail, topRankers, deptStats, backlogCount] = await Promise.all([
-      this.queryOrEmpty<{ label: string; count: number }>(
-        `SELECT ser.status AS label, COUNT(*)::int AS count
+      this.db.query<Array<{ label: string; count: number }>>(
+        `SELECT ser.result_status AS label, COUNT(*)::int AS count
          FROM student_exam_reports ser
-         JOIN exam_result_sessions ers ON ers.session_id = ser.session_id
-         WHERE ers.tenant_id = $1 AND ers.semester = $2
-         GROUP BY ser.status`,
+         JOIN exam_result_sessions ers
+           ON ers.session_id = ser.session_id AND ers.tenant_id = ser.tenant_id
+         WHERE ser.tenant_id = $1 AND ers.semester = $2
+           AND ser.declared_at IS NOT NULL AND ers.declared_at IS NOT NULL
+         GROUP BY ser.result_status ORDER BY ser.result_status`,
         [tenantId, sem],
       ),
-      this.queryOrEmpty(
-        `SELECT u.name, sp.enrollment_number, sg.cgpa, sg.sgpa
-         FROM student_grade_cards sg
-         JOIN users u ON u.user_id = sg.student_user_id
-         LEFT JOIN student_profiles sp ON sp.user_id = sg.student_user_id
-         WHERE sg.tenant_id = $1 AND sg.semester = $2
-         ORDER BY sg.cgpa DESC NULLS LAST
-         LIMIT 10`,
-        [tenantId, sem],
-      ),
-      this.queryOrEmpty(
-        `SELECT COALESCE(sp.branch_name, d.dept_name, 'Unknown') AS department, COUNT(*)::int AS students
+      this.semesterResults.topStudents(tenantId, sem, 10),
+      this.db.query(
+        `SELECT COALESCE(sp.branch_name, d.dept_name, 'Unknown') AS department, COUNT(DISTINCT e.student_user_id)::int AS students
          FROM student_course_enrollments e
-         JOIN users u ON u.user_id = e.student_user_id
+         JOIN users u ON u.user_id = e.student_user_id AND u.tenant_id = e.tenant_id
          LEFT JOIN student_profiles sp ON sp.user_id = e.student_user_id
          LEFT JOIN departments d ON d.dept_id = u.dept_id
          WHERE e.tenant_id = $1 AND e.semester = $2
@@ -499,16 +494,21 @@ export class ExamCellOperationsService {
     ]);
 
     const totalPublished = passFail.reduce((s, r) => s + r.count, 0);
-    const passed =
-      passFail.find((r) => r.label === 'PASS' || r.label === 'PUBLISHED')
-        ?.count ?? 0;
+    const passed = passFail.find((r) => r.label === 'PASS')?.count ?? 0;
 
     return {
       semester: sem,
       pass_fail: passFail,
       pass_percentage:
         totalPublished > 0 ? Math.round((passed / totalPublished) * 100) : 0,
-      top_rankers: topRankers,
+      // Reuse the Grade Cards & Merit ranking rules; keep this API's shape and
+      // return numbers because the report page formats GPA with toFixed().
+      top_rankers: topRankers.map((row) => ({
+        name: row.student_name,
+        enrollment_number: row.enrollment_number,
+        cgpa: row.cgpa == null ? null : Number(row.cgpa),
+        sgpa: row.sgpa == null ? null : Number(row.sgpa),
+      })),
       department_enrollment: deptStats,
       pending_backlog: backlogCount[0]?.c ?? 0,
     };

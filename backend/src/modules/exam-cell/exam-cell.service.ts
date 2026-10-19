@@ -77,7 +77,6 @@ export class ExamCellService {
       [ufmOpen],
       [duties],
       [invigilatorsToday],
-      [publishedResults],
       [pendingResultSessions],
       [hallTicketsGenerated],
       [studentsEligible],
@@ -149,12 +148,6 @@ export class ExamCellService {
         [tenantId, today],
       ),
       this.queryOrEmpty<{ c: number }>(
-        `SELECT COUNT(*)::int AS c FROM student_exam_reports ser
-         JOIN exam_result_sessions ers ON ers.session_id = ser.session_id
-         WHERE ers.tenant_id = $1 AND ser.status = 'PUBLISHED'`,
-        [tenantId],
-      ),
-      this.queryOrEmpty<{ c: number }>(
         `SELECT COUNT(*)::int AS c FROM exam_result_sessions
          WHERE tenant_id = $1 AND declared_at IS NULL`,
         [tenantId],
@@ -182,15 +175,20 @@ export class ExamCellService {
       ),
     ]);
 
-    const resultStats = await this.queryOrEmpty<{
-      label: string;
-      count: number;
-    }>(
-      `SELECT ser.status AS label, COUNT(*)::int AS count
+    // Outcomes are report records, not workflow stages or unique students.
+    // Use the same declaration boundary as published student result history.
+    // Do not turn a broken reporting query into an apparently empty chart.
+    const resultStats = await this.db.query<
+      Array<{ label: string; count: number }>
+    >(
+      `SELECT ser.result_status AS label, COUNT(*)::int AS count
        FROM student_exam_reports ser
-       JOIN exam_result_sessions ers ON ers.session_id = ser.session_id
-       WHERE ers.tenant_id = $1
-       GROUP BY ser.status`,
+       JOIN exam_result_sessions ers
+         ON ers.session_id = ser.session_id AND ers.tenant_id = ser.tenant_id
+       WHERE ser.tenant_id = $1
+         AND ser.declared_at IS NOT NULL AND ers.declared_at IS NOT NULL
+       GROUP BY ser.result_status
+       ORDER BY ser.result_status`,
       [tenantId],
     );
 
@@ -213,7 +211,7 @@ export class ExamCellService {
       open_ufm_cases: ufmOpen?.c ?? 0,
       invigilation_duties_published: duties?.c ?? 0,
       invigilators_assigned_today: invigilatorsToday?.c ?? 0,
-      published_results: publishedResults?.c ?? 0,
+      published_results: resultStats.reduce((total, row) => total + row.count, 0),
       result_status_chart: resultStats,
     };
   }
