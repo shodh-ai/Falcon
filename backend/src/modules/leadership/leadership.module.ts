@@ -17,9 +17,11 @@ import { AnomalyDetectionProcessor } from './anomaly-detection.processor';
 import { DepartmentScoreService } from './department-score.service';
 import { BudgetFpaModule } from './budget-fpa.module';
 import { OwnerAccessGuard } from '../../common/guards/owner-access.guard';
+import { ScopedSocketModule } from '../../common/websockets/scoped-socket.module';
 
 @Module({
   imports: [
+    ScopedSocketModule,
     BullModule.registerQueue({ name: LEADERSHIP_ANOMALY_QUEUE }),
     TypeOrmModule.forFeature([User]),
     RedisModule,

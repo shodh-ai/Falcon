@@ -1,0 +1,25 @@
+[Unit]
+Description=FALCON local online backup and protected finalization
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=root
+UMask=0077
+RuntimeDirectory=falcon-local-backup
+RuntimeDirectoryMode=0700
+RuntimeDirectoryPreserve=yes
+ExecStart=/usr/bin/python3 -I /opt/falcon-local-backup/falcon_backup.py backup
+TimeoutStartSec=20min
+TimeoutStopSec=30s
+KillMode=mixed
+Nice=15
+IOSchedulingClass=idle
+StandardOutput=journal
+StandardError=journal
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/data/falcon-backups /run/falcon-local-backup /run/docker.sock

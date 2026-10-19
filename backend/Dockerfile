@@ -44,23 +44,25 @@ ENV NODE_ENV=production
 ENV PORT=4000
 ENV NODE_OPTIONS=--max-old-space-size=768
 
-COPY --chown=node:node package.json ./
-COPY --chown=node:node --from=builder /app/node_modules ./node_modules
-COPY --chown=node:node --from=builder /app/dist ./dist
-COPY --chown=node:node --from=builder /app/migrations ./migrations
-COPY --chown=node:node --from=builder /app/scripts ./scripts
-COPY --chown=node:node --from=builder /app/data ./data
+COPY package.json ./
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/migrations ./migrations
+COPY --from=builder /app/scripts ./scripts
+COPY --from=builder /app/data ./data
 
 # PDF-to-CSV department preparation is an offline build/ops task. Production
 # bootstrap consumes committed CSV files with --skip-parse, so shipping Python,
 # pip and pypdf in every API image only increases deploy/unpack pressure.
 RUN mkdir -p /app/uploads && chown node:node /app/uploads
 
+USER node
+
 EXPOSE 4000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=45s --retries=5 \
   CMD node scripts/healthcheck.js
 
-# Apply forward-only, ledgered migrations before accepting traffic. The runner
-# uses a PostgreSQL advisory lock, so parallel replicas cannot race the schema.
-CMD ["sh", "-c", "npm run db:migrate && exec node dist/main.js"]
+# Run node scripts/deploy-migrate.js as a separate deployment job first.
+# Migration credentials must not be present in the API container.
+CMD ["node", "dist/main.js"]

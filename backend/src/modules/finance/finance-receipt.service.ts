@@ -1,4 +1,10 @@
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
@@ -6,6 +12,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { DataSource } from 'typeorm';
 import * as nodemailer from 'nodemailer';
+import { createHash, randomUUID } from 'crypto';
+import { requireTenantId } from '../../common/utils/require-tenant-id';
 import { wrapFalconEmailHtml } from '../../common/email/falcon-email.template';
 import {
   FALCON_EMAIL_FROM,
@@ -30,16 +38,26 @@ export class FinanceReceiptService {
     paymentMode?: string;
     feeHead?: string;
   }): Promise<string> {
+    const tenantId = requireTenantId(params.tenantId);
+    // These identifiers become path components. Never permit traversal or an
+    // absolute path supplied through a future receipt-generation entry point.
+    if (
+      !/^[0-9a-f-]{36}$/i.test(tenantId) ||
+      !/^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$/.test(params.receiptNumber)
+    ) {
+      throw new BadRequestException('Invalid receipt identifiers');
+    }
     const students = await this.dataSource.query(
       `SELECT u.name, u.official_email, sp.enrollment_no
        FROM users u
        LEFT JOIN student_profiles sp ON sp.user_id = u.user_id
-       WHERE u.user_id = $1`,
-      [params.studentUserId],
+       WHERE u.user_id = $1 AND u.tenant_id = $2 AND u.deleted_at IS NULL`,
+      [params.studentUserId, tenantId],
     );
     const student = students[0] as
       | { name: string; official_email: string; enrollment_no: string }
       | undefined;
+    if (!student) throw new NotFoundException('Student not found');
 
     const pdf = await PDFDocument.create();
     const page = pdf.addPage([595, 842]);
@@ -79,7 +97,7 @@ export class FinanceReceiptService {
       size: 10,
       font,
     });
-    page.drawText(`Enrollment: ${student?.enrollment_no ?? '—'}`, {
+    page.drawText(`Enrollment: ${student?.enrollment_no ?? '-'}`, {
       x: 50,
       y: 630,
       size: 10,
@@ -91,7 +109,7 @@ export class FinanceReceiptService {
       size: 10,
       font,
     });
-    page.drawText(`Amount Paid: ₹${params.amount.toFixed(2)}`, {
+    page.drawText(`Amount Paid: INR ${params.amount.toFixed(2)}`, {
       x: 50,
       y: 580,
       size: 12,
@@ -119,23 +137,62 @@ export class FinanceReceiptService {
 
     const bytes = await pdf.save();
     const relDir = path.join(
-      params.tenantId,
+      tenantId,
       'receipts',
       new Date().getFullYear().toString(),
     );
-    const absDir = path.join(process.cwd(), 'uploads', relDir);
+    const uploadRoot = this.config.get<string>('UPLOAD_PATH') ||
+      process.env.UPLOAD_PATH || path.join(process.cwd(), 'uploads');
+    const absDir = path.resolve(uploadRoot, relDir);
     fs.mkdirSync(absDir, { recursive: true });
-    const fileName = `${params.receiptNumber}.pdf`;
+    // Every generation is immutable. Old emailed/downloaded URLs keep working.
+    const fileName = `${params.receiptNumber}-${randomUUID()}.pdf`;
     const absPath = path.join(absDir, fileName);
-    fs.writeFileSync(absPath, bytes);
+    fs.writeFileSync(absPath, bytes, { flag: 'wx' });
     const receiptUrl = `/uploads/${relDir}/${fileName}`.replace(/\\/g, '/');
 
-    await this.dataSource.query(
-      `INSERT INTO finance_auto_receipts (tenant_id, transaction_id, receipt_number, receipt_url)
-       VALUES ($1, $2, $3, $4)
-       ON CONFLICT (tenant_id, receipt_number) DO UPDATE SET receipt_url = EXCLUDED.receipt_url`,
-      [params.tenantId, params.transactionId, params.receiptNumber, receiptUrl],
-    );
+    await this.dataSource.transaction(async (manager) => {
+      const previous = await manager.query<Array<{
+        transaction_id: string;
+        receipt_url: string | null;
+      }>>(
+        `SELECT transaction_id, receipt_url FROM finance_auto_receipts
+         WHERE tenant_id=$1 AND receipt_number=$2 FOR UPDATE`,
+        [tenantId, params.receiptNumber],
+      );
+      if (previous.length && previous[0].transaction_id !== params.transactionId) {
+        throw new ConflictException(
+          'Receipt number already belongs to another transaction',
+        );
+      }
+      if (previous[0]?.receipt_url) {
+        await manager.query(
+          `INSERT INTO finance_receipt_versions (tenant_id, transaction_id, receipt_number, receipt_url, source)
+           VALUES ($1,$2,$3,$4,'LEGACY') ON CONFLICT (tenant_id,transaction_id,receipt_url) DO NOTHING`,
+          [tenantId, params.transactionId, params.receiptNumber,
+            previous[0].receipt_url],
+        );
+      }
+      const changed = await manager.query<Array<{ receipt_id: string }>>(
+        `INSERT INTO finance_auto_receipts (tenant_id, transaction_id, receipt_number, receipt_url)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (tenant_id, receipt_number) DO UPDATE SET receipt_url = EXCLUDED.receipt_url
+         WHERE finance_auto_receipts.transaction_id = EXCLUDED.transaction_id
+         RETURNING receipt_id`,
+        [tenantId, params.transactionId, params.receiptNumber, receiptUrl],
+      );
+      if (!changed.length) {
+        throw new ConflictException(
+          'Receipt number already belongs to another transaction',
+        );
+      }
+      await manager.query(
+        `INSERT INTO finance_receipt_versions (tenant_id, transaction_id, receipt_number, receipt_url, sha256, source)
+         VALUES ($1,$2,$3,$4,$5,'GENERATED')`,
+        [tenantId, params.transactionId, params.receiptNumber, receiptUrl,
+          createHash('sha256').update(bytes).digest('hex')],
+      );
+    });
 
     return receiptUrl;
   }

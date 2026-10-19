@@ -38,6 +38,24 @@ jobs:
           fi
           echo "release_sha=$RELEASE_SHA" >> "$GITHUB_OUTPUT"
 
+      - name: Check out the exact release for access review
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.sha.outputs.release_sha }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.23.3'
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install locked backend review tooling
+        run: npm ci --ignore-scripts --prefix backend
+
+      - name: Block promotion of unreviewed or changed access surfaces
+        working-directory: backend
+        run: node scripts/security/access-surface.cjs --enforce
+
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:

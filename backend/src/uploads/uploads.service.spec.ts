@@ -88,6 +88,16 @@ describe('Student upload download authorization', () => {
     expect(sql).toContain("WHERE tenant_id = $1 AND status = 'ACTIVE'");
   });
 
+  it('keeps historical receipts accessible only through same-tenant student/demand ownership', async () => {
+    query.mockResolvedValue([{ file_reference: `/uploads/${key}` }]);
+    await service.assertStudentDownloadAccess(student, key);
+    const [sql] = query.mock.calls[0] as [string];
+    expect(sql).toContain('FROM finance_receipt_versions v');
+    expect(sql).toContain('t.transaction_id = v.transaction_id AND (t.tenant_id = v.tenant_id OR t.tenant_id IS NULL)');
+    expect(sql).toContain('v.tenant_id = $1 AND t.student_user_id = $2 AND d.student_user_id = $2');
+    expect(sql).toContain("t.status = 'SUCCESS' AND t.deleted_at IS NULL AND d.deleted_at IS NULL");
+  });
+
   it('gives Applicants only owned references without campus policies or test papers', async () => {
     query.mockResolvedValue([{ file_reference: `/uploads/${key}` }]);
     await service.assertStudentDownloadAccess(

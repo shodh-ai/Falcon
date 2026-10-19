@@ -5,7 +5,6 @@ import {
   PutObjectCommand,
   GetObjectCommand,
   HeadBucketCommand,
-  CreateBucketCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { existsSync, mkdirSync, writeFileSync, createReadStream } from 'fs';
@@ -54,14 +53,11 @@ export class ObjectStorageService implements OnModuleInit {
     try {
       await this.client.send(new HeadBucketCommand({ Bucket: this.bucket }));
     } catch {
-      try {
-        await this.client.send(
-          new CreateBucketCommand({ Bucket: this.bucket }),
-        );
-        this.logger.log(`Created bucket: ${this.bucket}`);
-      } catch (err) {
-        this.logger.warn(`Could not ensure bucket ${this.bucket}: ${err}`);
-      }
+      throw new Error(
+        `Configured object-storage bucket "${this.bucket}" is unavailable. ` +
+          'Provision it and grant the API HeadBucket and required object access ' +
+          'before startup; runtime bucket creation is disabled.',
+      );
     }
   }
 

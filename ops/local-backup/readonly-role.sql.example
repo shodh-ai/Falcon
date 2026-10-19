@@ -1,0 +1,16 @@
+-- REVIEW ONLY. No script in this package applies this SQL.
+-- A database administrator must approve the role, set its password through a
+-- protected channel, audit PUBLIC/inherited privileges and test completeness.
+-- Do not paste a password into this file, argv, logs or chat.
+CREATE ROLE falcon_backup LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE
+  NOREPLICATION INHERIT BYPASSRLS;
+GRANT pg_read_all_data TO falcon_backup;
+GRANT CONNECT ON DATABASE postgres, university_governance TO falcon_backup;
+ALTER ROLE falcon_backup SET default_transaction_read_only = on;
+ALTER ROLE falcon_backup SET statement_timeout = '5min';
+ALTER ROLE falcon_backup SET lock_timeout = '5s';
+-- BYPASSRLS is intentional for full tenant coverage; it does NOT grant writes.
+-- The worker additionally refuses CREATE privilege and ordinary table writes.
+-- Do not revoke PUBLIC privileges blindly: that could affect the live app.
+-- pg_dumpall --globals-only --no-role-passwords intentionally omits password
+-- hashes: live credentials must have their own restricted local recovery record.

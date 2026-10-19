@@ -8,6 +8,8 @@ import { LateFinePolicy } from '../../entities/late-fine-policy.entity';
 import { CreateFeeDemandDto } from './dto/create-fee-demand.dto';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 import { requireTenantId } from '../../common/utils/require-tenant-id';
+import { User } from '../../entities/user.entity';
+import { financeTransactionScope } from './finance-transaction-scope';
 
 @Injectable()
 export class FinanceService {
@@ -265,24 +267,62 @@ export class FinanceService {
     this.logger.log(`Late-fee sweep: marked ${rows.length} demands as OVERDUE`);
   }
 
-  listTransactions(studentUserId?: string) {
+  listTransactions(tenantId: string, studentUserId?: string) {
+    const scopedTenantId = requireTenantId(tenantId);
+    const query = this.transactions
+      .createQueryBuilder('t')
+      .withDeleted()
+      .leftJoin(FeeDemand, 'd', 'd.demand_id = t.demand_id')
+      .leftJoin(User, 'u', 'u.user_id = t.student_user_id')
+      .where(financeTransactionScope(':tenantId'), { tenantId: scopedTenantId })
+      .andWhere('t.deleted_at IS NULL')
+      .orderBy('t.created_at', 'DESC');
     if (studentUserId) {
-      return this.transactions.find({
-        where: { student_user_id: studentUserId },
-        order: { created_at: 'DESC' },
-      });
+      query.andWhere('t.student_user_id = :studentUserId', { studentUserId });
     }
-    return this.transactions.find({ order: { created_at: 'DESC' } });
+    return query.getMany();
   }
 
-  async uploadReceipt(transactionId: string, receiptUrl: string) {
-    const result = await this.transactions.update(
-      { transaction_id: transactionId },
-      { receipt_url: receiptUrl },
-    );
-    if (result.affected === 0)
-      throw new BadRequestException('Transaction not found');
-    return { success: true };
+  async uploadReceipt(
+    tenantId: string,
+    transactionId: string,
+    receiptUrl: string,
+    actorId: string,
+  ) {
+    const scopedTenantId = requireTenantId(tenantId);
+    if (typeof receiptUrl !== 'string' || !receiptUrl.trim()) {
+      throw new BadRequestException('Receipt URL required');
+    }
+    return this.transactions.manager.transaction(async (manager) => {
+      const rows = await manager.query<Array<{ receipt_url: string | null }>>(
+        `SELECT t.receipt_url FROM finance_transactions t
+         LEFT JOIN finance_fee_demands d ON d.demand_id=t.demand_id
+         LEFT JOIN users u ON u.user_id=t.student_user_id
+         WHERE t.transaction_id=$1 AND ${financeTransactionScope('$2')}
+           AND t.deleted_at IS NULL FOR UPDATE OF t`,
+        [transactionId, scopedTenantId],
+      );
+      if (!rows.length) throw new BadRequestException('Transaction not found');
+      // Preserve references before replacement; no physical file is removed.
+      if (rows[0].receipt_url) {
+        await manager.query(
+          `INSERT INTO finance_receipt_versions (tenant_id, transaction_id, receipt_url, source)
+           VALUES ($1,$2,$3,'LEGACY') ON CONFLICT (tenant_id,transaction_id,receipt_url) DO NOTHING`,
+          [scopedTenantId, transactionId, rows[0].receipt_url],
+        );
+      }
+      await manager.query(
+        `INSERT INTO finance_receipt_versions (tenant_id, transaction_id, receipt_url, source, actor_user_id)
+         VALUES ($1,$2,$3,'MANUAL',$4) ON CONFLICT (tenant_id,transaction_id,receipt_url) DO NOTHING`,
+        [scopedTenantId, transactionId, receiptUrl, actorId],
+      );
+      await manager.query(
+        `UPDATE finance_transactions SET receipt_url=$3
+         WHERE transaction_id=$1 AND (tenant_id=$2 OR tenant_id IS NULL) AND deleted_at IS NULL`,
+        [transactionId, scopedTenantId, receiptUrl],
+      );
+      return { success: true };
+    });
   }
 
   async listDefaulters() {

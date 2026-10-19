@@ -1,0 +1,128 @@
+-- REVIEW ONLY. No installer or preflight executes this file.
+-- Apply only after isolated restore tests and review of the selected schema.
+-- The dedicated LOGIN role must already exist; provision its password separately.
+-- psql variables required: runtime_role, runtime_schema, runtime_database.
+-- This is a coarse database-object boundary preserving current business DML.
+-- It is NOT the complete tenant/row/role/application capability policy.
+\set ON_ERROR_STOP on
+\if :{?runtime_role}
+\else
+  \echo 'runtime_role is required'
+  \quit 1
+\endif
+\if :{?runtime_schema}
+\else
+  \echo 'runtime_schema is required'
+  \quit 1
+\endif
+\if :{?runtime_database}
+\else
+  \echo 'runtime_database is required'
+  \quit 1
+\endif
+
+BEGIN;
+SELECT set_config('falcon.runtime_role', :'runtime_role', true),
+       set_config('falcon.runtime_schema', :'runtime_schema', true),
+       set_config('falcon.runtime_database', :'runtime_database', true);
+
+DO $boundary$
+DECLARE
+  role_name text := current_setting('falcon.runtime_role');
+  schema_name text := current_setting('falcon.runtime_schema');
+  database_name text := current_setting('falcon.runtime_database');
+  runtime_oid oid;
+  schema_oid oid;
+  role_row record;
+  table_row record;
+  receipt_oid oid;
+BEGIN
+  IF current_database() <> database_name THEN
+    RAISE EXCEPTION 'Wrong database; no boundary changes applied';
+  END IF;
+  SELECT * INTO role_row FROM pg_roles WHERE rolname = role_name;
+  IF NOT FOUND OR NOT role_row.rolcanlogin OR role_row.rolsuper OR
+     role_row.rolcreatedb OR role_row.rolcreaterole OR role_row.rolreplication OR
+     role_row.rolbypassrls OR role_name = current_user THEN
+    RAISE EXCEPTION 'Use an existing dedicated unprivileged LOGIN runtime role';
+  END IF;
+  runtime_oid := role_row.oid;
+  IF EXISTS (SELECT 1 FROM pg_auth_members WHERE member = runtime_oid) THEN
+    RAISE EXCEPTION 'Runtime role memberships require separate review; no grants applied';
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_database WHERE datdba = runtime_oid) OR
+     EXISTS (SELECT 1 FROM pg_namespace WHERE nspowner = runtime_oid) OR
+     EXISTS (SELECT 1 FROM pg_class WHERE relowner = runtime_oid) OR
+     EXISTS (SELECT 1 FROM pg_proc WHERE proowner = runtime_oid) OR
+     EXISTS (SELECT 1 FROM pg_type WHERE typowner = runtime_oid) THEN
+    RAISE EXCEPTION 'Runtime must not own databases, schemas or objects; transfer requires separate review';
+  END IF;
+  SELECT oid INTO schema_oid FROM pg_namespace WHERE nspname = schema_name;
+  IF schema_oid IS NULL OR schema_name ~ '^pg_' OR schema_name = 'information_schema' THEN
+    RAISE EXCEPTION 'Select one existing reviewed application schema';
+  END IF;
+  receipt_oid := to_regclass(format('%I.finance_receipt_versions', schema_name));
+  IF receipt_oid IS NULL THEN
+    RAISE EXCEPTION 'Apply the additive receipt-version migration before preparing this runtime schema';
+  END IF;
+
+  -- Only this role changes. PUBLIC and other application users are untouched.
+  EXECUTE format('REVOKE CREATE ON DATABASE %I FROM %I', database_name, role_name);
+  EXECUTE format('REVOKE CREATE ON SCHEMA %I FROM %I', schema_name, role_name);
+  IF has_database_privilege(runtime_oid, database_name, 'CREATE') OR
+     EXISTS (SELECT 1 FROM pg_namespace n WHERE n.nspname !~ '^pg_' AND
+       n.nspname <> 'information_schema' AND has_schema_privilege(runtime_oid, n.oid, 'CREATE')) THEN
+    RAISE EXCEPTION 'Inherited/PUBLIC CREATE remains; review separately without a global PUBLIC revoke';
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+       WHERE p.prosecdef AND n.nspname !~ '^pg_' AND n.nspname <> 'information_schema'
+       AND has_function_privilege(runtime_oid, p.oid, 'EXECUTE')) THEN
+    RAISE EXCEPTION 'Accessible SECURITY DEFINER functions need separate least-privilege review';
+  END IF;
+
+  EXECUTE format('GRANT CONNECT ON DATABASE %I TO %I', database_name, role_name);
+  EXECUTE format('GRANT USAGE ON SCHEMA %I TO %I', schema_name, role_name);
+  FOR table_row IN SELECT c.relname, c.relkind FROM pg_class c
+       WHERE c.relnamespace=schema_oid AND c.relkind IN ('r','p','v','m','f') LOOP
+    EXECUTE format('REVOKE TRUNCATE, REFERENCES, TRIGGER ON TABLE %I.%I FROM %I',
+                   schema_name, table_row.relname, role_name);
+    IF table_row.relname = 'schema_migrations' THEN
+      EXECUTE format('REVOKE ALL PRIVILEGES ON TABLE %I.%I FROM %I',
+                     schema_name, table_row.relname, role_name);
+      IF has_table_privilege(runtime_oid, format('%I.%I',schema_name,table_row.relname),
+                             'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') THEN
+        RAISE EXCEPTION 'Inherited/PUBLIC migration-ledger writes remain';
+      END IF;
+    ELSIF table_row.relname = 'finance_receipt_versions' THEN
+      EXECUTE format('REVOKE UPDATE, DELETE ON TABLE %I.%I FROM %I',
+                     schema_name, table_row.relname, role_name);
+      EXECUTE format('GRANT SELECT, INSERT ON TABLE %I.%I TO %I',
+                     schema_name, table_row.relname, role_name);
+      IF has_table_privilege(runtime_oid, receipt_oid,
+                            'UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') THEN
+        RAISE EXCEPTION 'Inherited/PUBLIC receipt-history mutation remains';
+      END IF;
+    ELSIF table_row.relkind = 'm' THEN
+      EXECUTE format('GRANT SELECT ON TABLE %I.%I TO %I',
+                     schema_name, table_row.relname, role_name);
+    ELSE
+      EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE %I.%I TO %I',
+                     schema_name, table_row.relname, role_name);
+    END IF;
+  END LOOP;
+  EXECUTE format('REVOKE UPDATE ON ALL SEQUENCES IN SCHEMA %I FROM %I', schema_name, role_name);
+  EXECUTE format('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA %I TO %I', schema_name, role_name);
+  IF EXISTS (SELECT 1 FROM pg_class c WHERE c.relnamespace=schema_oid
+       AND c.relkind IN ('r','p','v','m','f')
+       AND has_table_privilege(runtime_oid, c.oid, 'TRUNCATE,REFERENCES,TRIGGER')) OR
+     EXISTS (SELECT 1 FROM pg_class c WHERE c.relnamespace=schema_oid
+       AND c.relkind='S' AND has_sequence_privilege(runtime_oid, c.oid, 'UPDATE')) THEN
+    RAISE EXCEPTION 'Inherited/PUBLIC elevated table or sequence permissions remain';
+  END IF;
+END
+$boundary$;
+COMMIT;
+
+-- Deliberately no ownership transfer, role elevation, PUBLIC revoke, data write,
+-- new default DML grants, password change or automatic application cutover.
+-- Newly migrated tables require reviewed grants; do not grant ALL to the API.

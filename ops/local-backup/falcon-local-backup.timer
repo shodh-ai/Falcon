@@ -1,0 +1,11 @@
+[Unit]
+Description=FALCON serialized hourly local backup at minute 17
+
+[Timer]
+OnCalendar=*-*-* *:17:00 Asia/Kolkata
+AccuracySec=1min
+Persistent=false
+Unit=falcon-local-backup.service
+
+[Install]
+WantedBy=timers.target
