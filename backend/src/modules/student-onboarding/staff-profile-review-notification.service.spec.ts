@@ -86,6 +86,14 @@ describe('Staff profile correction email', () => {
     );
     expect(query.mock.calls[1][0]).toContain("status = 'SENT'");
     expect(query.mock.calls[0][0]).toContain('FOR UPDATE SKIP LOCKED');
+    expect(query.mock.calls[0][0].trim()).toMatch(/SELECT \* FROM claimed$/);
+  });
+
+  it('does not attempt SMTP when the SELECT claim returns no eligible emails', async () => {
+    const query = jest.fn().mockResolvedValue([]);
+    await new StaffProfileReviewNotificationService({ query } as never, config as never).deliverPending();
+    expect(query).toHaveBeenCalledTimes(1);
+    expect(nodemailer.createTransport).not.toHaveBeenCalled();
   });
 
   it.each(['unavailable', 'rejected'])(

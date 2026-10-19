@@ -107,17 +107,21 @@ export class StaffProfileReviewNotificationService {
     this.running = true;
     try {
       for (let count = 0; count < 10; count++) {
+        // End with SELECT: TypeORM's PostgreSQL driver returns [rows, count]
+        // for UPDATE, even with RETURNING. Delivery requires the actual row.
         const [email] = (await this.db.query(
           `WITH next_email AS (
              SELECT notification_id FROM staff_profile_review_email_outbox
              WHERE status <> 'SENT' AND next_attempt_at <= NOW()
              ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1
+           ), claimed AS (
+             UPDATE staff_profile_review_email_outbox e
+             SET status = 'SENDING', attempts = attempts + 1,
+                 next_attempt_at = NOW() + INTERVAL '5 minutes'
+             FROM next_email n WHERE e.notification_id = n.notification_id
+             RETURNING e.*
            )
-           UPDATE staff_profile_review_email_outbox e
-           SET status = 'SENDING', attempts = attempts + 1,
-               next_attempt_at = NOW() + INTERVAL '5 minutes'
-           FROM next_email n WHERE e.notification_id = n.notification_id
-           RETURNING e.*`,
+           SELECT * FROM claimed`,
         )) as PendingEmail[];
         if (!email) break;
         await this.deliver(email);
