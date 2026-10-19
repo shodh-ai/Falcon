@@ -7,12 +7,17 @@ describe('ExamCellController tenant context', () => {
   function createController() {
     const examCell = {
       listSchedules: jest.fn().mockResolvedValue([]),
+      publishResults: jest.fn(),
+    };
+    const resultControl = {
+      getSessionForCourse: jest.fn(),
+      declareSession: jest.fn(),
     };
     const unused = {};
     return {
       controller: new ExamCellController(
         examCell as never,
-        unused as never,
+        resultControl as never,
         unused as never,
         unused as never,
         unused as never,
@@ -22,6 +27,7 @@ describe('ExamCellController tenant context', () => {
         unused as never,
       ),
       examCell,
+      resultControl,
     };
   }
 
@@ -54,4 +60,23 @@ describe('ExamCellController tenant context', () => {
       expect(examCell.listSchedules).not.toHaveBeenCalled();
     },
   );
+
+  it('passes the authenticated actor to the legacy publication workflow', async () => {
+    const { controller, examCell } = createController();
+    const dto = { course_id: 'course-a', exam_type: 'END_TERM', batch_semester: 4 };
+    examCell.publishResults.mockResolvedValue({ declared: 1 });
+
+    await expect(
+      controller.publishResults(
+        { user: { user_id: 'exam-user', tenant_id: tenantId, role: 'ExamCell' } },
+        dto,
+      ),
+    ).resolves.toEqual({ declared: 1 });
+
+    expect(examCell.publishResults).toHaveBeenCalledWith(
+      tenantId,
+      dto,
+      'exam-user',
+    );
+  });
 });
