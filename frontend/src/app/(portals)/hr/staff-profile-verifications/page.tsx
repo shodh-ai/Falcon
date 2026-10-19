@@ -27,6 +27,9 @@ type Row = {
   status: string;
   onboarding_status: string;
   source: string;
+  revision: number;
+  document_review_status?: string;
+  documents_deferred?: boolean;
 };
 type Detail = {
   review: Omit<Row, "review_id"> & {
@@ -78,6 +81,7 @@ const STATUS: Record<string, string> = {
   RETURNED_FOR_CORRECTION: "Corrections requested",
   APPROVED: "Approved",
   AWAITING_SUBMISSION: "Awaiting submission",
+  DOCUMENTS_PENDING: "Documents pending",
 };
 
 export default function StaffProfileVerificationsPage() {
@@ -94,6 +98,9 @@ export default function StaffProfileVerificationsPage() {
   const [reason, setReason] = useState("");
   const [fields, setFields] = useState<string[]>([]);
   const [documents, setDocuments] = useState<string[]>([]);
+  const [reviewMode, setReviewMode] = useState<"CHECK" | "CORRECT">("CHECK");
+  const [reviewedFields, setReviewedFields] = useState<string[]>([]);
+  const [reviewedDocs, setReviewedDocs] = useState<string[]>([]);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(true);
@@ -118,7 +125,9 @@ export default function StaffProfileVerificationsPage() {
   const visible = rows.filter(
     (row) =>
       (!department || String(row.dept_id) === department) &&
-      (!status || row.status === status) &&
+      (!status || (status === "DOCUMENTS_PENDING"
+        ? row.status === "APPROVED" && row.document_review_status === "PENDING"
+        : row.status === status)) &&
       `${row.name} ${row.official_email}`
         .toLowerCase()
         .includes(search.toLowerCase().trim()),
@@ -135,6 +144,9 @@ export default function StaffProfileVerificationsPage() {
       setReason("");
       setFields([]);
       setDocuments([]);
+      setReviewMode("CHECK");
+      setReviewedFields([]);
+      setReviewedDocs([]);
       setError("");
       setMessage("");
     } catch (cause) {
@@ -145,7 +157,7 @@ export default function StaffProfileVerificationsPage() {
       setBusy(false);
     }
   };
-  const decide = async (action: "approve" | "return") => {
+  const decide = async (action: "approve" | "return" | "verify-documents") => {
     if (!selected) return;
     setBusy(true);
     try {
@@ -153,12 +165,17 @@ export default function StaffProfileVerificationsPage() {
         `/api/hr/staff-profile-reviews/${selected.review.review_id}/${action}`,
         action === "return"
           ? { reason: reason.trim(), fields, documents }
-          : undefined,
+          : action === "verify-documents"
+            ? { reviewed_documents: reviewedDocs }
+            : { defer_documents: true, reviewed_fields: reviewedFields,
+                deferral_reason: "HR approved profile details; document verification deferred until original files are available for inspection." },
       );
       setMessage(
         action === "approve"
-          ? `${selected.review.name}’s profile is approved.`
-          : `Corrections requested from ${selected.review.name}. An email has been queued to ${selected.review.official_email}.`,
+          ? `${selected.review.name}’s profile details are approved and account access is restored. Document verification remains pending.`
+          : action === "verify-documents"
+            ? `${selected.review.name}’s documents are verified. The earlier profile approval is unchanged.`
+            : `Corrections requested from ${selected.review.name}. An email has been queued to ${selected.review.official_email}.`,
       );
       setSelected(null);
       await load();
@@ -187,6 +204,11 @@ export default function StaffProfileVerificationsPage() {
     | undefined;
   const values = { ...selected?.profile, ...qualification };
   const reviewing = canDecide && selected?.review.status === "PENDING_HR";
+  const documentReview = canDecide && selected?.review.status === "APPROVED" && selected.review.document_review_status === "PENDING";
+  const correcting = reviewing && reviewMode === "CORRECT";
+  const changeMode = (mode: "CHECK" | "CORRECT") => {
+    setReviewMode(mode); setFields([]); setDocuments([]); setReviewedFields([]); setReason("");
+  };
 
   return (
     <div className="mx-auto max-w-7xl space-y-5 p-4 sm:p-6">
@@ -194,8 +216,7 @@ export default function StaffProfileVerificationsPage() {
         <div>
           <h1 className="text-2xl font-bold">Staff profile verification</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Review each person’s details and documents. Approve the profile or
-            ask for corrections by email.
+            Approve each person’s profile details or request corrections. Documents can be verified separately later.
           </p>
         </div>
         <Button
@@ -209,8 +230,8 @@ export default function StaffProfileVerificationsPage() {
           Refresh
         </Button>
       </header>
-      <div className="grid gap-3 sm:grid-cols-3">
-        {["PENDING_HR", "RETURNED_FOR_CORRECTION", "APPROVED"].map((key) => (
+      <div className="grid gap-3 sm:grid-cols-4">
+        {["PENDING_HR", "RETURNED_FOR_CORRECTION", "APPROVED", "DOCUMENTS_PENDING"].map((key) => (
           <button
             key={key}
             onClick={() => setStatus(key)}
@@ -221,7 +242,7 @@ export default function StaffProfileVerificationsPage() {
               {
                 rows.filter(
                   (row) =>
-                    row.status === key &&
+                    (key === "DOCUMENTS_PENDING" ? row.status === "APPROVED" && row.document_review_status === "PENDING" : row.status === key) &&
                     (!department || String(row.dept_id) === department),
                 ).length
               }
@@ -308,6 +329,7 @@ export default function StaffProfileVerificationsPage() {
                   <Badge variant="outline">
                     {STATUS[row.status] ?? row.status}
                   </Badge>
+                  {row.document_review_status === "PENDING" && <p className="mt-1 text-xs text-amber-800">Documents not yet verified</p>}
                 </td>
                 <td className="px-4 py-3">
                   {row.review_id ? (
@@ -317,7 +339,7 @@ export default function StaffProfileVerificationsPage() {
                       disabled={busy}
                       onClick={() => void open(row)}
                     >
-                      {row.status === "PENDING_HR" && canDecide
+                      {row.document_review_status === "PENDING" && canDecide ? "Review documents" : row.status === "PENDING_HR" && canDecide
                         ? "Review"
                         : "View"}
                     </Button>
@@ -358,6 +380,18 @@ export default function StaffProfileVerificationsPage() {
               <Badge variant="outline" className="w-fit">
                 {STATUS[selected.review.status] ?? selected.review.status}
               </Badge>
+              {reviewing && (
+                <div className="space-y-3 rounded-lg border bg-blue-50 p-3 text-sm">
+                  <p>Profile details and documents are separate decisions. Approving details restores account access; documents stay pending and are not marked verified.</p>
+                  <div role="group" aria-label="Review action" className="flex flex-wrap gap-2">
+                    <Button size="sm" variant={reviewMode === "CHECK" ? "default" : "outline"} aria-pressed={reviewMode === "CHECK"} onClick={() => changeMode("CHECK")}>Review for approval</Button>
+                    <Button size="sm" variant={reviewMode === "CORRECT" ? "default" : "outline"} aria-pressed={reviewMode === "CORRECT"} onClick={() => changeMode("CORRECT")}>Request corrections</Button>
+                  </div>
+                </div>
+              )}
+              {selected.review.document_review_status === "PENDING" && (
+                <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm">Profile details approved. Documents are still pending verification; teaching access is not frozen by this document follow-up.</p>
+              )}
               {selected.review.return_reason && (
                 <div className="rounded-lg bg-amber-50 p-3 text-sm">
                   <strong>HR feedback</strong>
@@ -381,10 +415,13 @@ export default function StaffProfileVerificationsPage() {
                   <h2 className="font-semibold">Submitted details</h2>
                   {reviewing && (
                     <p className="text-xs text-muted-foreground">
-                      If something needs changing, tick the field or document
-                      and add a note below.
+                      {correcting ? "Select only fields or documents that need correction, then add a note." : "Tick details you have reviewed and found correct. Select all is available after reviewing this profile."}
                     </p>
                   )}
+                  {reviewing && <div className="flex flex-wrap gap-2">
+                    <Button size="sm" variant="outline" onClick={() => correcting ? setFields(Object.keys(FIELDS)) : setReviewedFields(Object.keys(FIELDS))}>{correcting ? "Select all correction fields" : "Select all details"}</Button>
+                    <Button size="sm" variant="outline" onClick={() => correcting ? setFields([]) : setReviewedFields([])}>Clear all details</Button>
+                  </div>}
                   <dl className="grid gap-2 sm:grid-cols-2">
                     {Object.entries(FIELDS).map(([key, title]) => (
                       <div key={key} className="rounded-lg border p-3 text-sm">
@@ -392,10 +429,10 @@ export default function StaffProfileVerificationsPage() {
                           {reviewing && (
                             <input
                               className="mr-2"
-                              aria-label={`Request correction: ${title}`}
+                              aria-label={`${correcting ? "Request correction" : "Reviewed and correct"}: ${title}`}
                               type="checkbox"
-                              checked={fields.includes(key)}
-                              onChange={() => toggle(fields, setFields, key)}
+                              checked={(correcting ? fields : reviewedFields).includes(key)}
+                              onChange={() => correcting ? toggle(fields, setFields, key) : toggle(reviewedFields, setReviewedFields, key)}
                             />
                           )}
                           {title}
@@ -409,6 +446,11 @@ export default function StaffProfileVerificationsPage() {
                     ))}
                   </dl>
                   <h2 className="pt-2 font-semibold">Documents</h2>
+                  {reviewing && !correcting && <p className="text-xs text-amber-800">No document checkboxes are required for details-only approval. These documents will remain pending.</p>}
+                  {(correcting || documentReview) && <div className="flex flex-wrap gap-2">
+                    <Button size="sm" variant="outline" onClick={() => documentReview ? setReviewedDocs(Object.keys(DOCS)) : setDocuments(Object.keys(DOCS))}>{documentReview ? "Select all inspected documents" : "Select all replacement requests"}</Button>
+                    <Button size="sm" variant="outline" onClick={() => documentReview ? setReviewedDocs([]) : setDocuments([])}>Clear all documents</Button>
+                  </div>}
                   {Object.entries(DOCS).map(([key, title]) => {
                     const doc = selected.documents.find(
                       (document) => document.doc_type === key,
@@ -419,14 +461,14 @@ export default function StaffProfileVerificationsPage() {
                         className="flex items-center justify-between gap-3 rounded-lg border p-3 text-sm"
                       >
                         <label>
-                          {reviewing && (
+                          {(correcting || documentReview) && (
                             <input
                               className="mr-2"
-                              aria-label={`Request replacement: ${title}`}
+                              aria-label={`${documentReview ? "Inspected document" : "Request replacement"}: ${title}`}
                               type="checkbox"
-                              checked={documents.includes(key)}
+                              checked={(documentReview ? reviewedDocs : documents).includes(key)}
                               onChange={() =>
-                                toggle(documents, setDocuments, key)
+                                documentReview ? toggle(reviewedDocs, setReviewedDocs, key) : toggle(documents, setDocuments, key)
                               }
                             />
                           )}
@@ -473,7 +515,7 @@ export default function StaffProfileVerificationsPage() {
                   )}
                 </section>
               </div>
-              {reviewing && (
+              {correcting && (
                 <label className="block space-y-2 text-sm font-medium">
                   Correction note
                   <textarea
@@ -484,10 +526,11 @@ export default function StaffProfileVerificationsPage() {
                   />
                   <span className="block text-xs font-normal text-muted-foreground">
                     {fields.length + documents.length} correction(s) selected.
-                    Approval does not require a note.
+                    Checked items here mean corrections are required, not approved.
                   </span>
                 </label>
               )}
+              {reviewing && !correcting && <p className="text-sm text-muted-foreground">{reviewedFields.length} of {Object.keys(FIELDS).length} details checked. Documents will remain pending.</p>}
               {error && (
                 <p role="alert" className="text-sm text-red-700">
                   {error}
@@ -503,6 +546,7 @@ export default function StaffProfileVerificationsPage() {
                 </Button>
                 {reviewing && (
                   <div className="flex flex-wrap gap-2">
+                    {correcting ? (
                     <Button
                       variant="outline"
                       disabled={
@@ -514,16 +558,19 @@ export default function StaffProfileVerificationsPage() {
                     >
                       Request corrections &amp; email
                     </Button>
+                    ) : (
                     <Button
                       disabled={
-                        busy || fields.length > 0 || documents.length > 0
+                        busy || reviewedFields.length !== Object.keys(FIELDS).length
                       }
                       onClick={() => void decide("approve")}
                     >
-                      Approve profile
+                      Approve details — documents pending
                     </Button>
+                    )}
                   </div>
                 )}
+                {documentReview && <Button disabled={busy || reviewedDocs.length !== Object.keys(DOCS).length} onClick={() => void decide("verify-documents")}>Verify inspected documents</Button>}
               </DialogFooter>
             </>
           )}

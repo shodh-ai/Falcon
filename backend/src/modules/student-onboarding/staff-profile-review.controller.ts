@@ -169,11 +169,25 @@ export class StaffProfileReviewAdminController {
 
   @Post(':reviewId/approve')
   @Roles('HRAdmin')
-  async approve(@Req() req: { user: ReviewActor }, @Param('reviewId') reviewId: string) {
+  async approve(@Req() req: { user: ReviewActor }, @Param('reviewId') reviewId: string,
+    @Body() body?: { defer_documents?: boolean; reviewed_fields?: string[]; deferral_reason?: string },
+  ) {
+    if (body?.defer_documents !== undefined && typeof body.defer_documents !== 'boolean') {
+      throw new BadRequestException('defer_documents must be a boolean');
+    }
     const detail = await this.reviews.detail(req.user.tenant_id, reviewId, req.user);
     return this.onboarding.approve(
       req.user.tenant_id, detail.review.user_id,
       { userId: req.user.user_id, role: req.user.role }, req.user, 'staff', reviewId,
+      body?.defer_documents ? { reviewedFields: body.reviewed_fields ?? [], reason: body.deferral_reason ?? '' } : undefined,
     );
+  }
+
+  @Post(':reviewId/verify-documents')
+  @Roles('HRAdmin')
+  verifyDocuments(@Req() req: { user: ReviewActor }, @Param('reviewId') reviewId: string,
+    @Body() body: { reviewed_documents?: string[] },
+  ) {
+    return this.reviews.verifyDocuments(req.user.tenant_id, reviewId, req.user, body?.reviewed_documents);
   }
 }

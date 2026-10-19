@@ -690,6 +690,7 @@ export class StudentOnboardingService {
     scopeUser?: ScopedAuthUser,
     expectedKind?: OnboardingPortalKind,
     expectedReviewId?: string,
+    detailsOnly?: { reviewedFields: string[]; reason: string },
   ) {
     await this.assertVerificationCampus(scopeUser, targetUserId);
     const tenant = this.resolveTenantId(tenantId);
@@ -724,6 +725,7 @@ export class StudentOnboardingService {
 
       const status = (user.onboarding_status ?? '').trim();
       const kind = verifiedKind;
+      const deferDocuments = kind === 'staff' && Boolean(detailsOnly);
       const staffReview = kind === 'staff'
         ? await this.staffReviews?.activeReview(tenant, targetUserId, qr, true)
         : null;
@@ -738,6 +740,10 @@ export class StudentOnboardingService {
         if (!staffReview || staffReview.status !== 'PENDING_HR') {
           throw new ConflictException('No staff profile is awaiting HR approval');
         }
+        if (deferDocuments) {
+          this.staffReviews!.assertAllDetailsReviewed(detailsOnly!.reviewedFields);
+          if (typeof detailsOnly!.reason !== 'string' || !detailsOnly!.reason.trim()) throw new BadRequestException('Document deferral reason is required');
+        }
         if (expectedReviewId && staffReview.review_id !== expectedReviewId) {
           throw new ConflictException('Selected HR review is no longer current');
         }
@@ -749,7 +755,7 @@ export class StudentOnboardingService {
           (docType) => !snapshot.documentManifest.some((doc: { doc_type: string; file_path: string }) =>
             doc.doc_type === docType && Boolean(doc.file_path)),
         );
-        if (missing.length) throw new BadRequestException(`Missing documents: ${missing.join(', ')}`);
+        if (!deferDocuments && missing.length) throw new BadRequestException(`Missing documents: ${missing.join(', ')}`);
       }
       if (status !== 'PENDING_ADMIN_APPROVAL' && !(kind === 'staff' && status === 'COMPLETED')) {
         throw new BadRequestException(
@@ -769,7 +775,7 @@ export class StudentOnboardingService {
       }
 
       if (kind === 'staff') {
-        await qr.query(
+        if (!deferDocuments) await qr.query(
           `UPDATE staff_onboarding_docs
            SET status = 'APPROVED', admin_remarks = NULL
            WHERE staff_user_id = $1 AND tenant_id = $2`,
@@ -779,13 +785,15 @@ export class StudentOnboardingService {
         await qr.query(
           `UPDATE staff_profile_reviews
            SET status = 'APPROVED', revision = revision + 1,
+               documents_deferred = $4,
                decided_by = $3, decided_at = NOW(), updated_at = NOW()
            WHERE tenant_id = $1 AND review_id = $2 AND status = 'PENDING_HR'`,
-          [tenant, staffReview!.review_id, actor?.userId ?? scopeUser?.user_id],
+          [tenant, staffReview!.review_id, actor?.userId ?? scopeUser?.user_id, deferDocuments],
         );
         await this.staffReviews!.appendEvent(
           qr, { ...staffReview!, revision: staffReview!.revision + 1 },
-          'APPROVED', actor?.userId ?? scopeUser?.user_id ?? null,
+          deferDocuments ? 'PROFILE_APPROVED_DOCUMENTS_DEFERRED' : 'APPROVED', actor?.userId ?? scopeUser?.user_id ?? null,
+          deferDocuments ? JSON.stringify({ reason: detailsOnly!.reason.trim(), reviewed_fields: detailsOnly!.reviewedFields }) : null,
         );
       } else {
         await qr.query(
@@ -822,13 +830,13 @@ export class StudentOnboardingService {
           action: 'VERIFY_APPROVE',
           recordId: targetUserId,
           oldValue: { onboarding_status: status },
-          newValue: { onboarding_status: 'COMPLETED' },
+          newValue: { onboarding_status: 'COMPLETED', ...(kind === 'staff' ? { documents_deferred: deferDocuments } : {}) },
           ip: actor.ip,
           sessionId: actor.sessionId,
         });
       }
 
-      return { onboarding_status: 'COMPLETED' };
+      return { onboarding_status: 'COMPLETED', ...(kind === 'staff' ? { document_review_status: deferDocuments ? 'PENDING' : 'VERIFIED' } : {}) };
     } catch (error) {
       await qr.rollbackTransaction();
       throw error;
