@@ -185,17 +185,56 @@ describe('Scoped socket membership', () => {
     expect(allowed.join).toHaveBeenCalledWith('leadership_feed:tenant-a');
   });
 
-  it('preserves executive and legacy CampusAdmin access from database roles', async () => {
-    roles = ['CampusAdmin'];
-    const client = socket();
-    expect(await service.join(client, { kind: 'leadership' })).toEqual({
-      joined: true,
-    });
-    expect(await service.join(client, { kind: 'fleet' })).toEqual({
-      joined: true,
-    });
-    expect(client.join).toHaveBeenCalledWith('transport:tenant-a:fleet');
-  });
+  it.each(['CampusAdmin', 'AdmissionsOfficer'])(
+    'requires current owner entitlement for the %s leadership role alias',
+    async (role) => {
+      roles = [role];
+      const denied = socket();
+      expect(await service.join(denied, { kind: 'leadership' })).toEqual({
+        joined: false,
+      });
+      expect(denied.join).not.toHaveBeenCalled();
+      expect(query).toHaveBeenCalledWith(
+        expect.stringContaining('FROM owner_access_control'),
+        [tenant, user],
+      );
+
+      // The transport role gate still preserves its documented legacy alias.
+      const fleet = socket();
+      expect(await service.join(fleet, { kind: 'fleet' })).toEqual({
+        joined: true,
+      });
+      expect(fleet.join).toHaveBeenCalledWith('transport:tenant-a:fleet');
+
+      owner = true;
+      const allowed = socket();
+      expect(await service.join(allowed, { kind: 'leadership' })).toEqual({
+        joined: true,
+      });
+      expect(allowed.join).toHaveBeenCalledWith('leadership_feed:tenant-a');
+      owner = false;
+      await jest.advanceTimersByTimeAsync(30_000);
+      expect(allowed.disconnect).toHaveBeenCalledWith(false);
+      expect(fleet.disconnect).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['SuperAdmin', 'President', 'Vice Chancellor', ' superADMIN '])(
+    'preserves the HTTP owner bypass for literal normalized role %s',
+    async (role) => {
+      roles = [role];
+      const client = socket();
+      expect(await service.join(client, { kind: 'leadership' })).toEqual({
+        joined: true,
+      });
+      expect(client.join).toHaveBeenCalledWith('leadership_feed:tenant-a');
+      expect(
+        query.mock.calls.some(([sql]) =>
+          sql.includes('FROM owner_access_control'),
+        ),
+      ).toBe(false);
+    },
+  );
 
   it('requires the students paid active allocation on the requested same-tenant route', async () => {
     const client = socket();

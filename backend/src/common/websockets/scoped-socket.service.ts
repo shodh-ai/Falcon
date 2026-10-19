@@ -5,7 +5,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { Socket } from 'socket.io';
 import { DataSource } from 'typeorm';
 import {
-  expandCampusAdminRoles,
+  normalizeRoleName,
   rolesIntersect,
 } from '../config/campus-admin.roles';
 
@@ -170,8 +170,12 @@ export class ScopedSocketService implements OnModuleDestroy {
           ])
         )
           throw new Error();
-        const bypass = expandCampusAdminRoles(roles).some((r) =>
-          ['president', 'vice chancellor', 'superadmin'].includes(r),
+        // Match OwnerAccessGuard: role aliases may pass the role gate but must
+        // not acquire an executive exemption from owner entitlement checks.
+        const bypass = roles.some((role) =>
+          ['president', 'vice chancellor', 'superadmin'].includes(
+            normalizeRoleName(role),
+          ),
         );
         if (!bypass) {
           const owners = await this.db.query(

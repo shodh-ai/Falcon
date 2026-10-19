@@ -36,7 +36,7 @@ The shared lock lives in private root-owned /run/falcon-local-backup (0700), rec
 
 ## Review and prepare installation
 
-No command here has been run against production by the package author. The installer stages files only; it never creates roles, installs packages, pulls images, changes live upload permissions, starts jobs or enables timers.
+The installer stages files only; it never creates roles, installs packages, pulls images, changes live upload permissions, starts jobs or enables timers.
 
 1. Review the source and run the local synthetic/mock suite:
 
