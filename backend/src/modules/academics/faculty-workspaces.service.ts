@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import * as crypto from 'crypto';
 import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
+import { DataSource, EntityManager } from 'typeorm';
 import { SaveMarksDraftDto } from './dto/save-marks-draft.dto';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 import { DeanAuditService } from './dean-audit.service';
@@ -1279,23 +1279,63 @@ export class FacultyWorkspacesService {
   ) {
     await this.assertFacultyOwnsCourse(facultyUserId, tenantId, courseId);
 
-    // Mark all DRAFT and PENDING_COE marks for this course as PUBLISHED
-    const result = await this.dataSource.query(
-      `UPDATE academic_marks
-       SET status = 'PUBLISHED', published_at = NOW(), updated_at = NOW()
-       WHERE tenant_id = $1 AND course_id = $2 AND uploaded_by = $3
-         AND status IN ('DRAFT', 'PENDING_COE')
-       RETURNING mark_id, exam_type`,
-      [tenantId, courseId, facultyUserId],
-    );
+    const rows = await this.dataSource.transaction(async (manager) => {
+      const drafts = await manager.query<
+        Array<{ mark_id: string; exam_type: string }>
+      >(
+        `SELECT mark_id, exam_type FROM academic_marks
+         WHERE tenant_id = $1 AND course_id = $2 AND uploaded_by = $3
+           AND status = 'DRAFT'`,
+        [tenantId, courseId, facultyUserId],
+      );
+      if (!drafts.length) return [];
 
-    const rows = Array.isArray(result)
-      ? ((Array.isArray(result[0]) ? result[0] : result) as Array<{
-          mark_id: string;
-          exam_type: string;
-        }>)
-      : [];
-    const publishedCount = rows.length;
+      // Match single-assessment submission: only QUIZ can publish directly.
+      // Lock sessions before marks, in a stable order, as declaration does.
+      const examTypes = [...new Set(drafts.map((row) => row.exam_type))].sort();
+      for (const examType of examTypes) {
+        if (!isKnownExamType(examType) || isAutoSyncedExamType(examType)) {
+          throw new BadRequestException(`${examType} cannot be submitted manually`);
+        }
+        if (examType === 'QUIZ') continue;
+        const session = await this.getResultSession(
+          tenantId,
+          courseId,
+          examType,
+          manager,
+        );
+        if (session || !isFacultyDirectGradingType(examType)) {
+          this.assertFacultyEntryAllowed(session);
+        }
+      }
+
+      // Restrict the write to the validated drafts. Concurrent/repeated requests
+      // cannot republish submitted marks or generate another success notification.
+      const result = await manager.query(
+        `UPDATE academic_marks
+         SET status = CASE WHEN exam_type = 'QUIZ' THEN 'PUBLISHED' ELSE 'PENDING_COE' END,
+             published_at = CASE WHEN exam_type = 'QUIZ' THEN NOW() ELSE NULL END,
+             updated_at = NOW()
+         WHERE tenant_id = $1 AND course_id = $2 AND uploaded_by = $3
+           AND status = 'DRAFT' AND mark_id = ANY($4::uuid[])
+         RETURNING mark_id, exam_type, status`,
+        [
+          tenantId,
+          courseId,
+          facultyUserId,
+          drafts.map((row) => row.mark_id),
+        ],
+      );
+      return (Array.isArray(result[0]) ? result[0] : result) as Array<{
+        mark_id: string;
+        exam_type: string;
+        status: string;
+      }>;
+    });
+    const publishedRows = rows.filter((row) => row.status === 'PUBLISHED');
+    const submittedCount = rows.filter(
+      (row) => row.status === 'PENDING_COE',
+    ).length;
 
     const courseRows = await this.dataSource.query<
       Array<{ course_name: string }>
@@ -1304,9 +1344,7 @@ export class FacultyWorkspacesService {
       [courseId, tenantId],
     );
     const courseName = courseRows[0]?.course_name ?? 'your course';
-    const examTypes = [
-      ...new Set(rows.map((r) => r.exam_type).filter(Boolean)),
-    ];
+    const examTypes = [...new Set(publishedRows.map((r) => r.exam_type))];
 
     let notified_count = 0;
     for (const examType of examTypes) {
@@ -1319,10 +1357,22 @@ export class FacultyWorkspacesService {
     }
 
     return {
-      published: publishedCount,
-      status: 'PUBLISHED',
+      published: publishedRows.length,
+      submitted: submittedCount,
+      status:
+        submittedCount > 0
+          ? 'PENDING_COE'
+          : publishedRows.length > 0
+            ? 'PUBLISHED'
+            : 'UNCHANGED',
       notified_count,
       course_name: courseName,
+      message:
+        submittedCount > 0
+          ? `Submitted ${submittedCount} exam marks to Exam Cell. Results require Dean approval and Exam Cell publication.${publishedRows.length > 0 ? ` Published ${publishedRows.length} quiz marks.` : ''}`
+          : publishedRows.length > 0
+            ? 'Quiz marks published to students.'
+            : 'No draft marks to submit. Submitted exam marks await Dean approval and Exam Cell publication.',
     };
   }
 
@@ -3453,11 +3503,12 @@ export class FacultyWorkspacesService {
     tenantId: string,
     courseId: string,
     examType: string,
+    manager?: EntityManager,
   ) {
-    const rows = await this.dataSource.query(
+    const rows = await (manager ?? this.dataSource).query(
       `SELECT * FROM exam_result_sessions
        WHERE tenant_id = $1 AND course_id = $2 AND exam_type = $3
-       ORDER BY created_at DESC LIMIT 1`,
+       ORDER BY created_at DESC LIMIT 1${manager ? ' FOR UPDATE' : ''}`,
       [tenantId, courseId, examType],
     );
     return rows[0] ?? null;

@@ -34,13 +34,41 @@ function safetyConfig(env = loadEnv()) {
   if (!['127.0.0.1', 'localhost', '::1'].includes(env.DB_HOST)) throw new Error('Only a loopback database host is allowed.');
   if (Number(env.DB_PORT) !== 5433 || env.DB_DATABASE !== 'university_governance') throw new Error('This fixture is authorized only for localhost:5433/university_governance.');
   if (env.FALCON_SMOKE_ENABLE !== '1') throw new Error('Explicit FALCON_SMOKE_ENABLE=1 confirmation is required.');
-  const api = new URL(env.FALCON_SMOKE_API_URL || 'http://127.0.0.1:4100');
-  if (!['127.0.0.1', 'localhost', '[::1]'].includes(api.hostname) || api.protocol !== 'http:' || api.port !== '4100') throw new Error('Only the isolated local smoke API on port 4100 is allowed.');
+  const apiMode = env.FALCON_SMOKE_NORMAL_DOCKER === '1' ? 'local-docker' : 'isolated';
+  const apiPort = apiMode === 'local-docker' ? '4000' : '4100';
+  const api = new URL(env.FALCON_SMOKE_API_URL || `http://127.0.0.1:${apiPort}`);
+  if (!['127.0.0.1', 'localhost', '[::1]'].includes(api.hostname) || api.protocol !== 'http:' || api.port !== apiPort || api.username || api.password) throw new Error(`Only the explicitly selected local API on port ${apiPort} is allowed.`);
   return {
     env,
     api: api.origin,
+    apiMode,
     db: { host: env.DB_HOST, port: Number(env.DB_PORT), user: env.DB_USERNAME || env.DB_USER || 'postgres', password: env.DB_PASSWORD || '', database: env.DB_DATABASE },
   };
+}
+
+function assertLocalDockerApi(containers, config) {
+  const api = containers.find((c) => c.Name === '/backend-falcon-api-1');
+  const postgres = containers.find((c) => c.Name === '/falcon-postgres-1');
+  const environment = (c) => Object.fromEntries((c?.Config?.Env || []).map((item) => {
+    const index = item.indexOf('='); return [item.slice(0, index), item.slice(index + 1)];
+  }));
+  const env = environment(api);
+  const pgEnv = environment(postgres);
+  const bindings = api?.HostConfig?.PortBindings?.['4000/tcp'] || [];
+  const pgBindings = postgres?.HostConfig?.PortBindings?.['5432/tcp'] || [];
+  if (!api?.State?.Running || api.State.Health?.Status !== 'healthy' || !postgres?.State?.Running ||
+      env.FALCON_LOCAL_DOCKER !== '1' || env.NODE_ENV !== 'production' || env.DB_SYNCHRONIZE !== 'false' ||
+      env.DB_HOST !== 'postgres' || env.DB_PORT !== '5432' || env.DB_DATABASE !== config.db.database ||
+      pgEnv.POSTGRES_DB !== config.db.database || api.Config.Cmd?.join(' ') !== 'node dist/main.js' ||
+      api.Config.Labels?.['com.docker.compose.project'] !== 'backend' ||
+      api.Config.Labels?.['com.docker.compose.service'] !== 'falcon-api' ||
+      postgres.Config.Labels?.['com.docker.compose.project'] !== 'falcon' ||
+      !api.NetworkSettings?.Networks?.falcon_default || !postgres.NetworkSettings?.Networks?.falcon_default ||
+      bindings.length !== 1 || bindings[0].HostIp !== '127.0.0.1' || bindings[0].HostPort !== '4000' ||
+      !pgBindings.some((binding) => binding.HostPort === String(config.db.port))) {
+    throw new Error('Refusing unverified local Docker API/database identity.');
+  }
+  return { containerId: api.Id, imageId: api.Image, command: api.Config.Cmd, health: api.State.Health.Status };
 }
 
 function identifier(value) {
@@ -71,8 +99,17 @@ function writeReport(report, directory = LOCAL) {
 }
 
 async function createContext(config) {
-  const probe = await fetch(`${config.api}/api/auth/local-login`, { signal: AbortSignal.timeout(5000) });
-  if (probe.headers.get('x-falcon-smoke-environment') !== 'test' || probe.headers.get('x-falcon-smoke-database') !== config.db.database) throw new Error('Isolated API identity was not verified before writes.');
+  let dockerIdentity;
+  if (config.apiMode === 'local-docker') {
+    const inspection = spawnSync('docker', ['inspect', 'backend-falcon-api-1', 'falcon-postgres-1'], { encoding: 'utf8', windowsHide: true, timeout: 10000 });
+    if (inspection.status !== 0) throw new Error('Cannot verify local Docker API identity; no test writes permitted.');
+    dockerIdentity = assertLocalDockerApi(JSON.parse(inspection.stdout), config);
+    const health = await fetch(`${config.api}/health`, { redirect: 'error', signal: AbortSignal.timeout(5000) });
+    if (!health.ok || (await health.json()).status !== 'ok' || health.headers.has('x-falcon-smoke-environment')) throw new Error('Normal Docker API health/identity check failed.');
+  } else {
+    const probe = await fetch(`${config.api}/api/auth/local-login`, { signal: AbortSignal.timeout(5000) });
+    if (probe.headers.get('x-falcon-smoke-environment') !== 'test' || probe.headers.get('x-falcon-smoke-database') !== config.db.database) throw new Error('Isolated API identity was not verified before writes.');
+  }
   const db = new Client(config.db);
   await db.connect();
   const identity = (await db.query('SELECT current_database() AS database, inet_server_port() AS port, pg_is_in_recovery() AS recovery')).rows[0];
@@ -80,7 +117,7 @@ async function createContext(config) {
   await db.query('SELECT pg_advisory_lock(hashtext($1))', [PREFIX]);
   const tables = new Map();
   let insertQueue = Promise.resolve();
-  const report = { version: 1, seed: PREFIX, environment: { node: config.env.NODE_ENV, host: config.db.host, port: config.db.port, database: identity.database }, startedAt: new Date().toISOString(), records: {}, tests: [], limitations: [] };
+  const report = { version: 1, seed: PREFIX, environment: { node: config.env.NODE_ENV, host: config.db.host, port: config.db.port, database: identity.database, api: config.api, apiMode: config.apiMode, dockerIdentity }, startedAt: new Date().toISOString(), records: {}, tests: [], limitations: [] };
   const ctx = { db, config, report, ids: {}, actors: {}, allowedTenantIds: new Set(), seedDate: null, academicYear: '2026-2027', label: LABEL, prefix: PREFIX, subdomain: SUBDOMAIN };
 
   async function schema(table) {
@@ -167,9 +204,10 @@ async function createContext(config) {
       method,
       headers: { 'x-tenant-subdomain': actor?.subdomain || ctx.subdomain, ...(actor?.token ? { Authorization: `Bearer ${actor.token}` } : {}), ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...options.headers },
       body: body === undefined ? undefined : JSON.stringify(body),
+      redirect: 'error',
       signal: AbortSignal.timeout(45000),
     });
-    if (response.headers.get('x-falcon-smoke-environment') !== 'test') throw new Error('Refusing API without isolated test-environment identity.');
+    if (config.apiMode !== 'local-docker' && response.headers.get('x-falcon-smoke-environment') !== 'test') throw new Error('Refusing API without isolated test-environment identity.');
     const text = await response.text();
     let data;
     try { data = JSON.parse(text); } catch { data = text; }
@@ -182,6 +220,7 @@ async function createContext(config) {
     return data;
   };
   ctx.upload = async (actor, route, fields, file) => {
+    if (config.apiMode === 'local-docker') throw new Error('Uploads are not enabled for the normal-backend examination check.');
     const uploadKey = `${PREFIX}:upload:${crypto.createHash('sha256').update(`${actor.id}:${route}:${file.name}:${fields?.smoke_test_reference || ''}`).digest('hex').slice(0, 32)}`;
     if (route === '/api/uploads/single') {
       const saved = (await db.query('SELECT notes FROM smoke_seed_manifest WHERE smoke_key=$1', [uploadKey])).rows[0];
@@ -220,4 +259,4 @@ function manifestKey(table, recordId) {
   return key.length <= 120 ? key : `${PREFIX}:${table}:${crypto.createHash('sha256').update(recordId).digest('hex').slice(0, 24)}`;
 }
 
-module.exports = { ROOT, PREFIX, LABEL, SUBDOMAIN, LOCAL, loadEnv, safetyConfig, identifier, redact, createContext, manifestKey, writeReport };
+module.exports = { ROOT, PREFIX, LABEL, SUBDOMAIN, LOCAL, loadEnv, safetyConfig, assertLocalDockerApi, identifier, redact, createContext, manifestKey, writeReport };

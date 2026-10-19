@@ -1,0 +1,30 @@
+# Local override for an already-initialized database in the root development stack.
+# From backend/: docker compose -f docker-compose.yaml -f docker-compose.local.yaml up -d --build falcon-api
+# Start root dependencies first: docker compose -f ../docker-compose.yml up -d postgres redis minio
+# Do not use this override in Coolify/production; docker-compose.yaml is unchanged.
+services:
+  falcon-api:
+    env_file:
+      - .env
+    environment:
+      # Keep production authentication restrictions (including no dev-login).
+      NODE_ENV: production
+      FALCON_LOCAL_DOCKER: '1'
+      DB_HOST: postgres
+      DB_PORT: '5432'
+      DB_SYNCHRONIZE: 'false'
+      REDIS_HOST: redis
+      REDIS_PORT: '6379'
+      S3_ENDPOINT: http://minio:9000
+    # This local database already has schema/data. Applying pending migrations is
+    # a separate, explicit operation, not a side effect of repairing networking.
+    command: ['node', 'dist/main.js']
+    ports:
+      - '127.0.0.1:4000:4000'
+    networks:
+      - local-dependencies
+
+networks:
+  local-dependencies:
+    external: true
+    name: falcon_default

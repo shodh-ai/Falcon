@@ -785,8 +785,15 @@ export class ResultControlService {
       message: string;
     }> = [];
 
+    let publication: {
+      declared: number;
+      course_name: string;
+      exam_type: string;
+      session_id: string;
+    };
+
     try {
-      const publication = await this.db.transaction(async (manager) => {
+      publication = await this.db.transaction(async (manager) => {
         const session = await this.getDeclarationSession(
           manager,
           tenantId,
@@ -827,7 +834,8 @@ export class ResultControlService {
           }>
         >(
           `SELECT mark_id, student_user_id, marks_obtained, max_marks FROM academic_marks
-           WHERE tenant_id = $1 AND course_id = $2 AND exam_type = $3 AND status = 'PENDING_COE'`,
+           WHERE tenant_id = $1 AND course_id = $2 AND exam_type = $3 AND status = 'PENDING_COE'
+           FOR UPDATE`,
           [tenantId, session.course_id, session.exam_type],
         );
         if (!marks.length)
@@ -943,21 +951,6 @@ export class ResultControlService {
         };
       });
 
-      for (const notification of notifications) {
-        this.notify.examResultsPublished(notification);
-      }
-
-      await this.audit.log(tenantId, actorUserId, {
-        action: 'RESULT_DECLARED',
-        resource_type: 'exam_result_session',
-        resource_id: sessionId,
-        new_value: {
-          declared: publication.declared,
-          outcome: 'SUCCESS',
-        },
-      });
-
-      return publication;
     } catch (error) {
       try {
         await this.audit.log(tenantId, actorUserId, {
@@ -971,6 +964,22 @@ export class ResultControlService {
       }
       throw error;
     }
+
+    for (const notification of notifications) {
+      this.notify.examResultsPublished(notification);
+    }
+
+    await this.audit.log(tenantId, actorUserId, {
+      action: 'RESULT_DECLARED',
+      resource_type: 'exam_result_session',
+      resource_id: sessionId,
+      new_value: {
+        declared: publication.declared,
+        outcome: 'SUCCESS',
+      },
+    });
+
+    return publication;
   }
 
   /** Required compatibility mirror; failures must abort the declaration transaction. */

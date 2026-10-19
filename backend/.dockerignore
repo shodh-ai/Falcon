@@ -13,3 +13,6 @@ test
 .vscode
 .idea
 *.tsbuildinfo
+# Local smoke credentials, generated fixtures and reports must never enter images.
+scripts/student-smoke/local
+scripts/student-smoke/output

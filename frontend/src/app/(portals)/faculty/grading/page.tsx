@@ -317,15 +317,16 @@ export default function FacultyGradingPage() {
   async function publishAll() {
     if (!courseId) return;
     if (isFacultyDemoEntityId(courseId) || rows.some((r) => isFacultyDemoEntityId(r.student_user_id))) {
-      toast.success('Marks published to students (demo)');
+      toast.success('Marks submitted for approval (demo)');
       return;
     }
     setSaving(true);
     try {
-      await saveDraft({ silent: true });
+      if (!(await saveDraft({ silent: true }))) return;
 
       const result = await api.post<{
         published: number;
+        submitted?: number;
         notified_count?: number;
         status?: string;
         message?: string;
@@ -333,18 +334,18 @@ export default function FacultyGradingPage() {
         `/api/academics/faculty/workspaces/course/${encodeURIComponent(courseId)}/publish-all`,
       );
 
-      if ((result.published ?? 0) === 0) {
-        toast.warning('No marks were published.');
+      if ((result.published ?? 0) + (result.submitted ?? 0) === 0) {
+        toast.warning(result.message ?? 'No draft marks to submit.');
       } else {
         const notified = Number(result.notified_count ?? 0);
         toast.success(
-          `Published marks for course successfully. Notifications sent to ${notified} student${notified === 1 ? '' : 's'}.`,
+          result.message ?? `Published quiz marks. Notifications sent to ${notified} student${notified === 1 ? '' : 's'}.`,
         );
       }
 
       await reloadMarks();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Publish failed');
+      toast.error(e instanceof Error ? e.message : 'Submission failed');
     } finally {
       setSaving(false);
     }
@@ -353,7 +354,7 @@ export default function FacultyGradingPage() {
   const isPublishable = rows.some((r) =>
     activeColumns.some((col) => {
       const m = getMarkValue(r, col.id);
-      return m && m.obtained !== null && m.status !== 'PUBLISHED';
+      return !col.readOnly && m && m.obtained !== null && m.status !== 'PENDING_COE' && m.status !== 'PUBLISHED';
     }),
   );
 
@@ -361,7 +362,7 @@ export default function FacultyGradingPage() {
     <FacultyPageShell>
       <FacultyPageHeader
         title="Exams & Grades"
-        description="Conduct examinations and publish grades."
+        description="Enter marks and submit them for approval and publication."
         meta={
           courseId ? (
             <>
@@ -469,7 +470,7 @@ export default function FacultyGradingPage() {
             onClick={() => void publishAll()}
           >
             <Send className="mr-1 h-4 w-4" />
-            Publish All Marks
+            Submit All Marks
           </Button>
         </div>
 
