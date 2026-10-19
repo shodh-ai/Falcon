@@ -56,6 +56,9 @@ jobs:
             src/uploads/uploads.service.spec.ts
           node --test scripts/security/access-surface.spec.cjs
           node --test scripts/security/transaction-scope.spec.cjs
+          node --test scripts/security/rollout-workflow.spec.cjs
+      - name: Test offline runtime and release readiness decisions
+        run: python3 -B -m unittest discover -s ops/runtime-boundaries/tests -v
       - name: Inventory all access surfaces without loading the application
         working-directory: backend
         run: node scripts/security/access-surface.cjs --json > access-surface.json

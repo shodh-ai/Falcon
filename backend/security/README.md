@@ -14,6 +14,11 @@ Production restore and irreversible purge have no public API. Do not add deletio
 
 ## Staged rollout prerequisites
 
+Production promotion additionally requires the minimized operator observations
+described in [release readiness](../../ops/runtime-boundaries/RELEASE_READINESS.md).
+The offline gate repeats before webhooks and the backend requires the intended
+running frontend's image/revision observation; a root HTTP 200 is insufficient.
+
 - Apply the additive `20261019170000_finance_receipt_versions.sql` migration with reviewed migration credentials before deploying receipt/history reads. Otherwise student file ownership lookups correctly fail closed when the ledger is absent.
 - Deploy token-aware frontend socket clients before enabling the backend socket checks. The old backend ignores the additional handshake token. An already-open old browser session must refresh to resume its live stream after backend cutover; ordinary REST workflows remain available. Never admit unsigned clients as a compatibility fallback.
 - Existing storage mappings and originals remain in place. Files for failed receipt transactions are retained for investigation; do not automatically purge them. Generated versions use the configured UPLOAD_PATH and keep the `/uploads/...` URL shape.
