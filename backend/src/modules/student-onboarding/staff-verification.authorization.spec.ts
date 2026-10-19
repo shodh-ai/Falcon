@@ -34,6 +34,7 @@ describe('StaffProfileReviewAdminController authorization', () => {
       "@Post('pharmacy/reopen')",
       "@Post(':reviewId/return')",
       "@Post(':reviewId/approve')",
+      "@Post(':reviewId/verify-documents')",
     ];
 
     for (const route of routes) {

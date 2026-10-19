@@ -1,15 +1,20 @@
 import { createHash } from 'node:crypto';
+import { createReadStream } from 'node:fs';
+import { realpath, stat } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { DataSource, QueryRunner } from 'typeorm';
 import { CampusScopeService, type ScopedAuthUser } from '../../common/campus-scope/campus-scope.service';
 import { STAFF_ONBOARDING_DOC_TYPES } from './onboarding-portal.util';
 import { StaffProfileReviewNotificationService } from './staff-profile-review-notification.service';
+import { ObjectStorageService } from '../../storage/object-storage.service';
 
 type Db = Pick<DataSource, 'query'> | Pick<QueryRunner, 'query'>;
 type Review = {
@@ -23,6 +28,7 @@ type Review = {
   requested_docs: string[];
   return_reason: string | null;
   submitted_snapshot_hash: string;
+  documents_deferred?: boolean;
 };
 
 const PROFILE_FIELDS = new Set([
@@ -36,6 +42,7 @@ const PROFILE_FIELDS = new Set([
 const QUALIFICATION_FIELDS = new Set([
   'degree_level', 'degree_name', 'university', 'passing_year', 'specialization',
 ]);
+export const STAFF_PROFILE_REVIEW_FIELDS = [...PROFILE_FIELDS];
 
 @Injectable()
 export class StaffProfileReviewService {
@@ -43,6 +50,7 @@ export class StaffProfileReviewService {
     private readonly db: DataSource,
     private readonly campusScope: CampusScopeService,
     private readonly reviewNotifications: StaffProfileReviewNotificationService,
+    @Optional() private readonly objectStorage?: ObjectStorageService,
   ) {}
 
   private hash(value: unknown): string {
@@ -131,7 +139,13 @@ export class StaffProfileReviewService {
   async me(tenantId: string, userId: string) {
     const rows = await this.db.query(
       `SELECT review_id, source, status, revision, requested_fields,
-              requested_docs, return_reason, updated_at
+              requested_docs, return_reason, updated_at, documents_deferred,
+              CASE WHEN status <> 'APPROVED' THEN 'NOT_REVIEWED'
+                WHEN documents_deferred AND NOT EXISTS (
+                  SELECT 1 FROM staff_profile_document_verifications dv
+                  WHERE dv.review_id = staff_profile_reviews.review_id
+                    AND dv.tenant_id = staff_profile_reviews.tenant_id
+                ) THEN 'PENDING' ELSE 'VERIFIED' END AS document_review_status
        FROM staff_profile_reviews WHERE tenant_id = $1 AND user_id = $2
        ORDER BY CASE WHEN status IN ('PENDING_HR', 'RETURNED_FOR_CORRECTION') THEN 0 ELSE 1 END,
                 created_at DESC, review_id DESC LIMIT 1`,
@@ -166,8 +180,14 @@ export class StaffProfileReviewService {
     const reviews = await this.db.query(
       `SELECT v.review_id, v.user_id, v.status, v.source, v.revision,
               v.created_at, v.updated_at, u.name, u.official_email,
-              u.onboarding_status, u.dept_id, d.dept_name, r.role_name
+              u.onboarding_status, u.dept_id, d.dept_name, r.role_name,
+              v.documents_deferred,
+              CASE WHEN v.status <> 'APPROVED' THEN 'NOT_REVIEWED'
+                WHEN v.documents_deferred AND dv.verification_id IS NULL THEN 'PENDING'
+                ELSE 'VERIFIED' END AS document_review_status
        FROM staff_profile_reviews v
+       LEFT JOIN staff_profile_document_verifications dv
+         ON dv.review_id = v.review_id AND dv.tenant_id = v.tenant_id
        JOIN users u ON u.user_id = v.user_id AND u.tenant_id = v.tenant_id
        JOIN roles r ON r.role_id = u.role_id
        JOIN departments d ON d.dept_id = u.dept_id AND d.deleted_at IS NULL
@@ -347,8 +367,13 @@ export class StaffProfileReviewService {
   async detail(tenantId: string, reviewId: string, actor?: ScopedAuthUser) {
     const [review] = await this.db.query(
       `SELECT v.*, u.name, u.official_email, u.onboarding_status, u.dept_id,
+              CASE WHEN v.status <> 'APPROVED' THEN 'NOT_REVIEWED'
+                WHEN v.documents_deferred AND dv.verification_id IS NULL THEN 'PENDING'
+                ELSE 'VERIFIED' END AS document_review_status,
               d.dept_name, r.role_name
        FROM staff_profile_reviews v
+       LEFT JOIN staff_profile_document_verifications dv
+         ON dv.review_id = v.review_id AND dv.tenant_id = v.tenant_id
        JOIN users u ON u.user_id = v.user_id AND u.tenant_id = v.tenant_id
        JOIN roles r ON r.role_id = u.role_id
        JOIN departments d ON d.dept_id = u.dept_id
@@ -376,6 +401,111 @@ export class StaffProfileReviewService {
     return { review, profile: { ...snapshot.profile,
       staff_mobile: snapshot.profile.staff_mobile ?? snapshot.user.phone ?? '' }, documents: snapshot.documentManifest,
       events, email_delivery: emailDelivery ?? null };
+  }
+
+  assertAllDetailsReviewed(fields: unknown) {
+    if (!Array.isArray(fields) || fields.length !== PROFILE_FIELDS.size || fields.some((field) => typeof field !== 'string' || !PROFILE_FIELDS.has(field)) ||
+        new Set(fields).size !== PROFILE_FIELDS.size) {
+      throw new BadRequestException('Confirm every profile detail before approving details only');
+    }
+  }
+
+  // A later document decision never changes the immutable profile approval or
+  // re-freezes a faculty account. Bind the decision to the bytes actually read.
+  async verifyDocuments(tenantId: string, reviewId: string, actor: ScopedAuthUser, reviewed: unknown) {
+    if (![...(actor.roles ?? []), actor.role ?? ''].some((role) => role.toLowerCase() === 'hradmin')) {
+      throw new ForbiddenException('Only HR Admin may verify staff documents');
+    }
+    await this.detail(tenantId, reviewId, actor);
+    if (!Array.isArray(reviewed) || reviewed.length !== STAFF_ONBOARDING_DOC_TYPES.length || reviewed.some((type) => !(STAFF_ONBOARDING_DOC_TYPES as readonly unknown[]).includes(type)) ||
+        new Set(reviewed).size !== STAFF_ONBOARDING_DOC_TYPES.length) {
+      throw new BadRequestException('Confirm all required documents have been inspected');
+    }
+    const qr = this.db.createQueryRunner();
+    await qr.connect();
+    await qr.startTransaction();
+    try {
+      const [review] = await qr.query(
+        `SELECT * FROM staff_profile_reviews WHERE tenant_id = $1 AND review_id = $2 FOR SHARE`,
+        [tenantId, reviewId],
+      ) as Review[];
+      if (!review) throw new NotFoundException('Staff review not found');
+      if (review.user_id === actor.user_id) throw new ForbiddenException('Cannot verify your own documents');
+      if (review.status !== 'APPROVED' || !review.documents_deferred) {
+        throw new ConflictException('This profile has no deferred document verification');
+      }
+      const [existing] = await qr.query(
+        `SELECT verification_id FROM staff_profile_document_verifications WHERE tenant_id = $1 AND review_id = $2`,
+        [tenantId, reviewId],
+      );
+      if (existing) {
+        await qr.commitTransaction();
+        return { document_review_status: 'VERIFIED', verification_id: existing.verification_id, replayed: true };
+      }
+      const docs = await qr.query(
+        `SELECT doc_type, file_path FROM staff_onboarding_docs
+         WHERE tenant_id = $1 AND staff_user_id = $2 ORDER BY doc_type FOR SHARE`,
+        [tenantId, review.user_id],
+      ) as Array<{ doc_type: string; file_path: string }>;
+      const manifest: Array<{ doc_type: string; file_path: string; sha256: string; size: number }> = [];
+      for (const type of STAFF_ONBOARDING_DOC_TYPES) {
+        const doc = docs.find((item) => item.doc_type === type);
+        if (!doc?.file_path) throw new BadRequestException(`Cannot verify ${type}: document not uploaded`);
+        const digest = await this.documentDigest(tenantId, doc.file_path, type);
+        manifest.push({ ...doc, ...digest });
+      }
+      const [decision] = await qr.query(
+        `INSERT INTO staff_profile_document_verifications
+         (review_id, tenant_id, user_id, verified_by, document_manifest, manifest_hash)
+         VALUES ($1, $2, $3, $4, $5::jsonb, $6)
+         ON CONFLICT (review_id) DO NOTHING RETURNING verification_id`,
+        [reviewId, tenantId, review.user_id, actor.user_id, JSON.stringify(manifest), this.hash(manifest)],
+      );
+      const result = decision ?? (await qr.query(
+        `SELECT verification_id FROM staff_profile_document_verifications WHERE tenant_id = $1 AND review_id = $2`,
+        [tenantId, reviewId],
+      ))[0];
+      if (decision) await qr.query(
+        `UPDATE staff_onboarding_docs SET status = 'APPROVED', admin_remarks = NULL
+         WHERE tenant_id = $1 AND staff_user_id = $2 AND doc_type = ANY($3::text[])`,
+        [tenantId, review.user_id, [...STAFF_ONBOARDING_DOC_TYPES]],
+      );
+      await qr.commitTransaction();
+      return { document_review_status: 'VERIFIED', verification_id: result.verification_id };
+    } catch (error) {
+      await qr.rollbackTransaction();
+      throw error;
+    } finally { await qr.release(); }
+  }
+
+  async documentDigest(tenantId: string, filePath: string, type: string) {
+    try {
+      let stream: AsyncIterable<Buffer | string>;
+      if (this.objectStorage?.isEnabled()) {
+        const prefix = `s3://${this.objectStorage.getBucketName()}/`;
+        const key = filePath.startsWith(prefix) ? filePath.slice(prefix.length) : filePath;
+        if (!key.startsWith(`${tenantId}/`) || key.includes('..')) throw new Error('Invalid storage key');
+        stream = await this.objectStorage.getDownloadStream(key);
+      } else {
+        const root = await realpath(resolve(process.env.UPLOAD_PATH || './uploads'));
+        const location = filePath.startsWith('/uploads/') ? resolve(root, filePath.slice(9)) : resolve(filePath);
+        const actual = await realpath(location);
+        if (!actual.startsWith(`${root}/${tenantId}/`) || !(await stat(actual)).isFile()) throw new Error('Invalid file');
+        stream = createReadStream(actual);
+      }
+      let size = 0;
+      const hash = createHash('sha256');
+      for await (const chunk of stream) {
+        const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        size += bytes.length;
+        if (size > 32 * 1024 * 1024) throw new Error('Document too large');
+        hash.update(bytes);
+      }
+      if (!size) throw new Error('Empty document');
+      return { sha256: hash.digest('hex'), size };
+    } catch {
+      throw new BadRequestException(`Cannot verify ${type}: original document is missing or unreadable`);
+    }
   }
 
   async returnForCorrection(

@@ -34,7 +34,7 @@ describe("Authenticated staff document preview", () => {
     api.getBlob.mockRejectedValueOnce(new Error("The document record exists, but its original file is missing from storage."));
     render(<StaffDocumentPreview {...props} />);
     expect(await screen.findByRole("alert")).toHaveTextContent("original file is missing");
-    expect(screen.getByText(/Do not approve a document you cannot inspect/)).toBeInTheDocument();
+    expect(screen.getByText(/Do not mark a document verified if you cannot inspect it/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Retry document" }));
     fireEvent.load(await screen.findByRole("img"));
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();

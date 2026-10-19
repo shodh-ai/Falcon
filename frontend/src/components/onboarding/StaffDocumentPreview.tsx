@@ -77,7 +77,7 @@ export function StaffDocumentPreview({ userId, docType, title }: {
         <div className="space-y-3 p-4">
           <p role="alert" className="text-sm text-red-700">{error}</p>
           <p className="text-sm text-muted-foreground">
-            Do not approve a document you cannot inspect. If the original file is missing,
+            Do not mark a document verified if you cannot inspect it. Details-only profile approval can proceed separately. If the original file is missing,
             restore it from an uploads backup or select this document for replacement and request corrections below.
           </p>
           <Button variant="outline" size="sm" onClick={retry}>Retry document</Button>
