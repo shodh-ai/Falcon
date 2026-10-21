@@ -158,6 +158,11 @@ def count_command(config, name, inputs):
             '-w', '--data-only', '--no-owner', '--no-acl', '--file=-', '/backup/database.dump']
 
 
+def toc_command(config, name, inputs):
+    return _container(config, name, inputs) + ['--entrypoint', 'pg_restore', config['image'],
+            '-w', '--list', '/backup/database.dump']
+
+
 class Monitor:
     """Resource/application guards also run on an idle container output pipe."""
     def __init__(self, config):
@@ -264,35 +269,61 @@ class GuardedStream:
         return value
 
 
-def compare_counts(expected, actual):
-    """Exact physical-table inventory, not just aggregate row totals."""
-    want, got, parents = {}, {}, set()
+def compare_counts(expected, actual, materialized=None):
+    """Exact COPY table counts; declared materialized caches are separate proof."""
+    want, got, parents, seen, declared_views, restored_views = {}, {}, set(), set(), set(), {}
     for row in expected['tables']:
         key = (row['schema'], row['table'])
         if key in want or type(row['rows']) is not int or row['rows'] < 0:
             raise BackupError('Invalid expected row-count inventory')
         want[key] = row['rows']
+    if materialized is not None:
+        if (not isinstance(materialized, dict) or not isinstance(expected.get('dump_sha256'), str)
+                or not re.fullmatch('[0-9a-f]{64}', expected['dump_sha256'])
+                or materialized.get('schema_version') != 1
+                or materialized.get('dump_sha256') != expected.get('dump_sha256')
+                or not isinstance(materialized.get('materialized_views'), list)):
+            raise BackupError('Materialized-view TOC is not bound to the same dump')
+        for row in materialized['materialized_views']:
+            if (not isinstance(row, dict) or not isinstance(row.get('schema'), str)
+                    or not isinstance(row.get('table'), str) or row.get('refresh_intended') is not True):
+                raise BackupError('Invalid materialized-view TOC declaration')
+            key = (row['schema'], row['table'])
+            if key in declared_views or key in want:
+                raise BackupError('Duplicate or conflicting materialized-view TOC declaration')
+            declared_views.add(key)
     for row in actual:
         if (set(row) != {'schema', 'table', 'kind', 'rows'}
                 or not isinstance(row['schema'], str) or not isinstance(row['table'], str)
                 or type(row['rows']) is not int or row['rows'] < 0):
             raise BackupError('Invalid restored row-count inventory')
         key = (row['schema'], row['table'])
-        if key in got or key in parents:
+        if key in seen:
             raise BackupError('Duplicate restored table inventory')
+        seen.add(key)
         if row['kind'] == 'p':
             if row['rows'] != 0 or want.get(key, 0) != 0:
                 raise BackupError('Partition-root COPY routing cannot be proven by physical counts')
             parents.add(key)
         elif row['kind'] == 'r':
             got[key] = row['rows']
+        elif row['kind'] == 'm':
+            if materialized is None or key not in declared_views:
+                raise BackupError('Undeclared materialized view in restored inventory')
+            restored_views[key] = row['rows']
         else:
-            raise BackupError('Unsupported materialized/foreign relation in restored inventory')
+            raise BackupError('Unsupported foreign/unknown relation in restored inventory')
     physical = {key: count for key, count in want.items() if key not in parents}
     if physical != got:
         raise BackupError('Same-dump and restored table inventory/counts differ')
+    if set(restored_views) != declared_views:
+        raise BackupError('Restored materialized-view inventory differs from the dump TOC')
     return {'physical_tables': len(got), 'partition_parents': len(parents),
-            'rows': sum(got.values()), 'exact_physical_inventory_and_counts': True}
+            'rows': sum(got.values()), 'exact_physical_inventory_and_counts': True,
+            'materialized_views_checked': len(restored_views),
+            'materialized_view_rows_observed': sum(restored_views.values()),
+            'materialized_view_inventory_matches_dump_toc': materialized is not None,
+            'materialized_view_rows_are_derived_observations': True}
 
 
 def read_inventory(stream):
@@ -394,7 +425,7 @@ def run_restore(c, run_id, approval_id, validation_hook=None):
     if (type(c.get('restore_uid')) is not int or c['restore_uid'] <= 0
             or type(c.get('restore_gid')) is not int or c['restore_gid'] < 0):
         raise BackupError('Configure the existing nonroot PG18 image account UID/GID for initdb')
-    from dump_counts import parse_copy_stream
+    from dump_counts import parse_copy_stream, parse_materialized_toc
     monitor = Monitor(c)
     monitor.guard.check(initial=True)
     monitor.tick(force=True)
@@ -433,6 +464,14 @@ def run_restore(c, run_id, approval_id, validation_hook=None):
                     inputs = session / db_dir / 'inputs'
                     scratch = session / db_dir / 'pgdata'
                     check_copy(inputs_fd, entry, c, monitor)
+                    stage = 'same-dump-toc-derivation'
+                    name = session_id + '-toc-%d' % index
+                    with monitor.helper(toc_command(c, name, inputs), name) as process:
+                        with GuardedStream(process.stdout, monitor) as stream:
+                            materialized = parse_materialized_toc(stream, entry['sha256'], check=monitor.tick)
+                        monitor.wait(process)
+                    check_copy(inputs_fd, entry, c, monitor)
+                    _write_json(db_fd, 'expected-materialized-toc.json', materialized)
                     stage = 'same-dump-count-derivation'
                     name = session_id + '-counts-%d' % index
                     with monitor.helper(count_command(c, name, inputs), name) as process:
@@ -446,8 +485,16 @@ def run_restore(c, run_id, approval_id, validation_hook=None):
                     with monitor.helper(restore_command(c, name, inputs, scratch, script), name) as process:
                         with GuardedStream(process.stdout, monitor) as stream:
                             actual = read_inventory(stream)
-                            summary = compare_counts(counts, actual)
-                            _write_json(db_fd, 'restored-counts.json', {'tables': actual, 'comparison': summary})
+                            summary = compare_counts(counts, actual, materialized)
+                            _write_json(db_fd, 'restored-counts.json', {
+                                'tables': [row for row in actual if row['kind'] in ('r', 'p')],
+                                'comparison': summary})
+                            _write_json(db_fd, 'restored-materialized-views.json', {
+                                'dump_sha256': entry['sha256'],
+                                'toc_stream_sha256': materialized['toc_stream_sha256'],
+                                'views': [row for row in actual if row['kind'] == 'm'],
+                                'exact_inventory_matches_dump_toc': True,
+                                'row_count_semantics': 'observed after restore; derived cache data, not dump COPY row-count proof'})
                             hook_result = None
                             if validation_hook is not None:
                                 stage = 'optional-application-checks'
@@ -487,6 +534,9 @@ def run_restore(c, run_id, approval_id, validation_hook=None):
                 'databases_checked': len(summaries),
                 'physical_tables_checked': sum(row['physical_tables'] for row in summaries),
                 'rows_checked': sum(row['rows'] for row in summaries),
+                'materialized_views_checked': sum(row['materialized_views_checked'] for row in summaries),
+                'materialized_view_rows_observed': sum(row['materialized_view_rows_observed'] for row in summaries),
+                'materialized_view_rows_are_derived_observations': True,
                 'isolated_sql_restore_passed': True, 'same_dump_counts_passed': True,
                 'application_recovery_proven': False, 'cross_system_snapshot_proven': False}
     except BaseException as error:

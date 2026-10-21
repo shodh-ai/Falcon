@@ -25,6 +25,8 @@ DATA = (b'-- PostgreSQL database dump\n'
         b'-- PostgreSQL database dump complete\n')
 ROWS = [{'schema': 'public', 'table': 'records', 'kind': 'r', 'rows': 2},
         {'schema': 'public', 'table': 'empty', 'kind': 'r', 'rows': 0}]
+TOC_HEADER = (b';\n; Archive created at synthetic\n; TOC Entries: 3\n; Format: CUSTOM\n'
+              b'; Dumped by pg_dump version: 18.4\n;\n; Selected TOC Entries:\n;\n')
 
 
 def config(root):
@@ -241,6 +243,56 @@ class ComparisonTests(unittest.TestCase):
             with self.assertRaises(restore.BackupError):
                 restore.compare_counts(self.expected(), rows)
 
+    def materialized(self):
+        expected = dict(self.expected(), dump_sha256='a' * 64)
+        toc = {'schema_version': 1, 'dump_sha256': 'a' * 64, 'materialized_views': [
+            {'schema': 'public', 'table': 'summary', 'object_oid': 12345,
+             'definition_toc_id': 10, 'data_toc_id': 20, 'refresh_intended': True}]}
+        actual = ROWS + [{'schema': 'public', 'table': 'summary', 'kind': 'm', 'rows': 42}]
+        return expected, actual, toc
+
+    def test_declared_materialized_cache_is_separate_from_copy_counts(self):
+        expected, actual, toc = self.materialized()
+        result = restore.compare_counts(expected, actual, toc)
+        self.assertEqual(result['physical_tables'], 2)
+        self.assertEqual(result['rows'], 2)
+        self.assertEqual(result['materialized_views_checked'], 1)
+        self.assertEqual(result['materialized_view_rows_observed'], 42)
+        self.assertTrue(result['materialized_view_inventory_matches_dump_toc'])
+        self.assertTrue(result['materialized_view_rows_are_derived_observations'])
+
+    def test_materialized_inventory_missing_unknown_or_duplicate_is_refused(self):
+        expected, actual, toc = self.materialized()
+        for rows in (ROWS, actual + [dict(actual[-1], table='undeclared')], actual + [actual[-1]]):
+            with self.assertRaises(restore.BackupError):
+                restore.compare_counts(expected, rows, toc)
+        toc['materialized_views'].append(toc['materialized_views'][0])
+        with self.assertRaisesRegex(restore.BackupError, 'Duplicate'):
+            restore.compare_counts(expected, actual, toc)
+
+    def test_materialized_toc_requires_same_dump_and_explicit_refresh(self):
+        expected, actual, original = self.materialized()
+        for mutate in ('hash', 'missing_hash', 'refresh'):
+            toc = copy.deepcopy(original)
+            candidate = copy.deepcopy(expected)
+            if mutate == 'hash':
+                toc['dump_sha256'] = 'b' * 64
+            elif mutate == 'missing_hash':
+                toc.pop('dump_sha256')
+                candidate.pop('dump_sha256')
+            else:
+                toc['materialized_views'][0]['refresh_intended'] = False
+            with self.assertRaises(restore.BackupError):
+                restore.compare_counts(candidate, actual, toc)
+
+    def test_materialized_cache_cannot_hide_copy_or_foreign_relation(self):
+        expected, actual, toc = self.materialized()
+        with self.assertRaisesRegex(restore.BackupError, 'foreign'):
+            restore.compare_counts(expected, actual + [{'schema': 'public', 'table': 'remote', 'kind': 'f', 'rows': 0}], toc)
+        expected['tables'].append({'schema': 'public', 'table': 'summary', 'rows': 42})
+        with self.assertRaisesRegex(restore.BackupError, 'conflicting'):
+            restore.compare_counts(expected, actual, toc)
+
     def test_inventory_requires_ready_and_bounded_metadata(self):
         wire = b''.join(json.dumps(row).encode() + b'\n' for row in ROWS)
         self.assertEqual(restore.read_inventory(io.BytesIO(wire + json.dumps(restore.READY).encode() + b'\n')), ROWS)
@@ -318,6 +370,7 @@ class GuardTests(unittest.TestCase):
     def test_helpers_have_no_network_secret_or_source_mount(self):
         c = config(Path('/data/private'))
         for command in (restore.count_command(c, 'name', '/private-input'),
+                        restore.toc_command(c, 'name', '/private-input'),
                         restore.restore_command(c, 'name', '/private-input', '/private-scratch', '/reviewed-script')):
             for flag, value in [('--network', 'none'), ('--pull', 'never'), ('--memory', '256m'),
                                 ('--memory-swap', '256m'), ('--cpus', '0.5')]:
@@ -335,7 +388,9 @@ class FakeMonitor:
         self.active = self.maximum_active = 0
         self.names = []
         self.nonzero = False
+        self.fail_stage = None
         self.rows = ROWS
+        self.views = []
 
     def tick(self, **kwargs):
         pass
@@ -345,8 +400,18 @@ class FakeMonitor:
         self.active += 1
         self.maximum_active = max(self.maximum_active, self.active)
         self.names.append(name)
-        output = DATA if '-counts-' in name else b''.join(json.dumps(row).encode() + b'\n' for row in self.rows) + json.dumps(restore.READY).encode() + b'\n'
-        process = mock.Mock(stdout=io.BytesIO(output), returncode=1 if self.nonzero else 0)
+        if '-toc-' in name:
+            output = TOC_HEADER.replace(b'TOC Entries: 3', ('TOC Entries: %d' % (3 + 2 * len(self.views))).encode())
+            for index, view in enumerate(self.views):
+                output += ('%d; 1259 %d MATERIALIZED VIEW %s %s postgres\n%d; 0 %d MATERIALIZED VIEW DATA %s %s postgres\n' %
+                           (10 + index, 12345 + index, view['schema'], view['table'],
+                            20 + index, 12345 + index, view['schema'], view['table'])).encode('ascii')
+        elif '-counts-' in name:
+            output = DATA
+        else:
+            output = b''.join(json.dumps(row).encode() + b'\n' for row in self.rows) + json.dumps(restore.READY).encode() + b'\n'
+        failure = self.nonzero and (self.fail_stage is None or '-' + self.fail_stage + '-' in name)
+        process = mock.Mock(stdout=io.BytesIO(output), returncode=1 if failure else 0)
         try:
             yield process
         finally:
@@ -378,7 +443,8 @@ class LifecycleTests(Fixture):
         self.assertTrue((session / 'passed.json').is_file())
         self.assertFalse((session / 'failed.json').exists())
         for idx in range(2):
-            for name in ('expected-counts.json', 'restored-counts.json', 'passed.json'):
+            for name in ('expected-counts.json', 'restored-counts.json', 'expected-materialized-toc.json',
+                         'restored-materialized-views.json', 'passed.json'):
                 path = session / ('db-%d' % idx) / name
                 self.assertEqual(path.stat().st_mode & 0o777, 0o600)
             self.assertTrue((session / ('db-%d' % idx) / 'inputs' / 'database.dump').exists())
@@ -386,12 +452,48 @@ class LifecycleTests(Fixture):
     def test_nonzero_export_never_promoted_to_expected_evidence(self):
         monitor = FakeMonitor(self.c)
         monitor.nonzero = True
+        monitor.fail_stage = 'counts'
         with self.assertRaisesRegex(restore.BackupError, 'nonzero'):
             self.run_fake(monitor)
         session = self.sessions()[0]
         self.assertTrue((session / 'failed.json').exists())
         self.assertFalse((session / 'passed.json').exists())
         self.assertFalse((session / 'db-0' / 'expected-counts.json').exists())
+        self.assertTrue((session / 'db-0' / 'expected-materialized-toc.json').exists())
+
+    def test_nonzero_toc_or_changed_copy_cannot_promote_toc_evidence(self):
+        monitor = FakeMonitor(self.c)
+        monitor.nonzero = True
+        monitor.fail_stage = 'toc'
+        with self.assertRaisesRegex(restore.BackupError, 'nonzero'):
+            self.run_fake(monitor)
+        session = self.sessions()[0]
+        self.assertFalse((session / 'db-0' / 'expected-materialized-toc.json').exists())
+        self.assertEqual(len(monitor.names), 1)
+        with mock.patch.object(restore, 'check_copy', side_effect=[None, restore.BackupError('changed copy')]):
+            with self.assertRaisesRegex(restore.BackupError, 'changed copy'):
+                self.run_fake()
+        changed = next(path for path in self.sessions() if path != session)
+        self.assertFalse((changed / 'db-0' / 'expected-materialized-toc.json').exists())
+
+    def test_materialized_toc_and_derived_rows_are_separate_private_evidence(self):
+        monitor = FakeMonitor(self.c)
+        views = [{'schema': 'public', 'table': 'summary_%d' % i, 'kind': 'm', 'rows': i + 1}
+                 for i in range(8)]
+        monitor.rows = ROWS + views
+        monitor.views = views
+        result = self.run_fake(monitor)
+        self.assertEqual(result['rows_checked'], 4)
+        self.assertEqual(result['materialized_views_checked'], 16)
+        self.assertEqual(result['materialized_view_rows_observed'], 72)
+        self.assertTrue(result['materialized_view_rows_are_derived_observations'])
+        self.assertEqual(monitor.maximum_active, 1)
+        session = self.sessions()[0]
+        evidence = json.loads((session / 'db-0' / 'restored-materialized-views.json').read_text())
+        self.assertEqual(evidence['views'], views)
+        self.assertIn('not dump COPY row-count proof', evidence['row_count_semantics'])
+        physical = json.loads((session / 'db-0' / 'restored-counts.json').read_text())
+        self.assertEqual(physical['tables'], ROWS)
 
     def test_count_mismatch_retains_expected_and_failure_status(self):
         monitor = FakeMonitor(self.c)
@@ -403,7 +505,7 @@ class LifecycleTests(Fixture):
         event = json.loads((session / 'failed.json').read_text())
         self.assertEqual(event['stage'], 'isolated-sql-restore')
         self.assertNotIn('99', json.dumps(event))
-        self.assertEqual(len(monitor.names), 2)
+        self.assertEqual(len(monitor.names), 3)
 
     def test_hook_sees_only_current_private_sandbox_before_completion(self):
         seen = []
@@ -427,7 +529,7 @@ class LifecycleTests(Fixture):
         session = self.sessions()[0]
         self.assertTrue((session / 'failed.json').exists())
         self.assertFalse((session / 'db-0' / 'inputs' / 'complete').exists())
-        self.assertEqual(len(monitor.names), 2)
+        self.assertEqual(len(monitor.names), 3)
         self.assertEqual(monitor.active, 0)
 
     def test_low_start_memory_starts_nothing(self):
