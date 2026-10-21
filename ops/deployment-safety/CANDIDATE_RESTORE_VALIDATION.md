@@ -78,3 +78,45 @@ Bounded, network-none, read-only-root helper containers then exercise the restor
 The actual candidate then starts against the separately restored database and uses its real disk-storage service to create a fourth, exactly predeclared synthetic file in that reserved directory. Post-application checks accept only archived files plus these four exact synthetic files, recheck original bytes/ownership and every original directory's presence, inode, ownership, mode and reconstructed access/default ACLs, and repeat backup denials. Extra files, incomplete probes, failed guards or unconfirmed helper cleanup leave acceptance unproven. Originals are never truncated, overwritten or deleted by the test. Test containers are removed; private scratch and evidence remain on the server.
 
 The aggregate result records `restored_upload_permission_policy_proven`, the number of original files checked, and elapsed isolated recovery seconds. These seconds measure the local test from an already available backup and image; they do not demonstrate complete incident recovery, replacement-host provisioning, DNS/provider recovery or the earlier one-hour target. Existing encrypted HR compatibility and document-reference completeness are separate checks. Missing originals, uncovered references or unreadable samples keep complete document recovery unproven even when SQL and permission acceptance pass.
+
+## Read-only document reconciliation
+
+`reconcile-documents-reviewed.py` diagnoses document gaps against a newly restored, counted snapshot. It preserves the frozen content checker's original results and adds a separate report. It never updates production references, replaces files, creates substitute originals, fetches external URLs, or receives production credentials or HR keys.
+
+Generate a seed-reference catalog with `build-document-seed-catalog.py` from the committed repository's migration sources. The builder records only safe exact reference literals and source filename/line citations, bound to the source revision. A matching literal is evidence of a possible fixture reference; it does not prove row provenance or recovery. Protect the generated catalog on the server as root-owned `0600` and record its SHA-256 before use.
+
+Install the dispatcher and adjacent `document-reconciliation.cjs` in a root-controlled directory, with the Node file readable `0444`. The dispatcher verifies the installed frozen backup, restore and content-checker source hashes, uses the existing shared lock, requires 2 GiB available memory, and retains the core's disk/memory/public-health guards. It copies the verified selected archive and bound manifest into a new private session, mounts only copied inputs, the generated disposable PostgreSQL socket and reviewed scripts readonly, and runs a network-none UID70 helper at 128 MiB / 0.25 CPU with no capabilities, no-new-privileges and read-only root. All non-system image environment values are cleared. There is no production database or upload path argument.
+
+The helper uses a read-only PostgreSQL transaction with bounded cursors. It separates source/reference occurrences from unique local paths, checks explicitly cataloged storage columns, preserves the legacy result, and handles only source-reviewed JSON and download-URL forms. Known embedded PDF/PNG originals can be validated inside the restored database; JPEG metadata acceptance remains header-only. Generic values above 64 KiB remain oversized/unproven. Recognized generated registrar routes remain regeneration-unproven until their renderer is independently tested; no original is invented from a route.
+
+For archive media, bounded magic-byte checks distinguish filename-extension mismatches from content-parser failures. A fresh zero-offset `Uint8Array` prevents the JPEG parser's Buffer-pool offset from changing the result for identical bytes. JPEG headers do not prove full raster readability. All original member hashes must still match. Unsupported formats, size/pixel budgets, missing references, unresolved columns and failed parsers remain explicit findings.
+
+Password-protected PDFs receive the fixed `encrypted_pdf_password_required` result. This uses only the installed parser's trusted encryption-error signature internally; raw error strings and document contents are never reported. It does not bypass encryption, guess passwords or count the document as readable.
+
+The full report includes private document paths/references and stays root-owned `0600` on the server. Only an exact allowlist of aggregate counts and safety flags may reach stdout or a shared report. Retain the dump/archive/image binding, private evidence and helper-cleanup proof. An aggregate report completing successfully does not mean complete document recovery.
+
+Example, after verifying disk storage is enabled and reviewing exact immutable inputs:
+
+```sh
+python3 -B /etc/falcon-deployment-safety/<reviewed-directory>/reconcile-documents-reviewed.py \
+  --run-id '<finalized-backup-run-id>' \
+  --approval-id '<current-isolated-test-authorization>' \
+  --content-image 'sha256:<already-local-reviewed-image-id>' \
+  --seed-catalog '/etc/falcon-deployment-safety/<private-directory>/seed-catalog.json' \
+  --seed-catalog-sha256 '<verified-catalog-sha256>' \
+  --disk-storage-confirmed --i-confirm-disposable-restore
+```
+
+Search historical manifests or preserved archives only as candidate evidence. Validate source hashes before trusting a candidate, retain its exact tenant-relative path and source version, and compare it in an isolated tree. A similar basename or a different tenant's file is never sufficient. Any production restore requires the owner's explicit approval of exact targets and an audit record; no automatic overwrite, reference rewrite or purge is included here.
+
+## Separate bounded media proof
+
+`prove-document-media-reviewed.py` is an optional follow-up for the specific JPEG headers, format mismatches and size/pixel-budget findings in a completed private reconciliation report. It requires that report's exact run, dump and upload-archive bindings. It verifies the finalized source again, manually extracts only into a newly generated private quarantine using the pinned reviewed extractor, and copies selected originals into fresh indexed input files. Original source bytes, numeric ownership and the archive hash are checked before and after testing.
+
+The helper receives individual indexed files readonly, bound metadata and the reviewed `document-media-proof.cjs`; it receives no archive, database socket, production mount, credentials or keys. Use an explicit already-local API image for `--mode pdf`, or a separately verified already-local frontend image containing Sharp for `--mode raster`. No dependency is installed or downloaded by the proof.
+
+Each mode is serialized under the backup lock and existing continuous guards, requires 2 GiB available host memory, and uses UID70, network-none, read-only root, no capabilities, no-new-privileges, 384 MiB memory, 0.5 CPU and a 96 MiB Node heap. Indexed originals are bounded to 8 MiB. Raster proof disables Sharp caches, uses one decoder worker, permits one frame, limits input to 16 Mi-pixels and requires actual raw pixels with at most 64 MiB output. Decoded pixel and input buffers are cleared; no file is rewritten. Header-only acceptance never counts as raster proof.
+
+PDF parsing retains encryption checks. Oversized, multi-frame, unsupported, password-protected, failed or resource-aborted inputs stay unproven. The private per-file report remains on the server; stdout contains only exact aggregate outcomes, immutable image identity and generated scratch location. Test helpers are removed and absence is verified, while quarantine and evidence are retained. These results prove only the selected unchanged originals, not full business recovery or incident recovery time.
+
+On 2026-10-21, isolated reconciliation of backup `20261021T144753Z-6a1af8d8121c4e569235ab611fe1f138` restored and counted both databases and verified all 244 archived upload hashes. The separate raster proof fully decoded all 81 selected images, including the larger PNG and a valid PNG stored with a JPEG extension; source hashes remained unchanged and helper removal was verified. Two selected PDFs were classified as password protected, with no encryption bypass. Reconciliation still found 577 distinct unmatched local reference paths; these are paths rather than a proven count of unique missing originals, and may include duplicate or fixture references. No matching path candidates were found in 51 indexed finalized sets or two preserved archives. Missing originals, password-dependent PDF readability, any untested generated routes and complete incident recovery time remain unproven. Detailed references and document bytes stay in private server evidence; no production restore or reference rewrite was performed.
