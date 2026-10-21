@@ -21,8 +21,12 @@ export class StaffProfileFreezeInterceptor implements NestInterceptor {
     const method = String(req.method ?? '').toUpperCase();
     const accountAccess = /^\/(?:api\/)?auth\/(?:me|me\/permissions|profile|change-password|logout)$/.test(path);
     const reviewAccess = /^\/api\/staff\/profile-review\/me(?:\/corrections|\/resubmit|\/documents\/[A-Z_]+)?$/.test(path);
+    // Never trap a first-login staff member behind the recovery freeze before
+    // their required password setup. Legacy profile/document writes stay blocked.
+    const onboardingAccess = (method === 'POST' && path === '/api/staff/onboarding/reset-password') ||
+      (method === 'GET' && /^\/api\/staff\/onboarding\/(?:status|profile)$/.test(path));
     const runtimeAccess = method === 'GET' && path === '/api/platform/modules/runtime';
-    if (accountAccess || reviewAccess || runtimeAccess) return next.handle();
+    if (accountAccess || reviewAccess || runtimeAccess || onboardingAccess) return next.handle();
 
     return from(this.db.query(
       `SELECT 1 FROM staff_profile_reviews v

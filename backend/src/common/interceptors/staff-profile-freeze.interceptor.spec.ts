@@ -4,9 +4,9 @@ import { StaffProfileFreezeInterceptor } from './staff-profile-freeze.intercepto
 
 describe('StaffProfileFreezeInterceptor', () => {
   const next = { handle: () => of('allowed') };
-  const context = (path: string, userId = 'staff-1') => ({
+  const context = (path: string, userId = 'staff-1', method = 'GET') => ({
     switchToHttp: () => ({ getRequest: () => ({
-      user: { user_id: userId, tenant_id: 'tenant-1' }, originalUrl: path, method: 'GET',
+      user: { user_id: userId, tenant_id: 'tenant-1' }, originalUrl: path, method,
     }) }),
   });
 
@@ -34,5 +34,13 @@ describe('StaffProfileFreezeInterceptor', () => {
     const gate = new StaffProfileFreezeInterceptor(db as never);
     await expect(lastValueFrom(gate.intercept(context('/api/academics/faculty/dashboard') as never, next)))
       .resolves.toBe('allowed');
+  });
+  it('allows first-login password setup and own status reads but not legacy profile writes', async () => {
+    const db = { query: jest.fn().mockResolvedValue([{ '?column?': 1 }]) };
+    const gate = new StaffProfileFreezeInterceptor(db as never);
+    await expect(lastValueFrom(gate.intercept(context('/api/staff/onboarding/reset-password', 'staff-1', 'POST') as never, next))).resolves.toBe('allowed');
+    await expect(lastValueFrom(gate.intercept(context('/api/staff/onboarding/status') as never, next))).resolves.toBe('allowed');
+    await expect(lastValueFrom(gate.intercept(context('/api/staff/onboarding/profile', 'staff-1', 'POST') as never, next))).rejects.toBeInstanceOf(ForbiddenException);
+    expect(db.query).toHaveBeenCalledTimes(1);
   });
 });
