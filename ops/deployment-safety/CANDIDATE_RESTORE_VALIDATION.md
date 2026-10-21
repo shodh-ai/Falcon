@@ -78,3 +78,31 @@ Bounded, network-none, read-only-root helper containers then exercise the restor
 The actual candidate then starts against the separately restored database and uses its real disk-storage service to create a fourth, exactly predeclared synthetic file in that reserved directory. Post-application checks accept only archived files plus these four exact synthetic files, recheck original bytes/ownership and every original directory's presence, inode, ownership, mode and reconstructed access/default ACLs, and repeat backup denials. Extra files, incomplete probes, failed guards or unconfirmed helper cleanup leave acceptance unproven. Originals are never truncated, overwritten or deleted by the test. Test containers are removed; private scratch and evidence remain on the server.
 
 The aggregate result records `restored_upload_permission_policy_proven`, the number of original files checked, and elapsed isolated recovery seconds. These seconds measure the local test from an already available backup and image; they do not demonstrate complete incident recovery, replacement-host provisioning, DNS/provider recovery or the earlier one-hour target. Existing encrypted HR compatibility and document-reference completeness are separate checks. Missing originals, uncovered references or unreadable samples keep complete document recovery unproven even when SQL and permission acceptance pass.
+
+## Read-only document reconciliation
+
+`reconcile-documents-reviewed.py` diagnoses document gaps against a newly restored, counted snapshot. It preserves the frozen content checker's original results and adds a separate report. It never updates production references, replaces files, creates substitute originals, fetches external URLs, or receives production credentials or HR keys.
+
+Generate a seed-reference catalog with `build-document-seed-catalog.py` from the committed repository's migration sources. The builder records only safe exact reference literals and source filename/line citations, bound to the source revision. A matching literal is evidence of a possible fixture reference; it does not prove row provenance or recovery. Protect the generated catalog on the server as root-owned `0600` and record its SHA-256 before use.
+
+Install the dispatcher and adjacent `document-reconciliation.cjs` in a root-controlled directory, with the Node file readable `0444`. The dispatcher verifies the installed frozen backup, restore and content-checker source hashes, uses the existing shared lock, requires 2 GiB available memory, and retains the core's disk/memory/public-health guards. It copies the verified selected archive and bound manifest into a new private session, mounts only copied inputs, the generated disposable PostgreSQL socket and reviewed scripts readonly, and runs a network-none UID70 helper at 128 MiB / 0.25 CPU with no capabilities, no-new-privileges and read-only root. All non-system image environment values are cleared. There is no production database or upload path argument.
+
+The helper uses a read-only PostgreSQL transaction with bounded cursors. It separates source/reference occurrences from unique local paths, checks explicitly cataloged storage columns, preserves the legacy result, and handles only source-reviewed JSON and download-URL forms. Known embedded PDF/PNG originals can be validated inside the restored database; JPEG metadata acceptance remains header-only. Generic values above 64 KiB remain oversized/unproven. Recognized generated registrar routes remain regeneration-unproven until their renderer is independently tested; no original is invented from a route.
+
+For archive media, bounded magic-byte checks distinguish filename-extension mismatches from content-parser failures. A fresh zero-offset `Uint8Array` prevents the JPEG parser's Buffer-pool offset from changing the result for identical bytes. JPEG headers do not prove full raster readability. All original member hashes must still match. Unsupported formats, size/pixel budgets, missing references, unresolved columns and failed parsers remain explicit findings.
+
+The full report includes private document paths/references and stays root-owned `0600` on the server. Only an exact allowlist of aggregate counts and safety flags may reach stdout or a shared report. Retain the dump/archive/image binding, private evidence and helper-cleanup proof. An aggregate report completing successfully does not mean complete document recovery.
+
+Example, after verifying disk storage is enabled and reviewing exact immutable inputs:
+
+```sh
+python3 -B /etc/falcon-deployment-safety/<reviewed-directory>/reconcile-documents-reviewed.py \
+  --run-id '<finalized-backup-run-id>' \
+  --approval-id '<current-isolated-test-authorization>' \
+  --content-image 'sha256:<already-local-reviewed-image-id>' \
+  --seed-catalog '/etc/falcon-deployment-safety/<private-directory>/seed-catalog.json' \
+  --seed-catalog-sha256 '<verified-catalog-sha256>' \
+  --disk-storage-confirmed --i-confirm-disposable-restore
+```
+
+Search historical manifests or preserved archives only as candidate evidence. Validate source hashes before trusting a candidate, retain its exact tenant-relative path and source version, and compare it in an isolated tree. A similar basename or a different tenant's file is never sufficient. Any production restore requires the owner's explicit approval of exact targets and an audit record; no automatic overwrite, reference rewrite or purge is included here.

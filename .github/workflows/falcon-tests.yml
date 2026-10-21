@@ -53,6 +53,9 @@ jobs:
       - name: Install locked backend dependencies
         run: npm ci --prefix backend
 
+      - name: Test read-only document reconciliation with synthetic data
+        run: node --test ops/deployment-safety/tests/document_reconciliation.spec.cjs
+
       # These specs mock persistence, queues and SMTP. No application starts.
       - name: Test notification and password-reset sender safeguards offline
         working-directory: backend
