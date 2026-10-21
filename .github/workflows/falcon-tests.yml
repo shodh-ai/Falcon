@@ -20,6 +20,7 @@ jobs:
       - name: Check startup, storage refusal and host preflight decisions
         run: |
           node --test backend/scripts/storage-boundary.spec.cjs backend/scripts/resource-boundary.spec.cjs backend/scripts/runtime-start.spec.cjs backend/scripts/deploy-migrate.spec.cjs
+          node --test ops/deployment-safety/tests/recovery_upload_probe.spec.cjs
           python3 -B -m unittest discover -s ops/deployment-safety/tests -v
       - name: Prepare official disposable PostgreSQL 18 fixture image
         run: |
