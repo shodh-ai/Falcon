@@ -7,7 +7,9 @@ const profile = {
   staff_mobile: '9876543210', gender: 'Female', date_of_birth: '1985-02-03', current_address: 'Jaipur',
   emergency_contact_name: 'Contact', emergency_contact_phone: '9876543211',
   qualification: { degree_level: 'Doctorate', degree_name: 'PhD', university: 'University', passing_year: 2015 },
-  retained_unknown: { legacy: true }, orcid_id: 'saved-optional-id',
+  permanent_address: 'Jaipur', blood_group: 'B+', pan_number: 'ABCDE1234F', aadhaar_number: '123456789012',
+  bank_account_no: '12345678901', ifsc_code: 'TEST0000001', total_experience_years: 0,
+  retained_unknown: { legacy: true }, orcid_id: 'saved-research-id',
 };
 const docs = ['PHOTO', 'AADHAAR', 'PAN', 'HIGHEST_DEGREE'].map(doc_type => ({ doc_type, file_path: `/uploads/tenant/${doc_type}.pdf`, status: 'PENDING', uploaded_at: null }));
 const review = { review_id: 'review', tenant_id: 'tenant', user_id: 'staff', revision: 5, source: 'PHARMACY_RECHECK',
@@ -25,15 +27,32 @@ function setup() {
 }
 
 describe('Recovery essentials and persistent storage boundary', () => {
-  it('requires only core information, preserves nested qualifications, optional values and unknown keys', () => {
-    expect(STAFF_RECOVERY_REQUIRED_FIELDS).toHaveLength(10);
+  it('requires the same 18 fields as faculty onboarding and preserves nested/unknown values', () => {
+    expect(STAFF_RECOVERY_REQUIRED_FIELDS).toHaveLength(18);
     expect(invalidRecoveryFields(profile)).toEqual([]);
     const flat = recoveryValues(profile);
-    expect(flat).toMatchObject({ degree_name: 'PhD', orcid_id: 'saved-optional-id', retained_unknown: { legacy: true } });
+    expect(flat).toMatchObject({ degree_name: 'PhD', orcid_id: 'saved-research-id', retained_unknown: { legacy: true } });
     expect(profile).not.toHaveProperty('degree_name');
-    expect(invalidRecoveryFields({ ...profile, orcid_id: '', bank_account_no: '', blood_group: '' })).toEqual([]);
+    expect(invalidRecoveryFields({ ...profile, orcid_id: '', bank_account_no: '', blood_group: '' }))
+      .toEqual(expect.arrayContaining(['orcid_id', 'bank_account_no', 'blood_group']));
   });
-  it('detects blank or invalid core values without requiring optional research IDs', () => {
+  it.each(STAFF_RECOVERY_REQUIRED_FIELDS)('rejects missing %s in recovery and standard onboarding', (field) => {
+    const incomplete = { ...recoveryValues(profile), [field]: '', qualification: {} };
+    expect(invalidRecoveryFields(incomplete)).toContain(field);
+    const standard = StudentOnboardingService.prototype as unknown as {
+      validateProfileComplete: (kind: 'staff', values: Record<string, unknown>) => void;
+    };
+    expect(() => standard.validateProfileComplete('staff', incomplete)).toThrow('required profile fields');
+  });
+  it('leaves only applicable extras optional and accepts zero teaching experience', () => {
+    expect(invalidRecoveryFields({ ...profile, pf_uan: '', specialization: '', industry_experience_years: '', scopus_id: '', google_scholar_url: '' })).toEqual([]);
+    expect(invalidRecoveryFields({ ...profile, total_experience_years: '0' })).toEqual([]);
+    for (const value of [-1, Infinity, 'not-a-number']) {
+      expect(invalidRecoveryFields({ ...profile, total_experience_years: value })).toContain('total_experience_years');
+    }
+    expect(invalidRecoveryFields({ ...profile, industry_experience_years: -1 })).toContain('industry_experience_years');
+  });
+  it('detects blank or invalid core values without requiring Scopus or Google Scholar', () => {
     expect(invalidRecoveryFields({ ...profile, staff_mobile: 'invalid', date_of_birth: '1985-02-30', current_address: '' }))
       .toEqual(expect.arrayContaining(['staff_mobile', 'date_of_birth', 'current_address']));
     expect(invalidRecoveryFields({ ...profile, qualification: { ...profile.qualification, passing_year: 3000 } })).toContain('passing_year');
@@ -67,7 +86,7 @@ describe('Recovery preservation and authoritative document gates', () => {
   });
   it('accepts safe same-payload profile retries without rewriting saved data', async () => {
     const { service, qr } = setup();
-    await expect(service.correctProfile('tenant', 'staff', { orcid_id: 'saved-optional-id' })).resolves.toMatchObject({ replayed: true });
+    await expect(service.correctProfile('tenant', 'staff', { orcid_id: 'saved-research-id' })).resolves.toMatchObject({ replayed: true });
     expect(qr.query).not.toHaveBeenCalled(); expect(service.appendEvent).not.toHaveBeenCalled();
   });
   it('rejects replacement references with no readable bytes before overwriting the current reference', async () => {

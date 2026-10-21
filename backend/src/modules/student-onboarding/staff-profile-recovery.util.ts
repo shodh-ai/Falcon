@@ -1,9 +1,13 @@
 import { BadRequestException } from '@nestjs/common';
 
+// Match the existing staff-onboarding completion requirements. Recovery must
+// preserve saved values, not offer a less complete route around onboarding.
 export const STAFF_RECOVERY_REQUIRED_FIELDS = [
   'staff_mobile', 'gender', 'date_of_birth', 'current_address',
   'emergency_contact_name', 'emergency_contact_phone',
   'degree_level', 'degree_name', 'university', 'passing_year',
+  'permanent_address', 'blood_group', 'pan_number', 'aadhaar_number',
+  'bank_account_no', 'ifsc_code', 'orcid_id', 'total_experience_years',
 ] as const;
 const QUALIFICATIONS = new Set(['degree_level', 'degree_name', 'university', 'passing_year', 'specialization']);
 
@@ -31,6 +35,9 @@ export function invalidRecoveryFields(profile: Record<string, unknown>, phone?: 
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dob) || !Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== dob || date > new Date()) missing.push('date_of_birth');
   }
   if (values.passing_year && (!Number.isInteger(Number(values.passing_year)) || Number(values.passing_year) < 1950 || Number(values.passing_year) > new Date().getFullYear())) missing.push('passing_year');
+  for (const key of ['total_experience_years', 'industry_experience_years']) {
+    if (String(values[key] ?? '').trim() && (!Number.isFinite(Number(values[key])) || Number(values[key]) < 0)) missing.push(key);
+  }
   return [...new Set(missing)];
 }
 

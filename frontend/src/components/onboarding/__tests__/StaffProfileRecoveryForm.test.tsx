@@ -4,19 +4,48 @@ import { StaffProfileRecoveryForm } from '../StaffProfileRecoveryForm';
 
 const api = vi.hoisted(() => ({ post: vi.fn(), patch: vi.fn() }));
 vi.mock('@/lib/api', () => ({ useAuthedApi: () => api }));
-const review = { review_id: 'recovery-1', profile: { staff_mobile: '9876543210', degree_name: 'MPharm', orcid_id: 'retained-id' },
-  required_fields: ['staff_mobile', 'degree_name'], requested_fields: [], requested_docs: ['PAN'], corrected_docs: [] };
+const requiredFields = ['staff_mobile', 'gender', 'date_of_birth', 'current_address', 'emergency_contact_name',
+  'emergency_contact_phone', 'degree_level', 'degree_name', 'university', 'passing_year', 'permanent_address',
+  'blood_group', 'pan_number', 'aadhaar_number', 'bank_account_no', 'ifsc_code', 'orcid_id', 'total_experience_years'];
+const review = { review_id: 'recovery-1', profile: { staff_mobile: '9876543210', degree_name: 'MPharm', orcid_id: 'retained-id',
+  gender: 'Female', date_of_birth: '1985-02-03', current_address: 'Jaipur', emergency_contact_name: 'Contact',
+  emergency_contact_phone: '9876543211', degree_level: 'Masters', university: 'University', passing_year: '2015',
+  permanent_address: 'Jaipur', blood_group: 'B+', pan_number: 'ABCDE1234F', aadhaar_number: '123456789012',
+  bank_account_no: '12345678901', ifsc_code: 'TEST0000001', total_experience_years: '0' },
+  required_fields: requiredFields, requested_fields: [], requested_docs: ['PAN'], corrected_docs: [] };
 const complete = vi.fn();
 const submit = () => fireEvent.submit(screen.getByRole('button', { name: 'Submit profile and documents to HR' }).closest('form')!);
 describe('Faculty recovery form', () => {
   beforeEach(() => { vi.clearAllMocks(); api.post.mockResolvedValue({}); api.patch.mockResolvedValue({}); });
-  it('prefills saved information, requires only core fields and never offers skip', () => {
+  it('prefills saved information, marks all 18 onboarding fields required and never offers skip', () => {
     render(<StaffProfileRecoveryForm review={review} onSubmitted={complete} onSignOut={vi.fn()} />);
     expect(screen.getByDisplayValue('9876543210')).toBeRequired();
     expect(screen.getByDisplayValue('MPharm')).toBeRequired();
-    expect(screen.getByDisplayValue('retained-id')).not.toBeRequired();
+    expect(screen.getByDisplayValue('retained-id')).toBeRequired();
+    for (const key of requiredFields) expect(document.querySelector(`[name="${key}"]`)).toBeRequired();
+    for (const key of ['pf_uan', 'specialization', 'industry_experience_years', 'scopus_id', 'google_scholar_url']) {
+      expect(document.querySelector(`[name="${key}"]`)).not.toBeRequired();
+    }
+    expect(screen.getByText('Additional information — if applicable')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /skip/i })).not.toBeInTheDocument();
     expect(screen.getAllByText('Existing file retained')).toHaveLength(3);
+  });
+  it('blocks submission if an essential identity or payroll field is empty', async () => {
+    render(<StaffProfileRecoveryForm review={{ ...review, profile: { ...review.profile, bank_account_no: '' }, corrected_docs: ['PAN'] }} onSubmitted={complete} onSignOut={vi.fn()} />);
+    submit();
+    expect(await screen.findByRole('alert')).toHaveTextContent('Complete the fields marked Required');
+    expect(api.patch).not.toHaveBeenCalled(); expect(api.post).not.toHaveBeenCalled();
+  });
+  it('accepts zero teaching experience and blank applicable extras', async () => {
+    render(<StaffProfileRecoveryForm review={{ ...review, corrected_docs: ['PAN'] }} onSubmitted={complete} onSignOut={vi.fn()} />);
+    expect(screen.getByRole('spinbutton', { name: /Teaching experience/ })).toHaveValue(0);
+    submit(); await waitFor(() => expect(complete).toHaveBeenCalled());
+    expect(api.patch).not.toHaveBeenCalled();
+    expect(api.post).toHaveBeenCalledWith('/api/staff/profile-review/me/resubmit');
+  });
+  it('requires an applicable extra when HR explicitly requests it', () => {
+    render(<StaffProfileRecoveryForm review={{ ...review, requested_fields: ['pf_uan'] }} onSubmitted={complete} onSignOut={vi.fn()} />);
+    expect(document.querySelector('[name="pf_uan"]')).toBeRequired();
   });
   it('retains dirty input across status refreshes and requires the missing replacement', async () => {
     const view = render(<StaffProfileRecoveryForm review={review} onSubmitted={complete} onSignOut={vi.fn()} />);
