@@ -105,6 +105,9 @@ import { DatabaseExceptionFilter } from './common/filters/database-exception.fil
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
+      // The startup boundary validates the injected environment before Nest.
+      // An image-local dotenv file must not redirect storage/database afterward.
+      ignoreEnvFile: process.env.NODE_ENV === 'production',
     }),
     EventEmitterModule.forRoot(),
     ScheduleModule.forRoot(),
@@ -119,37 +122,47 @@ import { DatabaseExceptionFilter } from './common/filters/database-exception.fil
     }),
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
-      useFactory: (configService: ConfigService) => ({
-        type: 'postgres',
-        host: configService.get('DB_HOST', 'localhost'),
-        port: configService.get<number>('DB_PORT', 5432),
-        username: configService.get('DB_USERNAME', 'postgres'),
-        password: configService.get('DB_PASSWORD', 'postgres'),
-        database: configService.get('DB_DATABASE', 'university_governance'),
-        entities: Object.values(entities).filter(
-          (e) => typeof e === 'function',
-        ),
-        subscribers: [EntityScopeSubscriber, SystemAuditSubscriber],
-        synchronize:
-          configService.get<string>('DB_SYNCHRONIZE', 'false') === 'true',
-        logging:
-          configService.get('TYPEORM_LOGGING', 'false') === 'true'
-            ? ['query', 'error', 'warn']
-            : configService.get('NODE_ENV') === 'development',
-        maxQueryExecutionTime: Number(
-          configService.get('TYPEORM_SLOW_MS', '200'),
-        ),
-        extra: {
-          max: Number(configService.get('DB_POOL_MAX', '20')),
-          min: Number(configService.get('DB_POOL_MIN', '2')),
-          idleTimeoutMillis: Number(
-            configService.get('DB_POOL_IDLE_MS', '30000'),
+      useFactory: (configService: ConfigService) => {
+        if (
+          configService.get('NODE_ENV') === 'production' &&
+          configService.get<string>('DB_SYNCHRONIZE', 'false') !== 'false'
+        ) {
+          throw new Error(
+            'Production database schema synchronization is disabled',
+          );
+        }
+        return {
+          type: 'postgres',
+          host: configService.get('DB_HOST', 'localhost'),
+          port: configService.get<number>('DB_PORT', 5432),
+          username: configService.get('DB_USERNAME', 'postgres'),
+          password: configService.get('DB_PASSWORD', 'postgres'),
+          database: configService.get('DB_DATABASE', 'university_governance'),
+          entities: Object.values(entities).filter(
+            (e) => typeof e === 'function',
           ),
-          connectionTimeoutMillis: Number(
-            configService.get('DB_POOL_CONNECT_MS', '5000'),
+          subscribers: [EntityScopeSubscriber, SystemAuditSubscriber],
+          synchronize:
+            configService.get<string>('DB_SYNCHRONIZE', 'false') === 'true',
+          logging:
+            configService.get('TYPEORM_LOGGING', 'false') === 'true'
+              ? ['query', 'error', 'warn']
+              : configService.get('NODE_ENV') === 'development',
+          maxQueryExecutionTime: Number(
+            configService.get('TYPEORM_SLOW_MS', '200'),
           ),
-        },
-      }),
+          extra: {
+            max: Number(configService.get('DB_POOL_MAX', '20')),
+            min: Number(configService.get('DB_POOL_MIN', '2')),
+            idleTimeoutMillis: Number(
+              configService.get('DB_POOL_IDLE_MS', '30000'),
+            ),
+            connectionTimeoutMillis: Number(
+              configService.get('DB_POOL_CONNECT_MS', '5000'),
+            ),
+          },
+        };
+      },
       inject: [ConfigService],
     }),
     AuditModule,
