@@ -290,14 +290,21 @@ describe('Student fees and payments overview', () => {
     const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
     render(<StudentFeeStructureWorkspace />);
     await summary();
-    fireEvent.click(screen.getByRole('button', { name: 'Download receipt for Tuition Fee on 14 Oct 2026' }));
-    await waitFor(() => expect(click).toHaveBeenCalledOnce());
+    vi.useFakeTimers();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Download receipt for Tuition Fee on 14 Oct 2026' }));
+    });
+    expect(click).toHaveBeenCalledOnce();
     expect(mocks.api.getBlob).toHaveBeenCalledWith('/api/uploads/download?path=%2Fuploads%2Fsynthetic-tenant%2Freceipt.pdf');
     expect(mocks.createObjectURL).toHaveBeenCalledWith(original);
     const anchor = click.mock.instances[0];
     expect(anchor).toHaveAttribute('href', 'blob:original-receipt');
     expect(anchor).toHaveAttribute('download', 'fee-receipt-payment-semester-2.pdf');
     expect(mocks.downloadPdf).not.toHaveBeenCalled();
+    // Run the real component's delayed cleanup while URL is still mocked.
+    // Otherwise the callback escapes teardown and fails unrelated CI tests.
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    expect(mocks.revokeObjectURL).toHaveBeenCalledWith('blob:original-receipt');
   });
 
   it('reports a failed receipt download and never substitutes an invented receipt', async () => {
