@@ -1,0 +1,24 @@
+{
+  "staging_root": "/data/falcon-backups/staging",
+  "final_root": "/data/falcon-backups/finalized",
+  "uploads_source": "/REVIEW_REQUIRED/backend/uploads",
+  "pgpass_file": "/etc/falcon-local-backup/pgpass",
+  "image": "REVIEW_REQUIRED_LOCAL_POSTGRES18_IMAGE_ID",
+  "network": "REVIEW_REQUIRED_PRIVATE_COOLIFY_DB_NETWORK",
+  "db_host": "REVIEW_REQUIRED_DATABASE_CONTAINER_DNS",
+  "db_port": 5432,
+  "db_user": "falcon_backup",
+  "databases": ["postgres", "university_governance"],
+  "health_urls": ["http://127.0.0.1:REVIEW_REQUIRED/health"],
+  "release_resource_prefixes": {
+    "backend": "REVIEW_REQUIRED_BACKEND_RESOURCE_PREFIX",
+    "frontend": "REVIEW_REQUIRED_FRONTEND_RESOURCE_PREFIX"
+  },
+  "worker_uid": 999,
+  "worker_gid": 0,
+  "restore_uid": 70,
+  "restore_gid": 70,
+  "working_bytes": 536870912,
+  "max_archive_bytes": 134217728,
+  "timeout_seconds": 900
+}

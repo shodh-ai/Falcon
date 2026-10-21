@@ -28,6 +28,7 @@ import { FinanceApprovalsService } from './finance-approvals.service';
 import { FinanceChequeService } from './finance-cheque.service';
 import { CreateFeeDemandDto } from './dto/create-fee-demand.dto';
 import { GatewayWebhookDto } from './dto/gateway-webhook.dto';
+import { requireTenantId } from '../../common/utils/require-tenant-id';
 
 type AuthUser = { user_id: string; tenant_id?: string };
 
@@ -160,14 +161,25 @@ export class FinanceController {
 
   @Get('transactions')
   @Roles(...FINANCE_DESK)
-  listTransactions(@Query('studentUserId') studentUserId?: string) {
-    return this.finance.listTransactions(studentUserId);
+  listTransactions(
+    @Req() req: { user: AuthUser },
+    @Query('studentUserId') studentUserId?: string,
+  ) {
+    return this.finance.listTransactions(
+      requireTenantId(req.user.tenant_id), studentUserId,
+    );
   }
 
   @Patch('transactions/:id/receipt')
   @Roles(...FINANCE_DESK)
-  uploadReceipt(@Param('id') id: string, @Body() dto: { receipt_url: string }) {
-    return this.finance.uploadReceipt(id, dto.receipt_url);
+  uploadReceipt(
+    @Req() req: { user: AuthUser },
+    @Param('id') id: string,
+    @Body() dto: { receipt_url: string },
+  ) {
+    return this.finance.uploadReceipt(
+      requireTenantId(req.user.tenant_id), id, dto.receipt_url, req.user.user_id,
+    );
   }
 
   @Get('defaulters')

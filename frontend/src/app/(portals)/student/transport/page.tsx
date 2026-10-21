@@ -12,6 +12,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useAuthedApi } from '@/lib/api';
+import { useAuth } from '@/context/AuthContext';
 import { getApiBaseUrl } from '@/lib/api-base-url';
 import type { BusLocation, MapStop } from '@/components/transport/TransportMap';
 import { DEMO_TRANSPORT } from '@/lib/mock/student-portal-demo';
@@ -86,6 +87,7 @@ type Tab = 'find' | 'pass' | 'track';
 
 export default function StudentTransportPage() {
   const api = useAuthedApi();
+  const { token } = useAuth();
   const apiUrl = getApiBaseUrl();
 
   const [tab, setTab] = useState<Tab>('find');
@@ -179,7 +181,7 @@ export default function StudentTransportPage() {
   }, [api, allocation]);
 
   useEffect(() => {
-    if (tab !== 'track' || !allocation?.route_id) return;
+    if (tab !== 'track' || !allocation?.route_id || !token) return;
 
     const loadLive = () => {
       void api.get<LiveData>('/api/transport/live').then((data) => {
@@ -189,8 +191,8 @@ export default function StudentTransportPage() {
     };
     loadLive();
 
-    const socket: Socket = io(`${apiUrl}/transport`, { transports: ['websocket'] });
-    socket.emit('joinRoute', { route_id: allocation.route_id });
+    const socket: Socket = io(`${apiUrl}/transport`, { transports: ['websocket'], auth: { token } });
+    socket.on('connect', () => socket.emit('joinRoute', { route_id: allocation.route_id }));
     socket.on('gps_update', (payload: BusLocation & { route_id: string }) => {
       if (payload.route_id === allocation.route_id) {
         setBusLocation({ lat: payload.lat, lng: payload.lng, speed: payload.speed });
@@ -200,7 +202,7 @@ export default function StudentTransportPage() {
     return () => {
       socket.disconnect();
     };
-  }, [api, apiUrl, tab, allocation?.route_id]);
+  }, [api, apiUrl, tab, allocation?.route_id, token]);
 
   async function requestRouteChange() {
     if (routeChangeReason.trim().length < 10) {

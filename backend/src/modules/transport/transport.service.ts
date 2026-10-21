@@ -433,7 +433,7 @@ export class TransportService {
     await this.redis.setBusLocation(routeId, { lat, lng, speed, timestamp });
 
     const payload = { route_id: routeId, lat, lng, speed, timestamp };
-    this.gateway.broadcastGpsUpdate(routeId, payload);
+    this.gateway.broadcastGpsUpdate(tenantId, routeId, payload);
 
     await this.checkGeofenceAlerts(tenantId, routeId, lat, lng);
     return payload;

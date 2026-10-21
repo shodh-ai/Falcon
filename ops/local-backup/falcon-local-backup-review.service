@@ -1,0 +1,16 @@
+[Unit]
+Description=FALCON backup retention review (report only, never deletes)
+
+[Service]
+Type=oneshot
+User=root
+UMask=0077
+RuntimeDirectory=falcon-local-backup
+RuntimeDirectoryMode=0700
+RuntimeDirectoryPreserve=yes
+ExecStart=/usr/bin/python3 -I /opt/falcon-local-backup/falcon_backup.py review
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/run/falcon-local-backup
+StandardOutput=journal
+StandardError=journal

@@ -10,7 +10,6 @@ import {
   createReadStream,
   existsSync,
   mkdirSync,
-  unlinkSync,
   writeFileSync,
 } from 'fs';
 import { basename, resolve } from 'path';
@@ -571,8 +570,9 @@ export class CourseLmsService {
       }
     }
 
-    await this.removeStoredFile(material);
-    await this.materials.remove(material);
+    // Preserve the original and its visibility rows for owner-authorized
+    // recovery. TypeORM excludes soft-deleted rows from normal reads/downloads.
+    await this.materials.softRemove(material);
     return { deleted: true, material_id: materialId };
   }
 
@@ -1122,26 +1122,6 @@ export class CourseLmsService {
       this.logger.warn(
         `Material ${materialId} was uploaded, but student notifications could not be sent: ${message}`,
       );
-    }
-  }
-
-  private async removeStoredFile(material: CourseMaterial) {
-    if (material.file_key && this.objectStorage.isEnabled()) {
-      return;
-    }
-    const uploadRoot = resolve(process.env.UPLOAD_PATH || './uploads');
-    const filePath = material.file_path.startsWith('/')
-      ? material.file_path
-      : resolve(process.cwd(), material.file_path);
-    const resolved = filePath.includes(uploadRoot)
-      ? filePath
-      : resolve(uploadRoot, material.file_path);
-    if (existsSync(resolved)) {
-      try {
-        unlinkSync(resolved);
-      } catch {
-        /* best-effort disk cleanup */
-      }
     }
   }
 

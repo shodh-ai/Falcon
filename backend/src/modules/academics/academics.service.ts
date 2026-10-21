@@ -3187,7 +3187,7 @@ export class AcademicsService {
     const materialsCounts = await this.users.manager.query(
       `SELECT course_id, COUNT(*)::int AS count 
        FROM course_materials 
-       WHERE tenant_id = $1 AND faculty_user_id = ANY($2::uuid[]) 
+       WHERE tenant_id = $1 AND faculty_user_id = ANY($2::uuid[]) AND deleted_at IS NULL
        GROUP BY course_id`,
       [tenantId, facultyIds],
     );

@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useAuthedApi } from '@/lib/api';
+import { useAuth } from '@/context/AuthContext';
 import type { BusLocation } from '@/components/transport/TransportMap';
 
 const TransportMap = dynamic(
@@ -38,6 +39,7 @@ const DEFAULT_CENTER: [number, number] = [26.9124, 75.7434];
 
 export default function TransportAdminPage() {
   const api = useAuthedApi();
+  const { token } = useAuth();
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
   const [fleet, setFleet] = useState<FleetMapData | null>(null);
@@ -68,8 +70,9 @@ export default function TransportAdminPage() {
 
   useEffect(() => {
     load();
-    const socket: Socket = io(`${apiUrl}/transport`, { transports: ['websocket'] });
-    socket.emit('joinFleet');
+    if (!token) return;
+    const socket: Socket = io(`${apiUrl}/transport`, { transports: ['websocket'], auth: { token } });
+    socket.on('connect', () => socket.emit('joinFleet'));
     socket.on('fleet_gps_update', (payload: BusLocation & { route_id: string }) => {
       setBusLocations((prev) => ({
         ...prev,
@@ -79,7 +82,7 @@ export default function TransportAdminPage() {
     return () => {
       socket.disconnect();
     };
-  }, [api, apiUrl]);
+  }, [api, apiUrl, token]);
 
   const mapCenter = useMemo((): [number, number] => {
     const locs = Object.values(busLocations);

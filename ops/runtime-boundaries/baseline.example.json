@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "container_id": "REVIEW_REQUIRED_FULL_PREVIOUS_CONTAINER_ID",
+  "image_id": "REVIEW_REQUIRED_IMMUTABLE_PREVIOUS_IMAGE_ID",
+  "revision": "REVIEW_REQUIRED_FULL_PREVIOUS_GIT_REVISION",
+  "revision_evidence": "REVIEW_REQUIRED_SOURCE_BUILD_TO_IMAGE_MAPPING",
+  "persistent_mounts": [
+    {
+      "Type": "bind",
+      "Source": "/REVIEW_REQUIRED_EXISTING_UPLOAD_SOURCE",
+      "Destination": "/app/uploads",
+      "RW": true
+    }
+  ],
+  "writable_upload_targets": ["/app/uploads"],
+  "allowed_tmpfs_targets": ["/tmp"]
+}

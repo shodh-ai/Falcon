@@ -74,7 +74,12 @@ export class UploadsService {
          UNION ALL SELECT t.receipt_url FROM finance_transactions t
          JOIN finance_fee_demands d ON d.demand_id = t.demand_id
          WHERE d.tenant_id = $1 AND d.student_user_id = $2
-           AND t.tenant_id = $1 AND t.student_user_id = $2 AND t.status = 'SUCCESS'
+           AND (t.tenant_id = $1 OR t.tenant_id IS NULL) AND t.student_user_id = $2 AND t.status = 'SUCCESS'
+         UNION ALL SELECT v.receipt_url FROM finance_receipt_versions v
+         JOIN finance_transactions t ON t.transaction_id = v.transaction_id AND (t.tenant_id = v.tenant_id OR t.tenant_id IS NULL)
+         JOIN finance_fee_demands d ON d.demand_id = t.demand_id AND d.tenant_id = v.tenant_id
+         WHERE v.tenant_id = $1 AND t.student_user_id = $2 AND d.student_user_id = $2
+           AND t.status = 'SUCCESS' AND t.deleted_at IS NULL AND d.deleted_at IS NULL
          ${
            student
              ? `UNION ALL SELECT file_url FROM university_policies

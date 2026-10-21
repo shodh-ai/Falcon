@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { io, type Socket } from 'socket.io-client';
 import { useAuthedApi } from '@/lib/api';
+import { useAuth } from '@/context/AuthContext';
 import type { BusLocation } from '@/components/transport/TransportMap';
 
 const TransportMap = dynamic(
@@ -23,6 +24,7 @@ type LiveBus = {
 
 export function ParentBusMap({ studentUserId }: { studentUserId: string }) {
   const api = useAuthedApi();
+  const { token } = useAuth();
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
   const [live, setLive] = useState<LiveBus | null>(null);
   const [busLocation, setBusLocation] = useState<BusLocation | null>(null);
@@ -38,9 +40,9 @@ export function ParentBusMap({ studentUserId }: { studentUserId: string }) {
   }, [api, studentUserId]);
 
   useEffect(() => {
-    if (!live?.route_id) return;
-    const socket: Socket = io(`${apiUrl}/transport`, { transports: ['websocket'] });
-    socket.emit('joinRoute', { route_id: live.route_id });
+    if (!live?.route_id || !token) return;
+    const socket: Socket = io(`${apiUrl}/transport`, { transports: ['websocket'], auth: { token } });
+    socket.on('connect', () => socket.emit('joinRoute', { route_id: live.route_id }));
     socket.on('gps_update', (payload: BusLocation & { route_id: string }) => {
       if (payload.route_id === live.route_id) {
         setBusLocation({ lat: payload.lat, lng: payload.lng, speed: payload.speed });
@@ -49,7 +51,7 @@ export function ParentBusMap({ studentUserId }: { studentUserId: string }) {
     return () => {
       socket.disconnect();
     };
-  }, [apiUrl, live?.route_id]);
+  }, [apiUrl, live?.route_id, token]);
 
   if (!live) {
     return (

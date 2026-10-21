@@ -4,17 +4,20 @@ import {
   SubscribeMessage,
   MessageBody,
   ConnectedSocket,
+  OnGatewayDisconnect,
 } from '@nestjs/websockets';
-import { Logger } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
 import type { FeedEventPayload } from '../../common/constants/leadership-queue.constants';
+import { ScopedSocketService } from '../../common/websockets/scoped-socket.service';
 
 @WebSocketGateway({ namespace: '/leadership', cors: { origin: '*' } })
-export class LeadershipGateway {
+export class LeadershipGateway implements OnGatewayDisconnect {
   @WebSocketServer()
   server: Server;
 
-  private readonly logger = new Logger(LeadershipGateway.name);
+  constructor(private readonly sockets: ScopedSocketService) {}
+
+  handleDisconnect(client: Socket) { this.sockets.release(client); }
 
   broadcastFeedEvent(tenantId: string, event: FeedEventPayload) {
     this.server.to(`leadership_feed:${tenantId}`).emit('feed_event', event);
@@ -25,10 +28,6 @@ export class LeadershipGateway {
     @MessageBody() data: { tenant_id?: string },
     @ConnectedSocket() client: Socket,
   ) {
-    if (data?.tenant_id) {
-      client.join(`leadership_feed:${data.tenant_id}`);
-      this.logger.debug(`Client joined leadership_feed:${data.tenant_id}`);
-    }
-    return { joined: true };
+    return this.sockets.join(client, { kind: 'leadership', tenantId: data?.tenant_id });
   }
 }

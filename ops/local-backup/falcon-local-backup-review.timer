@@ -1,0 +1,10 @@
+[Unit]
+Description=Weekly review of FALCON backup sets aged at least 14 days
+
+[Timer]
+OnCalendar=Sun *-*-* 09:00:00 Asia/Kolkata
+Persistent=false
+Unit=falcon-local-backup-review.service
+
+[Install]
+WantedBy=timers.target

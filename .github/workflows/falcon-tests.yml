@@ -7,6 +7,66 @@ on:
     branches: [main, develop, testing]
 
 jobs:
+  access-protection:
+    name: Access and data preservation safeguards
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      NODE_ENV: test
+      PORTAL_EMAIL_DELIVERY_ENABLED: 'false'
+      DB_HOST: localhost
+      DB_PORT: 5432
+      DB_DATABASE: falcon_test_access
+      DB_USERNAME: postgres
+      DB_PASSWORD: synthetic-test-password
+      FALCON_SYNTHETIC_DB: '1'
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: synthetic-test-password
+          POSTGRES_DB: falcon_test_access
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.23.3'
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+      - name: Install locked backend dependencies
+        run: npm ci --ignore-scripts --prefix backend
+      - name: Test access boundaries with synthetic offline data
+        working-directory: backend
+        run: |
+          npm test -- --runInBand --runTestsByPath \
+            src/common/websockets/scoped-socket.service.spec.ts \
+            src/common/interceptors/impersonation-readonly.interceptor.spec.ts \
+            src/modules/academics/course-lms.material-preservation.spec.ts \
+            src/modules/academics/course-lms.delete-module.spec.ts \
+            src/modules/finance/finance-receipt-preservation.spec.ts \
+            src/uploads/uploads.service.spec.ts
+          node --test scripts/security/access-surface.spec.cjs
+          node --test scripts/security/transaction-scope.spec.cjs
+          node --test scripts/security/rollout-workflow.spec.cjs
+      - name: Test offline runtime and release readiness decisions
+        run: python3 -B -m unittest discover -s ops/runtime-boundaries/tests -v
+      - name: Inventory all access surfaces without loading the application
+        working-directory: backend
+        run: node scripts/security/access-surface.cjs --json > access-surface.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: access-surface-review
+          path: backend/access-surface.json
+
   notification-security:
     name: Notification and sender security
     runs-on: ubuntu-latest

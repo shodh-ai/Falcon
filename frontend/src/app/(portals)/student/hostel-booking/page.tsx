@@ -543,7 +543,7 @@ function HostelFloorMap({
 export default function StudentHostelBookingPage() {
   const router = useRouter();
   const api = useAuthedApi();
-  const { user } = useAuth();
+  const { user, token } = useAuth();
   const [catalog, setCatalog] = useState<HostelBlock[]>([]);
   const [selectedHostel, setSelectedHostel] = useState('');
   const [selectedFloor, setSelectedFloor] = useState('');
@@ -567,9 +567,9 @@ export default function StudentHostelBookingPage() {
 
   useEffect(() => {
     const tenantId = user?.tenant_id;
-    if (!tenantId) return;
-    const socket: Socket = io(`${getApiBaseUrl()}/hostel-tatkal`, { transports: ['websocket'] });
-    socket.emit('joinSale', { tenant_id: tenantId });
+    if (!tenantId || !token) return;
+    const socket: Socket = io(`${getApiBaseUrl()}/hostel-tatkal`, { transports: ['websocket'], auth: { token } });
+    socket.on('connect', () => socket.emit('joinSale', { tenant_id: tenantId }));
     socket.on('bed.update', (payload: { bed_id?: string; bedId?: string; display_status?: string; status?: string }) => {
       const bedId = payload.bedId ?? payload.bed_id;
       const status = payload.status ?? payload.display_status;
@@ -590,7 +590,7 @@ export default function StudentHostelBookingPage() {
     return () => {
       socket.disconnect();
     };
-  }, [user?.tenant_id]);
+  }, [user?.tenant_id, token]);
 
   const hostel = catalog.find((h) => h.hostel_block === selectedHostel);
   const activeFloor = selectedFloor || hostel?.floors[0]?.floor || '';

@@ -4,9 +4,10 @@ import {
   SubscribeMessage,
   MessageBody,
   ConnectedSocket,
+  OnGatewayDisconnect,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
-import { Logger } from '@nestjs/common';
+import { ScopedSocketService } from '../../common/websockets/scoped-socket.service';
 
 export type GpsUpdatePayload = {
   route_id: string;
@@ -17,33 +18,30 @@ export type GpsUpdatePayload = {
 };
 
 @WebSocketGateway({ namespace: '/transport', cors: { origin: '*' } })
-export class TransportGateway {
+export class TransportGateway implements OnGatewayDisconnect {
   @WebSocketServer()
   server: Server;
 
-  private readonly logger = new Logger(TransportGateway.name);
+  constructor(private readonly sockets: ScopedSocketService) {}
 
-  broadcastGpsUpdate(routeId: string, payload: GpsUpdatePayload) {
-    this.server.to(`route_${routeId}`).emit('gps_update', payload);
-    this.server.to('fleet_all').emit('fleet_gps_update', payload);
+  handleDisconnect(client: Socket) { this.sockets.release(client); }
+
+  broadcastGpsUpdate(tenantId: string, routeId: string, payload: GpsUpdatePayload) {
+    this.server.to(`transport:${tenantId}:route:${routeId}`).emit('gps_update', payload);
+    this.server.to(`transport:${tenantId}:fleet`).emit('fleet_gps_update', payload);
   }
 
   @SubscribeMessage('joinRoute')
-  handleJoinRoute(
+  async handleJoinRoute(
     @MessageBody() data: { route_id: string },
     @ConnectedSocket() client: Socket,
   ) {
-    if (data?.route_id) {
-      client.join(`route_${data.route_id}`);
-      this.logger.debug(`Client joined route room ${data.route_id}`);
-    }
-    return { joined: true, route_id: data?.route_id };
+    const result = await this.sockets.join(client, { kind: 'route', routeId: data?.route_id });
+    return { ...result, route_id: data?.route_id };
   }
 
   @SubscribeMessage('joinFleet')
   handleJoinFleet(@ConnectedSocket() client: Socket) {
-    client.join('fleet_all');
-    this.logger.debug('Client joined fleet map room');
-    return { joined: true };
+    return this.sockets.join(client, { kind: 'fleet' });
   }
 }
