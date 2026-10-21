@@ -23,6 +23,11 @@ import sys
 MIB = 1024 ** 2
 GIB = 1024 ** 3
 SHA256_RE = re.compile(r'^[0-9a-f]{64}$')
+TOC_IDENTIFIER = rb'[A-Za-z_][A-Za-z0-9_$]{0,62}'
+TOC_RECORD = re.compile(rb'([1-9][0-9]{0,9}); ([0-9]{1,10}) ([0-9]{1,10}) (.+)')
+TOC_MATERIALIZED = re.compile(
+    rb'MATERIALIZED VIEW( DATA)? (' + TOC_IDENTIFIER + rb') (' +
+    TOC_IDENTIFIER + rb') (' + TOC_IDENTIFIER + rb')')
 UNQUOTED_RE = re.compile(rb'[a-z_\x80-\xff][a-z0-9_$\x80-\xff]*')
 HEADER = b'-- PostgreSQL database dump'
 COMPLETE = b'-- PostgreSQL database dump complete'
@@ -287,6 +292,119 @@ def quote_identifier(name):
     except UnicodeEncodeError:
         raise CountParseError('SQL identifier must use UTF-8') from None
     return '"' + name.replace('"', '""') + '"'
+
+
+def parse_materialized_toc(binary_stream, dump_sha256, *, max_stream_bytes=64 * MIB,
+                           max_line_bytes=16 * 1024, max_entries=100000,
+                           max_views=10000, check=None):
+    """Read a private, unfiltered PG18 pg_restore --list stream, metadata only.
+
+    MATERIALIZED VIEW DATA represents a REFRESH intent, not cached row bytes.
+    This deliberately narrow proof accepts only simple ASCII names and paired
+    definition/DATA records with the same object OID and owner. Definition-only
+    views can be legitimate (WITH NO DATA), but remain unsupported here rather
+    than guessing a population state. No TOC names are included in exceptions.
+
+    pg_restore --list has no end marker and its header count includes entries
+    not printed by --list. Therefore the caller must use the exact immutable
+    dump, hash it before/after, and require the supervised pg_restore exit code
+    to be zero. The SHA argument labels that binding; it cannot establish it.
+    """
+    _require(isinstance(dump_sha256, str) and SHA256_RE.fullmatch(dump_sha256),
+             'A lowercase custom-dump SHA-256 is required')
+    for limit in (max_stream_bytes, max_line_bytes, max_entries, max_views):
+        _require(type(limit) is int and limit > 0, 'Positive integer parser limits are required')
+    digest = hashlib.sha256()
+    stream_bytes = entries = 0
+    archive_count = None
+    created = custom = pg18 = selected = False
+    ids, definitions, refreshes, object_names = set(), {}, {}, {}
+    while True:
+        if check:
+            check()
+        line = binary_stream.readline(max_line_bytes + 2)
+        _require(isinstance(line, bytes), 'A binary pg_restore TOC stream is required')
+        if not line:
+            break
+        stream_bytes += len(line)
+        _require(stream_bytes <= max_stream_bytes, 'TOC stream byte limit exceeded')
+        _require(len(line) <= max_line_bytes + 1, 'TOC stream line limit exceeded')
+        _require(line.endswith(b'\n'), 'Truncated or oversized TOC stream line')
+        _require(not any(char in line for char in (b'\0', b'\r')), 'Unsupported TOC control character')
+        digest.update(line)
+        body = line[:-1]
+        if body.startswith(b';'):
+            comment = body[1:].strip(b' \t')
+            if not comment:
+                continue
+            _require(not selected, 'Unexpected TOC comment after selected entries')
+            if comment.startswith(b'Archive created at '):
+                _require(not created, 'Duplicate TOC archive header')
+                created = True
+            elif comment.startswith(b'TOC Entries:'):
+                match = re.fullmatch(rb'TOC Entries: ([0-9]{1,10})', comment)
+                _require(match is not None and archive_count is None, 'Invalid TOC entry-count header')
+                archive_count = int(match[1])
+                _require(archive_count <= max_entries, 'TOC archive entry limit exceeded')
+            elif comment.startswith(b'Format:'):
+                _require(comment == b'Format: CUSTOM' and not custom, 'Unsupported TOC archive format')
+                custom = True
+            elif comment.startswith(b'Dumped by pg_dump version:'):
+                _require(not pg18 and re.fullmatch(
+                    rb'Dumped by pg_dump version: 18(?:\.[0-9]+)?(?:[ (].*)?', comment) is not None,
+                    'A PG18 TOC producer is required')
+                pg18 = True
+            elif comment == b'Selected TOC Entries:':
+                _require(created and custom and pg18 and archive_count is not None,
+                         'Incomplete TOC archive header')
+                selected = True
+            continue
+        if not body:
+            continue
+        _require(selected, 'Missing TOC selected-entry header')
+        match = TOC_RECORD.fullmatch(body)
+        _require(match is not None, 'Malformed TOC record')
+        toc_id, class_oid, object_oid = (int(match[index]) for index in (1, 2, 3))
+        _require(toc_id <= 2147483647 and class_oid <= 4294967295 and object_oid <= 4294967295,
+                 'TOC numeric identifier is outside supported bounds')
+        _require(toc_id not in ids, 'Duplicate TOC entry identifier')
+        ids.add(toc_id)
+        entries += 1
+        _require(entries <= max_entries and entries <= archive_count, 'TOC entry limit exceeded')
+        description = match[4]
+        # Do not confuse COMMENT/ACL records whose tag mentions a materialized
+        # view with an actual materialized-view definition or refresh record.
+        if not description.upper().startswith(b'MATERIALIZED'):
+            continue
+        materialized = TOC_MATERIALIZED.fullmatch(description)
+        _require(materialized is not None, 'Unsupported or ambiguous materialized-view TOC record')
+        is_data = materialized[1] is not None
+        _require(class_oid == (0 if is_data else 1259) and object_oid > 0,
+                 'Invalid materialized-view TOC catalog identifiers')
+        schema, table, owner = (materialized[index].decode('ascii') for index in (2, 3, 4))
+        key = (schema, table)
+        destination = refreshes if is_data else definitions
+        _require(key not in destination, 'Duplicate materialized-view TOC record')
+        _require(len(destination) < max_views, 'Materialized-view TOC limit exceeded')
+        destination[key] = (toc_id, object_oid, owner)
+        if not is_data:
+            _require(object_oid not in object_names, 'Duplicate materialized-view TOC object identifier')
+            object_names[object_oid] = key
+    _require(selected, 'Incomplete TOC archive header')
+    _require(definitions.keys() == refreshes.keys(), 'Unpaired materialized-view TOC records')
+    views = []
+    for (schema, table), (definition_id, object_oid, owner) in sorted(definitions.items()):
+        data_id, data_oid, data_owner = refreshes[(schema, table)]
+        _require(object_oid == data_oid and owner == data_owner,
+                 'Materialized-view TOC pair does not match')
+        views.append({'schema': schema, 'table': table, 'object_oid': object_oid,
+                      'definition_toc_id': definition_id, 'data_toc_id': data_id,
+                      'refresh_intended': True})
+    return {'schema_version': 1, 'dump_sha256': dump_sha256,
+            'toc_stream_sha256': digest.hexdigest(), 'stream_bytes': stream_bytes,
+            'toc_entries': entries, 'archive_toc_entries': archive_count,
+            'semantics': 'paired materialized-view definitions and REFRESH intents; no copied cached-row counts',
+            'materialized_views': views}
 
 
 def count_queries(metadata):

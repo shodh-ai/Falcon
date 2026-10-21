@@ -189,5 +189,148 @@ class DumpCountsTests(unittest.TestCase):
         self.assertNotIn(b'SYNTHETIC_PRIVATE_VALUE', process.stderr)
 
 
+def toc(entries=b'', count=None):
+    if count is None:
+        # PG18 --list does not print the three special archive entries.
+        count = 3 + len(entries.splitlines())
+    return (b';\n; Archive created at synthetic\n;     TOC Entries: ' + str(count).encode() +
+            b'\n;     Compression: gzip\n;     Dump Version: 1.16-0\n;     Format: CUSTOM\n'
+            b';     Integer: 4 bytes\n;     Offset: 8 bytes\n'
+            b';     Dumped from database version: 18.4\n'
+            b';     Dumped by pg_dump version: 18.4 (synthetic)\n'
+            b';\n;\n; Selected TOC Entries:\n;\n' + entries)
+
+
+VIEW = b'10; 1259 12345 MATERIALIZED VIEW public summary postgres\n'
+REFRESH = b'20; 0 12345 MATERIALIZED VIEW DATA public summary postgres\n'
+
+
+class MaterializedTocTests(unittest.TestCase):
+    def parse(self, entries=b'', **limits):
+        return dump_counts.parse_materialized_toc(io.BytesIO(toc(entries)), SHA, **limits)
+
+    def test_empty_and_paired_view_bind_exact_dump_and_toc(self):
+        self.assertEqual(self.parse()['materialized_views'], [])
+        source = toc(VIEW + REFRESH)
+        result = dump_counts.parse_materialized_toc(io.BytesIO(source), SHA)
+        self.assertEqual(result['dump_sha256'], SHA)
+        self.assertEqual(result['toc_stream_sha256'], hashlib.sha256(source).hexdigest())
+        self.assertEqual(result['stream_bytes'], len(source))
+        self.assertEqual(result['toc_entries'], 2)
+        self.assertEqual(result['archive_toc_entries'], 5)
+        self.assertEqual(result['materialized_views'], [
+            {'schema': 'public', 'table': 'summary', 'object_oid': 12345,
+             'definition_toc_id': 10, 'data_toc_id': 20, 'refresh_intended': True}])
+        self.assertIn('no copied cached-row counts', result['semantics'])
+
+    def test_schemas_sorted_and_data_before_definition_supported(self):
+        other = (VIEW.replace(b'10;', b'11;').replace(b'12345', b'12346').replace(b'public', b'other') +
+                 REFRESH.replace(b'20;', b'21;').replace(b'12345', b'12346').replace(b'public', b'other'))
+        result = self.parse(REFRESH + VIEW + other)
+        self.assertEqual([item['schema'] for item in result['materialized_views']], ['other', 'public'])
+
+    def test_other_record_types_are_not_misclassified_or_reported(self):
+        private = b'SYNTHETIC_PRIVATE_VALUE'
+        ignored = (b'30; 1259 20000 TABLE public physical postgres\n'
+                   b'31; 0 0 COMMENT public MATERIALIZED VIEW summary postgres\n'
+                   b'32; 0 0 ACL public MATERIALIZED VIEW summary postgres\n'
+                   b'33; 0 0 COMMENT public ' + private + b' postgres\n')
+        result = self.parse(VIEW + ignored + REFRESH)
+        self.assertEqual(len(result['materialized_views']), 1)
+        self.assertEqual(result['toc_entries'], 6)
+        self.assertNotIn(private.decode(), json.dumps(result))
+        self.assertNotIn('postgres', json.dumps(result))
+
+    def test_unpaired_definition_or_refresh_stays_unsupported(self):
+        for entries in (VIEW, REFRESH, VIEW + REFRESH.replace(b'summary', b'different')):
+            with self.subTest(length=len(entries)), self.assertRaises(dump_counts.CountParseError):
+                self.parse(entries)
+
+    def test_duplicate_records_ids_and_object_oids_fail(self):
+        duplicate_definition = VIEW.replace(b'10;', b'11;')
+        duplicate_data = REFRESH.replace(b'20;', b'21;')
+        same_object_other_name = VIEW.replace(b'10;', b'11;').replace(b'summary', b'other')
+        for entries in (VIEW + REFRESH + duplicate_definition,
+                        VIEW + REFRESH + duplicate_data,
+                        VIEW + REFRESH + same_object_other_name,
+                        VIEW + REFRESH + b'10; 0 0 COMMENT public ignored postgres\n'):
+            with self.subTest(length=len(entries)), self.assertRaises(dump_counts.CountParseError):
+                self.parse(entries)
+
+    def test_pair_oid_owner_and_catalog_class_must_match(self):
+        for entries in (VIEW + REFRESH.replace(b'12345', b'12346'),
+                        VIEW + REFRESH.replace(b'postgres', b'different_owner'),
+                        VIEW.replace(b'1259', b'0') + REFRESH,
+                        VIEW + REFRESH.replace(b'20; 0', b'20; 1259'),
+                        VIEW.replace(b'12345', b'0') + REFRESH.replace(b'12345', b'0')):
+            with self.subTest(length=len(entries)), self.assertRaises(dump_counts.CountParseError):
+                self.parse(entries)
+
+    def test_quoted_unicode_ambiguous_or_unsafe_identifiers_fail_without_echo(self):
+        for name in (b'"summary"', b'two words', b'name.with.dot', b'synthetic;DROP',
+                     b'x' * 64, b'SYNTHETIC_PRIVATE_VALUE\\evil', 'तาราง'.encode()):
+            entries = (VIEW + REFRESH).replace(b'summary', name)
+            with self.subTest(length=len(name)):
+                with self.assertRaises(dump_counts.CountParseError) as raised:
+                    self.parse(entries)
+                self.assertNotIn(name.decode('utf-8'), str(raised.exception))
+
+    def test_malformed_materialized_records_and_numeric_headers_fail(self):
+        malformed = [b'10; 1259 12345 MATERIALIZED\n',
+                     b'10; 1259 12345 materialized view public summary postgres\n',
+                     b'10; 1259 12345 MATERIALIZED VIEW DATA EXTRA public summary postgres\n',
+                     b'10; 1259 12345 MATERIALIZED_VIEW public summary postgres\n',
+                     b'10; x 12345 MATERIALIZED VIEW public summary postgres\n',
+                     b'10; 1259 4294967296 MATERIALIZED VIEW public summary postgres\n',
+                     b'2147483648; 1259 12345 MATERIALIZED VIEW public summary postgres\n']
+        for entries in malformed:
+            with self.subTest(length=len(entries)), self.assertRaises(dump_counts.CountParseError):
+                self.parse(entries)
+
+    def test_framing_control_characters_and_truncated_physical_lines_fail(self):
+        valid = toc(VIEW + REFRESH)
+        streams = [valid.rstrip(b'\n'), VIEW + REFRESH,
+                   valid.replace(b'Format: CUSTOM', b'Format: DIRECTORY'),
+                   valid.replace(b'Dumped by pg_dump version: 18.4', b'Dumped by pg_dump version: 19.0'),
+                   valid.replace(b'; Selected TOC Entries:\n', b''),
+                   valid.replace(b'public summary', b'public sum\0mary'),
+                   valid.replace(b'public summary', b'public sum\rmary'),
+                   valid + b'; 30; 1259 67890 MATERIALIZED VIEW public hidden postgres\n',
+                   valid + b'; Selected TOC Entries:\n',
+                   toc(VIEW + REFRESH, count=1)]
+        for index, source in enumerate(streams):
+            with self.subTest(case=index), self.assertRaises(dump_counts.CountParseError):
+                dump_counts.parse_materialized_toc(io.BytesIO(source), SHA)
+
+    def test_stream_line_entry_view_limits_and_binary_input(self):
+        second = (VIEW.replace(b'10;', b'11;').replace(b'12345', b'12346').replace(b'summary', b'other') +
+                  REFRESH.replace(b'20;', b'21;').replace(b'12345', b'12346').replace(b'summary', b'other'))
+        for limits in ({'max_stream_bytes': 10}, {'max_line_bytes': 10},
+                       {'max_entries': 4}, {'max_views': 1}):
+            with self.subTest(limit=next(iter(limits))), self.assertRaises(dump_counts.CountParseError):
+                self.parse(VIEW + REFRESH + second, **limits)
+        for invalid in (0, -1, True, 1.5):
+            with self.assertRaises(dump_counts.CountParseError): self.parse(max_views=invalid)
+        for invalid in ('', 'A' * 64, 'a' * 63, 'a' * 64 + '\n'):
+            with self.assertRaises(dump_counts.CountParseError):
+                dump_counts.parse_materialized_toc(io.BytesIO(toc()), invalid)
+        with self.assertRaises(dump_counts.CountParseError):
+            dump_counts.parse_materialized_toc(io.StringIO(toc().decode()), SHA)
+
+    def test_read_size_and_monitor_callback_are_bounded(self):
+        class Observed(io.BytesIO):
+            requests = []
+            def readline(self, size=-1):
+                self.requests.append(size)
+                return super().readline(size)
+        source = toc(VIEW + REFRESH)
+        stream = Observed(source)
+        callbacks = []
+        dump_counts.parse_materialized_toc(stream, SHA, max_line_bytes=256,
+                                          check=lambda: callbacks.append(True))
+        self.assertTrue(all(size == 258 for size in stream.requests))
+        self.assertEqual(len(callbacks), len(source.splitlines()) + 1)
+
+
 if __name__ == '__main__':
     unittest.main()
