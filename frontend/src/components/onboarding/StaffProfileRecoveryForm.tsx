@@ -29,6 +29,15 @@ const FIELDS: Record<string, string> = {
 const DOCS: Record<string, string> = {
   PHOTO: 'Passport photograph', AADHAAR: 'Aadhaar card', PAN: 'PAN card', HIGHEST_DEGREE: 'Highest degree certificate',
 };
+const FIELD_HINTS: Record<string, string> = {
+  total_experience_years: 'Enter 0 if you have no teaching experience.',
+  orcid_id: 'Required by the existing faculty onboarding and IQAC profile requirements.',
+  pf_uan: 'Provide it if a PF UAN has already been allotted to you.',
+  specialization: 'Provide it if your qualification has a specialization.',
+  industry_experience_years: 'Provide it if applicable; enter 0 for no industry experience.',
+  scopus_id: 'Provide it if you have a Scopus author profile.',
+  google_scholar_url: 'Provide your HTTPS profile link if you have a Google Scholar profile.',
+};
 
 export function StaffProfileRecoveryForm({ review, identityLabel, onSubmitted, onSignOut }: {
   review: RecoveryReview; identityLabel?: string; onSubmitted: () => Promise<unknown>; onSignOut: () => void;
@@ -81,11 +90,15 @@ export function StaffProfileRecoveryForm({ review, identityLabel, onSubmitted, o
     finally { setBusy(false); }
   };
   const field = (key: string) => <label key={key} className="block text-sm font-medium text-slate-800">
-    {FIELDS[key]} <span className="text-xs text-slate-500">{required.has(key) ? '(Required)' : '(Optional)'}</span>
+    {FIELDS[key]} <span className="text-xs text-slate-500">{required.has(key) ? '(Required)' : '(If applicable)'}</span>
     <Input className="mt-1" name={key} required={required.has(key)} disabled={busy}
-      type={key === 'date_of_birth' ? 'date' : key === 'google_scholar_url' ? 'url' : 'text'}
+      type={key === 'date_of_birth' ? 'date' : key === 'google_scholar_url' ? 'url' : ['passing_year', 'total_experience_years', 'industry_experience_years'].includes(key) ? 'number' : 'text'}
+      min={key === 'passing_year' ? 1950 : key.endsWith('experience_years') ? 0 : undefined}
+      max={key === 'passing_year' ? new Date().getFullYear() : undefined}
+      step={key === 'passing_year' ? 1 : key.endsWith('experience_years') ? 'any' : undefined}
       inputMode={key.endsWith('phone') || key === 'staff_mobile' ? 'tel' : key === 'passing_year' ? 'numeric' : undefined}
       value={values[key]} onChange={event => setValues(current => ({ ...current, [key]: event.target.value }))} />
+    {FIELD_HINTS[key] && <span className="mt-1 block text-xs font-normal text-slate-600">{FIELD_HINTS[key]}</span>}
   </label>;
   return <main className="min-h-screen bg-slate-50 p-4 sm:p-8">
     <form onSubmit={event => void submit(event)} className="mx-auto max-w-4xl space-y-6 rounded-2xl border bg-white p-5 sm:p-8">
@@ -93,16 +106,16 @@ export function StaffProfileRecoveryForm({ review, identityLabel, onSubmitted, o
         <p className="text-sm font-semibold text-amber-800">Pharmacy profile and document recovery</p>
         <h1 className="mt-2 text-2xl font-bold">Review your saved details and submit to HR</h1>
         {identityLabel && <p className="mt-2 break-words text-sm font-medium">{identityLabel}</p>}
-        <p className="mt-3 text-sm text-slate-700">Your existing information is prefilled and will not be deleted. Some earlier document files are unavailable. Upload only the replacements requested below and complete the important missing details. Portal access resumes after HR approval.</p>
+        <p className="mt-3 text-sm text-slate-700">Your existing information is prefilled and will not be deleted. Complete all fields marked Required, following the same requirements as faculty onboarding. Upload the replacement documents requested below. Portal access resumes after HR approval.</p>
         {review.return_reason && <p className="mt-3 rounded-lg bg-amber-50 p-3 text-sm">{review.return_reason}</p>}
       </header>
-      <section aria-label="Important profile details" className="space-y-3">
-        <h2 className="font-semibold">Important details</h2>
+      <section aria-label="Required faculty onboarding details" className="space-y-3">
+        <h2 className="font-semibold">Required faculty onboarding details</h2>
         <div className="grid gap-4 sm:grid-cols-2">{Object.keys(FIELDS).filter(key => required.has(key)).map(field)}</div>
       </section>
       <details className="rounded-lg border p-4">
-        <summary className="cursor-pointer font-medium">Other saved information — optional</summary>
-        <p className="mt-2 text-sm text-slate-600">These fields are not required unless HR specifically requests a correction. Existing values are retained.</p>
+        <summary className="cursor-pointer font-medium">Additional information — if applicable</summary>
+        <p className="mt-2 text-sm text-slate-600">Provide these details where applicable. They are not a requirement for every faculty member unless HR specifically requests a correction. Existing values are retained.</p>
         <div className="mt-4 grid gap-4 sm:grid-cols-2">{Object.keys(FIELDS).filter(key => !required.has(key)).map(field)}</div>
       </details>
       <section aria-label="Required documents" className="space-y-3">
