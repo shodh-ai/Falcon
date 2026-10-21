@@ -205,7 +205,23 @@ async function parseMedia(bytes, mime, pdf) {
       return { result: 'jpeg_header_opened', raster_decoded: false, width: image.width, height: image.height };
     }
     return { result: 'format_unsupported', raster_decoded: false };
-  } catch { return { result: 'parser_rejected', raster_decoded: false }; }
+  } catch (error) {
+    // Never expose a parser's message. The trusted pdf-lib build can transpile
+    // Error subclasses into plain Error instances; compare only its exact fresh
+    // constructor signature in that case, never a substring or document value.
+    if (mime === 'application/pdf' && error && typeof pdf.EncryptedPDFError === 'function') {
+      let encrypted = false;
+      try {
+        const signature = new pdf.EncryptedPDFError();
+        const trustedTypedError = error instanceof pdf.EncryptedPDFError &&
+          (error.name === 'EncryptedPDFError' || error.constructor?.name === 'EncryptedPDFError');
+        encrypted = trustedTypedError || (typeof signature.message === 'string' && signature.message.length > 0 &&
+          typeof error.message === 'string' && error.message === signature.message);
+      } catch { /* A dependency mismatch remains a fixed unproven result. */ }
+      if (encrypted) return { result: 'encrypted_pdf_password_required', raster_decoded: false };
+    }
+    return { result: 'parser_rejected', raster_decoded: false };
+  }
 }
 function increment(object, key, count = 1) { object[key] = (object[key] || 0) + count; }
 function snapshot(st) { return [st.dev, st.ino, st.size, st.mtimeMs, st.ctimeMs].join(':'); }
@@ -464,6 +480,7 @@ function assemble(state, archive, manifest, seeds) {
     pdf_parsed: media.pdf_parsed || 0, png_decoded: media.png_decoded || 0,
     jpeg_headers_opened: media.jpeg_header_opened || 0,
     parser_rejected: media.parser_rejected || 0,
+    encrypted_pdf_password_required: media.encrypted_pdf_password_required || 0,
     media_budget_exceeded: (media.byte_budget_exceeded || 0) + (media.pixel_budget_exceeded || 0),
     extension_mismatches: reconciliation.extension_mismatches,
     raw_references_omitted: state.detailsOmitted,

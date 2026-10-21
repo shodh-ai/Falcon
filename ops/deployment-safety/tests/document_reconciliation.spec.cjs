@@ -225,6 +225,60 @@ test('JPEG header parser handles nonzero Buffer offsets without claiming raster 
   assert.equal(result.width, 1);
 });
 
+test('encrypted PDF errors use a fixed password-required category and never become validated', async (t) => {
+  class EncryptedPDFError extends Error {}
+  for (const error of [new EncryptedPDFError('private document metadata')]) {
+    const result = await subject.parseMedia(Buffer.from('%PDF-synthetic'), 'application/pdf', {
+      EncryptedPDFError,
+      PDFDocument: { async load() { throw error; } },
+    });
+    assert.deepEqual(result, { result: 'encrypted_pdf_password_required', raster_decoded: false });
+    assert.equal(JSON.stringify(result).includes('private'), false);
+  }
+  const f = await fixture(t, [{ column: column(), values: ['/uploads/tenant/encrypted.pdf'] }],
+    [{ name: 'tenant/encrypted.pdf', bytes: Buffer.from('%PDF-synthetic') }]);
+  const frozenAdapter = { ...contractFrozen, async inspectArchive() { return { files_hashed: 1 }; } };
+  const result = await subject.runCheck(f.inputs, { ...f.modules, frozen: frozenAdapter,
+    pdf: { EncryptedPDFError, PDFDocument: { async load() { throw new EncryptedPDFError('private filename'); } } } });
+  assert.equal(result.summary.encrypted_pdf_password_required, 1);
+  assert.equal(result.summary.pdf_parsed, 0);
+  assert.equal(result.summary.documents_fully_recovered, false);
+  assert.equal(result.samples[0].result, 'encrypted_pdf_password_required');
+});
+
+test('transpiled plain Error uses only the exact trusted library encrypted signature', async () => {
+  const trustedError = new pdf.EncryptedPDFError();
+  assert.equal(trustedError.name, 'Error');
+  assert.equal(trustedError.constructor.name, 'Error');
+  const result = await subject.parseMedia(Buffer.from('%PDF-synthetic'), 'application/pdf', {
+    EncryptedPDFError: pdf.EncryptedPDFError, PDFDocument: { async load() { throw trustedError; } },
+  });
+  assert.deepEqual(result, { result: 'encrypted_pdf_password_required', raster_decoded: false });
+  for (const error of [new Error(trustedError.message + ' private suffix'),
+    Object.assign(new Error('different untrusted message'), { name: 'EncryptedPDFError' })]) {
+    const rejected = await subject.parseMedia(Buffer.from('%PDF-synthetic'), 'application/pdf', {
+      EncryptedPDFError: pdf.EncryptedPDFError, PDFDocument: { async load() { throw error; } },
+    });
+    assert.deepEqual(rejected, { result: 'parser_rejected', raster_decoded: false });
+  }
+  const noTrustedConstructor = await subject.parseMedia(Buffer.from('%PDF-synthetic'), 'application/pdf', {
+    PDFDocument: { async load() { throw trustedError; } },
+  });
+  assert.equal(noTrustedConstructor.result, 'parser_rejected');
+});
+
+test('unknown PDF errors and image errors stay fixed parser_rejected without leaking messages', async () => {
+  const error = new Error('private document name and arbitrary parser details');
+  const result = await subject.parseMedia(Buffer.from('%PDF-synthetic'), 'application/pdf', {
+    PDFDocument: { async load() { throw error; } },
+  });
+  assert.deepEqual(result, { result: 'parser_rejected', raster_decoded: false });
+  const image = await subject.parseMedia(Buffer.from('jpeg'), 'image/jpeg', {
+    PDFDocument: { async create() { throw Object.assign(error, { name: 'EncryptedPDFError' }); } },
+  });
+  assert.deepEqual(image, { result: 'parser_rejected', raster_decoded: false });
+});
+
 test('magic type diagnoses PNG stored with JPEG extension without changing any source bytes', async (t) => {
   const f = await fixture(t, [{ column: column(), values: ['/uploads/tenant/wrong.jpg'] }], [{ name: 'tenant/wrong.jpg', bytes: PNG }]);
   const before = fs.readFileSync(f.inputs.archive);

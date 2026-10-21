@@ -35,7 +35,7 @@ COUNT_FIELDS = frozenset('''files_hashed legacy_missing_occurrences legacy_missi
     sources_checked reference_pairs local_distinct missing_local_occurrences missing_local_distinct
     normalization_changes seed_literal_occurrences metadata_only_attachments unsupported_json_rows
     populated_unclassified_columns empty_unclassified_columns oversized_values embedded_originals_checked
-    embedded_originals_validated pdf_parsed png_decoded jpeg_headers_opened parser_rejected
+    embedded_originals_validated pdf_parsed png_decoded jpeg_headers_opened parser_rejected encrypted_pdf_password_required
     media_budget_exceeded extension_mismatches raw_references_omitted'''.split())
 FALSE_FIELDS = frozenset(('production_mutations', 'external_requests', 'hr_values_selected',
                           'documents_fully_recovered'))

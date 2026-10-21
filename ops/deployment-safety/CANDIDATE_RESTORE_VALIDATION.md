@@ -91,6 +91,8 @@ The helper uses a read-only PostgreSQL transaction with bounded cursors. It sepa
 
 For archive media, bounded magic-byte checks distinguish filename-extension mismatches from content-parser failures. A fresh zero-offset `Uint8Array` prevents the JPEG parser's Buffer-pool offset from changing the result for identical bytes. JPEG headers do not prove full raster readability. All original member hashes must still match. Unsupported formats, size/pixel budgets, missing references, unresolved columns and failed parsers remain explicit findings.
 
+Password-protected PDFs receive the fixed `encrypted_pdf_password_required` result. This uses only the installed parser's trusted encryption-error signature internally; raw error strings and document contents are never reported. It does not bypass encryption, guess passwords or count the document as readable.
+
 The full report includes private document paths/references and stays root-owned `0600` on the server. Only an exact allowlist of aggregate counts and safety flags may reach stdout or a shared report. Retain the dump/archive/image binding, private evidence and helper-cleanup proof. An aggregate report completing successfully does not mean complete document recovery.
 
 Example, after verifying disk storage is enabled and reviewing exact immutable inputs:
@@ -106,3 +108,13 @@ python3 -B /etc/falcon-deployment-safety/<reviewed-directory>/reconcile-document
 ```
 
 Search historical manifests or preserved archives only as candidate evidence. Validate source hashes before trusting a candidate, retain its exact tenant-relative path and source version, and compare it in an isolated tree. A similar basename or a different tenant's file is never sufficient. Any production restore requires the owner's explicit approval of exact targets and an audit record; no automatic overwrite, reference rewrite or purge is included here.
+
+## Separate bounded media proof
+
+`prove-document-media-reviewed.py` is an optional follow-up for the specific JPEG headers, format mismatches and size/pixel-budget findings in a completed private reconciliation report. It requires that report's exact run, dump and upload-archive bindings. It verifies the finalized source again, manually extracts only into a newly generated private quarantine using the pinned reviewed extractor, and copies selected originals into fresh indexed input files. Original source bytes, numeric ownership and the archive hash are checked before and after testing.
+
+The helper receives individual indexed files readonly, bound metadata and the reviewed `document-media-proof.cjs`; it receives no archive, database socket, production mount, credentials or keys. Use an explicit already-local API image for `--mode pdf`, or a separately verified already-local frontend image containing Sharp for `--mode raster`. No dependency is installed or downloaded by the proof.
+
+Each mode is serialized under the backup lock and existing continuous guards, requires 2 GiB available host memory, and uses UID70, network-none, read-only root, no capabilities, no-new-privileges, 384 MiB memory, 0.5 CPU and a 96 MiB Node heap. Indexed originals are bounded to 8 MiB. Raster proof disables Sharp caches, uses one decoder worker, permits one frame, limits input to 16 Mi-pixels and requires actual raw pixels with at most 64 MiB output. Decoded pixel and input buffers are cleared; no file is rewritten. Header-only acceptance never counts as raster proof.
+
+PDF parsing retains encryption checks. Oversized, multi-frame, unsupported, password-protected, failed or resource-aborted inputs stay unproven. The private per-file report remains on the server; stdout contains only exact aggregate outcomes, immutable image identity and generated scratch location. Test helpers are removed and absence is verified, while quarantine and evidence are retained. These results prove only the selected unchanged originals, not full business recovery or incident recovery time.

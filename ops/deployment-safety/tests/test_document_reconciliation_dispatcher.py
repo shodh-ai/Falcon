@@ -130,6 +130,20 @@ class DispatcherTests(unittest.TestCase):
             with self.assertRaises(m.ReconciliationError):
                 m.checked_report(raw)
 
+    def test_encrypted_pdf_password_count_is_required_and_bounded(self):
+        value = complete_report()
+        value['summary']['encrypted_pdf_password_required'] = 2
+        report = m.checked_report(json.dumps(value).encode())
+        self.assertEqual(report['summary']['encrypted_pdf_password_required'], 2)
+        self.assertFalse(report['summary']['documents_fully_recovered'])
+        for invalid in [True, -1, 10 ** 9 + 1, 'password required']:
+            value['summary']['encrypted_pdf_password_required'] = invalid
+            with self.subTest(invalid=invalid), self.assertRaises(m.ReconciliationError):
+                m.checked_report(json.dumps(value).encode())
+        del value['summary']['encrypted_pdf_password_required']
+        with self.assertRaisesRegex(m.ReconciliationError, 'summary-protocol'):
+            m.checked_report(json.dumps(value).encode())
+
     def test_catalog_requires_revision_label_deduplicated_bounded_sources(self):
         self.assertEqual(m.validate_catalog(json.dumps(catalog()).encode())['schema_version'], 1)
         for field, value in [('source_revision', 'main'), ('match_label', 'recovered'), ('schema_version', 2)]:

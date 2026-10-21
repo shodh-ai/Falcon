@@ -54,7 +54,7 @@ jobs:
         run: npm ci --prefix backend
 
       - name: Test read-only document reconciliation with synthetic data
-        run: node --test ops/deployment-safety/tests/document_reconciliation.spec.cjs
+        run: node --test ops/deployment-safety/tests/document_reconciliation.spec.cjs ops/deployment-safety/tests/document_media_proof.spec.cjs
 
       # These specs mock persistence, queues and SMTP. No application starts.
       - name: Test notification and password-reset sender safeguards offline
