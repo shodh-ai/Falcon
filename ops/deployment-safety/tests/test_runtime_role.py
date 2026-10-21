@@ -24,6 +24,126 @@ VIEWS = ('iqac_mv_placement_stats', 'iqac_mv_faculty_metrics',
          'exec_mv_academic_schools', 'exec_mv_placement_trends')
 
 
+def wait_for_final_postgres(command, probe, name, *, timeout=60,
+                            now=time.monotonic, pause=time.sleep):
+    """Ignore the entrypoint's temporary server; require final PID1 plus SQL.
+
+    pg_isready can return success while docker-entrypoint.sh is still using its
+    temporary initdb server. That server deliberately stops before exec postgres.
+    No fixture setup/role SQL may run during that initialization window.
+    """
+    deadline = now() + timeout
+    final_process = False
+    last_sql_exit = None
+    while now() < deadline:
+        try:
+            process = command(['exec', name, 'cat', '/proc/1/comm'],
+                              check=False, timeout=5)
+            final_process = process.returncode == 0 and process.stdout.strip() == b'postgres'
+            if final_process:
+                result = probe('SHOW server_version_num;', check=False, timeout=5)
+                last_sql_exit = result.returncode
+                if result.returncode == 0:
+                    value = result.stdout.strip()
+                    if not re.fullmatch(rb'[0-9]{6}', value) or not 180000 <= int(value) < 190000:
+                        raise RuntimeError('isolated fixture requires a valid PostgreSQL 18 version probe')
+                    return
+        except subprocess.TimeoutExpired:
+            # Startup probes are retryable and bounded; never echo driver output.
+            pass
+        remaining = deadline - now()
+        if remaining > 0:
+            pause(min(0.25, remaining))
+    raise RuntimeError('isolated PG fixture did not become ready: final_pid1=' +
+                       str(final_process).lower() + ', sql_exit=' + str(last_sql_exit))
+
+
+def fixture_state_summary(result):
+    match = re.fullmatch(rb'(true|false) ([0-9]{1,3}) (true|false)', result.stdout.strip())
+    if result.returncode != 0 or not match:
+        return 'unavailable'
+    return ('running=' + match[1].decode() + ',exit=' + match[2].decode() +
+            ',oom=' + match[3].decode())
+
+
+class RuntimeReadinessTests(unittest.TestCase):
+    class Clock:
+        value = 0
+
+        def now(self):
+            return self.value
+
+        def pause(self, duration):
+            self.value += duration
+
+    def wait(self, processes, probes, *, timeout=1):
+        clock = self.Clock()
+        calls = []
+
+        def command(args, **options):
+            calls.append(('process', args, options))
+            value = processes.pop(0) if len(processes) > 1 else processes[0]
+            if isinstance(value, Exception):
+                raise value
+            return subprocess.CompletedProcess(args, value[0], value[1], b'')
+
+        def probe(sql, **options):
+            calls.append(('sql', sql, options))
+            value = probes.pop(0) if len(probes) > 1 else probes[0]
+            if isinstance(value, Exception):
+                raise value
+            return subprocess.CompletedProcess([], value[0], value[1], b'')
+
+        return clock, calls, lambda: wait_for_final_postgres(
+            command, probe, 'synthetic-fixture', timeout=timeout,
+            now=clock.now, pause=clock.pause)
+
+    def test_temporary_server_never_triggers_setup_probe(self):
+        _, calls, run = self.wait([(0, b'docker-entrypoi\n'), (0, b'postgres\n')],
+                                  [(0, b'180004\n')])
+        run()
+        self.assertEqual([item[0] for item in calls], ['process', 'process', 'sql'])
+        self.assertEqual(calls[-1][1], 'SHOW server_version_num;')
+
+    def test_final_process_with_transient_sql_exit_two_is_retried(self):
+        _, calls, run = self.wait([(0, b'postgres\n')], [(2, b''), (0, b'180004\n')])
+        run()
+        self.assertEqual(sum(item[0] == 'sql' for item in calls), 2)
+        self.assertTrue(all(item[2]['timeout'] == 5 for item in calls))
+
+    def test_no_final_process_or_failed_sql_times_out_without_success(self):
+        for processes, probes in [([(0, b'docker-entrypoi\n')], [(0, b'180004\n')]),
+                                  ([(0, b'postgres\n')], [(2, b'')]),
+                                  ([(1, b'')], [(0, b'180004\n')])]:
+            clock, calls, run = self.wait(processes, probes)
+            with self.assertRaisesRegex(RuntimeError, 'did not become ready'):
+                run()
+            self.assertEqual(clock.value, 1)
+            if processes[0][1] != b'postgres\n':
+                self.assertFalse(any(item[0] == 'sql' for item in calls))
+
+    def test_wrong_version_or_probe_timeouts_do_not_bypass_gate(self):
+        for version in [b'170010\n', b'190000\n', b'', b'not-version-or-secret']:
+            _, _, run = self.wait([(0, b'postgres\n')], [(0, version)])
+            with self.assertRaisesRegex(RuntimeError, 'valid PostgreSQL 18 version probe') as error:
+                run()
+            if version.strip():
+                self.assertNotIn(version.decode().strip(), str(error.exception))
+        clock, _, run = self.wait([(0, b'postgres\n')],
+                                  [subprocess.TimeoutExpired('synthetic-probe', 5)])
+        with self.assertRaisesRegex(RuntimeError, 'did not become ready'):
+            run()
+        self.assertEqual(clock.value, 1)
+
+    def test_fixture_state_diagnostics_are_minimized_and_sanitized(self):
+        result = subprocess.CompletedProcess([], 0, b'false 137 true\n', b'')
+        self.assertEqual(fixture_state_summary(result), 'running=false,exit=137,oom=true')
+        for status, value in [(1, b'false 137 true'), (0, b'private-error-or-environment'),
+                              (0, b'false not-an-exit true')]:
+            self.assertEqual(fixture_state_summary(subprocess.CompletedProcess(
+                [], status, value, b'not-printed')), 'unavailable')
+
+
 class RuntimeRoleIntegration(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -56,17 +176,17 @@ class RuntimeRoleIntegration(unittest.TestCase):
                      '-e', 'POSTGRES_HOST_AUTH_METHOD=trust', image,
                      'postgres', '-c', 'shared_buffers=16MB', '-c', 'max_connections=10',
                      '-c', 'autovacuum=off'], timeout=30)
-        for _ in range(120):
-            ready = cls.command(['exec', cls.name, 'pg_isready', '-U', 'postgres',
-                                 '-d', 'postgres'], check=False)
-            if ready.returncode == 0:
-                break
-            time.sleep(0.25)
-        else:
-            raise RuntimeError('isolated PG fixture did not become ready')
-        version = cls.psql('SHOW server_version_num;').stdout.decode().strip()
-        if not 180000 <= int(version) < 190000:
-            raise RuntimeError('PostgreSQL 18 is required')
+        try:
+            wait_for_final_postgres(cls.command, cls.psql, cls.name)
+        except RuntimeError as error:
+            try:
+                state = cls.command(['inspect', '--format',
+                                     '{{.State.Running}} {{.State.ExitCode}} {{.State.OOMKilled}}',
+                                     cls.name], check=False, timeout=5)
+                summary = fixture_state_summary(state)
+            except (OSError, subprocess.TimeoutExpired):
+                summary = 'unavailable'
+            raise RuntimeError(str(error) + '; fixture_state=' + summary) from None
         # Inspect only minimized sandbox metadata, not environment or private data.
         raw = cls.command(['inspect', '--format',
                            '{{json .HostConfig}}', cls.name]).stdout
@@ -101,13 +221,13 @@ INSERT INTO public.business_records(value) VALUES ('synthetic baseline');
             cls.command(['rm', '-f', cls.name], check=False)
 
     @classmethod
-    def psql(cls, sql, *, role=None, check=True):
-        args = ['exec', '-i', cls.name, 'psql', '-X', '-v', 'ON_ERROR_STOP=1',
+    def psql(cls, sql, *, role=None, check=True, timeout=20):
+        args = ['exec', '-i', '-e', 'PGCONNECT_TIMEOUT=2', cls.name, 'psql', '-X', '-v', 'ON_ERROR_STOP=1',
                 '-U', 'postgres', '-d', 'postgres', '-At']
         if role:
             args += ['-v', 'runtime_role=' + role, '-v', 'runtime_database=postgres',
                      '-v', 'runtime_schema=public']
-        return cls.command(args, data=sql.encode(), check=check)
+        return cls.command(args, data=sql.encode(), check=check, timeout=timeout)
 
     def new_role(self, attributes=''):
         type(self).sequence += 1
