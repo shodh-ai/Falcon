@@ -1,0 +1,120 @@
+FALCON fixed uploads ACL adoption — local review package
+
+No command in this package has been run against the host by its author.
+The Python tests are synthetic. A successful private Linux fixture on the SAME
+filesystem device, using the exact frozen helper and pinned local image, is a
+mandatory gate before adoption. The fixture report is root0600, retained locally,
+and bound by explicit SHA256 to adoption. No data or keys leave the host.
+
+Fixed identities / scope
+  Source: /data/coolify/applications/pmy0ybhwzco11kocu0zloqk0/uploads
+  API: UID/GID61001:61001; both must be absent from host NSS.
+  Existing backup: UID999:GID0; unchanged. NO namedUID999 ACL is added.
+  Existing source owner/group0:0, basic ACLs only, file0640/0644, dir0750/0755.
+  Existing owner, group and other ACCESS entries remain exact.
+  Add only namedAPI accessrw (files), rwx (dirs), explicit maskrw/rwx.
+  Directory SGID preserves original GID0 for future files/dirs.
+  Directory defaults: owner:rwx, API61001:rwx, originalgroup:r-x, mask:rwx,
+  other:---. Existing access-other remains unchanged; new defaults are private.
+  No source content writes, chown, deletion, default backup/credential change,
+  external service, generic setfacl --restore, or automatic permission undo.
+
+Required bridge release BEFORE any source ACL change
+  Fully deploy the reviewed ROOT prep image, and remove EVERY old RW consumer.
+  Launcher sets process.umask(0027) before app/storage/database checks.
+  Sole explicit persistent0640 stream requests0660 instead; ordinary writes
+  request0666. Without default ACL, effective0660&~0027 is0640 as previously.
+  With default ACL, request0660 leaves maskrw and APIrw; group0 staysr.
+  Existing persistent mkdir paths request default0777; no persistent filesystem
+  rename/chmod/copy-in/hardlink/symlink creators may be introduced unnoticed.
+  LMS unlink exists: a deleted/replaced captured name ABORTS adoption safely.
+  The helper checks all running local Docker RW binds overlapping SOURCE, exact
+  immutable image/revision, image-default CMD/entrypoint/cwd, no code bind
+  overrides, PID1 actual Umask0027 and root UID. This is not a source audit;
+  --source-review-confirmed acknowledges the independently reviewed bridge code.
+  The root prep image remains healthy/compatible after any partial adoption.
+
+Owner-controlled run sequence (examples are intentionally invalid placeholders)
+  Install one frozen root-owned helper without group/other write permission.
+  Verify its SHA256 before and after; do not edit during fixture/adoption.
+  Supply the actual uploads st_dev integer and inode from the protected baseline.
+  Supply LOCAL image ID sha256:<64hex> and full40hex source revision.
+  All evidence directories must be NEW direct children of root0700
+  /data/falcon-backups, named upload-acl-YYYYMMDDTHHMMSSZ-<12lowerhex>.
+
+  First: fixture (source is not accessed by this mode)
+    python3 /root/falcon-upload-acl-reviewed.py fixture
+      --expected-image sha256:REPLACE64HEX
+      --expected-device REPLACE_DEVICE_INTEGER
+      --expected-script-sha256 REPLACE_HELPER64HEX
+      --evidence-dir /data/falcon-backups/upload-acl-YYYYMMDDTHHMMSSZ-REPLACE12HEX
+
+  Fixture: root-only synthetic tree; forked API61001:GID61001 (no group0,
+  effective/permitted caps0) creates nested SGID/GID0 dirs, mode0640/default0666
+  files, and updates existing root-owned files. Backup999:GID0 reads those files
+  but cannot write/create/delete. Outsider999:GID999 cannot traverse. Explicit
+ 0600/0700 objects intentionally deny backup access and are flagged as unsupported.
+  A local pinned Node container additionally proves RO uploads mount + UID999:GID0,
+  all capability sets0, networknone, no pull, no ports,64MiB/.1CPU. Only generated
+  container name+label+immutable ID is cleaned; fixture/evidence dirs are retained.
+  Check result.json ok:true and compute its SHA256 on the host. No raw result data
+  beyond counts/flags should be sent off-host.
+
+  Second: audit source / save full original numeric getfacl before mutation
+    python3 /root/falcon-upload-acl-reviewed.py audit
+      --expected-image sha256:REPLACE64HEX --expected-revision REPLACE40HEX
+      --expected-device REPLACE_DEVICE_INTEGER --expected-inode REPLACE_INODE_INTEGER
+      --expected-script-sha256 REPLACE_HELPER64HEX --source-review-confirmed
+      --evidence-dir /data/falcon-backups/upload-acl-YYYYMMDDTHHMMSSZ-REPLACE12HEX
+  Audit does not change source metadata/content; it stores private numeric ACLs.
+
+  Third: adopt using a DIFFERENT new evidence directory and successful fixture
+    python3 /root/falcon-upload-acl-reviewed.py adopt
+      --expected-image sha256:REPLACE64HEX --expected-revision REPLACE40HEX
+      --expected-device REPLACE_DEVICE_INTEGER --expected-inode REPLACE_INODE_INTEGER
+      --expected-script-sha256 REPLACE_HELPER64HEX --source-review-confirmed
+      --fixture-report /data/falcon-backups/upload-acl-FIXTURE/result.json
+      --fixture-sha256 REPLACE_FIXTURE_RESULT64HEX
+      --evidence-dir /data/falcon-backups/upload-acl-YYYYMMDDTHHMMSSZ-REPLACE12HEX
+
+Implementation gates
+  Initial whole-tree numeric getfacl snapshot is fsynced root0600 before mutation.
+  Each inode's exact prior identity/mode/ACLs is durably journaled before changes.
+  Directory SGID is set first; exact access/default ACLs are then installed BEFORE
+  listing children. A child created in the SGID-before-default window may be new
+  basic02750 only, with a proven prepared parent. Later inherited ACLs require
+  that same parent provenance and exact known UID0/GID0 state. Existing complex
+  ACLs/defaults/SGID, links, special files, unexpected modes/owners/devices,
+  symlinks, nested mount IDs, replaced or vanished captured names fail closed.
+  O_PATH inert opens check type before reopening a held inode; all ACL changes use
+  fd-based Linux xattrs, not a mutable source pathname. Named root and mount ID
+  are rechecked. Additive creation is reconciled at most4 passes, max3000 entries,
+  maxdepth64, overall180sec plus bounded cleanup. Kernel D-state I/O cannot be
+  guaranteed instantly interruptible by any userspace timer.
+
+On failure / rollback plan
+  Do not deploy UID61001 after any failed or incomplete adoption. Keep the reviewed
+  root prep image and existing data live. Do not blindly rerun or clear ACLs: retain
+  the private journal/result for targeted review. No automated metadata rollback
+  is included, because concurrent additions/unlinks can make an exact prior tree
+  impossible to restore without forbidden ownership/data changes.
+  If a later nonroot IMAGE rollout fails, return to the compatible ROOT PREP image
+  while retaining these ACLs/SGID; no content or permission undo is needed for that
+  application rollback. Never return to an old explicit0640/root image after ACL
+  adoption because newly created files could mask future API write permission.
+  A permission-only undo is a separately reviewed root operation using ONLY this
+  own protected snapshot/journal: match named paths, mount IDs and unchanged inodes;
+  refuse new/missing/replaced/foreign-owner objects or unexpected metadata; restore
+  exact recorded access ACL/default absence and original directory SGID/mode, no
+  chown or content operations. To avoid a transient group0-write grant, set the
+  original BASIC ACL atomically (owner/group/other) rather than removing extended
+  ACL and leaving the widened mask mode in place. Then restore original mode/SGID.
+  Never feed raw getfacl headers to setfacl --restore: that can restore owners/flags.
+
+Limits to retain in handoff
+  This is not atomic against arbitrary privileged writers. Reviewed bridge creates
+  are compatible; observed unlinks/replacements abort. Future chmod/access-ACL
+  changes by API (nonmember of GID0) may clear SGID; rename-in does not inherit;
+  explicit0600/0700 masks backup read. None is silently repaired. No extra runtime
+  capability or group0 membership is introduced. Final UID61001 full-app validation
+  and a subsequent real backup integrity check are separate rollout gates.
