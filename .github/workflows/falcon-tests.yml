@@ -7,6 +7,30 @@ on:
     branches: [main, develop, testing]
 
 jobs:
+  deployment-boundaries:
+    name: Storage and database deployment boundaries
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Check startup, storage refusal and host preflight decisions
+        run: |
+          node --test backend/scripts/storage-boundary.spec.cjs backend/scripts/resource-boundary.spec.cjs backend/scripts/runtime-start.spec.cjs backend/scripts/deploy-migrate.spec.cjs
+          python3 -B -m unittest discover -s ops/deployment-safety/tests -v
+      - name: Prepare official disposable PostgreSQL 18 fixture image
+        run: |
+          docker pull postgres:18-alpine
+          echo "FALCON_TEST_PG_IMAGE=$(docker image inspect --format '{{.Id}}' postgres:18-alpine)" >> "$GITHUB_ENV"
+      - name: Prove runtime grants against isolated PostgreSQL
+        env:
+          FALCON_RUN_ISOLATED_SQL_TESTS: '1'
+          FALCON_TEST_DOCKER_SOCKET: /var/run/docker.sock
+        run: python3 -B -m unittest discover -s ops/deployment-safety/tests -p test_runtime_role.py -v
+
   notification-security:
     name: Notification and sender security
     runs-on: ubuntu-latest
@@ -66,6 +90,10 @@ jobs:
           node --test scripts/healthcheck.spec.cjs
           node --check scripts/notifications/staging/ingress.cjs
           node --check scripts/notifications/staging/review-plan.cjs
+
+      - name: Verify deployment-owned Faculty AI schema readiness
+        working-directory: backend
+        run: npm test -- --runInBand --runTestsByPath src/modules/faculty-ai/faculty-ai-schema-readiness.spec.ts
 
       - name: Typecheck backend without emitting files
         working-directory: backend

@@ -38,6 +38,21 @@ jobs:
           fi
           echo "release_sha=$RELEASE_SHA" >> "$GITHUB_OUTPUT"
 
+      - name: Check out trusted deployment policy
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: deployment-policy
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Require storage and migration-free runtime protections
+        run: |
+          node --test deployment-policy/backend/scripts/storage-boundary.spec.cjs deployment-policy/backend/scripts/resource-boundary.spec.cjs deployment-policy/backend/scripts/runtime-start.spec.cjs deployment-policy/backend/scripts/deploy-migrate.spec.cjs
+          python3 -B -m unittest discover -s deployment-policy/ops/deployment-safety/tests -p test_host_preflight.py -v
+
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
@@ -53,6 +68,27 @@ jobs:
           docker buildx imagetools inspect "ghcr.io/shodh-ai/falcon-frontend:sha-$RELEASE_SHA"
           docker pull --platform linux/amd64 "ghcr.io/shodh-ai/falcon-backend:sha-$RELEASE_SHA"
           docker pull --platform linux/amd64 "ghcr.io/shodh-ai/falcon-frontend:sha-$RELEASE_SHA"
+
+      - name: Verify backend runtime command, source identity and protected code
+        env:
+          RELEASE_SHA: ${{ steps.sha.outputs.release_sha }}
+        run: |
+          image="ghcr.io/shodh-ai/falcon-backend:sha-$RELEASE_SHA"
+          test "$(docker image inspect --format '{{json .Config.Cmd}}' "$image")" = '["node","scripts/runtime-start.cjs"]'
+          test "$(docker image inspect --format '{{json .Config.Entrypoint}}' "$image")" = '["docker-entrypoint.sh"]'
+          test "$(docker image inspect --format '{{.Config.WorkingDir}}' "$image")" = '/app'
+          test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$image")" = "$RELEASE_SHA"
+          for file in runtime-start.cjs storage-boundary.cjs resource-boundary.cjs; do
+            expected="$(sha256sum "deployment-policy/backend/scripts/$file" | cut -d ' ' -f 1)"
+            actual="$(docker run --rm --network none --read-only --memory 128m --memory-swap 128m --cpus 0.25 \
+              --entrypoint node "$image" -e '
+                const fs=require("node:fs"),crypto=require("node:crypto");
+                const name="/app/scripts/"+process.argv[1],s=fs.statSync(name);
+                if(!s.isFile()||s.uid!==0||(s.mode&0o022)) process.exit(1);
+                console.log(crypto.createHash("sha256").update(fs.readFileSync(name)).digest("hex"));
+              ' "$file")"
+            test "$actual" = "$expected"
+          done
 
   promote:
     needs: validate

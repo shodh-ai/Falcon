@@ -27,6 +27,7 @@ pnpm-debug.log*
 .turbo/
 .cache/
 *.tsbuildinfo
+/work/jest-cache/
 
 # Runtime user uploads (local dev / server storage — do not commit)
 backend/uploads/
