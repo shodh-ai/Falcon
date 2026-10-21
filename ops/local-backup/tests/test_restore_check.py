@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import socket
+import stat
 import subprocess
 import sys
 import tempfile
@@ -161,7 +162,51 @@ class InputTests(Fixture):
                 os.close(target_fd)
 
 
+class FakeKernelMounts:
+    def __init__(self):
+        self.live = None
+        self.calls = []
+        self.source_fd = None
+        self.unmount_error = None
+        self.skip_hardening = False
+        self.wrong_inode = False
+
+    def bind(self, source, target):
+        self.calls.append(('bind', source, str(target)))
+        self.source_fd = int(source.rsplit('/', 1)[1])
+        info = os.fstat(self.source_fd)
+        self.live = {'mount_id': 123, 'device': info.st_dev,
+                     'inode': info.st_ino + int(self.wrong_inode), 'uid': info.st_uid,
+                     'mode': info.st_mode, 'private': False, 'options': {'rw'}, 'children': False}
+
+    def make_private(self, target):
+        self.calls.append(('private', str(target)))
+        self.live['private'] = True
+
+    def remount_readonly(self, target):
+        self.calls.append(('readonly', str(target)))
+        if not self.skip_hardening:
+            self.live['options'] = {'ro', 'nosuid', 'nodev', 'noexec'}
+
+    def state(self, target):
+        return copy.deepcopy(self.live)
+
+    def unmount(self, target):
+        self.calls.append(('unmount', str(target)))
+        if self.unmount_error:
+            raise self.unmount_error
+        self.live = None
+
+
 class SocketTests(Fixture):
+    def setUp(self):
+        super().setUp()
+        # Local tests run as a normal account under sticky /tmp. Production's
+        # root-only ancestry check is tested separately below, not weakened.
+        patch = mock.patch.object(restore, 'open_anchor_directory', side_effect=restore.open_directory)
+        patch.start()
+        self.addCleanup(patch.stop)
+
     def socket_tree(self):
         scratch = self.root / 'scratch'
         scratch.mkdir(mode=0o700)
@@ -175,13 +220,24 @@ class SocketTests(Fixture):
     def test_held_socket_inode_survives_directory_replacement(self):
         scratch, directory = self.socket_tree()
         original = directory.stat().st_ino
-        with restore.sandbox_socket(scratch, os.getuid()) as anchor:
-            fd = int(anchor.rsplit('/', 1)[1])
+        ops = FakeKernelMounts()
+        def absent():
+            ops.calls.append(('consumer_absent',))
+            return True
+        with restore.sandbox_socket(scratch, os.getuid(), consumer_absent=absent, mount_ops=ops) as anchor:
+            fd = ops.source_fd
+            ops.calls.append(('consumer',))
             directory.rename(scratch / 'retained-socket')
             directory.mkdir(mode=0o700)
             self.assertEqual(os.fstat(fd).st_ino, original)
             self.assertNotEqual(directory.stat().st_ino, original)
-            self.assertTrue(anchor.startswith('/proc/%d/fd/' % os.getpid()))
+            self.assertTrue(anchor.startswith(str(self.root / 'ipc-anchors' / 'socket-')))
+            self.assertEqual(Path(anchor).parent.stat().st_mode & 0o777, 0o700)
+        self.assertEqual([call[0] for call in ops.calls],
+                         ['bind', 'private', 'readonly', 'consumer', 'consumer_absent', 'unmount'])
+        self.assertIsNone(ops.live)
+        self.assertTrue(Path(anchor).is_dir())
+        self.assertEqual(len(list(Path(anchor).parent.glob('*-unmounted.json'))), 1)
         with self.assertRaises(OSError):
             os.fstat(fd)
 
@@ -190,21 +246,115 @@ class SocketTests(Fixture):
         directory.rename(scratch / 'saved')
         directory.symlink_to(scratch / 'saved')
         with self.assertRaises(OSError):
-            with restore.sandbox_socket(scratch, os.getuid()):
+            with restore.sandbox_socket(scratch, os.getuid(), consumer_absent=lambda: True, mount_ops=FakeKernelMounts()):
                 self.fail('followed socket-directory symlink')
         directory.unlink()
         directory.mkdir(mode=0o700)
         (directory / '.s.PGSQL.55432').symlink_to(scratch / 'saved' / '.s.PGSQL.55432')
         with self.assertRaisesRegex(restore.BackupError, 'Unsafe isolated'):
-            with restore.sandbox_socket(scratch, os.getuid()):
+            with restore.sandbox_socket(scratch, os.getuid(), consumer_absent=lambda: True, mount_ops=FakeKernelMounts()):
                 self.fail('followed socket endpoint symlink')
 
     def test_shared_socket_directory_refused(self):
         scratch, directory = self.socket_tree()
         directory.chmod(0o750)
         with self.assertRaisesRegex(restore.BackupError, 'Unsafe isolated'):
-            with restore.sandbox_socket(scratch, os.getuid()):
+            with restore.sandbox_socket(scratch, os.getuid(), consumer_absent=lambda: True, mount_ops=FakeKernelMounts()):
                 self.fail('shared IPC directory accepted')
+
+    def test_anchor_inside_writable_scratch_is_refused(self):
+        scratch, _ = self.socket_tree()
+        ops = FakeKernelMounts()
+        with self.assertRaisesRegex(restore.BackupError, 'outside'):
+            with restore.sandbox_socket(scratch, os.getuid(), scratch / 'ipc-anchors',
+                                        consumer_absent=lambda: True, mount_ops=ops):
+                self.fail('anchor exposed through scratch')
+        self.assertEqual(ops.calls, [])
+
+    def test_mount_identity_child_mount_or_consumer_uncertainty_retains_anchor(self):
+        scratch, _ = self.socket_tree()
+        for fault in ('mount_id', 'children', 'consumer'):
+            ops = FakeKernelMounts()
+            with self.assertRaisesRegex(restore.BackupError, 'cleanup failed'):
+                with restore.sandbox_socket(scratch, os.getuid(), consumer_absent=lambda: fault != 'consumer', mount_ops=ops):
+                    if fault == 'mount_id':
+                        ops.live['mount_id'] += 1
+                    elif fault == 'children':
+                        ops.live['children'] = True
+            self.assertIsNotNone(ops.live)
+            self.assertNotIn('unmount', [call[0] for call in ops.calls])
+        self.assertEqual(len(list((self.root / 'ipc-anchors').glob('*-cleanup-failed.json'))), 3)
+
+    def test_busy_unmount_retains_anchor_without_force_or_lazy_retry(self):
+        scratch, _ = self.socket_tree()
+        ops = FakeKernelMounts()
+        ops.unmount_error = OSError(16, 'synthetic busy')
+        with self.assertRaisesRegex(restore.BackupError, 'cleanup failed'):
+            with restore.sandbox_socket(scratch, os.getuid(), consumer_absent=lambda: True, mount_ops=ops):
+                pass
+        self.assertEqual([call[0] for call in ops.calls].count('unmount'), 1)
+        self.assertIsNotNone(ops.live)
+
+    def test_wrong_inode_retained_and_missing_hardening_cleanly_unmounted(self):
+        scratch, _ = self.socket_tree()
+        ops = FakeKernelMounts()
+        ops.wrong_inode = True
+        with self.assertRaisesRegex(restore.BackupError, 'cleanup failed'):
+            with restore.sandbox_socket(scratch, os.getuid(), consumer_absent=lambda: True, mount_ops=ops):
+                self.fail('wrong inode yielded')
+        self.assertIsNotNone(ops.live)
+        ops = FakeKernelMounts()
+        ops.skip_hardening = True
+        with self.assertRaisesRegex(restore.BackupError, 'hardening'):
+            with restore.sandbox_socket(scratch, os.getuid(), consumer_absent=lambda: True, mount_ops=ops):
+                self.fail('unprotected bind yielded')
+        self.assertIsNone(ops.live)
+
+    def test_no_source_permission_changes_and_body_failure_still_cleans_mount(self):
+        scratch, _ = self.socket_tree()
+        ops = FakeKernelMounts()
+        with mock.patch.object(restore.os, 'chmod') as chmod, mock.patch.object(restore.os, 'chown') as chown:
+            with self.assertRaisesRegex(ValueError, 'synthetic checker'):
+                with restore.sandbox_socket(scratch, os.getuid(), consumer_absent=lambda: True, mount_ops=ops):
+                    raise ValueError('synthetic checker')
+            chmod.assert_not_called()
+            chown.assert_not_called()
+        self.assertIsNone(ops.live)
+
+
+class KernelMountTests(unittest.TestCase):
+    def test_syscalls_preserve_literal_source_and_never_recursive_or_forced(self):
+        kernel = restore.KernelMounts.__new__(restore.KernelMounts)
+        kernel.libc = mock.Mock()
+        kernel.libc.mount.return_value = 0
+        kernel.libc.umount2.return_value = 0
+        kernel.bind('/proc/123/fd/4', '/private/target')
+        kernel.make_private('/private/target')
+        kernel.remount_readonly('/private/target')
+        flags = [call.args[3] for call in kernel.libc.mount.call_args_list]
+        self.assertEqual(flags, [4096, 1 << 18, 4096 | 32 | 1 | 2 | 4 | 8])
+        self.assertEqual(kernel.libc.mount.call_args_list[0].args[0], b'/proc/123/fd/4')
+        self.assertTrue(all(not value & 16384 for value in flags))
+        kernel.unmount('/private/target')
+        kernel.libc.umount2.assert_called_once_with(b'/private/target', 0)
+
+    def test_mountinfo_decodes_paths_and_propagation(self):
+        records = restore.mount_records('12 1 8:1 / /private/target\\040space ro,nosuid,nodev,noexec - ext4 /dev/test rw\n'
+                                        '13 12 8:1 / /private/child rw shared:2 - ext4 /dev/test rw\n')
+        self.assertEqual(records[0]['point'], '/private/target space')
+        self.assertTrue(records[0]['private'])
+        self.assertFalse(records[1]['private'])
+        self.assertEqual(records[0]['options'], {'ro', 'nosuid', 'nodev', 'noexec'})
+
+    def test_every_anchor_ancestor_must_be_root_owned_and_not_writable(self):
+        info = lambda uid, mode: mock.Mock(st_uid=uid, st_mode=stat.S_IFDIR | mode)
+        for metadata in ([info(0, 0o755), info(70, 0o700)], [info(0, 0o755), info(0, 0o777)]):
+            with mock.patch.object(restore.os, 'open', side_effect=[100, 101]), mock.patch.object(restore.os, 'close'), mock.patch.object(restore.os, 'fstat', side_effect=metadata):
+                with self.assertRaisesRegex(restore.BackupError, 'ancestors'):
+                    restore.open_anchor_directory('/unsafe')
+        with mock.patch.object(restore.os, 'open', side_effect=[100, 101, 102]) as opened, mock.patch.object(restore.os, 'close'), mock.patch.object(restore.os, 'fstat', return_value=info(0, 0o755)):
+            self.assertEqual(restore.open_anchor_directory('/safe/root'), 102)
+            self.assertTrue(all(call.args[1] & restore.NOFOLLOW for call in opened.call_args_list))
 
 
 class ComparisonTests(unittest.TestCase):
@@ -367,6 +517,18 @@ class GuardTests(unittest.TestCase):
                     pass
             popen.assert_not_called()
 
+    def test_consumer_absence_requires_successful_scoped_empty_query(self):
+        monitor = self.monitor()
+        name = 'falcon-restore-check-' + 'b' * 32 + '-content'
+        for code, output, expected in ((0, b'', True), (0, b'container-id\n', False), (1, b'', False)):
+            with mock.patch.object(restore.subprocess, 'run', return_value=mock.Mock(returncode=code, stdout=output)) as query:
+                self.assertEqual(monitor.container_absent(name), expected)
+                self.assertEqual(query.call_args.args[0][-2:], ['--filter', 'name=^/' + name + '$'])
+        with mock.patch.object(restore.subprocess, 'run', side_effect=subprocess.TimeoutExpired('synthetic', 10)):
+            self.assertFalse(monitor.container_absent(name))
+        with self.assertRaises(restore.BackupError):
+            monitor.container_absent('production-database')
+
     def test_helpers_have_no_network_secret_or_source_mount(self):
         c = config(Path('/data/private'))
         for command in (restore.count_command(c, 'name', '/private-input'),
@@ -425,7 +587,7 @@ class FakeMonitor:
 class LifecycleTests(Fixture):
     def run_fake(self, monitor=None, hook=None):
         monitor = monitor or FakeMonitor(self.c)
-        with mock.patch.object(restore, 'available_memory', return_value=2 * restore.GIB), mock.patch.object(restore, 'Monitor', return_value=monitor), mock.patch.object(restore, 'trusted_file', side_effect=lambda path: os.open(path, os.O_RDONLY)), mock.patch.object(restore, 'GuardedStream', side_effect=lambda pipe, monitor: contextlib.nullcontext(pipe)), mock.patch.object(restore, 'sandbox_socket', side_effect=lambda scratch, uid: contextlib.nullcontext('/proc/123/fd/4')):
+        with mock.patch.object(restore, 'available_memory', return_value=2 * restore.GIB), mock.patch.object(restore, 'Monitor', return_value=monitor), mock.patch.object(restore, 'trusted_file', side_effect=lambda path: os.open(path, os.O_RDONLY)), mock.patch.object(restore, 'GuardedStream', side_effect=lambda pipe, monitor: contextlib.nullcontext(pipe)), mock.patch.object(restore, 'sandbox_socket', side_effect=lambda scratch, uid, anchor_parent, **kwargs: contextlib.nullcontext('/private/protected-ipc-anchor')):
             return restore.run_restore(self.c, RUN, 'explicit-user-turn', hook)
 
     def test_success_is_serialized_retains_private_evidence_and_originals(self):
@@ -512,7 +674,7 @@ class LifecycleTests(Fixture):
         def hook(context, monitor):
             self.assertFalse((Path(context['inputs_path']) / 'complete').exists())
             self.assertTrue(context['socket_path'].endswith('/pgdata/socket'))
-            self.assertEqual(context['socket_mount_source'], '/proc/123/fd/4')
+            self.assertEqual(context['socket_mount_source'], '/private/protected-ipc-anchor')
             self.assertEqual(monitor.active, 1)
             seen.append(context['database'])
             return {'document_check_passed': False, 'status': 'not implemented'}

@@ -2,6 +2,7 @@
 """Explicitly approved, disposable PG18 restore; never connects to production."""
 import argparse
 import contextlib
+import ctypes
 import hashlib
 import json
 import os
@@ -222,6 +223,19 @@ class Monitor:
             self.wait(process)
             return data
 
+    def container_absent(self, name):
+        """Cleanup proof for the one generated consumer, without raw diagnostics."""
+        if not HELPER_RE.fullmatch(name):
+            raise BackupError('Only generated restore helpers may be inspected')
+        try:
+            result = subprocess.run(DOCKER + ['ps', '--all', '--quiet', '--no-trunc',
+                                    '--filter', 'name=^/' + name + '$'],
+                                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                    timeout=10, check=False)
+            return result.returncode == 0 and result.stdout.strip() == b''
+        except (OSError, subprocess.SubprocessError):
+            return False
+
 
 class GuardedStream:
     """Bound reads and wake guards while a container is stalled/silent."""
@@ -394,15 +408,118 @@ def check_copy(inputs, entry, config, monitor):
         os.close(fd)
 
 
-@contextlib.contextmanager
-def sandbox_socket(scratch, uid):
-    """Anchor the IPC bind inode, not an attacker-replaceable scratch path.
+def mount_records(data):
+    """Decode only the Linux mountinfo fields needed for safe IPC cleanup."""
+    if len(data) > MAX_METADATA:
+        raise BackupError('Mount metadata exceeds limit')
+    records = []
+    for line in data.splitlines():
+        fields = line.split()
+        if len(fields) < 10 or '-' not in fields[6:]:
+            raise BackupError('Invalid Linux mount metadata')
+        separator = fields.index('-', 6)
+        point = re.sub(r'\\([0-7]{3})', lambda m: chr(int(m.group(1), 8)), fields[4])
+        records.append({'mount_id': int(fields[0]), 'point': point,
+                        'options': set(fields[5].split(',')),
+                        'private': not any(value.startswith(('shared:', 'master:', 'propagate_from:'))
+                                           or value == 'unbindable' for value in fields[6:separator])})
+    return records
 
-    Docker's root daemon opens this host /proc path while the FD is held. A
-    symlink planted by restored SQL must never redirect a bind to host sockets.
+
+class KernelMounts:
+    """Fixed nonrecursive Linux mount calls; never canonicalize a proc-FD source."""
+    def __init__(self):
+        if sys.platform != 'linux' or os.geteuid() != 0:
+            raise BackupError('Private IPC mount requires the Linux root dispatcher')
+        self.libc = ctypes.CDLL(None, use_errno=True)
+        self.libc.mount.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p,
+                                   ctypes.c_ulong, ctypes.c_void_p]
+        self.libc.mount.restype = ctypes.c_int
+        self.libc.umount2.argtypes = [ctypes.c_char_p, ctypes.c_int]
+        self.libc.umount2.restype = ctypes.c_int
+
+    def _mount(self, source, target, flags):
+        if self.libc.mount(None if source is None else os.fsencode(source),
+                           os.fsencode(target), None, flags, None) != 0:
+            code = ctypes.get_errno()
+            raise OSError(code, os.strerror(code))
+
+    def bind(self, source, target):
+        self._mount(source, target, 4096)  # MS_BIND, deliberately not MS_REC.
+
+    def make_private(self, target):
+        self._mount(None, target, 1 << 18)  # MS_PRIVATE on this mount only.
+
+    def remount_readonly(self, target):
+        self._mount(None, target, 4096 | 32 | 1 | 2 | 4 | 8)
+        # MS_BIND|MS_REMOUNT|MS_RDONLY|MS_NOSUID|MS_NODEV|MS_NOEXEC.
+
+    def unmount(self, target):
+        if self.libc.umount2(os.fsencode(target), 0) != 0:
+            code = ctypes.get_errno()
+            raise OSError(code, os.strerror(code))
+
+    def state(self, target):
+        with open('/proc/self/mountinfo', encoding='utf-8') as stream:
+            records = mount_records(stream.read(MAX_METADATA + 1))
+        matching = [row for row in records if row['point'] == str(target)]
+        if not matching:
+            return None
+        if len(matching) != 1:
+            raise BackupError('Ambiguous stacked IPC mounts')
+        fd = open_directory(target)
+        try:
+            info = os.fstat(fd)
+            return dict(matching[0], device=info.st_dev, inode=info.st_ino,
+                        uid=info.st_uid, mode=info.st_mode,
+                        children=any(row['point'].startswith(str(target).rstrip('/') + '/') for row in records))
+        finally:
+            os.close(fd)
+
+
+def _same_socket_mount(state, source, mount_id=None, hardened=False):
+    return (state is not None and (mount_id is None or state['mount_id'] == mount_id)
+            and state['device'] == source.st_dev and state['inode'] == source.st_ino
+            and state['uid'] == source.st_uid and stat.S_ISDIR(state['mode'])
+            and not state['mode'] & 0o077 and not state['children']
+            and (not hardened or (state['private'] and {'ro', 'nosuid', 'nodev', 'noexec'} <= state['options'])))
+
+
+def open_anchor_directory(path):
+    """Ordinary mount target paths require a trusted chain of every ancestor."""
+    path = Path(path)
+    if not path.is_absolute() or '..' in path.parts:
+        raise BackupError('An absolute normalized IPC anchor path is required')
+    fd = os.open('/', os.O_RDONLY | DIRECTORY | NOFOLLOW)
+    try:
+        for component in (None,) + path.parts[1:]:
+            if component is not None:
+                next_fd = os.open(component, os.O_RDONLY | DIRECTORY | NOFOLLOW, dir_fd=fd)
+                os.close(fd)
+                fd = next_fd
+            info = os.fstat(fd)
+            if info.st_uid != 0 or info.st_mode & 0o022:
+                raise BackupError('All IPC target ancestors must be root-owned and not group/other writable')
+        return fd
+    except BaseException:
+        os.close(fd)
+        raise
+
+
+@contextlib.contextmanager
+def sandbox_socket(scratch, uid, anchor_parent=None, *, consumer_absent=None, mount_ops=None):
+    """Expose one socket inode through a protected host mount, never its RW path.
+
+    A reviewed consumer must finish and be confirmed absent before normal
+    unmount. Failure leaves private lifecycle evidence and retained directories.
     """
+    if not callable(consumer_absent):
+        raise BackupError('An isolated consumer cleanup verifier is required')
     scratch_fd = open_directory(scratch)
-    socket_fd = None
+    socket_fd = parent_fd = anchors_fd = None
+    bind_attempted = False
+    mount_id = None
+    target = None
     try:
         socket_fd = os.open('socket', os.O_RDONLY | DIRECTORY | NOFOLLOW, dir_fd=scratch_fd)
         directory = os.fstat(socket_fd)
@@ -411,11 +528,64 @@ def sandbox_socket(scratch, uid):
                 or not stat.S_ISSOCK(endpoint.st_mode) or endpoint.st_uid != uid
                 or endpoint.st_nlink != 1):
             raise BackupError('Unsafe isolated Unix socket directory/endpoint')
-        yield '/proc/%d/fd/%d' % (os.getpid(), socket_fd)
+        anchor_parent = Path(anchor_parent) if anchor_parent is not None else Path(scratch).parent / 'ipc-anchors'
+        if anchor_parent == Path(scratch) or Path(scratch) in anchor_parent.parents:
+            raise BackupError('IPC target must be outside the helper writable scratch')
+        # Parent is root-only and outside the PG helper's /scratch bind. Keep its
+        # inode open throughout creation, mount, consumer and verified cleanup.
+        parent_fd = open_anchor_directory(anchor_parent.parent)
+        _private(os.fstat(parent_fd), directory=True)
+        try:
+            os.mkdir(anchor_parent.name, 0o700, dir_fd=parent_fd)
+        except FileExistsError:
+            pass
+        anchors_fd = os.open(anchor_parent.name, os.O_RDONLY | DIRECTORY | NOFOLLOW, dir_fd=parent_fd)
+        _private(os.fstat(anchors_fd), directory=True)
+        name = 'socket-' + uuid.uuid4().hex
+        os.mkdir(name, 0o700, dir_fd=anchors_fd)
+        target = anchor_parent / name
+        ops = mount_ops if mount_ops is not None else KernelMounts()
+        if ops.state(target) is not None:
+            raise BackupError('New IPC target is already a mount')
+        event = {'anchor_path': str(target), 'source_device': directory.st_dev,
+                 'source_inode': directory.st_ino, 'recorded_at': utcnow(),
+                 'automatic_data_deletion': False}
+        _write_json(anchors_fd, name + '-started.json', dict(event, status='mount-requested'))
+        try:
+            bind_attempted = True
+            ops.bind('/proc/%d/fd/%d' % (os.getpid(), socket_fd), target)
+            state = ops.state(target)
+            if not _same_socket_mount(state, directory):
+                raise BackupError('IPC bind does not match the held socket inode')
+            mount_id = state['mount_id']
+            ops.make_private(target)
+            ops.remount_readonly(target)
+            if not _same_socket_mount(ops.state(target), directory, mount_id, hardened=True):
+                raise BackupError('IPC mount hardening/identity verification failed')
+            _write_json(anchors_fd, name + '-mounted.json', dict(event, status='mounted', mount_id=mount_id))
+            yield str(target)
+        finally:
+            try:
+                if bind_attempted:
+                    state = ops.state(target)
+                    if state is None and mount_id is None:
+                        _write_json(anchors_fd, name + '-not-mounted.json', dict(event, status='not-mounted'))
+                    else:
+                        if (mount_id is None or not _same_socket_mount(state, directory, mount_id)
+                                or consumer_absent() is not True):
+                            raise BackupError('IPC mount identity or consumer cleanup is unconfirmed; mount retained')
+                        ops.unmount(target)  # Ordinary umount2, flags zero only.
+                        if ops.state(target) is not None:
+                            raise BackupError('IPC unmount could not be confirmed; target retained')
+                        _write_json(anchors_fd, name + '-unmounted.json', dict(event, status='unmounted', mount_id=mount_id))
+            except BaseException as error:
+                _write_json(anchors_fd, name + '-cleanup-failed.json', dict(event, status='cleanup-unproven',
+                            mount_id=mount_id, error_type=type(error).__name__))
+                raise BackupError('Private IPC cleanup failed; retained mount requires root review') from error
     finally:
-        if socket_fd is not None:
-            os.close(socket_fd)
-        os.close(scratch_fd)
+        for fd in (anchors_fd, parent_fd, socket_fd, scratch_fd):
+            if fd is not None:
+                os.close(fd)
 
 
 def run_restore(c, run_id, approval_id, validation_hook=None):
@@ -498,7 +668,8 @@ def run_restore(c, run_id, approval_id, validation_hook=None):
                             hook_result = None
                             if validation_hook is not None:
                                 stage = 'optional-application-checks'
-                                with sandbox_socket(scratch, c['restore_uid']) as socket_source:
+                                with sandbox_socket(scratch, c['restore_uid'], session / 'ipc-anchors',
+                                                    consumer_absent=lambda: monitor.container_absent(name + '-content')) as socket_source:
                                     context = {'database': database, 'sandbox_name': name,
                                                'socket_path': str(scratch / 'socket'),
                                                'socket_mount_source': socket_source,
