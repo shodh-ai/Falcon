@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import socket
+import subprocess
 import sys
 import tempfile
 import time
@@ -435,6 +436,96 @@ class LifecycleTests(Fixture):
                 restore.run_restore(self.c, RUN, 'approval')
             monitor.assert_not_called()
         self.assertEqual(self.sessions(), [])
+
+
+class ShellDiagnosticsTests(Fixture):
+    """Exercise the shell with fake local PG binaries, never a database."""
+    def run_shell(self, fail='', stop_failure=False, preexisting=False):
+        case = self.root / ('shell-' + str(len(list(self.root.glob('shell-*')))))
+        case.mkdir(mode=0o700)
+        scratch, inputs, binaries = case / 'scratch', case / 'backup', case / 'bin'
+        for directory in (scratch, inputs, binaries):
+            directory.mkdir(mode=0o700)
+        (inputs / 'database.dump').write_bytes(b'PGDMP-synthetic')
+        if preexisting:
+            (scratch / 'recovery-operations.log').write_text('must remain unchanged')
+        fake = '''#!/usr/bin/env python3
+import json, os, sys
+name = os.path.basename(sys.argv[0])
+if name == 'postgres':
+    print('postgres (PostgreSQL) 18.0')
+    raise SystemExit(0)
+kind = name
+if name == 'pg_ctl':
+    kind = 'pg_ctl_stop' if 'stop' in sys.argv else 'pg_ctl_start'
+    if kind == 'pg_ctl_start':
+        assert '-l' in sys.argv
+        assert sys.argv[sys.argv.index('-l') + 1] == os.environ['SYNTHETIC_LOG']
+if kind == os.environ.get('FAIL_COMMAND') or (kind == 'pg_ctl_stop' and os.environ.get('FAIL_STOP') == '1'):
+    print('SYNTHETIC_SECRET_ROW error detail', file=sys.stderr)
+    print('SYNTHETIC_SECRET_ROW output detail')
+    raise SystemExit(17)
+if name == 'psql':
+    sys.stdin.buffer.read()
+    print(json.dumps({'schema':'public','table':'records','kind':'r','rows':2}))
+    with open(os.environ['SYNTHETIC_COMPLETION'], 'w') as marker:
+        marker.write('')
+else:
+    print('synthetic operation complete')
+'''
+        for name in ('postgres', 'initdb', 'pg_ctl', 'createdb', 'pg_restore', 'psql'):
+            path = binaries / name
+            path.write_text(fake)
+            path.chmod(0o700)
+        source = Path(restore.__file__).with_name('restore-check.sh').read_text()
+        script = case / 'restore-check.sh'
+        script.write_text(source.replace('/scratch', str(scratch)).replace('/backup', str(inputs)))
+        environment = dict(os.environ, PATH=str(binaries) + os.pathsep + os.environ['PATH'],
+                           FAIL_COMMAND=fail, FAIL_STOP='1' if stop_failure else '0',
+                           SYNTHETIC_LOG=str(scratch / 'recovery-operations.log'),
+                           SYNTHETIC_COMPLETION=str(inputs / 'complete'))
+        result = subprocess.run(['/bin/sh', str(script)], env=environment, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, timeout=10, check=False)
+        stages = (scratch / 'recovery-stages.log').read_text() if (scratch / 'recovery-stages.log').exists() else ''
+        return result, scratch, stages
+
+    def test_success_preserves_inventory_only_stdout_and_private_logs(self):
+        result, scratch, stages = self.run_shell()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual([json.loads(line) for line in result.stdout.splitlines()], ROWS[:1] + [restore.READY])
+        self.assertEqual(result.stderr, b'')
+        self.assertIn('restore_done\ninventory_start\ninventory_done\n', stages)
+        self.assertTrue(stages.endswith('shutdown_done\nexit_code=0\ncomplete\n'))
+        for name in ('recovery-operations.log', 'recovery-stages.log'):
+            self.assertEqual((scratch / name).stat().st_mode & 0o777, 0o600)
+
+    def test_each_failure_has_fixed_stage_and_private_error_only(self):
+        for command, stage in [('initdb', 'initdb_start'), ('pg_ctl_start', 'postgres_start'),
+                               ('createdb', 'createdb_start'), ('pg_restore', 'restore_start'),
+                               ('psql', 'inventory_start')]:
+            result, scratch, stages = self.run_shell(fail=command)
+            self.assertEqual(result.returncode, 17)
+            self.assertIn(stage + '\n', stages)
+            self.assertTrue(stages.endswith('exit_code=17\nfailed\n'))
+            self.assertEqual(result.stdout, b'')
+            self.assertEqual(result.stderr, b'')
+            self.assertNotIn('SYNTHETIC_SECRET_ROW', stages)
+            self.assertIn('SYNTHETIC_SECRET_ROW', (scratch / 'recovery-operations.log').read_text())
+            if command != 'initdb':
+                self.assertIn('shutdown_done\n', stages)
+
+    def test_shutdown_failure_does_not_turn_success_into_pass(self):
+        result, scratch, stages = self.run_shell(stop_failure=True)
+        self.assertEqual(result.returncode, 31)
+        self.assertTrue(stages.endswith('shutdown_unconfirmed\nexit_code=31\nfailed\n'))
+        self.assertNotIn('SYNTHETIC_SECRET_ROW', result.stdout.decode())
+        self.assertEqual(result.stderr, b'')
+
+    def test_preexisting_private_log_is_not_overwritten(self):
+        result, scratch, stages = self.run_shell(preexisting=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual((scratch / 'recovery-operations.log').read_text(), 'must remain unchanged')
+        self.assertEqual(result.stdout, b'')
 
 
 if __name__ == '__main__':
