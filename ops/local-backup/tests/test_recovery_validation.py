@@ -48,7 +48,9 @@ class EnvironmentTests(unittest.TestCase):
         self.assertNotIn('must-never-be-forwarded', json.dumps(selected))
 
     def test_selected_duplicates_and_unknown_upload_mapping_refused(self):
-        for entries in (['JWT_SECRET=one', 'JWT_SECRET=two'], ['UPLOAD_PATH=/other/live/path']):
+        for entries in (['JWT_SECRET=one', 'JWT_SECRET=two'], ['UPLOAD_PATH=/other/live/path'],
+                        ['UPLOAD_PATH= /app/uploads'], ['UPLOAD_PATH=/app/uploads '],
+                        ['UPLOAD_PATH= ./uploads '], ['UPLOAD_PATH=uploads\t']):
             with self.assertRaises(recovery.BackupError):
                 self.read(entries)
 

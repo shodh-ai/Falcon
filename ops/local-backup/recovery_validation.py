@@ -39,7 +39,7 @@ def read_environment(filename):
             if key in selected:
                 raise BackupError('Duplicate recovery configuration key')
             selected[key] = value
-    if selected.get('UPLOAD_PATH', '/app/uploads').strip() not in ('/app/uploads', './uploads', 'uploads'):
+    if selected.get('UPLOAD_PATH', '/app/uploads') not in ('/app/uploads', './uploads', 'uploads'):
         raise BackupError('Review the preserved upload mapping before this probe')
     return selected
 
