@@ -39,9 +39,10 @@ const REPORTS = [
   {
     id: 'missing-punches',
     title: 'Missing Punches Report',
-    description: 'Staff who punched IN today but forgot to punch OUT yesterday.',
-    path: () => '/api/hr/reports/missing-punches',
-    filename: () => 'missing-punches.xlsx',
+    description: 'Missing check-outs in the selected month, followed by a check-in the next day.',
+    path: (month: string) => `/api/hr/reports/missing-punches?month=${month}`,
+    filename: (month: string) => `missing-punches-${month}.xlsx`,
+    needsMonth: true,
   },
   {
     id: 'employee-master',
@@ -82,7 +83,10 @@ export default function HrReportsPage() {
           'x-tenant-subdomain': getSubdomainFromClient(),
         },
       });
-      if (!res.ok) throw new Error(await res.text().catch(() => 'Export failed'));
+      if (!res.ok) {
+        const error = await res.json().catch(() => null) as { message?: string | string[] } | null;
+        throw new Error(Array.isArray(error?.message) ? error.message.join(', ') : error?.message ?? 'Export failed');
+      }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -112,12 +116,12 @@ export default function HrReportsPage() {
 
       <div className="flex flex-wrap gap-4">
         <div>
-          <label className="text-xs font-medium text-muted-foreground">Report month</label>
-          <Input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="mt-1 w-44" />
+          <label htmlFor="hr-report-month" className="text-xs font-medium text-muted-foreground">Report month</label>
+          <Input id="hr-report-month" type="month" disabled={downloading !== null} value={month} onChange={(e) => setMonth(e.target.value)} className="mt-1 w-44" />
         </div>
         <div>
-          <label className="text-xs font-medium text-muted-foreground">Balance year</label>
-          <Input type="number" value={year} onChange={(e) => setYear(e.target.value)} className="mt-1 w-28" />
+          <label htmlFor="hr-balance-year" className="text-xs font-medium text-muted-foreground">Balance year</label>
+          <Input id="hr-balance-year" type="number" min={1900} max={9999} disabled={downloading !== null} value={year} onChange={(e) => setYear(e.target.value)} className="mt-1 w-28" />
         </div>
       </div>
 
@@ -134,14 +138,16 @@ export default function HrReportsPage() {
               </div>
               <Button
                 size="sm"
-                disabled={downloading === report.id}
+                disabled={downloading !== null || ('needsMonth' in report ? !/^\d{4}-(0[1-9]|1[0-2])$/.test(month) : 'needsYear' in report ? !/^\d{4}$/.test(year) : false)}
                 onClick={() => void downloadReport(report)}
               >
                 <Download className="mr-1 h-4 w-4" />
                 {downloading === report.id ? 'Generating…' : 'Download .xlsx'}
               </Button>
             </CardHeader>
-            <CardContent />
+            <CardContent className="text-sm text-muted-foreground">
+              {'needsMonth' in report ? `Selected month: ${month}` : 'needsYear' in report ? `Balance year: ${year}` : 'Current employee master data (not month-specific).'}
+            </CardContent>
           </Card>
         ))}
       </div>

@@ -102,7 +102,7 @@ export default function HrPayslipDownloadRequestsPage() {
               </label>
               <label className="relative block min-w-0">
                 <SlidersHorizontal aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-sgvu-navy" />
-                <select aria-label="Filter by request status" value={status} onChange={(event) => setStatus(event.target.value as 'ALL' | RequestStatus)} className="h-10 w-full appearance-none rounded-xl border-2 border-sgvu-gold bg-white pl-10 pr-10 text-sm font-semibold text-sgvu-navy shadow-sm outline-none focus:ring-2 focus:ring-sgvu-gold/30 sm:w-52">
+                <select aria-label="Filter by request status" value={status} onChange={(event) => setStatus(event.target.value as 'ALL' | RequestStatus)} style={{ paddingInline: '2.5rem', backgroundImage: 'none' }} className="h-10 w-full appearance-none rounded-xl border-2 border-sgvu-gold bg-white text-sm font-semibold text-sgvu-navy shadow-sm outline-none focus:ring-2 focus:ring-sgvu-gold/30 sm:w-52">
                   <option value="ALL">All statuses</option>
                   <option value="PENDING_REVIEW">Pending review</option>
                   <option value="APPROVED">Approved</option>

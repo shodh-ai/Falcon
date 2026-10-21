@@ -38,6 +38,9 @@ type AdminPendingItem = {
   reason: string | null;
   employee_name: string;
   approver_name: string | null;
+  review_stage: 'FIRST_LEVEL' | 'FINAL_HR';
+  can_override_approve: boolean;
+  can_override_reject: boolean;
 };
 
 type AdminPendingResponse = {
@@ -56,14 +59,14 @@ export default function HrInboxPage() {
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState<string | null>(null);
   const [overrideError, setOverrideError] = useState<{ leaveId: string; message: string } | null>(null);
+  const [overrideReasons, setOverrideReasons] = useState<Record<string, string>>({});
+  const [queueError, setQueueError] = useState<string | null>(null);
 
   const fetchQueues = useCallback(async () => {
     return Promise.all([
-      api.get<InboxResponse>('/api/hr/inbox/pending')
-        .catch(() => ({ count: 0, items: [] } as InboxResponse)),
+      api.get<InboxResponse>('/api/hr/inbox/pending'),
       isHrAdmin
         ? api.get<AdminPendingResponse>('/api/hr/admin/pending-requests')
-          .catch(() => ({ count: 0, items: [] } as AdminPendingResponse))
         : Promise.resolve(null),
     ]);
   }, [api, isHrAdmin]);
@@ -74,6 +77,11 @@ export default function HrInboxPage() {
       if (!active) return;
       setInbox(pending);
       setAdminPending(overridePending);
+      setQueueError(null);
+      setLoading(false);
+    }).catch((error) => {
+      if (!active) return;
+      setQueueError(error instanceof Error ? error.message : 'Could not load approval queues');
       setLoading(false);
     });
     return () => { active = false; };
@@ -84,8 +92,8 @@ export default function HrInboxPage() {
     setOverrideError(null);
     try {
       if (override) {
-        await api.patch(`/api/hr/admin/requests/${leaveId}/override`, { action });
-        toast.success(`Bypass ${action === 'APPROVE' ? 'approved' : 'rejected'}`);
+        await api.patch(`/api/hr/admin/requests/${leaveId}/override`, { action, comment: overrideReasons[leaveId]?.trim() });
+        toast.success(action === 'APPROVE' ? 'Approval stage completed; any remaining sign-off stays pending' : 'Request rejected');
       } else {
         await api.patch(`/api/hr/workforce/team/${leaveId}/action`, { action });
         toast.success(action === 'APPROVE' ? 'Approved' : 'Rejected');
@@ -118,6 +126,7 @@ export default function HrInboxPage() {
           {inbox?.count ?? 0} pending
         </Badge>
       </div>
+      {queueError && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">{queueError}. Refresh to retry; the queue could not be verified.</p>}
 
       <div className="space-y-3">
         {(inbox?.items ?? []).map((item) => (
@@ -164,7 +173,7 @@ export default function HrInboxPage() {
         ))}
       </div>
 
-      {!inbox?.items.length && (
+      {!queueError && !inbox?.items.length && (
         <p className="text-sm text-muted-foreground">You&apos;re all caught up — no pending approvals.</p>
       )}
 
@@ -172,9 +181,9 @@ export default function HrInboxPage() {
         <section className="mt-10 space-y-3">
           <HrPageHeader
             title="HR Admin Override"
-            description="Exception-only action for a stalled approver. Final HR sign-off remains separate and requires an independent reviewer."
+            description="Supervisory view of both pending stages. Bypass advances the current stage only; final HR approval must be independent. Every override needs a reason."
           />
-          <Badge variant="destructive">{adminPending?.count} eligible for exception review</Badge>
+          <Badge variant="destructive">{adminPending?.count} pending requests in scope</Badge>
           {(adminPending?.items ?? []).map((item) => (
             <Card key={`admin-${item.leave_id}`} className="border-amber-200">
               <CardContent className="flex flex-wrap items-start justify-between gap-4 p-4">
@@ -189,20 +198,25 @@ export default function HrInboxPage() {
                   <p className="text-xs text-amber-800">
                     Assigned approver: {item.approver_name ?? 'Unassigned'}
                   </p>
+                  <p className="text-sm font-medium">{item.review_stage === 'FINAL_HR' ? 'Final HR review' : 'First-level review'}</p>
                   {item.reason && <p className="mt-2 text-sm">{item.reason}</p>}
+                  <label className="mt-3 grid gap-1 text-sm">Override reason
+                    <textarea aria-label={`Override reason for ${item.employee_name}`} className="rounded-lg border p-2" maxLength={2000} value={overrideReasons[item.leave_id] ?? ''} onChange={(event) => setOverrideReasons((values) => ({ ...values, [item.leave_id]: event.target.value }))} placeholder="Explain why intervention is needed (at least 10 characters)" />
+                  </label>
+                  {!item.can_override_approve && <p className="mt-2 text-xs text-amber-800">Approval requires a reviewer other than the requester and previous approver.</p>}
                 </div>
                 <div className="flex gap-2">
                   <Button
                     size="sm"
                     variant="outline"
-                    disabled={acting === item.leave_id}
+                    disabled={acting !== null || !item.can_override_reject || (overrideReasons[item.leave_id]?.trim().length ?? 0) < 10}
                     onClick={() => void act(item.leave_id, 'REJECT', true)}
                   >
                     Force Reject
                   </Button>
                   <Button
                     size="sm"
-                    disabled={acting === item.leave_id}
+                    disabled={acting !== null || !item.can_override_approve || (overrideReasons[item.leave_id]?.trim().length ?? 0) < 10}
                     onClick={() => void act(item.leave_id, 'APPROVE', true)}
                   >
                     Bypass Approve

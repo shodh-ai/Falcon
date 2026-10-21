@@ -217,10 +217,10 @@ export function QuickActionMenu() {
             <DialogDescription>Submit without leaving your current page.</DialogDescription>
           </DialogHeader>
           <div className="flex gap-2">
-            <Button size="sm" variant="default" onClick={() => setOpen('leave')}>
+            <Button type="button" size="sm" aria-pressed={true} variant="default" disabled={submitting} onClick={() => setOpen('leave')}>
               Leave
             </Button>
-            <Button size="sm" variant="outline" onClick={() => setOpen('od')}>
+            <Button type="button" size="sm" aria-pressed={false} variant="outline" disabled={submitting} onClick={() => setOpen('od')}>
               On Duty
             </Button>
           </div>
@@ -272,7 +272,12 @@ export function QuickActionMenu() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Apply On Duty (OD)</DialogTitle>
+            <DialogDescription>Choose leave or official on-duty work. Your draft is retained when switching.</DialogDescription>
           </DialogHeader>
+          <div className="flex gap-2" aria-label="Request type">
+            <Button type="button" size="sm" aria-pressed={false} variant="outline" disabled={submitting} onClick={() => setOpen('leave')}>Leave</Button>
+            <Button type="button" size="sm" aria-pressed={true} variant="default" disabled={submitting} onClick={() => setOpen('od')}>On Duty</Button>
+          </div>
           <form onSubmit={submitOd} className="grid gap-3">
             <label className="grid gap-1 text-sm font-medium">Start Date
               <Input

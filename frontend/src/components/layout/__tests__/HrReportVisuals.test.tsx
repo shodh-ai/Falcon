@@ -24,7 +24,8 @@ describe('HR report visual controls', () => {
   it('reserves separate space for the status filter icon, label and chevron', () => {
     render(<HrPayslipDownloadRequestsPage />);
     const filter = screen.getByRole('combobox', { name: 'Filter by request status' });
-    expect(filter).toHaveClass('pl-10', 'pr-10');
+    // Inline padding beats the unlayered global native-select CSS rule.
+    expect(filter).toHaveStyle({ paddingInline: '2.5rem', backgroundImage: 'none' });
     expect(filter.parentElement?.querySelectorAll('svg')).toHaveLength(2);
     expect(filter).toHaveValue('ALL');
   });

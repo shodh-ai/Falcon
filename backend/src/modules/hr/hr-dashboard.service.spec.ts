@@ -42,11 +42,18 @@ describe('HrDashboardService pending review queues', () => {
           ? statement.includes("sl.request_type IN ('LEAVE', 'ON_DUTY')")
           : statement.includes("sl.request_type = 'REGULARIZATION'"),
       );
-      expect(sql).toContain('sl.current_approver_user_id = $3');
+      if (type === 'LEAVE') {
+        expect(sql).toContain('sl.current_approver_user_id = $3');
+        expect(sql).toContain('hr_step.workflow_id = sl.workflow_id');
+        expect(sql).toContain("hr_step.approver_type IN ('HR_ADMIN', 'HR_EXECUTIVE')");
+        expect(sql).toContain('later_step.step_order > sl.current_step_order');
+      } else {
+        // Includes manager-pending and final-HR rows exactly as the regularization page does.
+        expect(sql).not.toContain('sl.current_approver_user_id = $3');
+        expect(sql).toContain('access.department_scope');
+        expect(sql).toContain('access.entity_scope');
+      }
       expect(sql).toContain("sl.status IN ('PENDING', 'HOD_APPROVED')");
-      expect(sql).toContain('hr_step.workflow_id = sl.workflow_id');
-      expect(sql).toContain("hr_step.approver_type IN ('HR_ADMIN', 'HR_EXECUTIVE')");
-      expect(sql).toContain('later_step.step_order > sl.current_step_order');
       expect(sql).toContain('p.entity_id = $2');
       expect(params).toEqual([tenantId, 7, approverId]);
     }

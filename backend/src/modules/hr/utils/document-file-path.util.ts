@@ -145,7 +145,7 @@ export async function openDocumentReadStream(
   if (key && storage.isEnabled()) {
     return storage.getDownloadStream(key);
   }
-  const diskPath = resolveDocumentDiskPath(fileUrl, tenantId);
+  const diskPath = resolveDocumentDiskPath(key ? `/uploads/${key}` : fileUrl, tenantId);
   if (diskPath) {
     return createReadStream(diskPath);
   }

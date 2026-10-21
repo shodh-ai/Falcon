@@ -20,3 +20,15 @@ export function finalHrReviewSql(requestAlias: string, stepAlias: string) {
     )
   )`;
 }
+
+/** Explicit delegated scope restricts even HR master roles; absence retains legacy role access. */
+export function hrRequestScopeSql(request: string, profile: string, employee: string, actor: string, write = false) {
+  return `NOT EXISTS (
+    SELECT 1 FROM hr_access_controls access
+    WHERE access.tenant_id = ${request}.tenant_id AND access.user_id = ${actor}
+      AND access.module_name = 'LEAVES'
+      AND (access.can_view = false${write ? ' OR access.can_approve = false' : ''}
+        OR (access.entity_scope IS NOT NULL AND NOT (COALESCE(COALESCE(${request}.entity_id, ${profile}.entity_id, ${employee}.entity_id) = ANY(access.entity_scope), false)))
+        OR (access.department_scope IS NOT NULL AND NOT (COALESCE(${employee}.dept_id = ANY(access.department_scope), false))))
+  )`;
+}

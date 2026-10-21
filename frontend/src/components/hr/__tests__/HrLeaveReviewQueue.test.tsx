@@ -22,6 +22,7 @@ const regularization = {
   applied_at: '2026-10-11T09:15:00Z',
   reason: 'Missed check-in',
   status: 'HOD_APPROVED',
+  can_review: true,
   recorded_check_in: null,
   recorded_check_out: null,
 };
@@ -44,12 +45,27 @@ describe('HR final review queue', () => {
     expect(screen.getByText(/Submitted:/)).toBeInTheDocument();
     expect(useHrSWR).toHaveBeenCalledWith(
       ['hr-leave-review', 'REGULARIZATION'],
-      '/api/hr/leaves/review?request_type=REGULARIZATION',
+      '/api/hr/leaves/review?request_type=REGULARIZATION&include_first_level=true',
       expect.objectContaining({ revalidateOnMount: true }),
     );
 
     fireEvent.click(screen.getByRole('button', { name: 'Final HR Approve' }));
     await waitFor(() => expect(patch).toHaveBeenCalledWith('/api/hr/leaves/review/review-1', { action: 'APPROVE' }));
+  });
+
+  it('shows a manager-pending correction without final approval controls', () => {
+    useHrSWR.mockReturnValue({ data: [{ ...regularization, status: 'PENDING', review_stage: 'FIRST_LEVEL', can_review: false }], error: null, isLoading: false, mutate });
+    render(<HrLeaveReviewQueue requestType="REGULARIZATION" />);
+    expect(screen.getByText('Awaiting first-level approval in Pending on Me.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Final HR Approve' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reject' })).not.toBeInTheDocument();
+  });
+
+  it('does not expose final decisions for another assigned reviewer or a previous actor', () => {
+    useHrSWR.mockReturnValue({ data: [{ ...regularization, review_stage: 'FINAL_HR', can_review: false }], error: null, isLoading: false, mutate });
+    render(<HrLeaveReviewQueue requestType="REGULARIZATION" />);
+    expect(screen.getByText('Awaiting an independent, assigned final HR reviewer.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Final HR Approve' })).not.toBeInTheDocument();
   });
 
   it('does not show an empty queue as a successful review after a fetch failure', async () => {

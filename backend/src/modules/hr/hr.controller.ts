@@ -509,12 +509,14 @@ export class HrController {
     @Req() req: { user: AuthUser },
     @Res({ passthrough: true }) res: Response,
     @Query('entity_id') entityId?: string,
+    @Query('month') month?: string,
   ) {
     const tenantId = this.resolveTenantId(req.user);
     const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
     const buffer = await this.reports.buildMissingPunchesReport(
       tenantId,
       entity,
+      month ?? new Date().toISOString().slice(0, 7),
     );
     res.set({
       'Content-Type':
@@ -1142,6 +1144,7 @@ export class HrController {
     @Req() req: { user: AuthUser },
     @Query('request_type') requestType: 'LEAVE' | 'REGULARIZATION',
     @Query('entity_id') entityId?: string,
+    @Query('include_first_level') includeFirstLevel?: string,
   ) {
     if (requestType !== 'LEAVE' && requestType !== 'REGULARIZATION') {
       throw new BadRequestException('request_type must be LEAVE or REGULARIZATION');
@@ -1149,7 +1152,7 @@ export class HrController {
     const tenantId = this.resolveTenantId(req.user);
     const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
     return this.workforce.listHrReviewPending(
-      tenantId, entity, req.user.user_id, requestType,
+      tenantId, entity, req.user.user_id, requestType, includeFirstLevel === 'true',
     );
   }
 
@@ -1171,7 +1174,7 @@ export class HrController {
       this.workforce.listHrReviewPending(tenantId, entity, req.user.user_id, 'LEAVE'),
       this.workforce.listHrReviewPending(tenantId, entity, req.user.user_id, 'REGULARIZATION'),
     ]);
-    if (![...leave, ...regularization].some((row) => row.leave_id === leaveId)) {
+    if (![...leave, ...regularization].some((row) => row.leave_id === leaveId && row.can_review)) {
       throw new BadRequestException('Request is not pending your HR review in this entity');
     }
     return this.workforce.actOnTeamRequest(
@@ -1874,7 +1877,7 @@ export class HrController {
     const tenantId = this.resolveTenantId(req.user);
     return this.entityCtx
       .resolveEntityId(tenantId, entityId)
-      .then((entity) => this.team.listAllPendingForAdmin(tenantId, entity));
+      .then((entity) => this.team.listAllPendingForAdmin(tenantId, entity, req.user.user_id));
   }
 
   @Get('admin/requests/legacy-reconciliation')
@@ -1912,17 +1915,21 @@ export class HrController {
   @SkipEntityScope()
   @Roles('HRAdmin', 'SuperAdmin', 'HR')
   @HrPermission('leaves', 'write')
-  adminOverrideRequest(
+  async adminOverrideRequest(
     @Param('leaveId') leaveId: string,
     @Req() req: { user: AuthUser },
     @Body() body: { action: 'APPROVE' | 'REJECT'; comment?: string },
+    @Query('entity_id') entityId?: string,
   ) {
+    const tenantId = this.resolveTenantId(req.user);
+    const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
     return this.team.adminOverrideRequest(
       req.user.user_id,
       this.resolveTenantId(req.user),
       leaveId,
       body.action,
       body.comment,
+      entity,
     );
   }
 

@@ -78,7 +78,7 @@ export default function HrOnboardingPage() {
               <HrTh className="w-[12%]">Joining</HrTh>
               <HrTh className="w-[18%]">Progress</HrTh>
               <HrTh className="w-[10%]">Status</HrTh>
-              <HrTh className="w-[10%] text-right">Action</HrTh>
+              <HrTh className="w-[10%] text-left">Action</HrTh>
             </HrTableHead>
             <HrTableBody>
               {rows.map((row) => {
@@ -126,7 +126,7 @@ export default function HrOnboardingPage() {
                     <HrTd>
                       <HrStatusBadge status={status} />
                     </HrTd>
-                    <HrTd className="text-right">
+                    <HrTd className="text-left">
                       <Button
                         size="sm"
                         variant="outline"

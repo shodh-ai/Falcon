@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import * as ExcelJS from 'exceljs';
@@ -12,6 +12,19 @@ export class HrReportsService {
     private readonly entityCtx: HrEntityContextService,
     private readonly attendanceCalc: AttendanceCalculationService,
   ) {}
+
+  private monthRange(month: string) {
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month) || Number(month.slice(0, 4)) < 1900) {
+      throw new BadRequestException('Report month must be YYYY-MM');
+    }
+    const [year, monthNum] = month.split('-').map(Number);
+    const days = new Date(year, monthNum, 0).getDate();
+    return { year, monthNum, start: `${month}-01`, end: `${month}-${days}` };
+  }
+
+  private requireRows(rows: unknown[], period: string) {
+    if (!rows.length) throw new NotFoundException(`No report data is available for ${period}. No file was generated.`);
+  }
 
   private statusCode(calculated: string | null | undefined): string {
     if (!calculated) return 'A';
@@ -38,11 +51,13 @@ export class HrReportsService {
     entityId: number,
     month: string,
   ): Promise<Buffer> {
+    this.monthRange(month);
     const matrix = await this.attendanceCalc.getMatrixMonth(
       tenantId,
       month,
       entityId,
     );
+    this.requireRows(matrix.employees, month);
     const [, monthNum] = month.split('-').map(Number);
     const daysInMonth = new Date(
       month.split('-').map(Number)[0],
@@ -93,6 +108,7 @@ export class HrReportsService {
     month: string,
     userId: string,
   ): Promise<Buffer> {
+    this.monthRange(month);
     const matrix = await this.attendanceCalc.getMatrixMonth(
       tenantId,
       month,
@@ -137,6 +153,9 @@ export class HrReportsService {
     entityId: number,
     year: number,
   ): Promise<Buffer> {
+    if (!Number.isInteger(year) || year < 1900 || year > 9999) {
+      throw new BadRequestException('Balance year must be a four-digit year');
+    }
     const entityFilter = this.entityCtx.entityFilterSql('p', 2);
     const rows = await this.dataSource.query(
       `SELECT u.name, p.employee_id,
@@ -149,9 +168,11 @@ export class HrReportsService {
        LEFT JOIN hr_leave_balances b ON b.user_id = u.user_id AND b.year = $3
        WHERE u.tenant_id = $1 AND r.role_name NOT IN ('Student', 'Applicant', 'Parent')${entityFilter}
        GROUP BY u.name, p.employee_id
+       HAVING COUNT(b.user_id) > 0
        ORDER BY u.name`,
       [tenantId, entityId, year],
     );
+    this.requireRows(rows, String(year));
 
     const wb = new ExcelJS.Workbook();
     const sheet = wb.addWorksheet('Leave Balances');
@@ -181,7 +202,7 @@ export class HrReportsService {
     entityId: number,
     month: string,
   ): Promise<Buffer> {
-    const [year, monthNum] = month.split('-').map(Number);
+    const { year, monthNum } = this.monthRange(month);
     const entityFilter = this.entityCtx.entityFilterSql('p', 2);
     const rows = await this.dataSource.query(
       `SELECT u.name, p.employee_id, sp.gross_pay, sp.net_pay, sp.lwp_days,
@@ -189,9 +210,10 @@ export class HrReportsService {
        FROM staff_payslips sp
        JOIN users u ON u.user_id = sp.staff_user_id
        JOIN hr_employee_profiles p ON p.user_id = u.user_id AND p.tenant_id = sp.tenant_id
-       WHERE sp.tenant_id = $1 AND sp.year = $3 AND sp.month ILIKE $4${entityFilter}`,
-      [tenantId, entityId, year, `%${this.monthLabel(monthNum)}%`],
+       WHERE sp.tenant_id = $1 AND sp.year = $3 AND lower(trim(sp.month)) = ANY($4::text[])${entityFilter}`,
+      [tenantId, entityId, year, [this.monthLabel(monthNum).toLowerCase(), this.monthLabel(monthNum).slice(0, 3).toLowerCase(), String(monthNum), String(monthNum).padStart(2, '0'), month]],
     );
+    this.requireRows(rows, month);
 
     const wb = new ExcelJS.Workbook();
     const sheet = wb.addWorksheet('Salary Register');
@@ -225,49 +247,50 @@ export class HrReportsService {
   async buildMissingPunchesReport(
     tenantId: string,
     entityId: number,
+    month = new Date().toISOString().slice(0, 7),
   ): Promise<Buffer> {
-    const today = new Date().toISOString().slice(0, 10);
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    const yesterdayStr = yesterday.toISOString().slice(0, 10);
+    const { start, end } = this.monthRange(month);
     const entityFilter = this.entityCtx.entityFilterSql('p', 2);
 
     const rows = await this.dataSource.query(
-      `SELECT u.name, p.employee_id, y.first_in_time, y.last_out_time, t.first_in_time AS today_in
+      `SELECT u.name, p.employee_id, y.date::text AS attendance_date, y.first_in_time, y.last_out_time, t.first_in_time AS next_day_in
        FROM users u
        JOIN roles r ON r.role_id = u.role_id
        JOIN hr_employee_profiles p ON p.user_id = u.user_id AND p.tenant_id = u.tenant_id
-       JOIN hr_daily_attendance y ON y.user_id = u.user_id AND y.date = $3::date
-       JOIN hr_daily_attendance t ON t.user_id = u.user_id AND t.date = $4::date
+       JOIN hr_daily_attendance y ON y.user_id = u.user_id AND y.date BETWEEN $3::date AND $4::date
+       JOIN hr_daily_attendance t ON t.user_id = u.user_id AND t.date = y.date + 1
        WHERE u.tenant_id = $1 AND u.is_active = true
          AND r.role_name NOT IN ('Student', 'Applicant', 'Parent')${entityFilter}
          AND y.first_in_time IS NOT NULL AND y.last_out_time IS NULL
          AND t.first_in_time IS NOT NULL
-       ORDER BY u.name`,
-      [tenantId, entityId, yesterdayStr, today],
+       ORDER BY u.name, y.date`,
+      [tenantId, entityId, start, end],
     );
+    this.requireRows(rows, month);
 
     const wb = new ExcelJS.Workbook();
     const sheet = wb.addWorksheet('Missing Punches');
     sheet.addRow([
       'Employee ID',
       'Name',
-      'Yesterday IN',
-      'Yesterday OUT',
-      'Today IN',
+      'Attendance date',
+      'IN',
+      'OUT',
+      'Next day IN',
     ]);
     sheet.getRow(1).font = { bold: true };
     for (const r of rows) {
       sheet.addRow([
         r.employee_id,
         r.name,
+        r.attendance_date,
         r.first_in_time
           ? new Date(r.first_in_time).toLocaleString('en-IN')
           : '',
         r.last_out_time
           ? new Date(r.last_out_time).toLocaleString('en-IN')
           : 'MISSING',
-        r.today_in ? new Date(r.today_in).toLocaleString('en-IN') : '',
+        r.next_day_in ? new Date(r.next_day_in).toLocaleString('en-IN') : '',
       ]);
     }
     const buf = await wb.xlsx.writeBuffer();
@@ -293,6 +316,7 @@ export class HrReportsService {
        ORDER BY u.name`,
       [tenantId, entityId],
     );
+    this.requireRows(rows, 'the selected organization');
 
     const wb = new ExcelJS.Workbook();
     const sheet = wb.addWorksheet('Employee Master');

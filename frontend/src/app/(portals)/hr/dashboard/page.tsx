@@ -113,7 +113,7 @@ export default function HrMasterDashboardPage() {
   const hc = data?.headcount_snapshot;
   const att = data?.today_attendance;
   const pending = data?.pending_actions;
-  const actionableItems = (pending?.items ?? []).filter((item) => item.count > 0);
+  const actionableItems = pending?.items ?? [];
   const attrition = data?.attrition_trend ?? [];
   const lastTurnover = attrition[attrition.length - 1]?.turnover_pct ?? 0;
   const prevTurnover = attrition[attrition.length - 2]?.turnover_pct ?? lastTurnover;
@@ -221,7 +221,7 @@ export default function HrMasterDashboardPage() {
                 </Button>
               </div>
             ))}
-            {actionableItems.length === 0 && (
+            {actionableItems.every((item) => item.count === 0) && (
               <HrEmptyState
                 title="No pending actions"
                 description="You're all caught up — nothing awaiting HR review right now."

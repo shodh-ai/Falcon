@@ -8,6 +8,7 @@ import {
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { HrDocumentExportService } from './hr-document-export.service';
+import { Readable } from 'stream';
 
 // Jest runs CommonJS and cannot load archiver v8's ESM entrypoint. The runtime
 // archive implementation is exercised separately; these tests cover job and
@@ -179,6 +180,21 @@ describe('HrDocumentExportService partial exports', () => {
       'Check the source uploads or S3/MinIO object keys',
     );
     expect(notify.exportFailed).toHaveBeenCalledTimes(1);
+  });
+
+  it('skips an object that fails halfway through reading instead of corrupting a valid ZIP', async () => {
+    const docs = ['broken', 'good'].map((id) => ({ document_id: id, file_url: `s3://falcon-uploads/${tenantId}/${id}.pdf`, file_name: null,
+      document_type: 'PAN', employee_name: 'Employee', employee_id: 'EMP1' }));
+    const { service, storage, job } = makeService(docs);
+    storage.isEnabled.mockReturnValue(true);
+    const extendedStorage = storage as unknown as { getDownloadStream: jest.Mock; upload: jest.Mock; buildKey: jest.Mock };
+    extendedStorage.getDownloadStream = jest.fn(async (key: string) => key.includes('broken')
+      ? Readable.from((async function* () { yield Buffer.from('partial'); throw new Error('network interrupted'); })())
+      : Readable.from([Buffer.from('complete document')]));
+    extendedStorage.upload = jest.fn().mockResolvedValue(undefined);
+    extendedStorage.buildKey = jest.fn((_tenant: string, path: string) => `${tenantId}/${path}`);
+    await expect(service.runExport(job)).resolves.toMatchObject({ document_count: 1, skipped_count: 1 });
+    expect(extendedStorage.upload).toHaveBeenCalledTimes(1);
   });
 
   it('skips an existing file outside the export tenant', async () => {

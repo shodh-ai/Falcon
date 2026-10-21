@@ -8,7 +8,7 @@ export default function HrRegularizationsPage() {
     <>
       <HrPageHeader
         title="Attendance Regularizations"
-        description="Review attendance corrections that are specifically awaiting your final HR sign-off."
+        description="Track pending attendance corrections at both stages. Final HR actions become available only after first-level approval."
       />
       <HrLeaveReviewQueue requestType="REGULARIZATION" />
     </>
