@@ -32,17 +32,20 @@ EXPECTED_NAMES = {'api': 'pmy0ybhwzco11kocu0zloqk0',
                   'redis': 'y13hscsoka5mti9mjtfptqlh'}
 
 # Project only needed fields. Config.Env and health-check logs never leave Docker.
+# Docker 29 uses strict missing-key template evaluation. Official images may
+# omit Labels entirely, so a dotted lookup fails even inside an if statement.
+REVISION_FORMAT = ('{{with index .Config "Labels"}}{{json (index . "' +
+                   REVISION_LABEL + '")}}{{else}}null{{end}}')
 CONTAINER_FORMAT = ('{"Id":{{json .Id}},"Name":{{json .Name}},'
     '"Image":{{json .Image}},"Mounts":{{json .Mounts}},'
-    '"Revision":{{json (index .Config.Labels "' + REVISION_LABEL + '")}},'
+    '"Revision":' + REVISION_FORMAT + ','
     '"State":{"Running":{{json .State.Running}},'
     '"Paused":{{json .State.Paused}},"Restarting":{{json .State.Restarting}},'
-    '"Health":{{if .State.Health}}{{json .State.Health.Status}}{{else}}null{{end}}}}')
-IMAGE_FORMAT = ('{"Id":{{json .Id}},"Revision":'
-                '{{json (index .Config.Labels "' + REVISION_LABEL + '")}}}')
+    '"Health":{{with index .State "Health"}}{{json (index . "Status")}}{{else}}null{{end}}}}')
+IMAGE_FORMAT = '{"Id":{{json .Id}},"Revision":' + REVISION_FORMAT + '}'
 VOLUME_FORMAT = ('{"Name":{{json .Name}},"Driver":{{json .Driver}},'
                  '"Mountpoint":{{json .Mountpoint}},"Scope":{{json .Scope}},'
-                 '"HasOptions":{{if .Options}}true{{else}}false{{end}}}')
+                 '"HasOptions":{{if index . "Options"}}true{{else}}false{{end}}}')
 PGDATA_FORMAT = ('{{range .Config.Env}}{{if eq (index (split . "=") 0) '
                  '"PGDATA"}}{{json .}}{{end}}{{end}}')
 PS_FORMAT = '{"Id":{{json .ID}},"Name":{{json .Names}}}'
@@ -190,6 +193,10 @@ class Preflight:
     def document(self, arguments):
         try:
             value = json.loads(self.run(arguments))
+        except Refused:
+            # Refused inherits ValueError. Preserve sanitized command failures
+            # instead of misreporting a template/daemon error as invalid JSON.
+            raise
         except (ValueError, UnicodeError, TypeError) as error:
             raise Refused('Unexpected read-only Docker observation format') from error
         require(isinstance(value, dict), 'Expected one Docker observation object')
@@ -255,6 +262,8 @@ class Preflight:
             try:
                 pgdata = json.loads(self.run(['container', 'inspect', '--format', PGDATA_FORMAT,
                                              actual['Id']]))
+            except Refused:
+                raise
             except (ValueError, TypeError) as error:
                 raise Refused('Exactly one explicit PostgreSQL PGDATA value is required') from error
             require(pgdata == 'PGDATA=' + expected['pgdata'], 'PostgreSQL PGDATA differs from protected baseline')

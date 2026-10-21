@@ -172,6 +172,34 @@ class HostPreflightTests(unittest.TestCase):
             with self.subTest(image=image), self.assertRaises(host.Refused): self.check()
             self.docker.images[image] = original
 
+    def test_previous_image_without_labels_is_valid_but_unlabelled_candidate_refused(self):
+        # Official PG/Redis images omit Config.Labels on Docker 29. Their
+        # missing-key-safe projection returns Revision:null, not a template error.
+        for resource in self.baseline['resources'].values():
+            self.docker.images[resource['image_id']]['Revision'] = None
+        self.check()
+        self.docker.images['sha256:' + '9' * 64]['Revision'] = None
+        with self.assertRaisesRegex(host.Refused, 'wrong or missing revision'):
+            self.check()
+
+    def test_optional_metadata_templates_avoid_dotted_missing_key_lookups(self):
+        for template in (host.IMAGE_FORMAT, host.CONTAINER_FORMAT):
+            self.assertIn('{{with index .Config "Labels"}}', template)
+            self.assertNotIn('.Config.Labels', template)
+        self.assertIn('{{with index .State "Health"}}', host.CONTAINER_FORMAT)
+        self.assertNotIn('.State.Health', host.CONTAINER_FORMAT)
+        self.assertIn('{{if index . "Options"}}', host.VOLUME_FORMAT)
+
+    def test_command_refusal_is_not_misreported_as_json_error(self):
+        def refused(_):
+            raise host.Refused('Read-only local Docker observation failed')
+        probe = host.Preflight(run=refused, fs=self.fs)
+        with self.assertRaisesRegex(host.Refused, '^Read-only local Docker observation failed$'):
+            probe.document(['image', 'inspect'])
+        malformed = host.Preflight(run=lambda _: '{not-json', fs=self.fs)
+        with self.assertRaisesRegex(host.Refused, '^Unexpected read-only Docker observation format$'):
+            malformed.document(['image', 'inspect'])
+
     def test_missing_or_multiple_active_api_containers_refuse_without_cleanup(self):
         original = self.docker.api_rows
         for rows in ([], original + [{'Id': '8' * 64, 'Name': host.EXPECTED_NAMES['api'] + '-other'}]):

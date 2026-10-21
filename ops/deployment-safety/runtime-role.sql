@@ -155,8 +155,11 @@ BEGIN
   END LOOP;
   EXECUTE format('REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA %I FROM %I', schema_name, role_name);
   EXECUTE format('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA %I TO %I', schema_name, role_name);
-  IF EXISTS (SELECT 1 FROM pg_class c WHERE c.relnamespace = schema_oid AND
-       c.relkind = 'S' AND has_sequence_privilege(runtime_oid, c.oid, 'UPDATE')) THEN
+  -- SQL boolean predicates may be reordered. Guard the type-specific privilege
+  -- probe with CASE so indexes/TOAST relations cannot reach sequence inspection.
+  IF EXISTS (SELECT 1 FROM pg_class c WHERE CASE
+       WHEN c.relnamespace = schema_oid AND c.relkind = 'S'
+       THEN has_sequence_privilege(runtime_oid, c.oid, 'UPDATE') ELSE false END) THEN
     RAISE EXCEPTION 'Inherited or PUBLIC sequence reset permission remains';
   END IF;
 END

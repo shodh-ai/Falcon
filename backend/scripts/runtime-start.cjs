@@ -53,12 +53,14 @@ const ROLE_QUERY = `SELECT current_database() AS database_name,
       JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace
       WHERE n.nspname='public' AND p.prosecdef) AS security_definers,
   EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
-    WHERE n.nspname='public' AND c.relkind IN ('r','p','v','m','f')
-    AND (has_table_privilege(current_user,c.oid,'TRUNCATE,REFERENCES,TRIGGER')
-      OR has_any_column_privilege(current_user,c.oid,'REFERENCES'))) AS elevated_tables,
+    WHERE CASE WHEN n.nspname='public' AND c.relkind IN ('r','p','v','m','f')
+      THEN (has_table_privilege(current_user,c.oid,'TRUNCATE,REFERENCES,TRIGGER')
+        OR has_any_column_privilege(current_user,c.oid,'REFERENCES'))
+      ELSE false END) AS elevated_tables,
   EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
-    WHERE n.nspname='public' AND c.relkind='S'
-    AND has_sequence_privilege(current_user,c.oid,'UPDATE')) AS elevated_sequences,
+    WHERE CASE WHEN n.nspname='public' AND c.relkind='S'
+      THEN has_sequence_privilege(current_user,c.oid,'UPDATE')
+      ELSE false END) AS elevated_sequences,
   has_table_privilege(current_user,'public.schema_migrations',
     'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER,MAINTAIN')
     OR has_any_column_privilege(current_user,'public.schema_migrations',
@@ -66,19 +68,22 @@ const ROLE_QUERY = `SELECT current_database() AS database_name,
   NOT has_table_privilege(current_user,'public.schema_migrations','SELECT') AS missing_ledger_read,
   NOT has_schema_privilege(current_user,'public','USAGE') AS missing_schema_usage,
   EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
-    WHERE n.nspname='public' AND c.relkind='S'
-    AND NOT (has_sequence_privilege(current_user,c.oid,'USAGE')
-      AND has_sequence_privilege(current_user,c.oid,'SELECT'))) AS missing_sequence_access,
+    WHERE CASE WHEN n.nspname='public' AND c.relkind='S'
+      THEN NOT (has_sequence_privilege(current_user,c.oid,'USAGE')
+        AND has_sequence_privilege(current_user,c.oid,'SELECT'))
+      ELSE false END) AS missing_sequence_access,
   EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
-    WHERE n.nspname='public' AND c.relkind IN ('r','p','v','m')
-    AND has_table_privilege(current_user,c.oid,'MAINTAIN')
-    AND NOT (c.relkind='m' AND c.relname=ANY(ARRAY[
-      ${MATERIALIZED_VIEWS.map(name => "'" + name + "'").join(',')} ]::text[]))) AS unexpected_maintain,
+    WHERE CASE WHEN n.nspname='public' AND c.relkind IN ('r','p','v','m')
+      THEN has_table_privilege(current_user,c.oid,'MAINTAIN')
+        AND NOT (c.relkind='m' AND c.relname=ANY(ARRAY[
+          ${MATERIALIZED_VIEWS.map(name => "'" + name + "'").join(',')} ]::text[]))
+      ELSE false END) AS unexpected_maintain,
   EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
-    WHERE n.nspname='public' AND c.relkind='m'
-    AND (NOT has_table_privilege(current_user,c.oid,'SELECT')
-      OR has_table_privilege(current_user,c.oid,'INSERT,UPDATE,DELETE')
-      OR has_any_column_privilege(current_user,c.oid,'INSERT,UPDATE'))) AS invalid_materialized_access,
+    WHERE CASE WHEN n.nspname='public' AND c.relkind='m'
+      THEN (NOT has_table_privilege(current_user,c.oid,'SELECT')
+        OR has_table_privilege(current_user,c.oid,'INSERT,UPDATE,DELETE')
+        OR has_any_column_privilege(current_user,c.oid,'INSERT,UPDATE'))
+      ELSE false END) AS invalid_materialized_access,
   EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
     WHERE n.nspname='public' AND (c.relrowsecurity OR c.relforcerowsecurity
       OR c.relkind='f')) AS unsupported_relations,
@@ -95,11 +100,13 @@ const ROLE_QUERY = `SELECT current_database() AS database_name,
   EXISTS (SELECT 1 FROM pg_parameter_acl p
     WHERE has_parameter_privilege(current_user,p.parname,'SET,ALTER SYSTEM')) AS configuration_grants,
   EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
-    WHERE n.nspname='public' AND c.relkind IN ('r','p','v') AND c.relname<>'schema_migrations'
-    AND NOT (has_table_privilege(current_user,c.oid,'SELECT')
-      AND has_table_privilege(current_user,c.oid,'INSERT')
-      AND has_table_privilege(current_user,c.oid,'UPDATE')
-      AND has_table_privilege(current_user,c.oid,'DELETE'))) AS missing_business_access
+    WHERE CASE WHEN n.nspname='public' AND c.relkind IN ('r','p','v')
+        AND c.relname<>'schema_migrations'
+      THEN NOT (has_table_privilege(current_user,c.oid,'SELECT')
+        AND has_table_privilege(current_user,c.oid,'INSERT')
+        AND has_table_privilege(current_user,c.oid,'UPDATE')
+        AND has_table_privilege(current_user,c.oid,'DELETE'))
+      ELSE false END) AS missing_business_access
   FROM pg_roles r WHERE r.rolname=current_user`;
 
 async function verifyDatabase({ env, policy, Client }) {

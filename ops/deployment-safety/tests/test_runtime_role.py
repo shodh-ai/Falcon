@@ -18,6 +18,7 @@ import uuid
 
 
 SQL = Path(__file__).resolve().parents[1] / 'runtime-role.sql'
+RUNTIME = SQL.parents[2] / 'backend' / 'scripts' / 'runtime-start.cjs'
 VIEWS = ('iqac_mv_placement_stats', 'iqac_mv_faculty_metrics',
          'iqac_mv_student_counts', 'iqac_mv_repository_health',
          'exec_daily_university_health', 'exec_mv_finance_summary',
@@ -64,6 +65,16 @@ def fixture_state_summary(result):
         return 'unavailable'
     return ('running=' + match[1].decode() + ',exit=' + match[2].decode() +
             ',oom=' + match[3].decode())
+
+
+def synthetic_sql_diagnostic(result):
+    # Called only for this generated synthetic fixture's role application. Never
+    # include connection failures, DETAIL/CONTEXT, stdout, environment or logs.
+    match = re.search(rb'ERROR:\s+([0-9A-Z]{5}):\s*([^\r\n]*)', result.stderr[:8192])
+    if not match:
+        return 'sqlstate=unavailable'
+    message = ''.join(chr(value) if 32 <= value < 127 else '?' for value in match[2][:240])
+    return 'sqlstate=' + match[1].decode() + ', message=' + message
 
 
 class RuntimeReadinessTests(unittest.TestCase):
@@ -142,6 +153,21 @@ class RuntimeReadinessTests(unittest.TestCase):
                               (0, b'false not-an-exit true')]:
             self.assertEqual(fixture_state_summary(subprocess.CompletedProcess(
                 [], status, value, b'not-printed')), 'unavailable')
+
+    def test_positive_sql_diagnostics_only_expose_bounded_state_and_first_error(self):
+        result = subprocess.CompletedProcess([], 3, b'not-printed',
+            b'ERROR:  42809: "pg_toast_16384" is not a sequence\n'
+            b'DETAIL: not-printed\nCONTEXT: not-printed\n')
+        self.assertEqual(synthetic_sql_diagnostic(result),
+            'sqlstate=42809, message="pg_toast_16384" is not a sequence')
+        self.assertEqual(synthetic_sql_diagnostic(subprocess.CompletedProcess(
+            [], 2, b'', b'FATAL: credential-containing-driver-error')), 'sqlstate=unavailable')
+        self.assertLess(len(synthetic_sql_diagnostic(subprocess.CompletedProcess(
+            [], 3, b'', b'ERROR:  42501: ' + b'x' * 1000))), 280)
+
+    def test_role_sql_guards_sequence_types_with_case_not_predicate_order(self):
+        self.assertRegex(SQL.read_text(), r'WHERE CASE\s+WHEN c\.relnamespace = schema_oid AND '
+                         r"c\.relkind = 'S'\s+THEN has_sequence_privilege\([^;]+ELSE false END")
 
 
 class RuntimeRoleIntegration(unittest.TestCase):
@@ -223,6 +249,7 @@ INSERT INTO public.business_records(value) VALUES ('synthetic baseline');
     @classmethod
     def psql(cls, sql, *, role=None, check=True, timeout=20):
         args = ['exec', '-i', '-e', 'PGCONNECT_TIMEOUT=2', cls.name, 'psql', '-X', '-v', 'ON_ERROR_STOP=1',
+                '-v', 'VERBOSITY=verbose',
                 '-U', 'postgres', '-d', 'postgres', '-At']
         if role:
             args += ['-v', 'runtime_role=' + role, '-v', 'runtime_database=postgres',
@@ -237,7 +264,12 @@ INSERT INTO public.business_records(value) VALUES ('synthetic baseline');
         return role
 
     def apply(self, role, check=True):
-        return self.psql(SQL.read_text(), role=role, check=check)
+        if not re.fullmatch(r'fixture_api_[0-9]+', role):
+            raise AssertionError('invalid generated synthetic role')
+        result = self.psql(SQL.read_text(), role=role, check=False)
+        if check and result.returncode:
+            raise AssertionError('synthetic runtime-role SQL refused: ' + synthetic_sql_diagnostic(result))
+        return result
 
     def denied(self, role, command):
         # SET ROLE is possible only because this disposable fixture is the owner.
@@ -247,9 +279,21 @@ INSERT INTO public.business_records(value) VALUES ('synthetic baseline');
 
     def test_business_crud_sequences_ledger_read_and_exact_view_refresh(self):
         role = self.new_role()
+        self.assertEqual(self.psql("SELECT reltoastrelid <> 0 FROM pg_class "
+                                  "WHERE oid='public.business_records'::regclass;").stdout.decode().strip(), 't')
         self.apply(role)
         # A second application preserves data and the same boundaries.
         self.apply(role)
+        # Evaluate the real exported startup query too: catalog rows include
+        # TOAST tables and indexes which must not reach sequence-only probes.
+        query = subprocess.run(['node', '-e',
+            'process.stdout.write(require(process.argv[1]).ROLE_QUERY)', str(RUNTIME)],
+            capture_output=True, check=True, timeout=10).stdout.decode()
+        metadata = json.loads(self.psql('SET ROLE ' + role + '; SELECT row_to_json(boundary) '
+                                       'FROM (' + query + ') boundary;').stdout.decode().splitlines()[-1])
+        self.assertEqual(metadata.pop('database_name'), 'postgres')
+        self.assertEqual(metadata.pop('role_name'), role)
+        self.assertTrue(all(value is False for value in metadata.values()))
         self.psql('SET ROLE ' + role + ''';
 INSERT INTO public.business_records(value) VALUES ('synthetic new');
 UPDATE public.business_records SET value='synthetic edited' WHERE value='synthetic new';

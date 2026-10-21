@@ -3,7 +3,7 @@ const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const path=require('node:path');
-const {databasePolicy,verifyDatabase,runRuntime,MATERIALIZED_VIEWS}=require('./runtime-start.cjs');
+const {databasePolicy,verifyDatabase,runRuntime,MATERIALIZED_VIEWS,ROLE_QUERY}=require('./runtime-start.cjs');
 const policy={host:'isolated-db',port:5432,name:'fixture',role:'fixture_runtime',enforce_least_privilege:true};
 const env={NODE_ENV:'production',DB_HOST:policy.host,DB_PORT:'5432',DB_DATABASE:policy.name,
   DB_USERNAME:policy.role,DB_PASSWORD:'synthetic-only',DB_SYNCHRONIZE:'false'};
@@ -60,6 +60,18 @@ test('restricted role probes only metadata inside a read-only transaction',async
   assert.equal(calls.at(-2)[0],'ROLLBACK');
   assert.equal(calls.at(-1)[0],'END');
   for(const [sql] of calls.slice(2,-2)) assert.match(sql,/^SELECT/);
+});
+test('relation-specific privilege probes are CASE-guarded against planner predicate reordering',()=>{
+  for(const flag of ['elevated_tables','elevated_sequences','missing_sequence_access',
+    'unexpected_maintain','invalid_materialized_access','missing_business_access']){
+    const end=ROLE_QUERY.indexOf(' AS '+flag);
+    assert.ok(end>0);
+    const start=ROLE_QUERY.lastIndexOf('EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace',end);
+    const query=ROLE_QUERY.slice(start,end);
+    assert.match(query,/WHERE CASE WHEN n\.nspname='public' AND c\.relkind/);
+    assert.match(query,/THEN[\s\S]*has_(?:table|sequence|any_column)_privilege/);
+    assert.match(query,/ELSE false END\)$/);
+  }
 });
 test('actual driver target follows the protected Unix socket policy without implicit production defaults',async()=>{
   const {Client,calls}=client({database_name:'restorecheck'});
