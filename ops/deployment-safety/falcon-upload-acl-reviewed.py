@@ -51,6 +51,10 @@ CONTROL_SOURCE = '/data/coolify/applications'
 CONTROL_DEST = '/var/www/html/storage/app/applications'
 CONTROL_UPLOADS = CONTROL_DEST + '/pmy0ybhwzco11kocu0zloqk0/uploads'
 CONTROL_UID = CONTROL_GID = 9999
+SOURCE_ANCESTOR_PINS = {
+    '/data/coolify': (2052, 1333788866, 9999, 0, 0o700),
+    '/data/coolify/applications': (2052, 1358954689, 9999, 0, 0o700),
+}
 
 CONTROL_PHP = r'''$p='/var/www/html/storage/app/applications/pmy0ybhwzco11kocu0zloqk0/uploads';
 if(!function_exists('posix_geteuid')||!function_exists('posix_getgroups')){exit(2);}
@@ -170,8 +174,8 @@ def mount_id(fd):
     return int(values[0])
 
 
-def named_source_matches(root):
-    parent = trusted_directory(os.path.dirname(SOURCE))
+def named_source_matches(root, control_container=None, control_image=None):
+    parent = source_directory(os.path.dirname(SOURCE), control_container, control_image)
     try:
         named = os.open(os.path.basename(SOURCE), os.O_RDONLY | os.O_DIRECTORY |
                         os.O_NOFOLLOW, dir_fd=parent)
@@ -226,6 +230,51 @@ def trusted_directory(path, private=False):
     except BaseException:
         os.close(fd)
         raise
+
+
+def source_directory(path, control_container=None, control_image=None):
+    """Only the exact source/app parent; protected/evidence paths use strict walker.
+
+    UID9999 owns these two observed ancestors and can rename descendants. The
+    caller explicitly acknowledges that trusted administrative authority; every
+    walk pins observed identities and checks named links, without atomicity claims.
+    """
+    require(path in (SOURCE, os.path.dirname(SOURCE)), 'source-directory-scope')
+    approved = control_container == CONTROL_ID and control_image == CONTROL_IMAGE
+    def validate(prefix, st):
+        require(stat.S_ISDIR(st.st_mode), 'source-ancestor-type')
+        if prefix in SOURCE_ANCESTOR_PINS:
+            require(approved and
+                    (st.st_dev, st.st_ino, st.st_uid, st.st_gid,
+                     stat.S_IMODE(st.st_mode)) == SOURCE_ANCESTOR_PINS[prefix],
+                    'source-ancestor-pin')
+        else:
+            require(st.st_uid == st.st_gid == 0 and not st.st_mode & 0o022,
+                    'untrusted-source-directory-ancestor')
+    fds, prefixes, components = [], ['/'], path.split('/')[1:]
+    try:
+        fds.append(os.open('/', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW))
+        validate('/', os.fstat(fds[0]))
+        prefix = ''
+        for component in components:
+            prefix += '/' + component
+            fds.append(os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                               dir_fd=fds[-1]))
+            prefixes.append(prefix)
+            validate(prefix, os.fstat(fds[-1]))
+        # Keep every ancestor FD until all named relationships are rechecked.
+        for index, fd in enumerate(fds):
+            held = os.fstat(fd)
+            validate(prefixes[index], held)
+            if index:
+                named = os.stat(components[index - 1], dir_fd=fds[index - 1],
+                                follow_symlinks=False)
+                validate(prefixes[index], named)
+                require(identity(named) == identity(held), 'source-ancestor-name-changed')
+        return fds.pop()
+    finally:
+        for fd in reversed(fds):
+            os.close(fd)
 
 
 def check_no_nested_mounts():
@@ -671,7 +720,8 @@ def adopt(args):
     script_unchanged(args.expected_script_sha256)
     release = runtime_policy(args)
     check_no_nested_mounts()
-    root = trusted_directory(SOURCE)
+    root = source_directory(SOURCE, args.approved_control_plane_container,
+                            args.approved_control_plane_image)
     journal = None
     try:
         st = os.fstat(root)
@@ -689,7 +739,8 @@ def adopt(args):
         adoption.walk(root, snapshot_only=True)
         journal.record({'kind': 'initial-snapshot-complete'})
         if args.mode == 'audit':
-            named_source_matches(root)
+            named_source_matches(root, args.approved_control_plane_container,
+                                 args.approved_control_plane_image)
             runtime_policy(args)
             script_unchanged(args.expected_script_sha256)
             report = {'ok': True, 'snapshot_entries': len(adoption.initial),
@@ -702,13 +753,15 @@ def adopt(args):
         # THIS exact script and image. Its digest is owner supplied explicitly.
         require(verify_fixture(args.fixture_report, args.fixture_sha256,
                                args.expected_image, args.expected_device), 'fixture-proof')
-        named_source_matches(root)
+        named_source_matches(root, args.approved_control_plane_container,
+                             args.approved_control_plane_image)
         runtime_policy(args)
         adoption.walk(root)
         adoption.reconcile()
         runtime_policy(args)
         check_no_nested_mounts()
-        named_source_matches(root)
+        named_source_matches(root, args.approved_control_plane_container,
+                             args.approved_control_plane_image)
         require(identity(os.fstat(root)) == identity(st), 'source-root-changed')
         script_unchanged(args.expected_script_sha256)
         report = {'ok': True, 'entries': len(adoption.observed),

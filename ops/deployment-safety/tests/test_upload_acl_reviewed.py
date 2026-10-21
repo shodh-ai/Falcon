@@ -275,6 +275,7 @@ class AdoptionTests(unittest.TestCase):
              patch.object(m, 'runtime_precondition', return_value={'reviewed': True}) as runtime, \
              patch.object(m, 'check_no_nested_mounts'), \
              patch.object(m, 'trusted_directory', return_value=10), \
+             patch.object(m, 'source_directory', return_value=10), \
              patch.object(m, 'Journal', return_value=self.journal), \
              patch.object(m, 'named_source_matches'), \
              patch.object(m, 'verify_fixture', return_value=fixture_ok) as verified:
@@ -367,7 +368,7 @@ class SafetyTests(unittest.TestCase):
 
     def test_named_source_replacement_refused(self):
         first, second = node(1, 0o2770, True), node(2, 0o2770, True)
-        with patch.object(m, 'trusted_directory', return_value=20), \
+        with patch.object(m, 'source_directory', return_value=20), \
              patch.object(m.os, 'open', return_value=30), \
              patch.object(m.os, 'close'), \
              patch.object(m.os, 'fstat', side_effect=lambda fd:
@@ -662,6 +663,117 @@ class ControlPlaneTests(unittest.TestCase):
                 run(status.replace(old, new))
         with self.assertRaisesRegex(m.Refused, 'control-plane-process-reused'):
             run(status, stat_change=True)
+
+
+class SourceDirectoryTests(unittest.TestCase):
+    def setUp(self):
+        paths = ['/', '/data', '/data/coolify', '/data/coolify/applications',
+                 os.path.dirname(m.SOURCE), m.SOURCE]
+        inodes = [128, 1325400258, 1333788866, 1358954689, 1719686016, 2533360844]
+        modes = [0o555, 0o755, 0o700, 0o700, 0o755, 0o750]
+        self.fds = {path: 100 + i for i, path in enumerate(paths)}
+        self.nodes = {}
+        self.children = {}
+        for i, path in enumerate(paths):
+            value = node(inodes[i], modes[i], True, uid=9999 if i in (2, 3) else 0)
+            value['st_dev'] = 2052
+            self.nodes[100 + i] = value
+            if i:
+                self.children[(99 + i, os.path.basename(path))] = 100 + i
+
+    def opened(self, path, flags, dir_fd=None):
+        self.assertTrue(flags & m.os.O_NOFOLLOW)
+        self.assertTrue(flags & m.os.O_DIRECTORY)
+        if path == '/':
+            return 100
+        return self.children[(dir_fd, path)]
+
+    def st(self, fd):
+        return types.SimpleNamespace(**self.nodes[fd])
+
+    def walk(self, path=None, pins=True, named=None):
+        with patch.object(m.os, 'open', side_effect=self.opened), \
+             patch.object(m.os, 'fstat', side_effect=self.st), \
+             patch.object(m.os, 'stat', side_effect=named or (
+                 lambda name, dir_fd, follow_symlinks:
+                 self.st(self.children[(dir_fd, name)]))), \
+             patch.object(m.os, 'close') as closed:
+            result = m.source_directory(path or m.SOURCE,
+                                        m.CONTROL_ID if pins else None,
+                                        m.CONTROL_IMAGE if pins else None)
+            return result, [call.args[0] for call in closed.call_args_list]
+
+    def test_exact_source_chain_and_parent_allowed_only_with_pins(self):
+        fd, closed = self.walk()
+        self.assertEqual(fd, 105)
+        self.assertEqual(set(closed), {100, 101, 102, 103, 104})
+        fd, closed = self.walk(os.path.dirname(m.SOURCE))
+        self.assertEqual(fd, 104)
+        self.assertEqual(set(closed), {100, 101, 102, 103})
+        with self.assertRaisesRegex(m.Refused, 'source-ancestor-pin'):
+            self.walk(pins=False)
+
+    def test_source_walker_cannot_be_used_for_other_paths(self):
+        for path in ('/data/coolify', '/data/falcon-backups', m.SOURCE + '/nested',
+                     m.SOURCE + '/', '/etc'):
+            with patch.object(m.os, 'open') as opened:
+                with self.assertRaisesRegex(m.Refused, 'source-directory-scope'):
+                    m.source_directory(path, m.CONTROL_ID, m.CONTROL_IMAGE)
+                opened.assert_not_called()
+
+    def test_each_owned_ancestor_exact_state_is_pinned(self):
+        for fd in (102, 103):
+            for key, changed in (('st_uid', 0), ('st_gid', 9999),
+                                 ('st_dev', 2053), ('st_ino', 999),
+                                 ('st_mode', stat.S_IFDIR | 0o750)):
+                original = self.nodes[fd][key]
+                self.nodes[fd][key] = changed
+                with self.assertRaisesRegex(m.Refused, 'source-ancestor-pin'):
+                    self.walk()
+                self.nodes[fd][key] = original
+
+    def test_replaced_named_parent_after_open_refused(self):
+        def replaced(name, dir_fd, follow_symlinks):
+            value = copy.deepcopy(self.nodes[self.children[(dir_fd, name)]])
+            if dir_fd == 103:
+                value['st_ino'] += 1
+            return types.SimpleNamespace(**value)
+        with self.assertRaisesRegex(m.Refused, 'source-ancestor-name-changed'):
+            self.walk(named=replaced)
+
+    def test_other_root_owned_ancestor_group_must_remain0(self):
+        self.nodes[104]['st_gid'] = 9999
+        with self.assertRaisesRegex(m.Refused, 'untrusted-source-directory-ancestor'):
+            self.walk()
+
+    def test_pin_changed_on_named_recheck_refused(self):
+        def replaced(name, dir_fd, follow_symlinks):
+            value = copy.deepcopy(self.nodes[self.children[(dir_fd, name)]])
+            if dir_fd == 101:
+                value['st_mode'] = stat.S_IFDIR | 0o750
+            return types.SimpleNamespace(**value)
+        with self.assertRaisesRegex(m.Refused, 'source-ancestor-pin'):
+            self.walk(named=replaced)
+
+    def test_symlink_open_failure_closes_held_ancestors_no_fallback(self):
+        def no_symlink(path, flags, dir_fd=None):
+            if path == 'coolify':
+                raise OSError(40, 'synthetic symlink refusal')
+            return self.opened(path, flags, dir_fd)
+        with patch.object(m.os, 'open', side_effect=no_symlink) as opened, \
+             patch.object(m.os, 'fstat', side_effect=self.st), \
+             patch.object(m.os, 'close') as closed:
+            with self.assertRaises(OSError):
+                m.source_directory(m.SOURCE, m.CONTROL_ID, m.CONTROL_IMAGE)
+            self.assertEqual(opened.call_count, 3)
+            self.assertEqual({c.args[0] for c in closed.call_args_list}, {100, 101})
+
+    def test_strict_evidence_walker_still_refuses9999_owner(self):
+        with patch.object(m.os, 'open', side_effect=self.opened), \
+             patch.object(m.os, 'fstat', side_effect=self.st), \
+             patch.object(m.os, 'close'):
+            with self.assertRaisesRegex(m.Refused, 'untrusted-directory-ancestor'):
+                m.trusted_directory(m.SOURCE)
 
 
 if __name__ == '__main__':

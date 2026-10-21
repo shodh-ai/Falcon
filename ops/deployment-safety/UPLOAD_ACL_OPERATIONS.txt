@@ -171,3 +171,21 @@ Explicit existing Coolify control-plane exception
   Replacing/upgrading it requires a newly reviewed pin, not an automatic bypass.
   Any helper-code change invalidates prior exact-helper fixture evidence: rerun
   fixture and use its new result SHA before adopting with the updated helper.
+
+Exact source-only ancestor pins
+  On this host /data/coolify and /data/coolify/applications are owned9999:0,
+  mode0700. The source-only walker accepts these two exact observed directories
+  ONLY with both explicit control-plane pins above:
+    /data/coolify: device2052, inode1333788866, owner9999:0, mode0700
+    /data/coolify/applications: device2052, inode1358954689, owner9999:0, mode0700
+  It can open only the fixed uploads source or its exact application parent,
+  never an evidence/config/backup path. All other host directory components keep
+  root-owner/non-writable requirements. Every component uses NOFOLLOW; held FDs,
+  named relationships and exact pin states are rechecked during each walk.
+  Initial source open and every named-source check use this walker, so the same
+  pins are checked before/after metadata adoption. The strict trusted_directory
+  used for protected/evidence paths is unchanged; there is no generic UID allowlist.
+  UID9999 can rename entries in its owned ancestors despite being unable to
+  traverse/write uploads itself. Observed replacements/state changes fail closed;
+  this is not atomic against that acknowledged administrative authority. No
+  ancestor ownership, mode, ACL or data is changed to make the check pass.
