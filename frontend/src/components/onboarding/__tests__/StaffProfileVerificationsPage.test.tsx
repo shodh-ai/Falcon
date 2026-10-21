@@ -6,7 +6,7 @@ const mocks = vi.hoisted(() => ({ get: vi.fn(), getBlob: vi.fn(), post: vi.fn(),
 vi.mock("@/lib/api", () => ({ useAuthedApi: () => mocks }));
 vi.mock("@/context/AuthContext", () => ({ useAuth: () => ({ user: mocks.user }) }));
 const pending = { review_id: "review-1", user_id: "staff-1", name: "Faculty One", official_email: "faculty@example.edu", role_name: "Faculty", dept_id: 43, dept_name: "Pharmacy", status: "PENDING_HR", onboarding_status: "COMPLETED", source: "PHARMACY_RECHECK", revision: 1 };
-let row = { ...pending, document_review_status: "NOT_REVIEWED" };
+let row = { ...pending, document_review_status: "NOT_REVIEWED", recovery_required: false };
 async function open() {
   render(<StaffProfileVerificationsPage />);
   fireEvent.click(await screen.findByRole("button", { name: "Review", exact: true }));
@@ -14,7 +14,7 @@ async function open() {
 }
 describe("Individual HR profile approval with deferred documents", () => {
   beforeEach(() => {
-    vi.clearAllMocks(); mocks.user.role = "HRAdmin"; row = { ...pending, document_review_status: "NOT_REVIEWED" };
+    vi.clearAllMocks(); mocks.user.role = "HRAdmin"; row = { ...pending, document_review_status: "NOT_REVIEWED", recovery_required: false };
     mocks.get.mockImplementation((url: string) => Promise.resolve(url.endsWith("/review-1") ? { review: { ...row, return_reason: null }, profile: { qualification: { degree_name: "MPharm" } }, documents: [], events: [] } : [row]));
     mocks.post.mockResolvedValue({ document_review_status: "PENDING", email_status: "QUEUED" });
   });
@@ -38,6 +38,17 @@ describe("Individual HR profile approval with deferred documents", () => {
     await waitFor(() => expect(mocks.post).toHaveBeenCalledWith("/api/hr/staff-profile-reviews/review-1/approve", expect.objectContaining({ defer_documents: true, reviewed_fields: expect.arrayContaining(["staff_mobile", "degree_name"]), deferral_reason: expect.any(String) })));
     expect(mocks.post.mock.calls[0][1].reviewed_fields).toHaveLength(23);
     expect(await screen.findByRole("status")).toHaveTextContent(/Document verification remains pending/i);
+  });
+  it("requires both details and documents for recovery and sends the current revision", async () => {
+    row.recovery_required = true;
+    const d = await open();
+    const approve = d.getByRole("button", { name: "Approve profile and documents" });
+    fireEvent.click(d.getByRole("button", { name: "Select all details" }));
+    expect(approve).toBeDisabled();
+    fireEvent.click(d.getByRole("button", { name: "Select all inspected documents" }));
+    expect(approve).toBeEnabled(); fireEvent.click(approve);
+    await waitFor(() => expect(mocks.post).toHaveBeenCalledWith("/api/hr/staff-profile-reviews/review-1/approve", expect.objectContaining({ defer_documents: false, revision: 1, reviewed_documents: ["PHOTO", "AADHAAR", "PAN", "HIGHEST_DEGREE"] })));
+    expect(await screen.findByRole("status")).toHaveTextContent('profile and documents are approved');
   });
   it("separates correction selection from approval and supports bulk selection/clearing", async () => {
     const d = await open();
@@ -63,7 +74,7 @@ describe("Individual HR profile approval with deferred documents", () => {
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
   it("keeps deferred documents in a separate queue and rejects unavailable originals", async () => {
-    row = { ...pending, status: "APPROVED", document_review_status: "PENDING" };
+    row = { ...pending, status: "APPROVED", document_review_status: "PENDING", recovery_required: false };
     mocks.post.mockRejectedValue(new Error("Cannot verify PHOTO: original document is missing or unreadable"));
     render(<StaffProfileVerificationsPage />);
     fireEvent.click(await screen.findByRole("button", { name: /Documents pending/ }));

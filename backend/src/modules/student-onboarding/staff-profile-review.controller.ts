@@ -13,6 +13,7 @@ import { BelongsToModule } from '../../module-control/module-control.decorators'
 import { ObjectStorageService } from '../../storage/object-storage.service';
 import { StaffProfileReviewService } from './staff-profile-review.service';
 import { StudentOnboardingService } from './student-onboarding.service';
+import { requirePersistentUploadRoot } from './persistent-upload-root.util';
 
 type ReviewActor = {
   user_id: string;
@@ -71,12 +72,12 @@ export class StaffProfileReviewSelfController {
       filePath = stored.url ?? stored.key;
     } else {
       const now = new Date();
-      const root = process.env.UPLOAD_PATH || './uploads';
+      const root = await requirePersistentUploadRoot();
       const directory = `${root}/${req.user.tenant_id}/${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, '0')}`;
       if (!existsSync(directory)) mkdirSync(directory, { recursive: true });
       filePath = `${directory}/${fileName}`;
       await new Promise<void>((resolve, reject) => {
-        const stream = createWriteStream(filePath);
+        const stream = createWriteStream(filePath, { flags: 'wx', mode: 0o640 });
         stream.on('finish', resolve);
         stream.on('error', reject);
         stream.end(file.buffer);
@@ -170,7 +171,7 @@ export class StaffProfileReviewAdminController {
   @Post(':reviewId/approve')
   @Roles('HRAdmin')
   async approve(@Req() req: { user: ReviewActor }, @Param('reviewId') reviewId: string,
-    @Body() body?: { defer_documents?: boolean; reviewed_fields?: string[]; deferral_reason?: string },
+    @Body() body?: { defer_documents?: boolean; reviewed_fields?: string[]; deferral_reason?: string; reviewed_documents?: string[]; revision?: number },
   ) {
     if (body?.defer_documents !== undefined && typeof body.defer_documents !== 'boolean') {
       throw new BadRequestException('defer_documents must be a boolean');
@@ -180,6 +181,7 @@ export class StaffProfileReviewAdminController {
       req.user.tenant_id, detail.review.user_id,
       { userId: req.user.user_id, role: req.user.role }, req.user, 'staff', reviewId,
       body?.defer_documents ? { reviewedFields: body.reviewed_fields ?? [], reason: body.deferral_reason ?? '' } : undefined,
+      detail.review.recovery_required ? { reviewedFields: body?.reviewed_fields ?? [], reviewedDocuments: body?.reviewed_documents ?? [], revision: body?.revision ?? -1 } : undefined,
     );
   }
 
