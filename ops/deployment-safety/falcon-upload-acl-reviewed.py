@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Reviewed, fixed-scope Linux uploads ACL adoption. No content/owner changes.
 
-The root-preparation release must already be the ONLY RW consumer: umask0027,
+The root-preparation release must be the only application RW consumer: umask0027,
 explicit persistent stream mode0660, default-mode other persistent writers, and
 no persistent rename/chmod/copy-in. This is an operational/source-review gate,
 not a claim that arbitrary concurrent filesystem writers can be made atomic.
+The separately pinned existing administrative ancestor bind requires its explicit
+identity, process and read-only denial proof; Docker admin authority is acknowledged.
 
 Evidence and synthetic fixtures are retained. There is NO automatic rollback,
 deletion, chown, recursive pathname chmod, generic setfacl --restore, or retry of
@@ -43,6 +45,24 @@ IMAGE_RE = re.compile(r'^sha256:[0-9a-f]{64}$')
 REV_RE = re.compile(r'^[0-9a-f]{40}$')
 DOCKER = ['/usr/bin/docker', '--host', 'unix:///var/run/docker.sock']
 SAFE_ENV = {'PATH': '/usr/bin:/bin', 'LC_ALL': 'C'}
+CONTROL_ID = '780b6fe7ae612e6b42c432d2ddb3bbd4f97a1099ad93dd0a066b1a4c55d2cee1'
+CONTROL_IMAGE = 'sha256:7c54f42d64c0d20fed4a8f4561df9018a561fecba9931ed3f64a4f3e0d34a3be'
+CONTROL_SOURCE = '/data/coolify/applications'
+CONTROL_DEST = '/var/www/html/storage/app/applications'
+CONTROL_UPLOADS = CONTROL_DEST + '/pmy0ybhwzco11kocu0zloqk0/uploads'
+CONTROL_UID = CONTROL_GID = 9999
+
+CONTROL_PHP = r'''$p='/var/www/html/storage/app/applications/pmy0ybhwzco11kocu0zloqk0/uploads';
+if(!function_exists('posix_geteuid')||!function_exists('posix_getgroups')){exit(2);}
+clearstatcache(true,$p);$s=@lstat($p);if($s===false){exit(2);}
+$text=@file_get_contents('/proc/self/status');$caps=[];
+foreach(['CapInh','CapPrm','CapEff','CapAmb','CapBnd','NoNewPrivs'] as $k){
+ if(!preg_match('/^'.$k.':\s*([0-9a-f]+)\s*$/m',$text,$m)){exit(2);}$caps[$k]=$m[1];}
+echo json_encode(['uid'=>posix_getuid(),'euid'=>posix_geteuid(),
+ 'gid'=>posix_getgid(),'egid'=>posix_getegid(),'groups'=>array_values(posix_getgroups()),
+ 'device'=>$s['dev'],'inode'=>$s['ino'],'owner'=>$s['uid'],'group'=>$s['gid'],
+ 'mode'=>$s['mode'],'searchable'=>is_executable($p),'writable'=>is_writable($p),
+ 'caps'=>$caps],JSON_THROW_ON_ERROR);'''
 
 
 class Refused(Exception):
@@ -238,8 +258,114 @@ def source_overlaps(path):
     return common in (normalized, SOURCE)
 
 
-def runtime_precondition(image, revision):
+def control_processes(container_id, leader):
+    result = subprocess.run(DOCKER + ['top', container_id, '-eo', 'pid'],
+                            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                            timeout=10, env=SAFE_ENV)
+    require(result.returncode == 0 and len(result.stdout) <= 65536, 'control-plane-process-list')
+    lines = result.stdout.decode('ascii').splitlines()
+    require(lines and lines[0].strip() == 'PID', 'control-plane-process-header')
+    pids = [line.strip() for line in lines[1:] if line.strip()]
+    require(0 < len(pids) <= 200 and len(pids) == len(set(pids)) and
+            all(p.isdigit() and int(p) > 1 for p in pids) and str(leader) in pids,
+            'control-plane-process-pids')
+    snapshots = {}
+    def starttime(pid):
+        with open('/proc/{}/stat'.format(pid), 'r', encoding='ascii') as stream:
+            raw = stream.read(8192)
+        require(raw.startswith(pid + ' (') and ') ' in raw, 'control-plane-process-stat')
+        fields = raw[raw.rfind(') ') + 2:].split()
+        require(len(fields) >= 20 and fields[19].isdigit(), 'control-plane-process-starttime')
+        return fields[19]
+    for pid in pids:
+        started = starttime(pid)
+        with open('/proc/{}/status'.format(pid), 'r', encoding='ascii') as stream:
+            raw = stream.read(16384)
+        fields = dict(line.split(':', 1) for line in raw.splitlines() if ':' in line)
+        require(fields.get('Uid', '').split() == [str(CONTROL_UID)] * 4 and
+                fields.get('Gid', '').split() == [str(CONTROL_GID)] * 4 and
+                fields.get('Groups', '').split() and
+                all(g == str(CONTROL_GID) for g in fields['Groups'].split()),
+                'control-plane-process-identity')
+        for cap in ('CapInh', 'CapPrm', 'CapEff', 'CapAmb'):
+            value = fields.get(cap, '').strip()
+            require(re.fullmatch('[0-9a-f]{1,16}', value) and int(value, 16) == 0,
+                    'control-plane-process-active-caps')
+        bounding = fields.get('CapBnd', '').strip()
+        nnp = fields.get('NoNewPrivs', '').strip()
+        require(re.fullmatch('[0-9a-f]{1,16}', bounding) and nnp in ('0', '1'),
+                'control-plane-process-metadata')
+        require(starttime(pid) == started, 'control-plane-process-reused')
+        snapshots[pid] = {'starttime': started, 'bounding': bounding, 'nnp': nnp}
+    return snapshots
+
+
+def verify_control_plane(container, overlapping, device, inode):
+    require(container.get('Id') == CONTROL_ID and container.get('Image') == CONTROL_IMAGE and
+            container.get('State', {}).get('Running') is True and
+            container.get('Config', {}).get('User') == 'www-data' and len(overlapping) == 1 and
+            overlapping[0].get('Source') == CONTROL_SOURCE and
+            overlapping[0].get('Destination') == CONTROL_DEST and overlapping[0].get('RW') is True,
+            'control-plane-exception-identity')
+    require(isinstance(device, int) and isinstance(inode, int) and device >= 0 and inode > 0,
+            'control-plane-source-identity-required')
+    # Other mounts may not shadow this application's mapped uploads root. A
+    # broader parent mount above CONTROL_DEST does not override its child bind.
+    for mount in container.get('Mounts', []):
+        if mount is overlapping[0]:
+            continue
+        dest = mount.get('Destination', '')
+        require(isinstance(dest, str) and dest.startswith('/'), 'control-plane-mount-destination')
+        normalized = os.path.normpath('/' + dest.lstrip('/'))
+        if normalized == CONTROL_DEST or normalized.startswith(CONTROL_DEST + '/'):
+            common = os.path.commonpath((normalized, CONTROL_UPLOADS))
+            require(common not in (normalized, CONTROL_UPLOADS), 'control-plane-shadowed-uploads')
+    leader = container['State'].get('Pid')
+    require(isinstance(leader, int) and leader > 1, 'control-plane-leader')
+    before = control_processes(CONTROL_ID, leader)
+    proof = run_json(DOCKER + ['exec', CONTROL_ID, 'php', '-r', CONTROL_PHP], limit=4096)
+    require(proof.get('uid') == proof.get('euid') == CONTROL_UID and
+            proof.get('gid') == proof.get('egid') == CONTROL_GID and
+            isinstance(proof.get('groups'), list) and proof['groups'] and
+            all(g == CONTROL_GID for g in proof['groups']) and
+            proof.get('device') == device and proof.get('inode') == inode and
+            proof.get('owner') == proof.get('group') == 0 and
+            isinstance(proof.get('mode'), int) and stat.S_ISDIR(proof['mode']) and
+            proof.get('searchable') is False and proof.get('writable') is False,
+            'control-plane-uploads-denial')
+    caps = proof.get('caps', {})
+    for cap in ('CapInh', 'CapPrm', 'CapEff', 'CapAmb'):
+        value = caps.get(cap, '')
+        require(isinstance(value, str) and re.fullmatch('[0-9a-f]{1,16}', value) and
+                int(value, 16) == 0, 'control-plane-probe-active-caps')
+    require(re.fullmatch('[0-9a-f]{1,16}', caps.get('CapBnd', '')) and
+            caps.get('NoNewPrivs') in ('0', '1'), 'control-plane-probe-metadata')
+    after = control_processes(CONTROL_ID, leader)
+    for pid in before.keys() & after.keys():
+        require(before[pid]['starttime'] == after[pid]['starttime'], 'control-plane-process-reused')
+    current = run_json(DOCKER + ['inspect', CONTROL_ID])
+    require(len(current) == 1 and current[0].get('Id') == CONTROL_ID and
+            current[0].get('Image') == CONTROL_IMAGE and
+            current[0].get('State', {}).get('Running') is True and
+            current[0]['State'].get('Pid') == leader and
+            current[0].get('Mounts') == container.get('Mounts'),
+            'control-plane-changed-during-proof')
+    return {'container_id': CONTROL_ID, 'image': CONTROL_IMAGE, 'uid': CONTROL_UID,
+            'gid': CONTROL_GID, 'before_process_count': len(before),
+            'after_process_count': len(after), 'uploads_same_inode': True,
+            'uploads_search_write_denied': True, 'active_capability_sets_zero': True,
+            'bounding_sets_observed': sorted({x['bounding'] for x in after.values()}),
+            'no_new_privs_observed': sorted({x['nnp'] for x in after.values()}),
+            'existing_docker_admin_authority_acknowledged': True}
+
+
+def runtime_precondition(image, revision, control_container=None, control_image=None,
+                         expected_device=None, expected_inode=None):
     require(IMAGE_RE.fullmatch(image) and REV_RE.fullmatch(revision), 'release-identity')
+    approved_control = control_container is not None or control_image is not None
+    if approved_control:
+        require(control_container == CONTROL_ID and control_image == CONTROL_IMAGE,
+                'control-plane-approval-pins')
     try:
         pwd.getpwuid(API_UID)
     except KeyError:
@@ -266,11 +392,16 @@ def runtime_precondition(image, revision):
             all(re.fullmatch('[0-9a-f]{64}', cid) for cid in ids), 'container-list')
     containers = run_json(DOCKER + ['inspect'] + ids)
     matched = 0
+    control_proof = None
     for container in containers:
         relevant = [m for m in container.get('Mounts', [])
                     if m.get('Type') == 'bind' and m.get('RW') is True and
                     source_overlaps(m.get('Source'))]
         if not relevant:
+            continue
+        if approved_control and container.get('Id') == CONTROL_ID:
+            require(control_proof is None, 'control-plane-duplicate')
+            control_proof = verify_control_plane(container, relevant, expected_device, expected_inode)
             continue
         require(len(relevant) == 1 and relevant[0]['Source'] == SOURCE and
                 relevant[0]['Destination'] == '/app/uploads' and
@@ -298,8 +429,16 @@ def runtime_precondition(image, revision):
                 status.get('Uid', '').split() == ['0'] * 4, 'root-prep-umask')
         matched += 1
     require(matched > 0, 'root-prep-missing')
+    require(not approved_control or control_proof is not None, 'approved-control-plane-missing')
     return {'root_prep_consumers': matched, 'image': image, 'revision': revision,
-            'process_umask': '0027'}
+            'process_umask': '0027', 'approved_control_plane': control_proof}
+
+
+def runtime_policy(args):
+    return runtime_precondition(args.expected_image, args.expected_revision,
+                                args.approved_control_plane_container,
+                                args.approved_control_plane_image,
+                                args.expected_device, args.expected_inode)
 
 
 class Journal:
@@ -530,7 +669,7 @@ def adopt(args):
     require(sys.platform.startswith('linux') and os.geteuid() == 0, 'linux-root-required')
     require(args.source_review_confirmed, 'source-review-required')
     script_unchanged(args.expected_script_sha256)
-    release = runtime_precondition(args.expected_image, args.expected_revision)
+    release = runtime_policy(args)
     check_no_nested_mounts()
     root = trusted_directory(SOURCE)
     journal = None
@@ -551,7 +690,7 @@ def adopt(args):
         journal.record({'kind': 'initial-snapshot-complete'})
         if args.mode == 'audit':
             named_source_matches(root)
-            runtime_precondition(args.expected_image, args.expected_revision)
+            runtime_policy(args)
             script_unchanged(args.expected_script_sha256)
             report = {'ok': True, 'snapshot_entries': len(adoption.initial),
                       'adoption_applied': False, 'source_metadata_changed': False,
@@ -564,10 +703,10 @@ def adopt(args):
         require(verify_fixture(args.fixture_report, args.fixture_sha256,
                                args.expected_image, args.expected_device), 'fixture-proof')
         named_source_matches(root)
-        runtime_precondition(args.expected_image, args.expected_revision)
+        runtime_policy(args)
         adoption.walk(root)
         adoption.reconcile()
-        runtime_precondition(args.expected_image, args.expected_revision)
+        runtime_policy(args)
         check_no_nested_mounts()
         named_source_matches(root)
         require(identity(os.fstat(root)) == identity(st), 'source-root-changed')
@@ -890,6 +1029,8 @@ def main():
         p.add_argument('--expected-script-sha256', required=True)
         p.add_argument('--expected-inode', type=int, required=True)
         p.add_argument('--source-review-confirmed', action='store_true')
+        p.add_argument('--approved-control-plane-container')
+        p.add_argument('--approved-control-plane-image')
         if mode == 'adopt':
             p.add_argument('--fixture-report', required=True)
             p.add_argument('--fixture-sha256', required=True)

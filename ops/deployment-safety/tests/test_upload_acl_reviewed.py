@@ -2,6 +2,7 @@
 import ast
 import copy
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -265,17 +266,20 @@ class AdoptionTests(unittest.TestCase):
                                      expected_revision='b' * 40,
                                      expected_script_sha256=m.script_digest(),
                                      expected_device=123, expected_inode=42,
+                                     approved_control_plane_container=None,
+                                     approved_control_plane_image=None,
                                      evidence_dir='/ignored', fixture_report='/ignored',
                                      fixture_sha256='c' * 64)
         with patch.object(m.sys, 'platform', 'linux'), \
              patch.object(m.os, 'geteuid', return_value=0), \
-             patch.object(m, 'runtime_precondition', return_value={'reviewed': True}), \
+             patch.object(m, 'runtime_precondition', return_value={'reviewed': True}) as runtime, \
              patch.object(m, 'check_no_nested_mounts'), \
              patch.object(m, 'trusted_directory', return_value=10), \
              patch.object(m, 'Journal', return_value=self.journal), \
              patch.object(m, 'named_source_matches'), \
              patch.object(m, 'verify_fixture', return_value=fixture_ok) as verified:
             result = m.adopt(args)
+            self.last_runtime_calls = runtime.call_args_list
             return result, verified.call_count
 
     def test_fixture_proof_is_required_before_any_source_metadata_change(self):
@@ -301,6 +305,8 @@ class AdoptionTests(unittest.TestCase):
         self.assertFalse(result['source_contents_written'])
         self.assertFalse(result['source_ownership_changed'])
         self.assertFalse(result['atomic_against_arbitrary_writers'])
+        self.assertEqual(len(self.last_runtime_calls), 3)
+        self.assertTrue(all(call.args[-2:] == (123, 42) for call in self.last_runtime_calls))
 
 
 class SafetyTests(unittest.TestCase):
@@ -514,6 +520,148 @@ class RuntimeTests(unittest.TestCase):
         backup = {'Image': 'sha256:' + 'd' * 64, 'Mounts': [
             {'Type': 'bind', 'Source': m.SOURCE, 'Destination': '/source', 'RW': False}]}
         self.assertEqual(self.check([self.container, backup])['root_prep_consumers'], 1)
+
+    def test_control_plane_approval_cannot_select_other_container_or_image(self):
+        for cid, image in ((m.CONTROL_ID, 'sha256:' + 'd' * 64),
+                           ('d' * 64, m.CONTROL_IMAGE), (m.CONTROL_ID, None)):
+            with patch.object(m, 'run_json') as runner:
+                with self.assertRaisesRegex(m.Refused, 'control-plane-approval-pins'):
+                    m.runtime_precondition(self.image, self.revision, cid, image, 123, 42)
+                runner.assert_not_called()
+
+    def test_only_explicit_approved_control_plane_dispatches_to_denial_gate(self):
+        control = {'Id': m.CONTROL_ID, 'Image': m.CONTROL_IMAGE, 'Mounts': [
+            {'Type': 'bind', 'Source': m.CONTROL_SOURCE,
+             'Destination': m.CONTROL_DEST, 'RW': True}]}
+        with patch.object(m.pwd, 'getpwuid', side_effect=KeyError), \
+             patch.object(m.grp, 'getgrgid', side_effect=KeyError), \
+             patch.object(m, 'run_json', side_effect=[self.image_data, [self.container, control]]), \
+             patch.object(m.subprocess, 'run', return_value=types.SimpleNamespace(
+                 returncode=0, stdout=('c' * 64 + '\n').encode())), \
+             patch('builtins.open', mock_open(read_data='Umask:\t0027\nUid:\t0 0 0 0\n')), \
+             patch.object(m, 'verify_control_plane', return_value={'denied': True}) as gate:
+            result = m.runtime_precondition(self.image, self.revision,
+                                           m.CONTROL_ID, m.CONTROL_IMAGE, 123, 42)
+        gate.assert_called_once_with(control, control['Mounts'], 123, 42)
+        self.assertEqual(result['approved_control_plane'], {'denied': True})
+
+
+class ControlPlaneTests(unittest.TestCase):
+    def setUp(self):
+        self.mount = {'Type': 'bind', 'Source': m.CONTROL_SOURCE,
+                      'Destination': m.CONTROL_DEST, 'RW': True}
+        self.container = {'Id': m.CONTROL_ID, 'Image': m.CONTROL_IMAGE,
+                          'State': {'Running': True, 'Pid': 123},
+                          'Config': {'User': 'www-data'}, 'Mounts': [self.mount]}
+        self.proof = {'uid': 9999, 'euid': 9999, 'gid': 9999, 'egid': 9999,
+                      'groups': [9999], 'device': 123, 'inode': 42,
+                      'owner': 0, 'group': 0, 'mode': stat.S_IFDIR | 0o2770,
+                      'searchable': False, 'writable': False,
+                      'caps': {'CapInh': '0', 'CapPrm': '0', 'CapEff': '0',
+                               'CapAmb': '0', 'CapBnd': 'a80425fb', 'NoNewPrivs': '0'}}
+        self.snapshot = {'123': {'starttime': '1000', 'bounding': 'a80425fb', 'nnp': '0'}}
+
+    def verify(self, before=None, after=None):
+        with patch.object(m, 'control_processes', side_effect=[before or self.snapshot,
+                                                              after or self.snapshot]), \
+             patch.object(m, 'run_json', side_effect=[self.proof, [self.container]]) as runner:
+            result = m.verify_control_plane(self.container, [self.mount], 123, 42)
+            command = runner.call_args_list[0].args[0]
+            self.assertEqual(command, m.DOCKER + ['exec', m.CONTROL_ID,
+                                                 'php', '-r', m.CONTROL_PHP])
+            self.assertNotIn('--user', command)
+            return result
+
+    def test_exact_existing_control_plane_denial_accepted(self):
+        report = self.verify()
+        self.assertTrue(report['uploads_same_inode'])
+        self.assertTrue(report['uploads_search_write_denied'])
+        self.assertTrue(report['existing_docker_admin_authority_acknowledged'])
+        self.assertEqual(report['bounding_sets_observed'], ['a80425fb'])
+        self.assertEqual(report['no_new_privs_observed'], ['0'])
+
+    def test_missing_or_shadowed_target_cannot_false_pass_denials(self):
+        for key, value in (('inode', None), ('inode', 43), ('device', 124),
+                           ('mode', stat.S_IFREG | 0o660)):
+            original = self.proof[key]
+            self.proof[key] = value
+            with self.assertRaisesRegex(m.Refused, 'control-plane-uploads-denial'):
+                self.verify()
+            self.proof[key] = original
+
+    def test_actual_php_write_or_search_authority_refused(self):
+        for key in ('searchable', 'writable'):
+            self.proof[key] = True
+            with self.assertRaisesRegex(m.Refused, 'control-plane-uploads-denial'):
+                self.verify()
+            self.proof[key] = False
+
+    def test_php_group0_or_api_identity_refused(self):
+        for groups in ([0], [9999, 0], [9999, 61001], []):
+            self.proof['groups'] = groups
+            with self.assertRaisesRegex(m.Refused, 'control-plane-uploads-denial'):
+                self.verify()
+
+    def test_php_permitted_capability_refused(self):
+        self.proof['caps']['CapPrm'] = '1'
+        with self.assertRaisesRegex(m.Refused, 'control-plane-probe-active-caps'):
+            self.verify()
+
+    def test_control_mounts_cannot_shadow_uploads(self):
+        for dest in (m.CONTROL_DEST, m.CONTROL_UPLOADS,
+                     m.CONTROL_UPLOADS + '/child',
+                     m.CONTROL_DEST + '/pmy0ybhwzco11kocu0zloqk0'):
+            self.container['Mounts'] = [self.mount, {'Type': 'bind', 'Source': '/other',
+                                                   'Destination': dest, 'RW': False}]
+            with self.assertRaisesRegex(m.Refused, 'control-plane-shadowed-uploads'):
+                self.verify()
+
+    def test_other_ancestor_or_generic_container_is_not_exempt(self):
+        for key, value in (('Source', '/data/coolify'),
+                           ('Destination', '/different'), ('RW', False)):
+            original = self.mount[key]
+            self.mount[key] = value
+            with self.assertRaisesRegex(m.Refused, 'control-plane-exception-identity'):
+                self.verify()
+            self.mount[key] = original
+
+    def test_reused_process_id_refused(self):
+        after = copy.deepcopy(self.snapshot)
+        after['123']['starttime'] = '1001'
+        with self.assertRaisesRegex(m.Refused, 'control-plane-process-reused'):
+            self.verify(after=after)
+
+    def test_new_validated_worker_is_allowed(self):
+        after = copy.deepcopy(self.snapshot)
+        after['124'] = {'starttime': '2000', 'bounding': 'a80425fb', 'nnp': '0'}
+        self.assertEqual(self.verify(after=after)['after_process_count'], 2)
+
+    def test_process_status_all_ids_caps_and_starttime(self):
+        status = ('Uid:\t9999 9999 9999 9999\nGid:\t9999 9999 9999 9999\n'
+                  'Groups:\t9999 9999\nCapInh:\t0\nCapPrm:\t0\nCapEff:\t0\n'
+                  'CapAmb:\t0\nCapBnd:\ta80425fb\nNoNewPrivs:\t0\n')
+        def run(text, stat_change=False):
+            calls = {}
+            def opened(path, *args, **kwargs):
+                if path.endswith('/stat'):
+                    calls[path] = calls.get(path, 0) + 1
+                    started = '1001' if stat_change and calls[path] > 1 else '1000'
+                    return io.StringIO(path.split('/')[2] + ' (php worker) S ' +
+                                       '0 ' * 18 + started + '\n')
+                return io.StringIO(text)
+            with patch.object(m.subprocess, 'run', return_value=types.SimpleNamespace(
+                    returncode=0, stdout=b'PID\n123\n124\n')), \
+                 patch('builtins.open', side_effect=opened):
+                return m.control_processes(m.CONTROL_ID, 123)
+        self.assertEqual(set(run(status)), {'123', '124'})
+        for old, new in (('Uid:\t9999 9999 9999 9999', 'Uid:\t9999 9999 9999 0'),
+                         ('Groups:\t9999 9999', 'Groups:\t9999 0'),
+                         ('Groups:\t9999 9999', 'Groups:\t9999 61001'),
+                         ('CapPrm:\t0', 'CapPrm:\t1')):
+            with self.assertRaises(m.Refused):
+                run(status.replace(old, new))
+        with self.assertRaisesRegex(m.Refused, 'control-plane-process-reused'):
+            run(status, stat_change=True)
 
 
 if __name__ == '__main__':
