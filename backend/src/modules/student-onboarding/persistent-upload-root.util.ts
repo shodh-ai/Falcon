@@ -4,8 +4,9 @@ import { resolve } from 'node:path';
 
 export function uploadRootIsMounted(root: string, mountInfo: string) {
   return mountInfo.split('\n').some((line) => {
+    const type = line.split(' - ')[1]?.split(' ')[0];
     const mount = line.split(' ')[4]?.replace(/\\([0-7]{3})/g, (_, code) => String.fromCharCode(parseInt(code, 8)));
-    return mount && mount !== '/' && (root === mount || root.startsWith(`${mount}/`));
+    return type && !['tmpfs', 'ramfs', 'overlay', 'aufs'].includes(type) && mount && mount !== '/' && (root === mount || root.startsWith(`${mount}/`));
   });
 }
 

@@ -45,6 +45,7 @@ describe('Recovery essentials and persistent storage boundary', () => {
     expect(uploadRootIsMounted('/app/uploads/tenant', mount)).toBe(true);
     expect(uploadRootIsMounted('/app/uploads-fake', mount)).toBe(false);
     expect(uploadRootIsMounted('/app', mount)).toBe(false);
+    expect(uploadRootIsMounted('/app/uploads', '32 31 0:8 / /app/uploads rw - tmpfs tmpfs rw')).toBe(false);
     expect(uploadRootIsMounted('/app/my files', '32 31 8:1 /data /app/my\\040files rw - ext4 disk rw')).toBe(true);
   });
 });
