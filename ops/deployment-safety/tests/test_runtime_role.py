@@ -6,6 +6,7 @@ FALCON_RUN_ISOLATED_SQL_TESTS=1 FALCON_TEST_DOCKER_SOCKET=/var/run/docker.sock
 FALCON_TEST_PG_IMAGE=sha256:<approved existing image> python3 -B -m unittest ...
 No image pulls, published ports, host data mounts or production credentials.
 """
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -19,6 +20,9 @@ import uuid
 
 SQL = Path(__file__).resolve().parents[1] / 'runtime-role.sql'
 RUNTIME = SQL.parents[2] / 'backend' / 'scripts' / 'runtime-start.cjs'
+HOST_SPEC = importlib.util.spec_from_file_location('fixture_host_preflight', SQL.parent / 'host-preflight.py')
+HOST = importlib.util.module_from_spec(HOST_SPEC)
+HOST_SPEC.loader.exec_module(HOST)
 VIEWS = ('iqac_mv_placement_stats', 'iqac_mv_faculty_metrics',
          'iqac_mv_student_counts', 'iqac_mv_repository_health',
          'exec_daily_university_health', 'exec_mv_finance_summary',
@@ -75,6 +79,23 @@ def synthetic_sql_diagnostic(result):
         return 'sqlstate=unavailable'
     message = ''.join(chr(value) if 32 <= value < 127 else '?' for value in match[2][:240])
     return 'sqlstate=' + match[1].decode() + ', message=' + message
+
+
+def fixture_projected_output(command, arguments):
+    """Run only the caller's projected synthetic-fixture inspection.
+
+    Never forward Docker stderr or arbitrary output on failure. The real
+    projection regression below does not request Config.Env or health logs.
+    """
+    result = command(arguments, check=False)
+    if result.returncode:
+        raise AssertionError('synthetic Docker metadata inspection failed with exit ' + str(result.returncode))
+    if len(result.stdout) > HOST.MAX_DOCUMENT_BYTES:
+        raise AssertionError('synthetic Docker metadata inspection exceeded its bound')
+    try:
+        return result.stdout.decode('utf-8')
+    except UnicodeError:
+        raise AssertionError('synthetic Docker metadata inspection encoding is invalid') from None
 
 
 class RuntimeReadinessTests(unittest.TestCase):
@@ -169,6 +190,16 @@ class RuntimeReadinessTests(unittest.TestCase):
         self.assertRegex(SQL.read_text(), r'WHERE CASE\s+WHEN c\.relnamespace = schema_oid AND '
                          r"c\.relkind = 'S'\s+THEN has_sequence_privilege\([^;]+ELSE false END")
 
+    def test_projected_metadata_failure_diagnostics_never_echo_docker_output(self):
+        for status, stdout in [(1, b'synthetic-private-output'), (0, b'\xff'),
+                               (0, b'x' * (HOST.MAX_DOCUMENT_BYTES + 1))]:
+            def command(arguments, **options):
+                self.assertEqual(options, {'check': False})
+                return subprocess.CompletedProcess(arguments, status, stdout, b'synthetic-private-stderr')
+            with self.assertRaises(AssertionError) as error:
+                fixture_projected_output(command, ['image', 'inspect'])
+            self.assertNotIn('synthetic-private', str(error.exception))
+
 
 class RuntimeRoleIntegration(unittest.TestCase):
     @classmethod
@@ -188,6 +219,7 @@ class RuntimeRoleIntegration(unittest.TestCase):
         if not match or int(match.group(1)) * 1024 < 1536 * 1024 * 1024:
             raise RuntimeError('at least 1.5 GiB available host memory is required')
         cls.docker = ['docker', '--host', 'unix://' + docker_socket]
+        cls.image = image
         cls.name = 'falcon-role-fixture-' + uuid.uuid4().hex
         cls.sequence = 0
         cls.command(['image', 'inspect', '--format', '{{.Id}}', image])
@@ -277,6 +309,35 @@ INSERT INTO public.business_records(value) VALUES ('synthetic baseline');
         self.assertNotEqual(result.returncode, 0, 'runtime unexpectedly performed forbidden SQL')
         self.assertRegex(result.stderr, b'permission denied|must be owner')
 
+    def test_docker_go_projection_formats_handle_missing_labels_and_health(self):
+        # Execute the actual Go templates in Docker, not FakeDocker. The official
+        # PG18 fixture has no OCI revision labels and no image HEALTHCHECK.
+        # Docker 29's strict missing-key mode used to reject .Config.Labels
+        # before our JSON parser ran; a dotted lookup inside `if` also fails.
+        probe = HOST.Preflight(run=lambda args: fixture_projected_output(self.command, args))
+        image = probe.document(['image', 'inspect', '--format', HOST.IMAGE_FORMAT, self.image])
+        self.assertEqual(set(image), {'Id', 'Revision'})
+        self.assertEqual(image['Id'], self.image)
+        self.assertIsNone(image['Revision'])
+        container = probe.document(['container', 'inspect', '--format', HOST.CONTAINER_FORMAT, self.name])
+        self.assertEqual(set(container), {'Id', 'Name', 'Image', 'Mounts', 'Revision', 'State'})
+        self.assertRegex(container['Id'], r'^[0-9a-f]{64}$')
+        self.assertEqual(container['Name'], '/' + self.name)
+        self.assertEqual(container['Image'], self.image)
+        self.assertIsInstance(container['Mounts'], list)
+        self.assertIsNone(container['Revision'])
+        self.assertEqual(container['State'], {'Running': True, 'Paused': False,
+                                             'Restarting': False, 'Health': None})
+        output = fixture_projected_output(self.command,
+            ['container', 'inspect', '--format', HOST.PGDATA_FORMAT, self.name])
+        try:
+            pgdata = json.loads(output)
+        except ValueError:
+            raise AssertionError('synthetic PGDATA projection is not one valid JSON value') from None
+        self.assertTrue(isinstance(pgdata, str) and
+                        pgdata.startswith('PGDATA=/var/lib/postgresql/'),
+                        'synthetic PGDATA projection must select only its expected absolute path')
+
     def test_business_crud_sequences_ledger_read_and_exact_view_refresh(self):
         role = self.new_role()
         self.assertEqual(self.psql("SELECT reltoastrelid <> 0 FROM pg_class "
@@ -330,7 +391,7 @@ SELECT currval('public.business_records_id_seq');
         self.psql('REVOKE fixture_group FROM ' + role + '; ALTER ROLE ' + role + ' BYPASSRLS;')
         self.assertNotEqual(self.apply(role, check=False).returncode, 0)
 
-    def test_public_or_column_level_ledger_writes_and_sequence_reset_refused(self):
+    def test_public_ledger_writes_sequence_reset_and_elevated_grants_refused(self):
         for grant, revoke in [
             ('GRANT CREATE ON SCHEMA public TO PUBLIC', 'REVOKE CREATE ON SCHEMA public FROM PUBLIC'),
             ('GRANT UPDATE(filename) ON public.schema_migrations TO PUBLIC', 'REVOKE UPDATE(filename) ON public.schema_migrations FROM PUBLIC'),
@@ -345,9 +406,24 @@ SELECT currval('public.business_records_id_seq');
                     "','public.business_records','INSERT');").stdout.decode().strip(), 'f')
             finally:
                 self.psql(revoke + ';')
+
+    def test_direct_column_ledger_write_is_removed_and_select_preserved(self):
         role = self.new_role()
         self.psql('GRANT INSERT(filename) ON public.schema_migrations TO ' + role + ';')
-        self.assertNotEqual(self.apply(role, check=False).returncode, 0)
+        self.assertEqual(self.psql("SELECT has_column_privilege('" + role +
+            "','public.schema_migrations','filename','INSERT');").stdout.decode().strip(), 't')
+        # PG18 REVOKE on a table also removes corresponding direct column ACLs.
+        # Normalization is safe only if the effective ledger boundary is SELECT-only.
+        self.apply(role)
+        self.assertEqual(self.psql("SELECT has_table_privilege('" + role +
+            "','public.schema_migrations','SELECT');").stdout.decode().strip(), 't')
+        self.assertEqual(self.psql("SELECT has_table_privilege('" + role +
+            "','public.schema_migrations','INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER,MAINTAIN');"
+            ).stdout.decode().strip(), 'f')
+        self.assertEqual(self.psql("SELECT has_any_column_privilege('" + role +
+            "','public.schema_migrations','INSERT,UPDATE,REFERENCES');").stdout.decode().strip(), 'f')
+        self.psql('SET ROLE ' + role + '; SELECT filename FROM public.schema_migrations;')
+        self.denied(role, "INSERT INTO public.schema_migrations(filename) VALUES ('forbidden')")
 
     def test_definer_trigger_grant_delegation_and_rls_refused(self):
         role = self.new_role()
