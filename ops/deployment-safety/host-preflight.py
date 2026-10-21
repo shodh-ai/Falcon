@@ -26,6 +26,8 @@ UPLOAD_SOURCE = '/data/coolify/applications/pmy0ybhwzco11kocu0zloqk0/uploads'
 PG_VOLUME = 'postgres-data-acdz53zfy2eqstxeybua41rs'
 REDIS_VOLUME = 'redis-data-y13hscsoka5mti9mjtfptqlh'
 GUARD_SOURCE = '/etc/falcon-deployment-safety/storage-boundary.json'
+VERSIONED_GUARD_SOURCE = re.compile(
+    r'/etc/falcon-deployment-safety/policies/storage-boundary-[0-9a-f]{32}\.json')
 GUARD_TARGET = '/run/falcon/storage-boundary.json'
 EXPECTED_NAMES = {'api': 'pmy0ybhwzco11kocu0zloqk0',
                   'postgres': 'acdz53zfy2eqstxeybua41rs',
@@ -171,7 +173,8 @@ def normalize_mounts(mounts, baseline=False):
             source_type = mount.get('source_type', 'directory')
             require(source_type == 'directory' or
                     source_type == 'file' and kind == 'bind' and
-                    source == GUARD_SOURCE and target == GUARD_TARGET and mount['RW'] is False,
+                    (source == GUARD_SOURCE or VERSIONED_GUARD_SOURCE.fullmatch(source)) and
+                    target == GUARD_TARGET and mount['RW'] is False,
                     'Only the exact read-only startup boundary may be a file mount')
             normalized['source_type'] = source_type
         result[target] = normalized

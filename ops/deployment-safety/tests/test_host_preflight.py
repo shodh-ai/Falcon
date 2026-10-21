@@ -326,6 +326,66 @@ class HostPreflightTests(unittest.TestCase):
         self.save_baseline()
         with self.assertRaises(host.Refused): self.check()
 
+    def add_versioned_guard(self):
+        path = '/etc/falcon-deployment-safety/policies/storage-boundary-' + 'a' * 32 + '.json'
+        self.fs.add_file(path, b'{"synthetic":"versioned metadata only"}', mode=0o444)
+        source = self.fs.lstat(path)
+        mount = {'Type':'bind','Source':path,'Destination':host.GUARD_TARGET,
+                 'RW':False,'source_type':'file',
+                 'source_identity':{'device':source.st_dev,'inode':source.st_ino}}
+        self.baseline['resources']['api']['mounts'].append(mount)
+        self.docker.documents['api']['Mounts'].append({k:v for k,v in mount.items()
+            if k not in ('source_type','source_identity')})
+        self.save_baseline()
+        return path
+
+    def test_exact_versioned_guard_file_supported_with_pinned_live_source(self):
+        path = self.add_versioned_guard()
+        self.check()
+        self.assertNotIn(path, self.fs.reads)  # File metadata only; policy is not changed/read here.
+        self.docker.documents['api']['Mounts'][-1]['Source'] = path.replace('a' * 32,'b' * 32)
+        with self.assertRaisesRegex(host.Refused, 'mount mapping differs'):
+            self.check()
+
+    def test_versioned_guard_keeps_root_path_type_and_source_identity_checks(self):
+        path = self.add_versioned_guard()
+        for target,field,value in [(path,'st_uid',1000),
+                (path,'st_mode',stat.S_IFREG | 0o664),
+                (path,'st_mode',stat.S_IFLNK | 0o777),
+                (path,'st_ino',999),(path,'st_dev',999),
+                ('/etc/falcon-deployment-safety/policies','st_uid',1000),
+                ('/etc/falcon-deployment-safety/policies','st_mode',stat.S_IFDIR | 0o775),
+                ('/etc/falcon-deployment-safety/policies','st_mode',stat.S_IFLNK | 0o777)]:
+            original=getattr(self.fs.nodes[target],field)
+            setattr(self.fs.nodes[target],field,value)
+            with self.subTest(target=target,field=field,value=value), self.assertRaises(host.Refused):
+                self.check()
+            setattr(self.fs.nodes[target],field,original)
+
+    def test_versioned_guard_refuses_arbitrary_traversal_and_malformed_sources(self):
+        prefix='/etc/falcon-deployment-safety/policies/storage-boundary-'
+        valid=prefix + 'a'*32 + '.json'
+        for path in ['/some/other/file', '/etc/falcon-deployment-safety/policies/storage-boundary.json',
+                prefix+'a'*31+'.json',prefix+'a'*33+'.json',prefix+'g'*32+'.json',
+                prefix+'A'*32+'.json',valid+'.extra',valid+'\n',
+                valid.replace('/policies/','/policies/../policies/'),
+                valid.replace('/policies/','/policies//'),
+                valid.replace('/policies/','/policies/./'),
+                valid.replace('/policies/','/policies/nested/')]:
+            mount={'Type':'bind','Source':path,'Destination':host.GUARD_TARGET,
+                   'RW':False,'source_type':'file','source_identity':{'device':123,'inode':1}}
+            with self.subTest(path=path), self.assertRaises(host.Refused):
+                host.normalize_mounts([mount],baseline=True)
+
+    def test_versioned_guard_refuses_writable_other_destination_and_volume_mounts(self):
+        self.add_versioned_guard()
+        mount=self.baseline['resources']['api']['mounts'][-1]
+        for key,value in [('RW',True),('Destination','/run/falcon/other.json'),('Type','volume')]:
+            changed={**mount,key:value}
+            if key=='Type': changed['Name']='synthetic_volume'
+            with self.subTest(key=key), self.assertRaises(host.Refused):
+                host.normalize_mounts([changed],baseline=True)
+
     def test_exact_memory_and_disk_thresholds_and_higher_candidate_budget(self):
         self.fs.content['/proc/meminfo'] = b'MemAvailable: 1572864 kB\n'
         self.fs.free = 20 * host.GIB

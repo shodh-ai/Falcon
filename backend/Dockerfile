@@ -43,6 +43,8 @@ LABEL org.opencontainers.image.source="https://github.com/shodh-ai/Falcon" \
 ENV NODE_ENV=production
 ENV PORT=4000
 ENV NODE_OPTIONS=--max-old-space-size=768
+ENV HOME=/tmp
+ENV XDG_CACHE_HOME=/tmp/falcon-cache
 
 COPY package.json ./
 COPY --from=builder /app/node_modules ./node_modules
@@ -54,7 +56,15 @@ COPY --from=builder /app/data ./data
 # PDF-to-CSV department preparation is an offline build/ops task. Production
 # bootstrap consumes committed CSV files with --skip-parse, so shipping Python,
 # pip and pypdf in every API image only increases deploy/unpack pressure.
-RUN mkdir -p /app/uploads && chown node:node /app/uploads
+RUN addgroup -g 61001 -S falcon \
+    && adduser -S -D -H -u 61001 -G falcon -h /tmp -s /sbin/nologin falcon \
+    && mkdir -p /app/uploads \
+    && find / -xdev -type f \( -perm -4000 -o -perm -2000 \) -exec chmod u-s,g-s {} + \
+    && chmod -R a-w /app \
+    && chown 61001:61001 /app/uploads \
+    && chmod 0750 /app/uploads
+
+USER 61001:61001
 
 EXPOSE 4000
 
@@ -63,6 +73,6 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=45s --retries=5 \
 
 # Verify existing storage and database boundaries before starting the API.
 # Migrations use a separately reviewed one-off job, never container startup.
-# First rollout preserves the current OS identity; non-root/ACL adoption is a
-# separate stage after the migration-free rollback image is verified healthy.
+# Code remains root-owned and has no write bits. Existing persistent uploads
+# need separately preserved and reviewed ACLs before this UID is deployed.
 CMD ["node", "scripts/runtime-start.cjs"]

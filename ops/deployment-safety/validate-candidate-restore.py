@@ -209,6 +209,17 @@ def boundary_entry(host_path, destination, mountinfo, kind=None):
     return result
 
 
+def validate_relay_endpoint(current, named, sock, original, expected_socket, names):
+    if ((current.st_dev, current.st_ino) != (original.st_dev, original.st_ino) or
+            (named.st_dev, named.st_ino) != (original.st_dev, original.st_ino) or
+            not stat.S_ISDIR(current.st_mode) or current.st_uid != 70 or current.st_gid != 61001 or
+            stat.S_IMODE(current.st_mode) != 0o710 or names != ['.s.PGSQL.55432'] or
+            not stat.S_ISSOCK(sock.st_mode) or sock.st_uid != 70 or sock.st_gid != 61001 or
+            stat.S_IMODE(sock.st_mode) != 0o660 or sock.st_nlink != 1 or
+            (sock.st_dev, sock.st_ino) != expected_socket):
+        fail('relay-endpoint-identity')
+
+
 def base_run(docker, name, image, *, network='none', memory='128m', cpus='0.25', user=None, remove=True):
     checked_name(name)
     if not IMAGE_RE.fullmatch(image):
@@ -238,6 +249,87 @@ try {
  process.stdout.write(JSON.stringify({storage_boundary_refused:error.name==='StorageBoundaryError',error_code:error.code||'unknown'}));
  process.exitCode=1;
 }
+"""
+
+
+IDENTITY_JS = r"""
+const fs=require('fs');
+try {
+ const read=p=>Object.fromEntries(fs.readFileSync(p,'utf8').split('\n').filter(x=>x.includes(':')).map(x=>[x.slice(0,x.indexOf(':')),x.slice(x.indexOf(':')+1).trim()]));
+ const one=read('/proc/1/status'),self=read('/proc/self/status');
+ const nums=x=>x?x.split(/\s+/).map(Number):[];
+ const zero=x=>['CapEff','CapPrm','CapInh','CapBnd','CapAmb'].every(k=>/^[0-9a-f]+$/i.test(x[k]||'')&&BigInt('0x'+x[k])===0n);
+ process.stdout.write(JSON.stringify({uid:process.getuid(),gid:process.getgid(),groups:process.getgroups(),
+  pid1_uids:nums(one.Uid),pid1_gids:nums(one.Gid),pid1_groups:nums(one.Groups),
+  capabilities_zero:zero(one)&&zero(self),no_new_privileges:one.NoNewPrivs==='1'&&self.NoNewPrivs==='1'}));
+} catch {process.exitCode=1;}
+"""
+
+
+CODE_PERMISSIONS_JS = r"""
+'use strict';
+const fs=require('fs'),path=require('path').posix;
+const roots=['/app/dist','/app/scripts','/app/node_modules','/app/migrations','/app/data','/app/package.json'];
+let files=0,dirs=0,links=0,total=0;
+try {
+ const app=fs.lstatSync('/app');
+ if(!app.isDirectory()||app.isSymbolicLink()||app.uid!==0||(app.mode&0o222)||(app.mode&0o6000))throw Error();
+ const stack=roots.map(p=>[p,0]);
+ while(stack.length){
+  const [p,depth]=stack.pop();
+  if(++total>100000||depth>64||p.length>4096)throw Error();
+  const item=fs.lstatSync(p);
+  if(item.uid!==0)throw Error();
+  if(item.isSymbolicLink()){
+   const real=fs.realpathSync(p);
+   if(!roots.some(r=>real===r||real.startsWith(r+'/')))throw Error();
+   const target=fs.statSync(real);
+   if(target.uid!==0||(target.mode&0o222)||(target.mode&0o6000)||(!target.isFile()&&!target.isDirectory()))throw Error();
+   links++;continue;
+  }
+  if((item.mode&0o222)||(item.mode&0o6000))throw Error();
+  if(item.isDirectory()){
+   dirs++;
+   for(const child of fs.readdirSync(p)){
+    if(!child||child==='.'||child==='..'||child.includes('/')||child.includes('\0'))throw Error();
+    stack.push([path.join(p,child),depth+1]);
+   }
+  }else if(item.isFile())files++;else throw Error();
+ }
+ process.stdout.write(JSON.stringify({schema_version:1,code_permission_inventory_complete:true,
+  code_owned_by_root:true,code_write_bits_clear:true,code_setid_bits_clear:true,
+  files_checked:files,directories_checked:dirs+1,symlinks_checked:links}));
+} catch {process.stdout.write(JSON.stringify({schema_version:1,code_permission_inventory_complete:false,error_code:'code-permissions-refused'}));process.exitCode=1;}
+"""
+
+
+RELAY_JS = r"""
+'use strict';
+const fs=require('fs'),net=require('net');
+const endpoint='/relay/.s.PGSQL.55432',upstream='/upstream-socket/.s.PGSQL.55432';
+const pairs=new Set();let stopping=false;
+function stop(code){if(stopping)return;stopping=true;for(const p of pairs){p[0].destroy();p[1].destroy();}process.exit(code);}
+try {
+ const d=fs.lstatSync('/relay');
+ if(process.getuid()!==70||process.getgid()!==61001||!d.isDirectory()||d.isSymbolicLink()||d.uid!==70||d.gid!==61001||(d.mode&0o777)!==0o710||fs.readdirSync('/relay').length)throw Error();
+ process.umask(0o117);
+ const server=net.createServer({pauseOnConnect:true,allowHalfOpen:false},client=>{
+  if(pairs.size>=4){client.destroy();return;}
+  const remote=net.createConnection({path:upstream,allowHalfOpen:false,highWaterMark:65536});
+  const pair=[client,remote];pairs.add(pair);
+  const timer=setTimeout(()=>{client.destroy();remote.destroy();},5000);
+  const close=()=>{clearTimeout(timer);pairs.delete(pair);client.destroy();remote.destroy();};
+  client.on('error',close);remote.on('error',close);client.on('close',close);remote.on('close',close);
+  remote.once('connect',()=>{clearTimeout(timer);client.pipe(remote);remote.pipe(client);client.resume();});
+ });
+ server.on('error',()=>stop(1));
+ server.listen(endpoint,()=>{
+  fs.chmodSync(endpoint,0o660);
+  process.stdout.write('{"schema_version":1,"relay_ready":true}\n');
+ });
+ setTimeout(()=>stop(1),300000);
+ process.on('SIGTERM',()=>stop(0));process.on('SIGINT',()=>stop(0));
+} catch {stop(1);}
 """
 
 
@@ -295,10 +387,22 @@ function request(path,token){return new Promise((resolve,reject)=>{
 """
 
 
+def relay_command(docker, name, image, metadata, upstream, endpoint):
+    command = base_run(docker, name, image, memory='64m', cpus='0.1', user='70:61001', remove=False)
+    command += image_environment_resets(metadata, {'NODE_OPTIONS'})
+    command += ['--env', 'NODE_OPTIONS=--max-old-space-size=32', '--detach']
+    command += mount_arg(upstream, '/upstream-socket')
+    command += mount_arg(endpoint, '/relay', False)
+    return command + ['--entrypoint', 'node', image, '-e', RELAY_JS]
+
+
 class CandidateHook:
-    def __init__(self, restore, backup, config, image, redis_source, role_sql):
+    def __init__(self, restore, backup, config, image, redis_source, role_sql, user_mode='root'):
         self.restore, self.backup, self.config = restore, backup, config
         self.image, self.redis_source, self.role_sql = image, redis_source, role_sql
+        if user_mode not in ('root', 'nonroot'):
+            fail('candidate-user-mode')
+        self.user_mode = user_mode
         self.reports = []
 
     def capture(self, command, monitor, name, *, allow_failure=False):
@@ -331,13 +435,94 @@ class CandidateHook:
                 if code:
                     fail('private-log-retention')
 
+    def observe_identity(self, docker, monitor, name, uid, gid):
+        code, data = run_guarded(docker + ['exec', name, 'node', '-e', IDENTITY_JS], monitor)
+        value = decode_json(data)
+        if (code or not isinstance(value, dict) or value.get('uid') != uid or value.get('gid') != gid or
+                value.get('pid1_uids') != [uid] * 4 or value.get('pid1_gids') != [gid] * 4 or
+                not isinstance(value.get('groups'), list) or not isinstance(value.get('pid1_groups'), list) or
+                any(item != gid for item in value['groups'] + value['pid1_groups']) or
+                value.get('capabilities_zero') is not True or value.get('no_new_privileges') is not True):
+            fail('observed-nonroot-identity-or-caps')
+        return {'uid': uid, 'gid': gid, 'all_capabilities_zero': True, 'no_new_privileges': True}
+
+    def observe_code_permissions(self, docker, monitor, name, inputs):
+        code, data = run_guarded(docker + ['exec', name, 'node', '-e', CODE_PERMISSIONS_JS], monitor, timeout=90)
+        private_write(inputs, 'code-permissions.json', data)
+        value = decode_json(data)
+        flags = ['code_permission_inventory_complete', 'code_owned_by_root', 'code_write_bits_clear', 'code_setid_bits_clear']
+        counts = ['files_checked', 'directories_checked', 'symlinks_checked']
+        if (code or not isinstance(value, dict) or value.get('schema_version') != 1 or
+                any(value.get(key) is not True for key in flags) or
+                any(type(value.get(key)) is not int or value[key] < 0 for key in counts) or
+                value['files_checked'] < 1 or value['directories_checked'] < 1):
+            fail('observed-code-permissions')
+        return value
+
+    @contextlib.contextmanager
+    def relay(self, context, monitor, inputs, image):
+        docker = self.backup.DOCKER
+        name = checked_name(context['sandbox_name'] + '-content')
+        endpoint = inputs / 'relay-socket'
+        os.mkdir(str(endpoint), 0o710)
+        directory_fd = os.open(str(endpoint), os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        expected_socket = None
+        try:
+            os.fchown(directory_fd, 70, 61001)
+            os.fchmod(directory_fd, 0o710)
+            original = os.fstat(directory_fd)
+            command = relay_command(docker, name, self.image, image, context['socket_mount_source'], endpoint)
+            with self.detached(command, monitor, name, inputs, 'relay-operations.log') as process:
+                bounded = DeadlineMonitor(monitor, 30)
+                with self.restore.GuardedStream(process.stdout, bounded) as stream:
+                    container_id = stream.read(129).strip().decode()
+                wait_bounded(process, bounded)
+                if not ID_RE.fullmatch(container_id):
+                    fail('relay-id')
+                runtime = docker_json(docker, monitor, ['inspect', '--format', '{{json .HostConfig}}', name])
+                if (runtime.get('NetworkMode') != 'none' or runtime.get('PortBindings') or runtime.get('Privileged') or
+                        not runtime.get('ReadonlyRootfs') or runtime.get('Memory') != 64 * 1024 * 1024 or
+                        runtime.get('NanoCpus') != 100000000 or 'ALL' not in (runtime.get('CapDrop') or []) or runtime.get('CapAdd')):
+                    fail('relay-isolation')
+                identity = self.observe_identity(docker, monitor, name, 70, 61001)
+                deadline = time.monotonic() + 15
+                while True:
+                    bounded.tick()
+                    try:
+                        candidate = os.stat('.s.PGSQL.55432', dir_fd=directory_fd, follow_symlinks=False)
+                    except FileNotFoundError:
+                        if time.monotonic() >= deadline:
+                            fail('relay-not-ready')
+                        time.sleep(0.1)
+                        continue
+                    expected_socket = (candidate.st_dev, candidate.st_ino)
+                    break
+                def check_endpoint():
+                    monitor.tick()
+                    current = os.fstat(directory_fd)
+                    named = os.stat(str(endpoint), follow_symlinks=False)
+                    sock = os.stat('.s.PGSQL.55432', dir_fd=directory_fd, follow_symlinks=False)
+                    validate_relay_endpoint(current, named, sock, original, expected_socket, os.listdir(directory_fd))
+                    running = docker_json(docker, monitor, ['inspect', '--format', '{{json .State.Running}}', name])
+                    if running is not True:
+                        fail('relay-exited')
+                check_endpoint()
+                yield endpoint, identity, check_endpoint
+                check_endpoint()
+            if not monitor.container_absent(name):
+                fail('relay-cleanup-unconfirmed')
+        finally:
+            os.close(directory_fd)
+
     def __call__(self, context, monitor):
         if context['database'] != 'postgres':
             return {'execution_complete': True, 'candidate_check': 'not-applicable-non-business-database'}
         if self.backup.available_memory() < 2 * GIB:
             fail('candidate-memory-start-gate')
         docker = self.backup.DOCKER
-        name = checked_name(context['sandbox_name'] + '-content')
+        core_name = checked_name(context['sandbox_name'] + '-content')
+        nonroot = self.user_mode == 'nonroot'
+        name = checked_name(context['sandbox_name'] + ('-candidate' if nonroot else '-content'))
         redis_name = checked_name(context['sandbox_name'] + '-redis')
         session = Path(context['session_path'])
         session_fd = self.restore.open_anchor_directory(session)
@@ -347,32 +532,28 @@ class CandidateHook:
         for child in ('uploads', 'wrong-uploads'):
             os.mkdir(str(inputs / child), 0o700)
         stage = 'image-review'
+        relay_stack = contextlib.ExitStack()
         report = {'schema_version': 1, 'candidate_image_id': self.image,
                   'production_connection': False, 'production_credentials_mounted': False,
                   'production_uploads_mounted': False, 'external_network': False,
-                  'execution_complete': False, 'candidate_checks_passed': False}
+                  'execution_complete': False, 'candidate_checks_passed': False,
+                  'candidate_user_mode': self.user_mode}
         try:
             image = image_metadata(docker, monitor, self.image)
             config = image.get('Config') or {}
+            approved_users = ('61001:61001',) if nonroot else ('', '0', '0:0', 'root', 'root:root')
             if (config.get('Volumes') or config.get('Cmd') != ['node', 'scripts/runtime-start.cjs'] or
                     config.get('Entrypoint') not in (None, [], ['docker-entrypoint.sh']) or
-                    config.get('User', '') not in ('', '0', '0:0', 'root', 'root:root')):
+                    config.get('User', '') not in approved_users):
                 fail('unreviewed-entrypoint-or-uid-stage')
             report['image_default_user'] = config.get('User') or 'root (image default)'
             report['nonroot_proven'] = False
-            report['test_capability_exception'] = 'DAC_OVERRIDE'
+            report['test_capability_exception'] = None if nonroot else 'DAC_OVERRIDE'
             report['all_capabilities_dropped_proven'] = False
             redis_image = docker_json(docker, monitor, ['inspect', '--type', 'container', '--format', '{{json .Image}}', self.redis_source])
             image_metadata(docker, monitor, redis_image)
             report['redis_image_id'] = redis_image
             image_metadata(docker, monitor, self.config['image'])
-            mountinfo = Path('/proc/self/mountinfo').read_text()
-            boundary = {'schema_version': 1,
-                'upload_mounts': [boundary_entry(inputs / 'uploads', '/app/uploads', mountinfo)],
-                'readonly_mounts': [boundary_entry(context['socket_mount_source'], '/restore-socket', mountinfo, 'directory')],
-                'database': {'host': '/restore-socket', 'port': 55432, 'name': 'restorecheck',
-                             'role': 'falcon_runtime', 'enforce_least_privilege': True}}
-            write_json(inputs, 'storage-boundary.json', boundary, 0o444)
             password, jwt = os.urandom(32).hex(), os.urandom(48).hex()
             environment = {'NODE_ENV': 'production', 'PORT': '4000', 'NODE_OPTIONS': '--max-old-space-size=768',
                 'DB_HOST': '/restore-socket', 'DB_PORT': '55432', 'DB_DATABASE': 'restorecheck',
@@ -391,15 +572,37 @@ class CandidateHook:
             private_write(inputs, 'fixture.sql', initialization.encode())
             os.chown(str(inputs / 'fixture.sql'), self.config['restore_uid'], self.config['restore_gid'])
             stage = 'disposable-role-boundary'
-            command = base_run(docker, name, self.config['image'], user='%s:%s' % (self.config['restore_uid'], self.config['restore_gid']))
+            command = base_run(docker, core_name, self.config['image'], user='%s:%s' % (self.config['restore_uid'], self.config['restore_gid']))
             command += mount_arg(context['socket_mount_source'], '/restore-socket')
             command += mount_arg(inputs / 'fixture.sql', '/checks/fixture.sql') + mount_arg(self.role_sql, '/checks/runtime-role.sql')
             command += ['--entrypoint', 'psql', self.config['image'], '-X', '-w', '-h', '/restore-socket',
                 '-p', '55432', '-U', 'restorecheck', '-d', 'restorecheck', '-v', 'ON_ERROR_STOP=1',
                 '-v', 'runtime_role=falcon_runtime', '-v', 'runtime_database=restorecheck', '-v', 'runtime_schema=public',
                 '-f', '/checks/fixture.sql', '-f', '/checks/runtime-role.sql']
-            _, data = self.capture(command, monitor, name)
+            _, data = self.capture(command, monitor, core_name)
             private_write(inputs, 'role-operations.log', data)
+            socket_source = context['socket_mount_source']
+            check_endpoint = lambda: None
+            if nonroot:
+                stage = 'relay-start'
+                socket_source, identity, check_endpoint = relay_stack.enter_context(self.relay(context, monitor, inputs, image))
+                report['relay_identity'] = identity
+                for child in ('uploads', 'wrong-uploads'):
+                    os.chown(str(inputs / child), 61001, 61001)
+                    os.chmod(str(inputs / child), 0o700)
+            mountinfo = Path('/proc/self/mountinfo').read_text()
+            boundary = {'schema_version': 1,
+                'upload_mounts': [boundary_entry(inputs / 'uploads', '/app/uploads', mountinfo)],
+                'readonly_mounts': [boundary_entry(socket_source, '/restore-socket', mountinfo, 'directory')],
+                'database': {'host': '/restore-socket', 'port': 55432, 'name': 'restorecheck',
+                             'role': 'falcon_runtime', 'enforce_least_privilege': True}}
+            write_json(inputs, 'storage-boundary.json', boundary, 0o444)
+            if nonroot:
+                fd = os.open(str(inputs / 'storage-boundary.json'), os.O_RDONLY | os.O_NOFOLLOW)
+                try:
+                    os.fchmod(fd, 0o444)
+                finally:
+                    os.close(fd)
             stage = 'storage-guard-tests'
             resets = image_environment_resets(image, environment)
             def api_command(uploads, guard_only=True, network='none', detached=False):
@@ -407,11 +610,12 @@ class CandidateHook:
                 # Current production stage is root with Docker's DAC_OVERRIDE.
                 # The private PG socket is UID70/0700. No other cap is restored;
                 # readonly mounts still prevent filesystem writes through aliases.
-                command += ['--cap-add', 'DAC_OVERRIDE']
+                if not nonroot:
+                    command += ['--cap-add', 'DAC_OVERRIDE']
                 if detached:
                     command += ['--detach']
                 command += resets + ['--env-file', str(inputs / 'candidate.env'), '--workdir', '/app']
-                command += mount_arg(context['socket_mount_source'], '/restore-socket')
+                command += mount_arg(socket_source, '/restore-socket')
                 command += mount_arg(inputs / 'storage-boundary.json', '/run/falcon/storage-boundary.json')
                 if uploads is not None:
                     command += mount_arg(uploads, '/app/uploads', False)
@@ -420,6 +624,7 @@ class CandidateHook:
                 else:
                     command += [self.image]
                 return command
+            check_endpoint()
             code, data = self.capture(api_command(inputs / 'uploads'), monitor, name)
             positive = decode_json(data)
             if positive != {'storage_boundary_verified': True, 'upload_roots_verified': 1}:
@@ -466,11 +671,19 @@ class CandidateHook:
                             runtime.get('Privileged') or not runtime.get('ReadonlyRootfs') or
                             runtime.get('Memory') != GIB or runtime.get('NanoCpus') != 500000000 or
                             'ALL' not in (runtime.get('CapDrop') or []) or
-                            {item.removeprefix('CAP_') for item in (runtime.get('CapAdd') or [])} != {'DAC_OVERRIDE'}):
+                            {item.removeprefix('CAP_') for item in (runtime.get('CapAdd') or [])} != (set() if nonroot else {'DAC_OVERRIDE'})):
                         fail('candidate-isolation')
+                    if nonroot:
+                        report['candidate_identity'] = self.observe_identity(docker, monitor, name, 61001, 61001)
+                        report['code_permissions'] = self.observe_code_permissions(docker, monitor, name, inputs)
+                        report['fixture_readonly_root'] = True
+                        report['fixture_no_new_privileges'] = True
+                        report['production_readonly_root_proven'] = False
+                        report['production_no_new_privileges_proven'] = False
                     stage = 'candidate-health'
                     deadline = time.monotonic() + 180
                     while True:
+                        check_endpoint()
                         monitor.tick()
                         code, _ = run_guarded(docker + ['exec', name, 'node', 'scripts/healthcheck.js'], monitor, timeout=10)
                         if code == 0:
@@ -481,6 +694,7 @@ class CandidateHook:
                         if state is not True:
                             fail('candidate-exited')
                         time.sleep(1)
+                    check_endpoint()
                     stage = 'candidate-auth-crud-upload'
                     code, data = run_guarded(docker + ['exec', '-i', '--workdir', '/app', name, 'node', '-'], monitor,
                                              data=PROBE_JS.encode(), timeout=60)
@@ -496,6 +710,12 @@ class CandidateHook:
                     fail('candidate-cleanup-unconfirmed')
             if not monitor.container_absent(redis_name):
                 fail('redis-cleanup-unconfirmed')
+            stage = 'relay-cleanup'
+            relay_stack.close()
+            if nonroot and not monitor.container_absent(core_name):
+                fail('relay-cleanup-unconfirmed')
+            report['nonroot_proven'] = nonroot
+            report['all_capabilities_dropped_proven'] = nonroot
             report.update(execution_complete=True, candidate_checks_passed=True,
                           synthetic_fixture_added_after_count_proof=True,
                           full_application_recovery_proven=False)
@@ -503,9 +723,13 @@ class CandidateHook:
             self.reports.append(report)
             return report
         except BaseException as error:
+            try:
+                relay_stack.close()
+            except BaseException as cleanup_error:
+                error = cleanup_error
             write_json(inputs, 'failed.json', dict(report, stage=stage, error_type=type(error).__name__,
                 error_code=str(error) if isinstance(error, CandidateError) else 'guard-or-process-failed', result='unproven'))
-            raise
+            raise error
 
 
 def main():
@@ -514,6 +738,7 @@ def main():
     parser.add_argument('--run-id', required=True)
     parser.add_argument('--approval-id', required=True)
     parser.add_argument('--candidate-image', required=True)
+    parser.add_argument('--candidate-user-mode', choices=('root', 'nonroot'), default='root')
     parser.add_argument('--redis-source-container', required=True, help='Existing full container ID; read only image observation')
     parser.add_argument('--i-confirm-disposable-restore', action='store_true', required=True)
     args = parser.parse_args()
@@ -540,7 +765,7 @@ def main():
             fail('reviewed-restore-scope')
         role_sql = Path(__file__).resolve().with_name('runtime-role.sql')
         os.close(backup.trusted_file(str(role_sql)))
-        hook = CandidateHook(restore, backup, config, args.candidate_image, args.redis_source_container, str(role_sql))
+        hook = CandidateHook(restore, backup, config, args.candidate_image, args.redis_source_container, str(role_sql), args.candidate_user_mode)
         result = restore.run_restore(config, args.run_id, args.approval_id, hook)
         if len(hook.reports) != 1 or not hook.reports[0].get('candidate_checks_passed'):
             fail('candidate-checks-incomplete')
@@ -550,8 +775,12 @@ def main():
             'same_dump_counts_passed': result['same_dump_counts_passed'],
             'physical_tables_checked': result['physical_tables_checked'], 'rows_checked': result['rows_checked'],
             'candidate_checks_passed': True, 'actual_runtime_login': True, 'authenticated_me': True,
-            'synthetic_disk_upload': True, 'nonroot_proven': False,
-            'test_capability_exception': 'DAC_OVERRIDE', 'all_capabilities_dropped_proven': False,
+            'synthetic_disk_upload': True, 'candidate_user_mode': args.candidate_user_mode,
+            'nonroot_proven': hook.reports[0]['nonroot_proven'],
+            'test_capability_exception': hook.reports[0]['test_capability_exception'],
+            'all_capabilities_dropped_proven': hook.reports[0]['all_capabilities_dropped_proven'],
+            'code_permissions_verified': bool(hook.reports[0].get('code_permissions', {}).get('code_permission_inventory_complete')),
+            'production_readonly_root_proven': False, 'production_no_new_privileges_proven': False,
             'production_restore': False, 'full_application_recovery_proven': False}))
 
 

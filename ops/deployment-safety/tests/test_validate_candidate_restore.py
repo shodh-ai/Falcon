@@ -130,7 +130,7 @@ class CandidateUnitTests(unittest.TestCase):
         with self.assertRaisesRegex(m.CandidateError, 'candidate-memory-start-gate'):
             hook({'database': 'postgres'}, Monitor())
 
-    def exercise_hook(self, *, negative_code=1, probe=REQUIRED, probe_code=0, command_override=None, cleanup_unconfirmed=False, runtime_caps=('DAC_OVERRIDE',)):
+    def exercise_hook(self, *, negative_code=1, probe=REQUIRED, probe_code=0, command_override=None, cleanup_unconfirmed=False, runtime_caps=None, user_mode='root', image_user=None, observed_uid=61001, relay_cleanup_failure=False):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         session = Path(temporary.name)
@@ -139,14 +139,16 @@ class CandidateUnitTests(unittest.TestCase):
                                        GuardedStream=lambda stream, monitor: contextlib.nullcontext(stream))
         backup = types.SimpleNamespace(available_memory=lambda: 3 * m.GIB, DOCKER=['docker'])
         hook = m.CandidateHook(restore, backup, {'restore_uid': 70, 'restore_gid': 70, 'image': PG},
-                               IMAGE, '4' * 64, '/fixed/runtime-role.sql')
+                               IMAGE, '4' * 64, '/fixed/runtime-role.sql', user_mode)
+        if runtime_caps is None:
+            runtime_caps = () if user_mode == 'nonroot' else ('DAC_OVERRIDE',)
         monitor = Monitor()
         if cleanup_unconfirmed:
             monitor.container_absent = lambda name: False
         captured = []
         def capture(command, current_monitor, name, allow_failure=False):
             captured.append(command)
-            self.assertEqual(name, BASE + ('-redis-id' if '-redis-id' in name else '-content'))
+            self.assertIn(name, [BASE + '-redis-id', BASE + '-content', BASE + '-candidate'])
             if '--entrypoint' in command and command[command.index('--entrypoint') + 1] == 'node':
                 mounted = [x for x in command if 'dst=/app/uploads' in x]
                 if not mounted or 'wrong-uploads' in mounted[0]:
@@ -158,7 +160,7 @@ class CandidateUnitTests(unittest.TestCase):
         hook.capture = capture
         def metadata(docker, current_monitor, image):
             return {'Id': image, 'Config': {'Cmd': command_override or ['node', 'scripts/runtime-start.cjs'],
-                'User': '', 'Entrypoint': ['docker-entrypoint.sh'],
+                'User': image_user if image_user is not None else ('61001:61001' if user_mode == 'nonroot' else ''), 'Entrypoint': ['docker-entrypoint.sh'],
                 'Env': ['NODE_ENV=production', 'SMTP_PASSWORD=discard-image-value']}}
         def docker_json(docker, current_monitor, command):
             if '{{json .Image}}' in command:
@@ -172,11 +174,33 @@ class CandidateUnitTests(unittest.TestCase):
         def guarded(command, current_monitor, **kwargs):
             if command[1] == 'logs':
                 return 0, b'private application diagnostics\n'
+            if '-e' in command and command[-1] == m.CODE_PERMISSIONS_JS:
+                return 0, json.dumps({'schema_version': 1, 'code_permission_inventory_complete': True,
+                    'code_owned_by_root': True, 'code_write_bits_clear': True, 'code_setid_bits_clear': True,
+                    'files_checked': 3, 'directories_checked': 7, 'symlinks_checked': 1}).encode()
+            if '-e' in command and command[-1] == m.IDENTITY_JS:
+                return 0, json.dumps({'uid': observed_uid, 'gid': 61001, 'groups': [61001],
+                    'pid1_uids': [observed_uid] * 4, 'pid1_gids': [61001] * 4, 'pid1_groups': [61001],
+                    'capabilities_zero': True, 'no_new_privileges': True}).encode()
             if '-i' in command:
                 return probe_code, b'FALCON_CANDIDATE_V1 ' + json.dumps(probe).encode() + b'\n'
             return 0, b''
         context = {'database': 'postgres', 'sandbox_name': BASE, 'session_path': str(session),
                    'socket_mount_source': str(socket)}
+        if user_mode == 'nonroot':
+            @contextlib.contextmanager
+            def relay(context, current_monitor, inputs, image):
+                endpoint = inputs / 'relay-socket'
+                endpoint.mkdir(mode=0o710)
+                monitor.active.add(BASE + '-content')
+                try:
+                    yield endpoint, {'uid': 70, 'gid': 61001, 'all_capabilities_zero': True}, lambda: monitor.tick()
+                finally:
+                    if relay_cleanup_failure:
+                        raise m.CandidateError('relay-cleanup-unconfirmed')
+                    monitor.active.remove(BASE + '-content')
+                    monitor.cleanup.append(BASE + '-content')
+            hook.relay = relay
         with patch.object(m, 'image_metadata', side_effect=metadata), patch.object(m, 'docker_json', side_effect=docker_json), \
              patch.object(m, 'run_guarded', side_effect=guarded), patch.object(m.os, 'chown'), \
              patch.object(m.Path, 'read_text', return_value='1 0 8:1 / / rw - xfs /dev/fixture rw\n'):
@@ -259,7 +283,7 @@ class CandidateUnitTests(unittest.TestCase):
         node = shutil.which('node')
         if node is None:
             self.skipTest('Node is unavailable for syntax-only check')
-        for script in [m.PROBE_JS, m.GUARD_JS]:
+        for script in [m.PROBE_JS, m.GUARD_JS, m.IDENTITY_JS, m.RELAY_JS, m.CODE_PERMISSIONS_JS]:
             result = subprocess.run([node, '--check', '-'], input=script.encode(), capture_output=True)
             self.assertEqual(result.returncode, 0, 'fixed Node probe failed syntax validation')
         self.assertLessEqual(len(m.PROBE_JS.encode()), 4096)
@@ -280,6 +304,133 @@ class CandidateUnitTests(unittest.TestCase):
             self.assertEqual(monitor.active, set())
             self.assertTrue((session / 'candidate-validation/candidate-application.log').exists())
             self.assertFalse((session / 'candidate-validation/passed.json').exists())
+
+
+    def test_nonroot_mode_uses_relay_not_core_alias_and_verifies_cleanup_order(self):
+        result, error, captured, monitor, session = self.exercise_hook(user_mode='nonroot')
+        self.assertIsNone(error)
+        self.assertTrue(result['nonroot_proven'])
+        self.assertTrue(result['all_capabilities_dropped_proven'])
+        self.assertIsNone(result['test_capability_exception'])
+        self.assertEqual(result['candidate_identity']['uid'], 61001)
+        self.assertEqual(monitor.cleanup, [BASE + '-candidate', BASE + '-redis', BASE + '-content'])
+        app = next(c for c in monitor.commands if c[c.index('--name') + 1] == BASE + '-candidate')
+        self.assertNotIn('--cap-add', app)
+        socket_mounts = [x for x in app if 'dst=/restore-socket' in x]
+        self.assertEqual(len(socket_mounts), 1)
+        self.assertIn('relay-socket', socket_mounts[0])
+        self.assertNotIn('socket-anchor', socket_mounts[0])
+        self.assertIn(',readonly', socket_mounts[0])
+        self.assertEqual(stat.S_IMODE((session / 'candidate-validation/storage-boundary.json').stat().st_mode), 0o444)
+        self.assertEqual(monitor.active, set())
+
+    def test_nonroot_mode_rejects_root_image_extra_caps_wrong_actual_uid_and_failed_relay_cleanup(self):
+        for kwargs, expected in [({'image_user': ''}, 'unreviewed-entrypoint-or-uid-stage'),
+                ({'runtime_caps': ('DAC_OVERRIDE',)}, 'candidate-isolation'),
+                ({'observed_uid': 0}, 'observed-nonroot-identity-or-caps'),
+                ({'relay_cleanup_failure': True}, 'relay-cleanup-unconfirmed')]:
+            result, error, _, _, session = self.exercise_hook(user_mode='nonroot', **kwargs)
+            self.assertIsNone(result); self.assertEqual(str(error), expected)
+            self.assertFalse((session / 'candidate-validation/passed.json').exists())
+
+    def test_relay_command_has_fixed_targets_no_network_no_caps_and_only_one_fresh_rw_directory(self):
+        command = m.relay_command(['docker'], BASE + '-content', IMAGE, {'Config': {'Env': []}},
+                                  '/root-private/held-core', Path('/root-private/new-relay'))
+        self.assertEqual(command[command.index('--user') + 1], '70:61001')
+        self.assertEqual(command[command.index('--memory') + 1], '64m')
+        self.assertEqual(command[command.index('--cpus') + 1], '0.1')
+        self.assertEqual(command[command.index('--network') + 1], 'none')
+        self.assertNotIn('--cap-add', command)
+        mounts = [x for x in command if x.startswith('type=bind,')]
+        self.assertEqual(mounts, ['type=bind,src=/root-private/held-core,dst=/upstream-socket,readonly',
+                                   'type=bind,src=/root-private/new-relay,dst=/relay'])
+        self.assertNotIn('--env-file', command)
+        self.assertNotIn('DB_PASSWORD', str(command))
+        self.assertIn("upstream='/upstream-socket/.s.PGSQL.55432'", m.RELAY_JS)
+        self.assertNotIn('unlink', m.RELAY_JS)
+        self.assertNotIn('chmodSync', m.RELAY_JS.split('endpoint=')[0])
+
+    def test_observed_uid_caps_and_no_new_privileges_are_required_from_kernel_metadata(self):
+        hook = m.CandidateHook(None, None, {}, IMAGE, '4' * 64, '/fixed/runtime-role.sql', 'nonroot')
+        good = {'uid': 61001, 'gid': 61001, 'groups': [61001], 'pid1_uids': [61001] * 4,
+                'pid1_gids': [61001] * 4, 'pid1_groups': [61001], 'capabilities_zero': True, 'no_new_privileges': True}
+        for patch_value in [{}, {'uid': 0}, {'pid1_uids': [0] * 4}, {'groups': [0]},
+                            {'capabilities_zero': False}, {'no_new_privileges': False}]:
+            with patch.object(m, 'run_guarded', return_value=(0, json.dumps({**good, **patch_value}).encode())):
+                if patch_value:
+                    with self.assertRaisesRegex(m.CandidateError, 'observed-nonroot-identity-or-caps'):
+                        hook.observe_identity(['docker'], Monitor(), BASE + '-candidate', 61001, 61001)
+                else:
+                    self.assertEqual(hook.observe_identity(['docker'], Monitor(), BASE + '-candidate', 61001, 61001)['uid'], 61001)
+
+    def test_relay_endpoint_identity_rejects_swaps_links_wrong_modes_owners_and_extra_entries(self):
+        def info(mode, uid, gid, inode, links=1):
+            return types.SimpleNamespace(st_mode=mode, st_uid=uid, st_gid=gid, st_dev=1, st_ino=inode, st_nlink=links)
+        directory = info(stat.S_IFDIR | 0o710, 70, 61001, 10)
+        endpoint = info(stat.S_IFSOCK | 0o660, 70, 61001, 11)
+        args = [directory, directory, endpoint, directory, (1, 11), ['.s.PGSQL.55432']]
+        m.validate_relay_endpoint(*args)
+        for index, replacement in [(0, info(stat.S_IFDIR | 0o770, 70, 61001, 10)),
+                (0, info(stat.S_IFDIR | 0o710, 0, 61001, 10)), (1, info(stat.S_IFDIR | 0o710, 70, 61001, 12)),
+                (2, info(stat.S_IFLNK | 0o660, 70, 61001, 11)), (2, info(stat.S_IFSOCK | 0o666, 70, 61001, 11)),
+                (2, info(stat.S_IFSOCK | 0o660, 70, 70, 11)), (2, info(stat.S_IFSOCK | 0o660, 70, 61001, 11, 2)),
+                (4, (1, 12)), (5, ['.s.PGSQL.55432', 'unexpected'])]:
+            altered = list(args); altered[index] = replacement
+            with self.assertRaisesRegex(m.CandidateError, 'relay-endpoint-identity'):
+                m.validate_relay_endpoint(*altered)
+
+
+    def test_code_stat_inventory_rejects_writable_modes_even_when_fixture_root_is_readonly(self):
+        import shutil
+        import subprocess
+        node = shutil.which('node')
+        if node is None:
+            self.skipTest('Node is unavailable for synthetic metadata test')
+        harness = r"""
+const fs=require('fs'),vm=require('vm');
+const input=JSON.parse(fs.readFileSync(0,'utf8'));
+const records={
+ '/app':{kind:'d',mode:0o40555}, '/app/dist':{kind:'d',mode:0o40555,children:['main.js']},
+ '/app/dist/main.js':{kind:'f',mode:0o100444}, '/app/scripts':{kind:'d',mode:0o40555},
+ '/app/node_modules':{kind:'d',mode:0o40555,children:['alias','module.js']},
+ '/app/node_modules/alias':{kind:'l',mode:0o120777,real:'/app/node_modules/module.js'},
+ '/app/node_modules/module.js':{kind:'f',mode:0o100444}, '/app/migrations':{kind:'d',mode:0o40555},
+ '/app/data':{kind:'d',mode:0o40555}, '/app/package.json':{kind:'f',mode:0o100444}};
+if(input.patch)Object.assign(records[input.patch.path],input.patch.value);
+const info=p=>{const r=records[p];if(!r)throw Error();return {...r,uid:r.uid===undefined?0:r.uid,
+ isDirectory:()=>r.kind==='d',isFile:()=>r.kind==='f',isSymbolicLink:()=>r.kind==='l'};};
+const fake={lstatSync:info,statSync:info,realpathSync:p=>records[p].real,
+ readdirSync:p=>records[p].children||[],accessSync:()=>{throw Error('RO must not be used as mode proof');}};
+let stdout='';const process={stdout:{write:x=>stdout+=x},exitCode:0};
+vm.runInNewContext(input.code,{require:n=>n==='fs'?fake:require(n),process});
+global.process.stdout.write(JSON.stringify({code:process.exitCode,report:JSON.parse(stdout)}));
+"""
+        for patch_value in [None, {'path': '/app', 'value': {'mode': 0o40755}},
+                {'path': '/app/dist/main.js', 'value': {'mode': 0o100644}},
+                {'path': '/app/data', 'value': {'uid': 61001}},
+                {'path': '/app/dist/main.js', 'value': {'mode': 0o104444}},
+                {'path': '/app/node_modules/alias', 'value': {'real': '/app/uploads/anything'}}]:
+            result = subprocess.run([node, '-e', harness], input=json.dumps({'code': m.CODE_PERMISSIONS_JS,
+                                    'patch': patch_value}).encode(), capture_output=True)
+            self.assertEqual(result.returncode, 0)
+            report = json.loads(result.stdout)
+            self.assertEqual(report['code'], 0 if patch_value is None else 1)
+            self.assertEqual(report['report']['code_permission_inventory_complete'], patch_value is None)
+
+
+    def test_probe_jwt_timestamp_remains_epoch_seconds_when_runtime_ids_change(self):
+        import re
+        import shutil
+        import subprocess
+        node = shutil.which('node')
+        if node is None:
+            self.skipTest('Node is unavailable for timestamp check')
+        match = re.search(r'now=(Math.floor\(Date.now\(\)/[0-9]+\))', m.PROBE_JS)
+        self.assertIsNotNone(match)
+        script = 'Date.now=()=>1700000000000;console.log(' + match.group(1) + ');'
+        result = subprocess.run([node, '-e', script], capture_output=True)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout.strip(), b'1700000000')
 
 
 if __name__ == '__main__':
