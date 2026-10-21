@@ -198,11 +198,14 @@ class Provision:
             '-c log_statement=none -c log_min_error_statement=panic '
             '-c log_min_duration_statement=-1 -c log_min_duration_sample=-1 '
             '-c log_transaction_sample_rate=0')
-        arguments = ['exec','-i','-e',options,
-            '-e','PGHOST=/var/run/postgresql','-e','PGHOSTADDR=','-e','PGPORT=5432',
-            '-e','PGCONNECT_TIMEOUT=5','-e','PGPASSWORD=',
-            '-e','PGSERVICE=','-e','PGSERVICEFILE=/dev/null','-e','PGPASSFILE=/dev/null',
-            self.args.pg_container,'psql','-X','-w','-U','postgres','-d','postgres',
+        # Empty PGSERVICE is still a libpq service name. Start with no inherited
+        # environment instead of trying to clear individual connection options.
+        # Missing /usr/bin/env refuses the fresh-role check before any secret or
+        # role is created; never fall back to inherited container configuration.
+        arguments = ['exec','-i',self.args.pg_container,'/usr/bin/env','-i',
+            'PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
+            'LANG=C','PGCONNECT_TIMEOUT=5',options,'PGHOST=/var/run/postgresql',
+            'PGPORT=5432','PGPASSFILE=/dev/null','psql','-X','-w','-U','postgres','-d','postgres',
             '-v','ON_ERROR_STOP=1','-At']
         if boundary:
             arguments += ['-v','runtime_role=' + ROLE,'-v','runtime_database=postgres',

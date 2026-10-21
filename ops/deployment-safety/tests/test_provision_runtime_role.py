@@ -1,6 +1,7 @@
 """Synthetic offline tests only; never invoke Docker or a database."""
 import importlib.util
 import json
+import os
 from pathlib import Path
 import subprocess
 from types import SimpleNamespace
@@ -93,8 +94,10 @@ class ProvisionOfflineTests(unittest.TestCase):
         arguments,options=calls[0]
         self.assertEqual(options,{'data':synthetic_sql})
         self.assertNotIn('synthetic-verifier',' '.join(arguments))
-        for expected in ['PGHOST=/var/run/postgresql','PGHOSTADDR=','PGPORT=5432',
-                         'PGCONNECT_TIMEOUT=5','PGPASSWORD=','PGPASSFILE=/dev/null',
+        self.assertEqual(arguments[:5],['exec','-i','b'*64,'/usr/bin/env','-i'])
+        self.assertNotIn('-e',arguments)
+        for expected in ['PGHOST=/var/run/postgresql','PGPORT=5432',
+                         'PGCONNECT_TIMEOUT=5','PGPASSFILE=/dev/null',
                          'runtime_role=falcon_runtime','runtime_database=postgres',
                          'runtime_schema=public']:
             self.assertIn(expected,arguments)
@@ -103,6 +106,21 @@ class ProvisionOfflineTests(unittest.TestCase):
                          'log_min_error_statement=panic','log_min_duration_statement=-1',
                          'log_min_duration_sample=-1','log_transaction_sample_rate=0']:
             self.assertIn(expected,pgoptions)
+        assignments=arguments[5:arguments.index('psql')]
+        expected_environment=dict(value.split('=',1) for value in assignments)
+        self.assertEqual(set(expected_environment),{'PATH','LANG','PGCONNECT_TIMEOUT',
+            'PGOPTIONS','PGHOST','PGPORT','PGPASSFILE'})
+        # Execute the same clean-environment prefix offline with hostile inherited
+        # libpq options. No psql, Docker, database or credentials are involved.
+        inherited={**os.environ,'PGSERVICE':'','PGSERVICEFILE':'/synthetic/services',
+            'PGHOSTADDR':'192.0.2.10','PGPASSWORD':'synthetic-only',
+            'PGDATABASE':'unreviewed','PGUSER':'unreviewed'}
+        result=subprocess.run(['/usr/bin/env','-i',*assignments,'/usr/bin/env'],env=inherited,
+            capture_output=True,check=True,timeout=10)
+        observed=dict(line.split('=',1) for line in result.stdout.decode().splitlines())
+        self.assertEqual(observed,expected_environment)
+        for key in ['PGSERVICE','PGSERVICEFILE','PGHOSTADDR','PGPASSWORD','PGDATABASE','PGUSER']:
+            self.assertNotIn(key,observed)
 
     def test_scram_uses_independent_node_crypto_and_contains_no_plaintext(self):
         password, salt = 'a' * 64, bytes(range(16))
