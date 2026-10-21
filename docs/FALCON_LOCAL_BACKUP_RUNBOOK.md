@@ -105,7 +105,21 @@ Only after an explicit authorization, an operator may invoke:
   --i-confirm-disposable-restore
 ```
 
-The script also aborts if host memory drops below 1 GiB, disk/health guards fail, or 30 minutes elapse. Guards remain active while helpers emit no output. A passed SQL restore/count comparison still needs a separately planned authorized application/decryption/document walkthrough. The Python `run_restore` API accepts a trusted local `validation_hook(context, monitor)` after comparison while that one sandbox remains alive; its caller must hold the same shared lock as the CLI. The default CLI does not run a content checker, read recovery keys or claim application recovery. A separately reviewed checker may use only the private scratch socket, verified private archive/manifest copies and the minimum approved key copy, with its own fixed resource limits and aggregate-only output. Its Docker Unix-socket bind must use `context.socket_mount_source`, the held `/proc/<dispatcher-pid>/fd/<socket-dir-fd>` inode anchor, mounted read-only at the short internal `/restore-socket` path. The ordinary `context.socket_path` is for evidence only: it is too long for direct Unix-socket connections and its helper-writable path could be replaced. Run the checker as the configured restore UID/GID to traverse the private socket directory. Never reconnect a test application to production DB/mail/payments. No restore claim should imply original password hashes, encryption keys or every authenticated workflow was tested.
+The script also aborts if host memory drops below 1 GiB, disk/health guards fail, or 30 minutes elapse. Guards remain active while helpers emit no output. A passed SQL restore/count comparison still needs a separately planned authorized application/decryption/document walkthrough. The Python `run_restore` API accepts a trusted local `validation_hook(context, monitor)` after comparison while that one sandbox remains alive; its caller must hold the same shared lock as the CLI. The default CLI does not run a content checker, read recovery keys or claim application recovery. A separately reviewed checker may use only the isolated socket, verified private archive/manifest copies and the minimum approved key copy, with its own fixed resource limits and aggregate-only output. Never reconnect a test application to production DB/mail/payments. No restore claim should imply original password hashes, encryption keys or every authenticated workflow was tested.
+
+### Protected host IPC mount for the optional checker
+
+The IPC adapter requires a **Linux root dispatcher with host mount authority**, in a mount namespace whose target is visible to the Docker daemon. The PostgreSQL and Node helpers remain nonroot, with no capabilities; do not grant either helper `SYS_ADMIN` or privileged mode. Before using the adapter on another host/runtime, verify its bind, protection flags, ordinary-path Docker access and normal unmount with synthetic data only. A capability probe is not a successful backup restore.
+
+The dispatcher opens the isolated socket directory without following symlinks, verifies its expected UID/private permissions and socket endpoint, and holds its directory FD throughout the check. Docker/runc may reject a direct host `/proc/<dispatcher-pid>/fd/<fd>` bind source. The dispatcher therefore uses literal Linux `mount(2)` calls through Python's standard-library `ctypes`, avoiding utility path canonicalization that could turn the held FD back into a replaceable pathname.
+
+A new target is created under `<restore-session>/ipc-anchors/socket-<uuid>`, outside the PostgreSQL helper's writable scratch bind. Every target ancestor must be root-owned, not group/other writable, and traversed with `O_NOFOLLOW`; the anchor parent is 0700. The dispatcher makes one **nonrecursive** bind from the held socket FD, sets private propagation, then applies `MS_REMOUNT | MS_BIND | MS_RDONLY | MS_NOSUID | MS_NODEV | MS_NOEXEC`. It verifies the target device/inode, mount ID, protection flags, private propagation and absence of child mounts before exposing it. The mounted directory naturally reflects the socket directory's UID/mode: never chmod/chown that alias, which would change the isolated PostgreSQL source inode. These bind flags do not make PostgreSQL's separate writable source alias read-only.
+
+The reviewed Node command uses only `context.socket_mount_source`, now the **protected ordinary host mountpoint**, as its read-only bind to the short internal `/restore-socket` path. Run it as the configured restore UID/GID (the reviewed wrapper requires 70:70). `context.socket_path` remains evidence only: its helper-writable pathname can be replaced and its full host path is too long for direct Unix-socket connections. There is no fallback to that path, a production socket, a host network or a published port.
+
+After the checker exits and its helper cleanup finishes, the dispatcher rechecks the same mount ID/device/inode and absence of child mounts, and requires a successful scoped Docker query confirming that the exact generated checker container is absent. It performs only ordinary `umount2(target, 0)`, then confirms the mountpoint is absent from mount metadata. Empty target directories and private lifecycle JSON files remain; no backup, scratch file or key is deleted. Root-owned 0600 events beside the target record `mount-requested`, `mounted`, `unmounted`, `not-mounted` or `cleanup-unproven` status, the anchor path, source inode/device and mount ID when known. Their filenames end in `-started.json`, `-mounted.json`, `-unmounted.json`, `-not-mounted.json` or `-cleanup-failed.json` respectively.
+
+An unexpected mount identity, child mount, unconfirmed consumer cleanup or failed/busy unmount makes the result **unproven**. The adapter retains the target and a private `cleanup-unproven` event for root review; it never uses forced/lazy unmount, a path fallback or recursive deletion. Under the shared lock, inspect only that generated checker and recorded anchor/mount identity before any targeted recovery. Do not recurse into or remove a live or unconfirmed mount. Preserve existing sets, recovery keys and scratch data; their deletion still requires separate explicit user authorization. Keep raw SQL/error logs on the server because they may contain restored values. This lifecycle alone does not establish final application recovery.
 
 ## Recovery and review limits
 
@@ -127,7 +141,9 @@ existing JWT fallback) and writes a new private key input. The full environment
 and production database credentials are never mounted into a test helper. The
 minimal application key is mounted read-only into the Node helper, separately
 from the PostgreSQL helper. Test evidence and those private inputs remain under
-the owner-only restore session directory on the same server; no cleanup runs.
+the owner-only restore session directory on the same server; no input or scratch
+files are automatically deleted. The temporary IPC mount follows the verified
+cleanup lifecycle above.
 
 ```sh
 python3 /opt/falcon-local-backup/recovery_validation.py \
@@ -139,11 +155,13 @@ python3 /opt/falcon-local-backup/recovery_validation.py \
 ```
 
 The Node helper has no network, published ports, production mounts or Docker
-socket. Its only database connection uses the held-inode isolated Unix socket.
+socket. Its only database connection uses the isolated Unix socket through the
+protected host IPC mount described above.
 Its memory/swap cap is 128 MiB, CPU cap 0.25 and Node heap cap 64 MiB; the
-PostgreSQL helper retains its separate 256 MiB / 0.5 CPU cap. Each is removed if
-its resource/application guards fail; the retained backup and scratch files
-are not deleted.
+PostgreSQL helper retains its separate 256 MiB / 0.5 CPU cap. Cleanup attempts to
+remove each generated helper on completion or failure. Unconfirmed Node cleanup
+remains unproven and blocks IPC unmount; retained backup and scratch files are
+not deleted.
 
 A zero process exit alone does not establish recovery. Read the explicit
 `content_checks_passed`, SQL/count flags and private per-database reports.
