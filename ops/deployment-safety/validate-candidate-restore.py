@@ -387,6 +387,15 @@ function request(path,token){return new Promise((resolve,reject)=>{
 """
 
 
+def recovery_application_probe(directory):
+    if not re.fullmatch(r'\.falcon-recovery-proof-[0-9a-f]{32}', directory):
+        fail('recovery-probe-directory')
+    original = "const key='candidate-validation/synthetic-'+crypto.randomBytes(8).toString('hex')+'.txt';"
+    if PROBE_JS.count(original) != 1:
+        fail('recovery-probe-template')
+    return PROBE_JS.replace(original, "const key='" + directory + "/application.txt';")
+
+
 def relay_command(docker, name, image, metadata, upstream, endpoint):
     command = base_run(docker, name, image, memory='64m', cpus='0.1', user='70:61001', remove=False)
     command += image_environment_resets(metadata, {'NODE_OPTIONS'})
@@ -397,13 +406,46 @@ def relay_command(docker, name, image, metadata, upstream, endpoint):
 
 
 class CandidateHook:
-    def __init__(self, restore, backup, config, image, redis_source, role_sql, user_mode='root'):
+    def __init__(self, restore, backup, config, image, redis_source, role_sql, user_mode='root',
+                 recover_uploads=False, run_id=None):
         self.restore, self.backup, self.config = restore, backup, config
         self.image, self.redis_source, self.role_sql = image, redis_source, role_sql
         if user_mode not in ('root', 'nonroot'):
             fail('candidate-user-mode')
         self.user_mode = user_mode
+        if recover_uploads and (user_mode != 'nonroot' or not isinstance(run_id, str) or
+                not re.fullmatch(r'[0-9]{8}T[0-9]{6}Z-[0-9a-f]{32}', run_id)):
+            fail('recovered-uploads-require-nonroot-and-finalized-run')
+        self.recover_uploads, self.run_id = recover_uploads, run_id
         self.reports = []
+
+    def recovered_upload_probe(self, context, monitor, inputs, image, mode, *, after=False):
+        users = {'api': '61001:61001', 'verify': '61001:61001',
+                 'backup': '999:0', 'backup-ro': '999:0', 'outsider': '999:999'}
+        if mode not in users:
+            fail('recovered-upload-probe-mode')
+        script = Path(__file__).resolve().with_name('recovery_upload_probe.cjs')
+        os.close(self.backup.trusted_file(str(script)))
+        name = checked_name(context['sandbox_name'] + '-permissions')
+        command = base_run(self.backup.DOCKER, name, self.image, memory='128m',
+                           cpus='0.25', user=users[mode])
+        command += image_environment_resets(image)
+        command += mount_arg(inputs / 'uploads', '/app/uploads', mode == 'backup-ro')
+        command += mount_arg(inputs / 'recovery-files.json', '/checks/recovery-files.json')
+        command += mount_arg(script, '/checks/recovery_upload_probe.cjs')
+        command += ['--entrypoint', 'node', self.image, '--max-old-space-size=64',
+                    '/checks/recovery_upload_probe.cjs', mode]
+        if after:
+            command += ['after-application']
+        code, data = self.capture(command, monitor, name)
+        private_write(inputs, 'recovery-permission-' + ('post-application-' if after else '') + mode + '.json', data)
+        value = decode_json(data)
+        if (code or not isinstance(value, dict) or set(value) != {'ok', 'mode', 'original_files', 'synthetic_files'} or
+                value.get('ok') is not True or value.get('mode') != mode or
+                type(value.get('original_files')) is not int or value['original_files'] < 1 or
+                value.get('synthetic_files') != (4 if after else 3)):
+            fail('recovered-upload-permission-probe')
+        return value
 
     def capture(self, command, monitor, name, *, allow_failure=False):
         bounded = DeadlineMonitor(monitor, 120)
@@ -533,6 +575,7 @@ class CandidateHook:
             os.mkdir(str(inputs / child), 0o700)
         stage = 'image-review'
         relay_stack = contextlib.ExitStack()
+        recovered = None
         report = {'schema_version': 1, 'candidate_image_id': self.image,
                   'production_connection': False, 'production_credentials_mounted': False,
                   'production_uploads_mounted': False, 'external_network': False,
@@ -587,9 +630,32 @@ class CandidateHook:
                 stage = 'relay-start'
                 socket_source, identity, check_endpoint = relay_stack.enter_context(self.relay(context, monitor, inputs, image))
                 report['relay_identity'] = identity
-                for child in ('uploads', 'wrong-uploads'):
+                for child in (('wrong-uploads',) if self.recover_uploads else ('uploads', 'wrong-uploads')):
                     os.chown(str(inputs / child), 61001, 61001)
                     os.chmod(str(inputs / child), 0o700)
+            if self.recover_uploads:
+                stage = 'recovered-upload-permissions'
+                module_path = Path(__file__).resolve().with_name('restore_upload_permissions.py')
+                os.close(self.backup.trusted_file(str(module_path)))
+                import importlib.util
+                spec = importlib.util.spec_from_file_location('reviewed_upload_recovery', module_path)
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+                recovered = module.RecoveryUploads(self.backup, self.restore, self.config, self.run_id)
+                report['restored_uploads'] = recovered.prepare(context, monitor, inputs, inputs / 'uploads')
+                probe_directory = '.falcon-recovery-proof-' + uuid.uuid4().hex
+                write_json(inputs, 'recovery-files.json', {'schema_version': 1,
+                    'files': recovered.original_files,
+                    'probe_directory': probe_directory}, 0o444)
+                metadata_fd = os.open(str(inputs / 'recovery-files.json'), os.O_RDONLY | os.O_NOFOLLOW)
+                try:
+                    os.fchmod(metadata_fd, 0o444)
+                finally:
+                    os.close(metadata_fd)
+                report['recovered_upload_permission_probes'] = {}
+                for mode in ('api', 'backup', 'backup-ro', 'outsider'):
+                    report['recovered_upload_permission_probes'][mode] = self.recovered_upload_probe(
+                        context, monitor, inputs, image, mode)
             mountinfo = Path('/proc/self/mountinfo').read_text()
             boundary = {'schema_version': 1,
                 'upload_mounts': [boundary_entry(inputs / 'uploads', '/app/uploads', mountinfo)],
@@ -697,7 +763,8 @@ class CandidateHook:
                     check_endpoint()
                     stage = 'candidate-auth-crud-upload'
                     code, data = run_guarded(docker + ['exec', '-i', '--workdir', '/app', name, 'node', '-'], monitor,
-                                             data=PROBE_JS.encode(), timeout=60)
+                                             data=(recovery_application_probe(probe_directory) if recovered is not None
+                                                   else PROBE_JS).encode(), timeout=60)
                     private_write(inputs, 'candidate-probe.log', data)
                     probe = probe_report(data)
                     required = ['execution_complete', 'actual_runtime_login', 'business_crud', 'ddl_and_ledger_denials',
@@ -706,6 +773,13 @@ class CandidateHook:
                             probe.get('schema_version') != 1 or any(probe.get(key) is not True for key in required)):
                         fail('candidate-probe-incomplete')
                     report['checks'] = probe
+                    if recovered is not None:
+                        stage = 'recovered-upload-post-application-integrity'
+                        report['recovered_upload_post_application'] = recovered.verify(monitor)
+                        for mode in ('verify', 'backup', 'backup-ro'):
+                            report['recovered_upload_permission_probes']['post-application-' + mode] = (
+                                self.recovered_upload_probe(context, monitor, inputs, image, mode, after=True))
+                        report['restored_upload_permission_policy_proven'] = True
                 if not monitor.container_absent(name):
                     fail('candidate-cleanup-unconfirmed')
             if not monitor.container_absent(redis_name):
@@ -739,6 +813,8 @@ def main():
     parser.add_argument('--approval-id', required=True)
     parser.add_argument('--candidate-image', required=True)
     parser.add_argument('--candidate-user-mode', choices=('root', 'nonroot'), default='root')
+    parser.add_argument('--restore-upload-permissions', action='store_true',
+                        help='Reconstruct the reviewed ACL policy only in this new disposable uploads tree')
     parser.add_argument('--redis-source-container', required=True, help='Existing full container ID; read only image observation')
     parser.add_argument('--i-confirm-disposable-restore', action='store_true', required=True)
     args = parser.parse_args()
@@ -765,7 +841,9 @@ def main():
             fail('reviewed-restore-scope')
         role_sql = Path(__file__).resolve().with_name('runtime-role.sql')
         os.close(backup.trusted_file(str(role_sql)))
-        hook = CandidateHook(restore, backup, config, args.candidate_image, args.redis_source_container, str(role_sql), args.candidate_user_mode)
+        started = time.monotonic()
+        hook = CandidateHook(restore, backup, config, args.candidate_image, args.redis_source_container,
+                             str(role_sql), args.candidate_user_mode, args.restore_upload_permissions, args.run_id)
         result = restore.run_restore(config, args.run_id, args.approval_id, hook)
         if len(hook.reports) != 1 or not hook.reports[0].get('candidate_checks_passed'):
             fail('candidate-checks-incomplete')
@@ -780,6 +858,9 @@ def main():
             'test_capability_exception': hook.reports[0]['test_capability_exception'],
             'all_capabilities_dropped_proven': hook.reports[0]['all_capabilities_dropped_proven'],
             'code_permissions_verified': bool(hook.reports[0].get('code_permissions', {}).get('code_permission_inventory_complete')),
+            'restored_upload_permission_policy_proven': bool(hook.reports[0].get('restored_upload_permission_policy_proven')),
+            'restored_upload_files_checked': (hook.reports[0].get('recovered_upload_post_application') or {}).get('original_files_verified', 0),
+            'isolated_recovery_seconds': round(time.monotonic() - started, 1),
             'production_readonly_root_proven': False, 'production_no_new_privileges_proven': False,
             'production_restore': False, 'full_application_recovery_proven': False}))
 

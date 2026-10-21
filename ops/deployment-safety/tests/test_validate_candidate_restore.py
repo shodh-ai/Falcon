@@ -432,6 +432,57 @@ global.process.stdout.write(JSON.stringify({code:process.exitCode,report:JSON.pa
         self.assertEqual(result.returncode, 0)
         self.assertEqual(result.stdout.strip(), b'1700000000')
 
+    def test_recovered_uploads_require_nonroot_and_finalized_backup(self):
+        run = '20261021T124757Z-' + 'a' * 32
+        for user, selected in [('root', run), ('nonroot', None), ('nonroot', '../production')]:
+            with self.assertRaisesRegex(m.CandidateError, 'recovered-uploads-require'):
+                m.CandidateHook(None, None, {}, IMAGE, '4' * 64, '/fixed/roles.sql', user, True, selected)
+        m.CandidateHook(None, None, {}, IMAGE, '4' * 64, '/fixed/roles.sql', 'nonroot', True, run)
+
+    def test_recovery_application_upload_uses_one_exact_predeclared_synthetic_file(self):
+        selected = '.falcon-recovery-proof-' + 'a' * 32
+        script = m.recovery_application_probe(selected)
+        self.assertIn("const key='" + selected + "/application.txt';", script)
+        self.assertNotIn('candidate-validation/synthetic-', script)
+        self.assertIn('FALCON disposable candidate upload check', script)
+        self.assertLessEqual(len(script.encode()), 4096)
+        for invalid in ['../production', selected + '/child', selected.upper()]:
+            with self.assertRaises(m.CandidateError):
+                m.recovery_application_probe(invalid)
+
+    def test_recovered_probe_matrix_has_only_scratch_mounts_and_distinct_post_evidence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            inputs = Path(directory)
+            backup = types.SimpleNamespace(DOCKER=['docker'], trusted_file=lambda path: os.open(path, os.O_RDONLY))
+            hook = m.CandidateHook(None, backup, {}, IMAGE, '4' * 64, '/fixed/roles.sql', 'nonroot')
+            observed = []
+            def capture(command, monitor, name):
+                observed.append(command)
+                mode = command[-2] if command[-1] == 'after-application' else command[-1]
+                after = command[-1] == 'after-application'
+                return 0, json.dumps(dict(ok=True, mode=mode, original_files=195,
+                                          synthetic_files=4 if after else 3)).encode()
+            hook.capture = capture
+            image = {'Config': {'Env': ['SMTP_PASSWORD=must-not-copy']}}
+            for mode in ('api', 'backup', 'backup-ro', 'outsider'):
+                hook.recovered_upload_probe({'sandbox_name': BASE}, Monitor(), inputs, image, mode)
+            for mode in ('verify', 'backup', 'backup-ro'):
+                hook.recovered_upload_probe({'sandbox_name': BASE}, Monitor(), inputs, image, mode, after=True)
+            self.assertEqual(len(list(inputs.glob('recovery-permission-*.json'))), 7)
+            for command in observed:
+                self.assertNotIn('must-not-copy', str(command))
+                self.assertIn('none', command)
+                self.assertIn('--read-only', command)
+                mounts = [command[i+1] for i, value in enumerate(command) if value == '--mount']
+                self.assertEqual(len(mounts), 3)
+                upload = next(item for item in mounts if 'dst=/app/uploads' in item)
+                self.assertIn('src=' + str(inputs / 'uploads'), upload)
+                mode = command[-2] if command[-1] == 'after-application' else command[-1]
+                self.assertEqual('readonly' in upload, mode == 'backup-ro')
+            hook.capture = lambda *args: (0, b'{"ok":true,"mode":"backup","original_files":195,"synthetic_files":3,"extra":true}')
+            with self.assertRaisesRegex(m.CandidateError, 'recovered-upload-permission-probe'):
+                hook.recovered_upload_probe({'sandbox_name': BASE}, Monitor(), inputs, image, 'verify')
+
 
 if __name__ == '__main__':
     unittest.main()
