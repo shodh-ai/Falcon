@@ -28,6 +28,15 @@ describe('StaffProfileFreezeGate', () => {
     expect(await screen.findByText('Mark attendance')).toBeInTheDocument();
   });
 
+  it('opens the prefilled recovery form for an initial-review pilot, without resetting onboarding', async () => {
+    mocks.onboardingStatus = 'PENDING_ADMIN_APPROVAL';
+    mocks.get.mockResolvedValue({ review_id: 'recovery', status: 'RETURNED_FOR_CORRECTION', source: 'INITIAL', recovery_required: true,
+      profile: { staff_mobile: '9876543210' }, required_fields: ['staff_mobile'], requested_docs: [] });
+    render(<StaffProfileFreezeGate initialReview><p>Old waiting room</p></StaffProfileFreezeGate>);
+    expect(await screen.findByDisplayValue('9876543210')).toBeInTheDocument();
+    expect(screen.queryByText('Old waiting room')).not.toBeInTheDocument();
+  });
+
   it('does not falsely freeze an account when the review lookup is unavailable', async () => {
     mocks.get.mockRejectedValue(new Error('Review service unavailable'));
     render(<StaffProfileFreezeGate><button>Mark attendance</button></StaffProfileFreezeGate>);

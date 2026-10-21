@@ -6,10 +6,12 @@ import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { FalconLoader } from '@/components/brand/FalconLoader';
+import { StaffProfileRecoveryForm, type RecoveryReview } from './StaffProfileRecoveryForm';
 
-type Review = {
+type Review = RecoveryReview & {
   status: string;
   source?: string;
+  recovery_required?: boolean;
   requested_fields?: string[];
   requested_docs?: string[];
   corrected_fields?: string[];
@@ -33,7 +35,7 @@ const LABELS: Record<string, string> = {
 
 export function StaffProfileFreezeGate({ children, initialReview = false }: { children: ReactNode; initialReview?: boolean }) {
   const api = useAuthedApi();
-  const { user, logout } = useAuth();
+  const { user, logout, refreshUser } = useAuth();
   const [review, setReview] = useState<Review | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -41,15 +43,20 @@ export function StaffProfileFreezeGate({ children, initialReview = false }: { ch
   const [values, setValues] = useState<Record<string, string>>({});
   const [uploaded, setUploaded] = useState<string[]>([]);
   const needsReview = user?.onboarding_status === 'COMPLETED' ||
-    (initialReview && user?.onboarding_status === 'PENDING_ADMIN_APPROVAL');
+    (initialReview && ['PENDING_ADMIN_APPROVAL', 'PENDING_DOCUMENTS'].includes(user?.onboarding_status ?? ''));
 
   const load = useCallback(() => {
     if (!needsReview) return Promise.resolve();
     return api.get<Review>('/api/staff/profile-review/me')
-      .then((result) => { setReview(result); setError(''); })
+      .then(async (result) => {
+        setReview(result); setError('');
+        if (result.recovery_required && result.status === 'APPROVED' && user?.onboarding_status !== 'COMPLETED') {
+          await refreshUser?.();
+        }
+      })
       .catch(() => setError('We could not check your HR verification status. Please retry.'))
       .finally(() => setLoading(false));
-  }, [api, needsReview]);
+  }, [api, needsReview, refreshUser, user?.onboarding_status]);
 
   useEffect(() => {
     void load();
@@ -59,7 +66,7 @@ export function StaffProfileFreezeGate({ children, initialReview = false }: { ch
 
   if (!needsReview) return <>{children}</>;
   if (loading) return <FalconLoader label="Checking HR verification…" className="min-h-screen" />;
-  const frozen = review?.source === 'PHARMACY_RECHECK' &&
+  const frozen = (review?.source === 'PHARMACY_RECHECK' || review?.recovery_required) &&
     ['PENDING_HR', 'RETURNED_FOR_CORRECTION'].includes(review.status);
   // The server enforces an active freeze on every business API request. If this
   // status request fails before a review was loaded, do not freeze unrelated
@@ -67,6 +74,9 @@ export function StaffProfileFreezeGate({ children, initialReview = false }: { ch
   // Keep an already-confirmed freeze in place across transient refresh errors.
   const initialCorrection = initialReview && review?.source === 'INITIAL' && review.status === 'RETURNED_FOR_CORRECTION';
   if (!frozen && !initialCorrection) return <>{children}</>;
+  if (review?.recovery_required && review.status === 'RETURNED_FOR_CORRECTION') {
+    return <StaffProfileRecoveryForm key={review.review_id} review={review} identityLabel={[user?.name, user?.email].filter(Boolean).join(' · ')} onSubmitted={load} onSignOut={logout} />;
+  }
 
   const correct = async () => {
     const fields = review?.requested_fields ?? [];
@@ -148,7 +158,7 @@ export function StaffProfileFreezeGate({ children, initialReview = false }: { ch
         )}
         {review?.status === 'PENDING_HR' && (
           <p className="mt-5 rounded-lg bg-blue-50 p-3 text-sm text-blue-950">
-            No action is needed from you yet. HR will either approve the profile or ask for specific corrections.
+            {review?.recovery_required ? 'Your profile and documents have been submitted to HR. HR will check them and either approve your account or request specific corrections.' : 'No action is needed from you yet. HR will either approve the profile or ask for specific corrections.'}
           </p>
         )}
         {error && <p role="alert" className="mt-4 text-sm text-red-700">{error}</p>}

@@ -29,8 +29,8 @@ export class StaffProfileFreezeInterceptor implements NestInterceptor {
        JOIN users u ON u.user_id = v.user_id AND u.tenant_id = v.tenant_id
        WHERE v.tenant_id = $1 AND v.user_id = $2
          AND v.status IN ('PENDING_HR', 'RETURNED_FOR_CORRECTION')
-         AND v.source = 'PHARMACY_RECHECK'
-         AND u.onboarding_status = 'COMPLETED'
+         AND ((v.source = 'PHARMACY_RECHECK' AND u.onboarding_status = 'COMPLETED')
+              OR v.recovery_required = true)
        LIMIT 1`,
       [user.tenant_id, user.user_id],
     )).pipe(mergeMap((rows: unknown[]) => {

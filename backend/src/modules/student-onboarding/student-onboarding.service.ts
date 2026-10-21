@@ -691,6 +691,7 @@ export class StudentOnboardingService {
     expectedKind?: OnboardingPortalKind,
     expectedReviewId?: string,
     detailsOnly?: { reviewedFields: string[]; reason: string },
+    recoveryApproval?: { reviewedFields: string[]; reviewedDocuments: string[]; revision: number },
   ) {
     await this.assertVerificationCampus(scopeUser, targetUserId);
     const tenant = this.resolveTenantId(tenantId);
@@ -729,6 +730,7 @@ export class StudentOnboardingService {
       const staffReview = kind === 'staff'
         ? await this.staffReviews?.activeReview(tenant, targetUserId, qr, true)
         : null;
+      let recoveryEvidence: unknown = null;
       if (kind === 'staff') {
         const roles = [...(scopeUser?.roles ?? []), scopeUser?.role ?? ''];
         if (!roles.some((role) => role.toLowerCase() === 'hradmin')) {
@@ -750,6 +752,13 @@ export class StudentOnboardingService {
         const snapshot = await this.staffReviews!.snapshot(tenant, targetUserId, qr);
         if (snapshot.hash !== staffReview.submitted_snapshot_hash) {
           throw new ConflictException('Staff profile changed since submission; resubmit for HR review');
+        }
+        if (staffReview.recovery_required) {
+          if (deferDocuments || !recoveryApproval) throw new BadRequestException('Recovery profiles require HR inspection of both details and documents');
+          if (recoveryApproval.revision !== staffReview.revision) throw new ConflictException('Recovery review changed; refresh before approving');
+          this.staffReviews!.assertAllDetailsReviewed(recoveryApproval.reviewedFields);
+          this.staffReviews!.assertAllDocumentsReviewed(recoveryApproval.reviewedDocuments);
+          recoveryEvidence = await this.staffReviews!.inspectRecoveryDocuments(tenant, snapshot.profile, snapshot.user.phone, snapshot.documentManifest);
         }
         const missing = getRequiredDocTypes('staff').filter(
           (docType) => !snapshot.documentManifest.some((doc: { doc_type: string; file_path: string }) =>
@@ -792,8 +801,9 @@ export class StudentOnboardingService {
         );
         await this.staffReviews!.appendEvent(
           qr, { ...staffReview!, revision: staffReview!.revision + 1 },
-          deferDocuments ? 'PROFILE_APPROVED_DOCUMENTS_DEFERRED' : 'APPROVED', actor?.userId ?? scopeUser?.user_id ?? null,
-          deferDocuments ? JSON.stringify({ reason: detailsOnly!.reason.trim(), reviewed_fields: detailsOnly!.reviewedFields }) : null,
+          staffReview!.recovery_required ? 'RECOVERY_APPROVED' : deferDocuments ? 'PROFILE_APPROVED_DOCUMENTS_DEFERRED' : 'APPROVED', actor?.userId ?? scopeUser?.user_id ?? null,
+          recoveryEvidence ? JSON.stringify({ inspected_documents: recoveryEvidence, reviewed_fields: recoveryApproval!.reviewedFields })
+            : deferDocuments ? JSON.stringify({ reason: detailsOnly!.reason.trim(), reviewed_fields: detailsOnly!.reviewedFields }) : null,
         );
       } else {
         await qr.query(

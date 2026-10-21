@@ -15,6 +15,7 @@ import { CampusScopeService, type ScopedAuthUser } from '../../common/campus-sco
 import { STAFF_ONBOARDING_DOC_TYPES } from './onboarding-portal.util';
 import { StaffProfileReviewNotificationService } from './staff-profile-review-notification.service';
 import { ObjectStorageService } from '../../storage/object-storage.service';
+import { assertRecoveryComplete, invalidRecoveryFields, recoveryValues, STAFF_RECOVERY_REQUIRED_FIELDS } from './staff-profile-recovery.util';
 
 type Db = Pick<DataSource, 'query'> | Pick<QueryRunner, 'query'>;
 type Review = {
@@ -29,6 +30,7 @@ type Review = {
   return_reason: string | null;
   submitted_snapshot_hash: string;
   documents_deferred?: boolean;
+  recovery_required?: boolean;
 };
 
 const PROFILE_FIELDS = new Set([
@@ -139,7 +141,7 @@ export class StaffProfileReviewService {
   async me(tenantId: string, userId: string) {
     const rows = await this.db.query(
       `SELECT review_id, source, status, revision, requested_fields,
-              requested_docs, return_reason, updated_at, documents_deferred,
+              requested_docs, return_reason, updated_at, documents_deferred, recovery_required,
               CASE WHEN status <> 'APPROVED' THEN 'NOT_REVIEWED'
                 WHEN documents_deferred AND NOT EXISTS (
                   SELECT 1 FROM staff_profile_document_verifications dv
@@ -160,12 +162,18 @@ export class StaffProfileReviewService {
            AND event_type IN ('BEFORE_PROFILE_CORRECTION', 'BEFORE_DOCUMENT_CORRECTION')
            AND revision > COALESCE((
              SELECT MAX(revision) FROM staff_profile_review_events
-             WHERE review_id = $1 AND event_type = 'RETURNED'
+             WHERE review_id = $1 AND event_type IN ('RETURNED', 'RECOVERY_OPENED')
            ), 0)`,
         [review.review_id, tenantId],
       ) : [];
+    const recovery = review.recovery_required ? await this.snapshot(tenantId, userId) : null;
     return {
       ...review,
+      ...(recovery ? {
+        profile: recoveryValues(recovery.profile, recovery.user.phone),
+        required_fields: STAFF_RECOVERY_REQUIRED_FIELDS,
+        missing_fields: invalidRecoveryFields(recovery.profile, recovery.user.phone),
+      } : {}),
       corrected_fields: [...new Set(edits.filter((event: { event_type: string }) =>
         event.event_type === 'BEFORE_PROFILE_CORRECTION').flatMap((event: { reason: string | null }) =>
         String(event.reason ?? '').split(',').filter(Boolean)))],
@@ -181,7 +189,7 @@ export class StaffProfileReviewService {
       `SELECT v.review_id, v.user_id, v.status, v.source, v.revision,
               v.created_at, v.updated_at, u.name, u.official_email,
               u.onboarding_status, u.dept_id, d.dept_name, r.role_name,
-              v.documents_deferred,
+              v.documents_deferred, v.recovery_required,
               CASE WHEN v.status <> 'APPROVED' THEN 'NOT_REVIEWED'
                 WHEN v.documents_deferred AND dv.verification_id IS NULL THEN 'PENDING'
                 ELSE 'VERIFIED' END AS document_review_status
@@ -403,6 +411,105 @@ export class StaffProfileReviewService {
       events, email_delivery: emailDelivery ?? null };
   }
 
+  // Explicit operational activation only. No migration or login may activate a
+  // cohort. Preview/hash + recoverable backup are required even for the pilot.
+  async activateRecovery(tenantId: string, userId: string, expectedHash: string, backupReference: string, actorId: string | null) {
+    if (!/^[a-f0-9]{64}$/.test(expectedHash) || !backupReference?.trim()) {
+      throw new BadRequestException('Exact profile snapshot and verified backup reference are required');
+    }
+    const qr = this.db.createQueryRunner();
+    await qr.connect();
+    await qr.startTransaction();
+    try {
+      await qr.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`staff-recovery:${tenantId}:${userId}`]);
+      const [person] = await qr.query(
+        `SELECT u.user_id FROM users u JOIN departments d ON d.dept_id = u.dept_id
+         JOIN schools s ON s.school_id = d.school_id
+         WHERE u.tenant_id = $1 AND u.user_id = $2 AND u.deleted_at IS NULL
+           AND u.is_active = true AND d.deleted_at IS NULL AND s.deleted_at IS NULL
+           AND lower(d.dept_name) LIKE '%pharm%' FOR UPDATE OF u`, [tenantId, userId],
+      );
+      if (!person) throw new NotFoundException('Active Pharmacy staff account not found');
+      let review = await this.activeReview(tenantId, userId, qr, true);
+      if (review?.recovery_required) {
+        await qr.commitTransaction();
+        return { review_id: review.review_id, replayed: true };
+      }
+      const snapshot = await this.snapshot(tenantId, userId, qr);
+      if (snapshot.hash !== expectedHash) throw new ConflictException('Profile changed after recovery preview');
+      const missingDocuments: string[] = [];
+      for (const type of STAFF_ONBOARDING_DOC_TYPES) {
+        const doc = snapshot.documentManifest.find((item: { doc_type: string }) => item.doc_type === type);
+        if (!doc?.file_path) { missingDocuments.push(type); continue; }
+        try { await this.documentDigest(tenantId, String(doc.file_path), type); }
+        catch { missingDocuments.push(type); }
+      }
+      const [prior] = await qr.query(
+        `SELECT review_id FROM staff_profile_reviews WHERE tenant_id = $1 AND user_id = $2
+         AND status = 'APPROVED' ORDER BY created_at DESC LIMIT 1`, [tenantId, userId],
+      );
+      if (!review) {
+        await this.open(tenantId, userId, snapshot.user.onboarding_status === 'COMPLETED' ? 'PHARMACY_RECHECK' : 'INITIAL', actorId, qr);
+        review = await this.activeReview(tenantId, userId, qr, true);
+      }
+      if (!review) throw new ConflictException('Cannot open recovery review');
+      const previousEdits = review.status === 'RETURNED_FOR_CORRECTION' ? await qr.query(
+        `SELECT event_type, reason FROM staff_profile_review_events
+         WHERE tenant_id = $1 AND review_id = $2
+           AND event_type IN ('BEFORE_PROFILE_CORRECTION', 'BEFORE_DOCUMENT_CORRECTION')
+           AND revision > COALESCE((SELECT MAX(revision) FROM staff_profile_review_events
+             WHERE tenant_id = $1 AND review_id = $2 AND event_type = 'RETURNED'), 0)`,
+        [tenantId, review.review_id],
+      ) : [];
+      const completedFields = new Set(previousEdits.filter((event: { event_type: string }) => event.event_type === 'BEFORE_PROFILE_CORRECTION')
+        .flatMap((event: { reason: string }) => String(event.reason ?? '').split(',')));
+      const completedDocs = new Set(previousEdits.filter((event: { event_type: string }) => event.event_type === 'BEFORE_DOCUMENT_CORRECTION')
+        .map((event: { reason: string }) => event.reason));
+      const requestedFields = [...new Set([...review.requested_fields.filter(field => !completedFields.has(field)), ...invalidRecoveryFields(snapshot.profile, snapshot.user.phone)])];
+      const requestedDocs = [...new Set([...review.requested_docs.filter(type => !completedDocs.has(type)), ...missingDocuments])];
+      const reason = 'Please confirm your saved profile, complete important missing details and replace the listed documents. Existing data and earlier decisions are preserved.'
+        + (review.return_reason ? ` Existing HR correction note: ${review.return_reason}` : '');
+      await qr.query(
+        `UPDATE staff_profile_reviews SET recovery_required = true,
+           supersedes_review_id = $3, status = 'RETURNED_FOR_CORRECTION',
+           requested_fields = $4, requested_docs = $5, return_reason = $6,
+           revision = revision + 1, updated_at = NOW()
+         WHERE tenant_id = $1 AND review_id = $2`,
+        [tenantId, review.review_id, prior?.review_id ?? null, requestedFields, requestedDocs, reason],
+      );
+      await this.appendEvent(qr, { ...review, revision: review.revision + 1 }, 'RECOVERY_OPENED', actorId, reason);
+      await qr.query(
+        `INSERT INTO staff_profile_recovery_activations
+         (tenant_id, user_id, review_id, original_snapshot_hash, backup_reference, reason, activated_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+        [tenantId, userId, review.review_id, expectedHash, backupReference.trim(), reason, actorId],
+      );
+      await qr.commitTransaction();
+      return { review_id: review.review_id, required_fields: requestedFields, required_documents: requestedDocs, replayed: false };
+    } catch (error) { await qr.rollbackTransaction(); throw error; }
+    finally { await qr.release(); }
+  }
+
+  async inspectRecoveryDocuments(tenantId: string, profile: Record<string, unknown>, phone: unknown, documents: Array<{ doc_type: string; file_path: unknown }>) {
+    assertRecoveryComplete(profile, phone);
+    const manifest: Array<{ doc_type: string; file_path: string; sha256: string; size: number }> = [];
+    for (const type of STAFF_ONBOARDING_DOC_TYPES) {
+      const doc = documents.find((item) => item.doc_type === type);
+      if (!doc?.file_path) throw new BadRequestException(`Upload the required ${type} document`);
+      const path = String(doc.file_path);
+      manifest.push({ doc_type: type, file_path: path, ...await this.documentDigest(tenantId, path, type) });
+    }
+    return manifest;
+  }
+
+  assertAllDocumentsReviewed(documents: unknown) {
+    if (!Array.isArray(documents) || documents.length !== STAFF_ONBOARDING_DOC_TYPES.length ||
+        new Set(documents).size !== STAFF_ONBOARDING_DOC_TYPES.length ||
+        documents.some((type) => !(STAFF_ONBOARDING_DOC_TYPES as readonly unknown[]).includes(type))) {
+      throw new BadRequestException('Confirm that every required document has been inspected');
+    }
+  }
+
   assertAllDetailsReviewed(fields: unknown) {
     if (!Array.isArray(fields) || fields.length !== PROFILE_FIELDS.size || fields.some((field) => typeof field !== 'string' || !PROFILE_FIELDS.has(field)) ||
         new Set(fields).size !== PROFILE_FIELDS.size) {
@@ -564,13 +671,15 @@ export class StaffProfileReviewService {
       if (!review || review.status !== 'RETURNED_FOR_CORRECTION') {
         throw new ConflictException('No profile corrections requested by HR');
       }
-      if (keys.some((key) => !review.requested_fields.includes(key))) {
+      if (keys.some((key) => review.recovery_required ? !PROFILE_FIELDS.has(key) : !review.requested_fields.includes(key))) {
         throw new ForbiddenException('Only fields requested by HR may be changed');
       }
       const before = await this.snapshot(tenantId, userId, qr);
+      const effectiveKeys: string[] = [];
       const merged = { ...before.profile } as Record<string, unknown>;
       const qualification = { ...(merged.qualification as Record<string, unknown> ?? {}) };
       for (const [key, value] of Object.entries(changes)) {
+        if (typeof value !== 'string' && typeof value !== 'number') throw new BadRequestException(`${key} must be a text or numeric value`);
         if (value == null || String(value).trim() === '') throw new BadRequestException(`${key} cannot be empty`);
         if (['total_experience_years', 'industry_experience_years'].includes(key) &&
             (!Number.isFinite(Number(value)) || Number(value) < 0)) {
@@ -589,13 +698,19 @@ export class StaffProfileReviewService {
         }
         const current = QUALIFICATION_FIELDS.has(key) ? qualification[key] : merged[key];
         if (String(current ?? '') === String(value)) {
+          if (review.recovery_required) continue;
           throw new BadRequestException(`${key} has not changed`);
         }
+        effectiveKeys.push(key);
         if (QUALIFICATION_FIELDS.has(key)) qualification[key] = value;
         else merged[key] = value;
       }
+      if (!effectiveKeys.length) {
+        await qr.commitTransaction();
+        return { status: review.status, revision: review.revision, replayed: true };
+      }
       await this.appendEvent(qr, { ...review, revision: review.revision + 1 },
-        'BEFORE_PROFILE_CORRECTION', userId, keys.join(','));
+        'BEFORE_PROFILE_CORRECTION', userId, effectiveKeys.join(','));
       merged.qualification = qualification;
       await qr.query(
         `UPDATE users SET onboarding_profile = $3::jsonb,
@@ -629,6 +744,7 @@ export class StaffProfileReviewService {
           !review.requested_docs.includes(docType)) {
         throw new ForbiddenException('HR has not requested this document');
       }
+      if (review.recovery_required) await this.documentDigest(tenantId, filePath, docType);
       await this.appendEvent(qr, { ...review, revision: review.revision + 1 }, 'BEFORE_DOCUMENT_CORRECTION', userId, docType);
       await qr.query(
         `INSERT INTO staff_onboarding_docs (tenant_id, staff_user_id, doc_type, file_path, status)
@@ -672,6 +788,10 @@ export class StaffProfileReviewService {
     await qr.startTransaction();
     try {
       const review = await this.activeReview(tenantId, userId, qr, true);
+      if (review?.recovery_required && review.status === 'PENDING_HR') {
+        await qr.commitTransaction();
+        return { status: 'PENDING_HR', replayed: true };
+      }
       if (!review || review.status !== 'RETURNED_FOR_CORRECTION') {
         throw new ConflictException('No returned review to resubmit');
       }
@@ -682,7 +802,7 @@ export class StaffProfileReviewService {
            AND event_type IN ('BEFORE_PROFILE_CORRECTION', 'BEFORE_DOCUMENT_CORRECTION')
            AND revision > COALESCE((
              SELECT MAX(revision) FROM staff_profile_review_events
-             WHERE review_id = $1 AND event_type = 'RETURNED'
+             WHERE review_id = $1 AND event_type IN ('RETURNED', 'RECOVERY_OPENED')
            ), 0)`,
         [review.review_id, tenantId],
       );
@@ -699,6 +819,15 @@ export class StaffProfileReviewService {
           throw new BadRequestException(`Upload a replacement for ${doc}`);
         }
       }
+      const recoveryEvidence = review.recovery_required
+        ? await this.inspectRecoveryDocuments(tenantId, snapshot.profile, snapshot.user.phone, snapshot.documentManifest)
+        : null;
+      if (review.recovery_required && snapshot.user.onboarding_status === 'PENDING_DOCUMENTS') {
+        // Forward progress only for never-approved staff; previously completed
+        // onboarding and all old decisions remain unchanged.
+        await qr.query(`UPDATE users SET onboarding_status = 'PENDING_ADMIN_APPROVAL', updated_at = NOW()
+          WHERE tenant_id = $1 AND user_id = $2 AND onboarding_status = 'PENDING_DOCUMENTS'`, [tenantId, userId]);
+      }
       await qr.query(
         `UPDATE staff_profile_reviews
          SET status = 'PENDING_HR', requested_fields = '{}', requested_docs = '{}',
@@ -707,7 +836,8 @@ export class StaffProfileReviewService {
          WHERE tenant_id = $1 AND review_id = $2`,
         [tenantId, review.review_id, snapshot.hash],
       );
-      await this.appendEvent(qr, { ...review, revision: review.revision + 1 }, 'RESUBMITTED', userId);
+      await this.appendEvent(qr, { ...review, revision: review.revision + 1 }, 'RESUBMITTED', userId,
+        recoveryEvidence ? JSON.stringify({ recovery: true, verified_storage_manifest: recoveryEvidence }) : undefined);
       await qr.commitTransaction();
       return { status: 'PENDING_HR' };
     } catch (error) {

@@ -30,6 +30,7 @@ type Row = {
   revision: number;
   document_review_status?: string;
   documents_deferred?: boolean;
+  recovery_required?: boolean;
 };
 type Detail = {
   review: Omit<Row, "review_id"> & {
@@ -167,12 +168,16 @@ export default function StaffProfileVerificationsPage() {
           ? { reason: reason.trim(), fields, documents }
           : action === "verify-documents"
             ? { reviewed_documents: reviewedDocs }
+            : selected.review.recovery_required
+              ? { defer_documents: false, reviewed_fields: reviewedFields, reviewed_documents: reviewedDocs, revision: selected.review.revision }
             : { defer_documents: true, reviewed_fields: reviewedFields,
                 deferral_reason: "HR approved profile details; document verification deferred until original files are available for inspection." },
       );
       setMessage(
         action === "approve"
-          ? `${selected.review.name}’s profile details are approved and account access is restored. Document verification remains pending.`
+          ? selected.review.recovery_required
+            ? `${selected.review.name}’s profile and documents are approved. Account access is restored.`
+            : `${selected.review.name}’s profile details are approved and account access is restored. Document verification remains pending.`
           : action === "verify-documents"
             ? `${selected.review.name}’s documents are verified. The earlier profile approval is unchanged.`
             : `Corrections requested from ${selected.review.name}. An email has been queued to ${selected.review.official_email}.`,
@@ -206,8 +211,10 @@ export default function StaffProfileVerificationsPage() {
   const reviewing = canDecide && selected?.review.status === "PENDING_HR";
   const documentReview = canDecide && selected?.review.status === "APPROVED" && selected.review.document_review_status === "PENDING";
   const correcting = reviewing && reviewMode === "CORRECT";
+  const recoveryReview = reviewing && selected?.review.recovery_required && !correcting;
+  const inspectingDocs = documentReview || recoveryReview;
   const changeMode = (mode: "CHECK" | "CORRECT") => {
-    setReviewMode(mode); setFields([]); setDocuments([]); setReviewedFields([]); setReason("");
+    setReviewMode(mode); setFields([]); setDocuments([]); setReviewedFields([]); setReviewedDocs([]); setReason("");
   };
 
   return (
@@ -382,7 +389,7 @@ export default function StaffProfileVerificationsPage() {
               </Badge>
               {reviewing && (
                 <div className="space-y-3 rounded-lg border bg-blue-50 p-3 text-sm">
-                  <p>Profile details and documents are separate decisions. Approving details restores account access; documents stay pending and are not marked verified.</p>
+                  <p>{selected.review.recovery_required ? "Recovery submission: inspect the saved details and all four documents before approval. Documents cannot be deferred for this recovery review." : "Profile details and documents are separate decisions. Approving details restores account access; documents stay pending and are not marked verified."}</p>
                   <div role="group" aria-label="Review action" className="flex flex-wrap gap-2">
                     <Button size="sm" variant={reviewMode === "CHECK" ? "default" : "outline"} aria-pressed={reviewMode === "CHECK"} onClick={() => changeMode("CHECK")}>Review for approval</Button>
                     <Button size="sm" variant={reviewMode === "CORRECT" ? "default" : "outline"} aria-pressed={reviewMode === "CORRECT"} onClick={() => changeMode("CORRECT")}>Request corrections</Button>
@@ -446,10 +453,10 @@ export default function StaffProfileVerificationsPage() {
                     ))}
                   </dl>
                   <h2 className="pt-2 font-semibold">Documents</h2>
-                  {reviewing && !correcting && <p className="text-xs text-amber-800">No document checkboxes are required for details-only approval. These documents will remain pending.</p>}
-                  {(correcting || documentReview) && <div className="flex flex-wrap gap-2">
-                    <Button size="sm" variant="outline" onClick={() => documentReview ? setReviewedDocs(Object.keys(DOCS)) : setDocuments(Object.keys(DOCS))}>{documentReview ? "Select all inspected documents" : "Select all replacement requests"}</Button>
-                    <Button size="sm" variant="outline" onClick={() => documentReview ? setReviewedDocs([]) : setDocuments([])}>Clear all documents</Button>
+                  {reviewing && !correcting && !recoveryReview && <p className="text-xs text-amber-800">No document checkboxes are required for details-only approval. These documents will remain pending.</p>}
+                  {(correcting || inspectingDocs) && <div className="flex flex-wrap gap-2">
+                    <Button size="sm" variant="outline" onClick={() => inspectingDocs ? setReviewedDocs(Object.keys(DOCS)) : setDocuments(Object.keys(DOCS))}>{inspectingDocs ? "Select all inspected documents" : "Select all replacement requests"}</Button>
+                    <Button size="sm" variant="outline" onClick={() => inspectingDocs ? setReviewedDocs([]) : setDocuments([])}>Clear all documents</Button>
                   </div>}
                   {Object.entries(DOCS).map(([key, title]) => {
                     const doc = selected.documents.find(
@@ -461,14 +468,14 @@ export default function StaffProfileVerificationsPage() {
                         className="flex items-center justify-between gap-3 rounded-lg border p-3 text-sm"
                       >
                         <label>
-                          {(correcting || documentReview) && (
+                          {(correcting || inspectingDocs) && (
                             <input
                               className="mr-2"
-                              aria-label={`${documentReview ? "Inspected document" : "Request replacement"}: ${title}`}
+                              aria-label={`${inspectingDocs ? "Inspected document" : "Request replacement"}: ${title}`}
                               type="checkbox"
-                              checked={(documentReview ? reviewedDocs : documents).includes(key)}
+                              checked={(inspectingDocs ? reviewedDocs : documents).includes(key)}
                               onChange={() =>
-                                documentReview ? toggle(reviewedDocs, setReviewedDocs, key) : toggle(documents, setDocuments, key)
+                                inspectingDocs ? toggle(reviewedDocs, setReviewedDocs, key) : toggle(documents, setDocuments, key)
                               }
                             />
                           )}
@@ -530,7 +537,7 @@ export default function StaffProfileVerificationsPage() {
                   </span>
                 </label>
               )}
-              {reviewing && !correcting && <p className="text-sm text-muted-foreground">{reviewedFields.length} of {Object.keys(FIELDS).length} details checked. Documents will remain pending.</p>}
+              {reviewing && !correcting && <p className="text-sm text-muted-foreground">{reviewedFields.length} of {Object.keys(FIELDS).length} details checked. {recoveryReview ? `${reviewedDocs.length} of ${Object.keys(DOCS).length} documents inspected.` : "Documents will remain pending."}</p>}
               {error && (
                 <p role="alert" className="text-sm text-red-700">
                   {error}
@@ -561,11 +568,11 @@ export default function StaffProfileVerificationsPage() {
                     ) : (
                     <Button
                       disabled={
-                        busy || reviewedFields.length !== Object.keys(FIELDS).length
+                        busy || reviewedFields.length !== Object.keys(FIELDS).length || Boolean(recoveryReview && reviewedDocs.length !== Object.keys(DOCS).length)
                       }
                       onClick={() => void decide("approve")}
                     >
-                      Approve details — documents pending
+                      {recoveryReview ? "Approve profile and documents" : "Approve details — documents pending"}
                     </Button>
                     )}
                   </div>
