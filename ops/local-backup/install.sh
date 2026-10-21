@@ -52,10 +52,10 @@ for key in ('staging_root','final_root'):
     Path(c[key]).mkdir(mode=0o700, parents=True, exist_ok=True)
 (Path(c['staging_root']).parent/'restore-check').mkdir(mode=0o700,exist_ok=True)
 PY
-for file in falcon_backup.py restore_check.py; do
+for file in falcon_backup.py restore_check.py dump_counts.py recovery_validation.py; do
     install -m 0700 "$source_dir/$file" "/opt/falcon-local-backup/$file"
 done
-for file in worker.sh restore-check.sh; do
+for file in worker.sh restore-check.sh recovery_content_check.js; do
     install -m 0555 "$source_dir/$file" "/opt/falcon-local-backup/$file"
 done
 install -m 0600 "$config" /etc/falcon-local-backup/config.json

@@ -112,3 +112,46 @@ The script also aborts if host memory drops below 1 GiB, disk/health guards fail
 Live uploads can change across database and file captures. Matching pre/post and archive hashes catch ordinary file-set/content changes, but they do not create one atomic database-plus-file snapshot. Keep the manifest's consistency caveat. No near-zero RPO or sub-hour recovery is claimed.
 
 On any failure, retain previous completed sets and the first preservation copy. Do not retry repeatedly during memory/health pressure. Inspect only the failed job's staging/partial paths and metadata, correct the reason, and run again after gates pass. No backup is removed without a separate, explicit user authorization identifying the exact scope. Retention review, manifest inspection and this package itself never delete backup artifacts.
+## Optional document and HR recovery probe
+
+`recovery_validation.py` uses the same explicit disposable-restore authorization,
+shared lock, 1.5 GiB actual available-RAM start gate and health/resource guards as
+`restore_check.py`. It runs SQL/count verification for both configured databases,
+then uses a separately limited offline Node helper for the business database
+`postgres`. It does not run the application's startup, migrations or jobs.
+
+Supply an already-local, reviewed application **image ID**, the immutable backup
+run ID and the protected preserved backend environment JSON. The wrapper reads
+that JSON on the server, selects only the existing HR encryption secret (or its
+existing JWT fallback) and writes a new private key input. The full environment
+and production database credentials are never mounted into a test helper. The
+minimal application key is mounted read-only into the Node helper, separately
+from the PostgreSQL helper. Test evidence and those private inputs remain under
+the owner-only restore session directory on the same server; no cleanup runs.
+
+```sh
+python3 /opt/falcon-local-backup/recovery_validation.py \
+  --run-id REVIEWED_FINALIZED_RUN_ID \
+  --approval-id owner-approved-isolated-restore \
+  --content-image sha256:REVIEWED_ALREADY_LOCAL_BACKEND_IMAGE_ID \
+  --key-source /data/falcon-backups/recovery-private/PRESERVATION_ID/BACKEND.environment.json \
+  --i-confirm-disposable-restore
+```
+
+The Node helper has no network, published ports, production mounts or Docker
+socket. Its only database connection uses the held-inode isolated Unix socket.
+Its memory/swap cap is 128 MiB, CPU cap 0.25 and Node heap cap 64 MiB; the
+PostgreSQL helper retains its separate 256 MiB / 0.5 CPU cap. Each is removed if
+its resource/application guards fail; the retained backup and scratch files
+are not deleted.
+
+A zero process exit alone does not establish recovery. Read the explicit
+`content_checks_passed`, SQL/count flags and private per-database reports.
+Document evidence covers all archived-file hashes, recognized document-reference
+columns and bounded representative PDF parsing/PNG decoding. JPEG header checks
+are reported separately. Missing, external, unclassified or unsupported content
+keeps document readiness false; absence is never attributed to an earlier
+incident without independent, dump/archive-bound source evidence. HR evidence
+requires successful authenticated decryption of actual encrypted restored values.
+Full authenticated application workflows and a cross-system atomic snapshot
+remain separate, unproven checks.
