@@ -111,6 +111,10 @@ def select_members(report, manifest, mode, extractor):
             choose = (result == 'jpeg_header_opened' or
                       result == 'pixel_budget_exceeded' and
                       (detected == 'image/png' or member.lower().endswith('.png')) or
+                      result == 'byte_budget_exceeded' and
+                      (member.lower().endswith(('.jpg', '.jpeg', '.png')) or
+                       detected in ('image/jpeg', 'image/png') or
+                       sample.get('extension_mime') in ('image/jpeg', 'image/png')) or
                       sample.get('extension_mismatch') is True)
         if choose:
             require(type(sample.get('bytes')) is int and 0 < sample['bytes'] <= MAX_FILE, 'target-byte-budget')

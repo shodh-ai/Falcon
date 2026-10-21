@@ -88,6 +88,38 @@ class MediaDispatcherTests(unittest.TestCase):
         report = source_report(); report['samples'][0]['result'] = 'pdf_parsed'
         with self.assertRaises(m.MediaError): m.select_members(report, manifest(), 'pdf', extractor)
 
+    def test_raster_selection_includes_larger_originals_within_existing_byte_limit(self):
+        for member in ['large.png', 'large.JPG', 'large.JPEG']:
+            value = manifest(); value['uploads']['file_sha256'][member] = '3' * 64
+            report = source_report()
+            report['samples'] = [{'member': member, 'bytes': 7_069_597,
+                                  'result': 'byte_budget_exceeded', 'detected_mime': None}]
+            with self.subTest(member=member):
+                self.assertEqual(m.select_members(report, value, 'raster', extractor), [member])
+                report['samples'][0]['bytes'] = m.MAX_FILE
+                self.assertEqual(m.select_members(report, value, 'raster', extractor), [member])
+                report['samples'][0]['bytes'] = m.MAX_FILE + 1
+                with self.assertRaisesRegex(m.MediaError, 'target-byte-budget'):
+                    m.select_members(report, value, 'raster', extractor)
+
+    def test_raster_byte_budget_selection_requires_image_suffix_or_reviewed_mime(self):
+        for field in ['detected_mime', 'extension_mime']:
+            for mime in ['image/jpeg', 'image/png']:
+                value = manifest(); value['uploads']['file_sha256']['original.bin'] = '3' * 64
+                report = source_report()
+                report['samples'] = [{'member': 'original.bin', 'bytes': 7_069_597,
+                                      'result': 'byte_budget_exceeded', field: mime}]
+                with self.subTest(field=field, mime=mime):
+                    self.assertEqual(m.select_members(report, value, 'raster', extractor), ['original.bin'])
+        for member, mime in [('private.pdf', 'application/pdf'), ('trick.png.exe', None),
+                             ('remote.txt', 'image/gif')]:
+            value = manifest(); value['uploads']['file_sha256'][member] = '3' * 64
+            report = source_report()
+            report['samples'] = [{'member': member, 'bytes': 7_069_597,
+                                  'result': 'byte_budget_exceeded', 'detected_mime': mime}]
+            with self.subTest(member=member), self.assertRaisesRegex(m.MediaError, 'target-count'):
+                m.select_members(report, value, 'raster', extractor)
+
     def test_individual_readonly_indexed_binds_without_archive_database_keys_or_live_mounts(self):
         command = m.helper_command(['/usr/bin/docker'], SESSION, IMAGE, 'pdf', SESSION / 'media-inputs',
                                    SESSION / 'document-media-proof.cjs', targets(), ['--env', 'DATABASE_URL='])
