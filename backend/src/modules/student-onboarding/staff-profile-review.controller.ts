@@ -77,7 +77,10 @@ export class StaffProfileReviewSelfController {
       if (!existsSync(directory)) mkdirSync(directory, { recursive: true });
       filePath = `${directory}/${fileName}`;
       await new Promise<void>((resolve, reject) => {
-        const stream = createWriteStream(filePath, { flags: 'wx', mode: 0o640 });
+        // Preserve inherited ACL write access for the future runtime UID: 0660
+        // permits its ACL mask to retain write. Without a default ACL, the
+        // guarded launcher's 0027 umask still creates an ordinary 0640 file.
+        const stream = createWriteStream(filePath, { flags: 'wx', mode: 0o660 });
         stream.on('finish', resolve);
         stream.on('error', reject);
         stream.end(file.buffer);

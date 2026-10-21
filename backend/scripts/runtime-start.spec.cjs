@@ -3,6 +3,7 @@ const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const path=require('node:path');
+const {spawnSync}=require('node:child_process');
 const {databasePolicy,verifyDatabase,runRuntime,MATERIALIZED_VIEWS,ROLE_QUERY}=require('./runtime-start.cjs');
 const policy={host:'isolated-db',port:5432,name:'fixture',role:'fixture_runtime',enforce_least_privilege:true};
 const env={NODE_ENV:'production',DB_HOST:policy.host,DB_PORT:'5432',DB_DATABASE:policy.name,
@@ -28,10 +29,49 @@ function client(rowOverrides={},fail=false,viewRows) {
 }
 test('runtime starts only after both boundaries pass and never calls a migration',async()=>{
   const order=[];
-  await runRuntime({env,verifyStorage:()=>{order.push('storage');return {baseline:{database:policy}};},
+  await runRuntime({env,setUmask:mask=>{assert.equal(mask,0o027);order.push('umask');},
+    verifyStorage:()=>{order.push('storage');return {baseline:{database:policy}};},
     verifyDb:async()=>{order.push('database');return {least_privilege_enforced:true};},
     loadApplication:()=>order.push('app'),log:()=>{}});
-  assert.deepEqual(order,['storage','database','app']);
+  assert.deepEqual(order,['umask','storage','database','app']);
+});
+test('umask failure prevents boundary checks and application startup',async()=>{
+  await assert.rejects(runRuntime({env,setUmask:()=>{throw new Error('umask failed');},
+    verifyStorage:()=>assert.fail('storage'),verifyDb:()=>assert.fail('database'),
+    loadApplication:()=>assert.fail('app')}),/umask failed/);
+});
+test('real launcher umask restricts default and ACL-compatible explicit file modes',()=>{
+  // Use a separate process: process.umask is global, and parallel tests must not
+  // inherit a changed mask. The temporary files contain synthetic bytes only.
+  const source=`
+    const fs=require('node:fs'),os=require('node:os'),path=require('node:path');
+    const {runRuntime}=require(process.argv[1]);
+    const root=fs.mkdtempSync(path.join(os.tmpdir(),'falcon-umask-'));
+    const policy=${JSON.stringify(policy)},env=${JSON.stringify(env)};
+    (async()=>{let pending;
+      try{
+        process.umask(0);
+        await runRuntime({env,verifyStorage:()=>{
+          if(process.umask()!==0o027)throw Error('mask was not applied before checks');
+          return {baseline:{database:policy}};
+        },verifyDb:async()=>({least_privilege_enforced:true}),log:()=>{},loadApplication:()=>{
+          const directory=path.join(root,'uploads');fs.mkdirSync(directory);
+          fs.writeFileSync(path.join(directory,'default'),'synthetic');
+          pending=new Promise((resolve,reject)=>{
+            const stream=fs.createWriteStream(path.join(directory,'explicit'),{flags:'wx',mode:0o660});
+            stream.on('finish',resolve);stream.on('error',reject);stream.end('synthetic');
+          });
+        }});
+        await pending;
+        process.stdout.write(JSON.stringify(['uploads','uploads/default','uploads/explicit']
+          .map(name=>fs.statSync(path.join(root,name)).mode&0o777)));
+      }finally{fs.rmSync(root,{recursive:true,force:true})}
+    })().catch(()=>process.exitCode=1);
+  `;
+  const result=spawnSync(process.execPath,['-e',source,path.join(__dirname,'runtime-start.cjs')],
+    {encoding:'utf8',timeout:10000});
+  assert.equal(result.status,0,result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout),[0o750,0o640,0o640]);
 });
 test('production image uses the guarded launcher and cannot source a late dotenv target',()=>{
   const docker=fs.readFileSync(path.join(__dirname,'../Dockerfile'),'utf8');
@@ -42,7 +82,7 @@ test('production image uses the guarded launcher and cannot source a late dotenv
   assert.match(app,/ignoreEnvFile:\s*process\.env\.NODE_ENV\s*===\s*'production'/);
 });
 test('storage failure prevents any database connection or app startup',async()=>{
-  await assert.rejects(runRuntime({env,verifyStorage:()=>{throw new Error('wrong mount');},
+  await assert.rejects(runRuntime({env,setUmask:()=>{},verifyStorage:()=>{throw new Error('wrong mount');},
     verifyDb:()=>assert.fail('database'),loadApplication:()=>assert.fail('app')}),/wrong mount/);
 });
 test('configuration changes, sync, migration credentials and role aliases fail closed',()=>{
@@ -118,7 +158,7 @@ test('protected transition policy can pin the existing administrator only before
 });
 test('database denial prevents app bootstrap and no secret is logged',async()=>{
   const output=[];
-  await assert.rejects(runRuntime({env,verifyStorage:()=>({baseline:{database:policy}}),
+  await assert.rejects(runRuntime({env,setUmask:()=>{},verifyStorage:()=>({baseline:{database:policy}}),
     verifyDb:async()=>{throw new Error('boundary denied');},
     loadApplication:()=>assert.fail('app'),log:x=>output.push(x)}));
   assert.deepEqual(output,[]);

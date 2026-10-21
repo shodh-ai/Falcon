@@ -153,7 +153,10 @@ async function verifyDatabase({ env, policy, Client }) {
 }
 
 async function runRuntime({ env=process.env, verifyStorage,
-  verifyDb=verifyDatabase, loadApplication, log=console.log }={}) {
+  verifyDb=verifyDatabase, loadApplication, log=console.log,
+  setUmask=process.umask }={}) {
+  // Apply before boundary checks or application imports can create files.
+  setUmask(0o027);
   if (env.NODE_ENV !== 'production') throw new Error('Hardened runtime requires NODE_ENV=production');
   const storage = (verifyStorage || require('./storage-boundary.cjs').assertStorageBoundary)({env});
   databasePolicy(env, storage.baseline.database);
