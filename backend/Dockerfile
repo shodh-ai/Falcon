@@ -64,9 +64,8 @@ RUN addgroup -g 61001 -S falcon \
     && chown 61001:61001 /app/uploads \
     && chmod 0750 /app/uploads
 
-# Preparation release: retain the current UID until inherited upload ACLs are
-# verified. The final service-UID release changes only this USER instruction.
-USER 0:0
+# Existing upload ACLs must be verified before this dedicated UID is deployed.
+USER 61001:61001
 
 EXPOSE 4000
 
