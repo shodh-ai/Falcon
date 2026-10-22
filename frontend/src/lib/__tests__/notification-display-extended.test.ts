@@ -20,7 +20,10 @@ describe('notification-display extended branches', () => {
   it('covers formatRelativeTime minute, hour, day, and year branches', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-07-15T12:00:00Z'));
-    expect(formatRelativeTime('2026-07-15T11:58:00Z')).toBe('2m ago');
+    expect(formatRelativeTime('2026-07-15T11:58:00Z')).toBe('2min ago');
+    expect(formatRelativeTime('2026-07-15T11:59:00Z')).toBe('1min ago');
+    expect(formatRelativeTime('2026-07-15T11:01:00Z')).toBe('59min ago');
+    expect(formatRelativeTime('2026-07-15T11:00:00Z')).toBe('1h ago');
     expect(formatRelativeTime('2026-07-15T09:00:00Z')).toBe('3h ago');
     expect(formatRelativeTime('2026-07-12T12:00:00Z')).toBe('3d ago');
     expect(formatRelativeTime('2024-07-15T12:00:00Z')).toMatch(/2024/);

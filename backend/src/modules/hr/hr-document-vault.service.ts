@@ -7,6 +7,7 @@ import {
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import type { Response } from 'express';
+import { accessSync, constants } from 'fs';
 import { ObjectStorageService } from '../../storage/object-storage.service';
 import {
   HR_DOCUMENT_CATEGORIES,
@@ -86,11 +87,21 @@ export class HrDocumentVaultService {
       tenantId,
       this.storage.getBucketName(),
     );
-    const localFile = resolveDocumentDiskPath(fileUrl, tenantId);
+    const localFile = resolveDocumentDiskPath(
+      key && !this.storage.isEnabled() ? `/uploads/${key}` : fileUrl, tenantId,
+    );
     if ((!key || !this.storage.isEnabled()) && !localFile) {
       throw new BadRequestException(
         "Document must reference an uploaded file in this tenant's secure storage",
       );
+    }
+
+    try {
+      if (key && this.storage.isEnabled()) await this.storage.assertObjectExists(key);
+      else if (localFile) accessSync(localFile, constants.R_OK);
+      else throw new Error('File unavailable');
+    } catch {
+      throw new BadRequestException('The uploaded file is missing or unreadable. Upload it again before saving the document.');
     }
 
     const status = options?.autoVerify ? 'VERIFIED' : 'PENDING';
@@ -117,7 +128,7 @@ export class HrDocumentVaultService {
         entityId,
         userId,
         docType,
-        key ? `s3://${this.storage.getBucketName()}/${key}` : fileUrl,
+        key && this.storage.isEnabled() ? `s3://${this.storage.getBucketName()}/${key}` : key ? `/uploads/${key}` : fileUrl,
         fileName,
         uploadedBy,
         status,

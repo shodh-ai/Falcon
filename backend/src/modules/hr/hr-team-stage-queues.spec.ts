@@ -33,12 +33,16 @@ describe('HR manager and override queue stage separation', () => {
     expect(query.mock.calls[0][0]).toContain("hr_step.approver_type IN ('HR_ADMIN', 'HR_EXECUTIVE')");
   });
 
-  it('excludes final HR review from the exception-only admin override queue', async () => {
+  it('shows both stages in the scoped supervisory queue without making the prior actor a final approver', async () => {
     const { service, query } = makeService();
-    await service.listAllPendingForAdmin(tenantId, 7);
+    await service.listAllPendingForAdmin(tenantId, 7, approverId);
     const [sql, params] = query.mock.calls[0];
-    expect(sql).toContain('AND NOT (r.request_type IN');
+    expect(sql).toContain("THEN 'FINAL_HR' ELSE 'FIRST_LEVEL'");
+    expect(sql).toContain('AS can_override_approve');
+    expect(sql).toContain('prior.actor_user_id = $3');
+    expect(sql).toContain('access.department_scope');
+    expect(sql).toContain('COALESCE(r.entity_id, p.entity_id, u.entity_id) = $2');
     expect(sql).toContain('r.current_step_order');
-    expect(params).toEqual([tenantId, 7]);
+    expect(params).toEqual([tenantId, 7, approverId]);
   });
 });

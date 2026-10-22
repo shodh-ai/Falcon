@@ -162,6 +162,29 @@ jobs:
         working-directory: tests
         run: npm run db:migrate:test
 
+      - name: HR QA workflow, scoped queues, reports and document storage regressions
+        working-directory: backend
+        env:
+          # Specs create TEMP tables and roll back; no live HR data is used.
+          HR_QA_PG_URL: postgresql://postgres:postgres@localhost:5432/falcon_test
+        run: npm test -- --runInBand --testPathPatterns='modules/hr/.*spec.ts'
+
+      - name: HR QA frontend regressions
+        working-directory: frontend
+        run: >-
+          npm test -- src/components/hr/__tests__
+          src/components/layout/__tests__/QuickActionMenu.test.tsx
+          src/lib/__tests__/notification-display.test.ts
+          src/lib/__tests__/notification-display-extended.test.ts
+          src/lib/__tests__/quick-action-dates.test.ts
+          src/lib/__tests__/quick-action-access.test.ts
+
+      - name: Build backend and verify real document ZIP integrity
+        working-directory: backend
+        run: |
+          npm run build --ignore-scripts
+          node scripts/test-hr-document-export.cjs
+
       - name: Install Playwright browsers
         working-directory: tests
         run: npx playwright install --with-deps chromium

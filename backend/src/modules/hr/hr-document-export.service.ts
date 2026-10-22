@@ -535,32 +535,49 @@ export class HrDocumentExportService {
       void (async () => {
         for (const doc of docs) {
           let stream: Readable | null = null;
+          let body: Buffer | null = null;
           try {
             stream = await openDocumentReadStream(
               doc.file_url,
               this.storage,
               tenantId,
             );
+            // Read failures can occur after opening (permissions/network). Never
+            // append a half-read source stream that would corrupt the whole ZIP.
+            if (stream) {
+              const parts: Buffer[] = [];
+              let size = 0;
+              for await (const part of stream) {
+                const chunk = Buffer.isBuffer(part) ? part : Buffer.from(part);
+                size += chunk.length;
+                if (size > 64 * 1024 * 1024) throw new Error('Document exceeds archive entry limit');
+                parts.push(chunk);
+              }
+              if (size === 0) throw new Error('Empty document');
+              body = Buffer.concat(parts);
+            }
           } catch {
             // One missing S3 object must not prevent an otherwise valid export.
+          } finally {
+            stream?.destroy();
           }
-          if (!stream) {
+          if (!body) {
             skipped.push({
               document_id: doc.document_id,
               employee_name: doc.employee_name,
               document_type: doc.document_type,
-              reason: 'File missing or unreadable in configured storage',
+              reason: 'File missing, empty, unreadable, or exceeds the 64 MiB archive entry limit',
             });
             continue;
           }
           packedCount += 1;
           const safeName = doc.employee_name.replace(/[^a-zA-Z0-9]/g, '');
           const empId = (doc.employee_id ?? 'NA').replace(/[^a-zA-Z0-9]/g, '');
-          const ext = (doc.file_name ?? 'file.pdf').includes('.')
-            ? doc.file_name!.slice(doc.file_name!.lastIndexOf('.'))
-            : '.pdf';
-          const entryName = `${doc.document_type}_${safeName}_${empId}_${doc.document_id}${ext}`;
-          archive.append(stream, { name: entryName });
+          const ext = doc.file_name?.match(/\.[a-zA-Z0-9]{1,10}$/)?.[0] ?? '.bin';
+          const safeType = doc.document_type.replace(/[^a-zA-Z0-9_-]/g, '');
+          const safeId = doc.document_id.replace(/[^a-zA-Z0-9-]/g, '');
+          const entryName = `${safeType}_${safeName}_${empId}_${safeId}${ext}`;
+          archive.append(body, { name: entryName });
         }
         if (skipped.length) {
           archive.append(
