@@ -15,6 +15,9 @@ type StudentWeeklyTest = {
   course_id: string;
   test_type: string;
   question_paper_url: string;
+  question_count: number;
+  max_marks: number;
+  scoring_version: number;
   start_time: Date | string;
   end_time: Date | string;
   status: string;
@@ -44,14 +47,29 @@ export class WeeklyTestsService {
       test_type: 'WT1' | 'WT2';
       question_paper_url: string;
       answer_key: string[];
+      question_count?: number;
+      max_marks?: number;
       start_time: string;
       end_time: string;
     },
   ) {
+    // Older faculty clients omit these fields during a rolling deployment.
+    const questionCount = data.question_count ?? 10;
+    const maxMarks = data.max_marks ?? 10;
+    const configuredScoring = data.question_count !== undefined && data.max_marks !== undefined;
+    if (
+      (data.question_count === undefined) !== (data.max_marks === undefined) ||
+      !Number.isInteger(questionCount) || questionCount < 1 || questionCount > 100 ||
+      !Number.isInteger(maxMarks) || maxMarks < 1 || maxMarks > 100 ||
+      !Array.isArray(data.answer_key) || data.answer_key.length !== questionCount ||
+      !data.answer_key.every((answer) => ['A', 'B', 'C', 'D'].includes(answer))
+    ) {
+      throw new BadRequestException('Set 1–100 questions, 1–100 maximum marks, and one A–D answer per question');
+    }
     await this.assertCourseAccess(tenantId, facultyId, data.course_id);
     const res = await this.dataSource.query(
-      `INSERT INTO weekly_tests (tenant_id, course_id, test_type, question_paper_url, answer_key, start_time, end_time, created_by, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'SCHEDULED')
+      `INSERT INTO weekly_tests (tenant_id, course_id, test_type, question_paper_url, answer_key, question_count, max_marks, scoring_version, start_time, end_time, created_by, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'SCHEDULED')
        RETURNING test_id, course_id, test_type, start_time, end_time`,
       [
         tenantId,
@@ -59,6 +77,9 @@ export class WeeklyTestsService {
         data.test_type,
         data.question_paper_url,
         JSON.stringify(data.answer_key),
+        questionCount,
+        maxMarks,
+        configuredScoring ? 2 : 1,
         data.start_time,
         data.end_time,
         facultyId,
@@ -87,7 +108,7 @@ export class WeeklyTestsService {
     const hodDepartmentIds = await this.resolveHodDepartmentIds(facultyId);
     if (hodDepartmentIds.length) {
       return this.dataSource.query(
-        `SELECT t.test_id, t.course_id, c.course_code, c.course_name, t.test_type,
+        `SELECT t.test_id, t.course_id, c.course_code, c.course_name, t.test_type, t.question_count, t.max_marks,
                 t.start_time, t.end_time, t.status, t.is_active,
                 (SELECT COUNT(*)::int FROM weekly_test_responses r WHERE r.test_id = t.test_id) AS response_count,
                 (SELECT ROUND(AVG(r.score)::numeric, 2) FROM weekly_test_responses r WHERE r.test_id = t.test_id) AS avg_score
@@ -114,7 +135,7 @@ export class WeeklyTestsService {
       );
     }
     return this.dataSource.query(
-      `SELECT t.test_id, t.course_id, c.course_code, c.course_name, t.test_type, t.start_time, t.end_time, t.status, t.is_active,
+      `SELECT t.test_id, t.course_id, c.course_code, c.course_name, t.test_type, t.question_count, t.max_marks, t.start_time, t.end_time, t.status, t.is_active,
               (SELECT COUNT(*)::int FROM weekly_test_responses r WHERE r.test_id = t.test_id) AS response_count,
               (SELECT ROUND(AVG(r.score)::numeric, 2) FROM weekly_test_responses r WHERE r.test_id = t.test_id) AS avg_score
        FROM weekly_tests t
@@ -132,7 +153,7 @@ export class WeeklyTestsService {
   ) {
     await this.assertTestAccess(tenantId, facultyId, testId);
     const test = await this.dataSource.query(
-      `SELECT t.test_id, t.course_id, t.test_type, t.start_time, t.end_time, t.status, t.is_active,
+      `SELECT t.test_id, t.course_id, t.test_type, t.question_count, t.max_marks, t.start_time, t.end_time, t.status, t.is_active,
               c.course_code, c.course_name
        FROM weekly_tests t
        JOIN academic_courses c ON c.course_id = t.course_id
@@ -219,7 +240,7 @@ export class WeeklyTestsService {
 
   async getAvailableTests(tenantId: string, studentId: string) {
     return this.dataSource.query(
-      `SELECT t.test_id, t.course_id, c.course_code, c.course_name, t.test_type, t.start_time, t.end_time, t.status, t.is_active,
+      `SELECT t.test_id, t.course_id, c.course_code, c.course_name, t.test_type, t.question_count, t.max_marks, t.start_time, t.end_time, t.status, t.is_active,
               r.submitted_at
        FROM weekly_tests t
        JOIN academic_courses c ON c.course_id = t.course_id AND c.tenant_id = t.tenant_id
@@ -235,7 +256,7 @@ export class WeeklyTestsService {
 
   async getTestForAttempt(tenantId: string, studentId: string, testId: string) {
     const test = await this.dataSource.query<StudentWeeklyTest[]>(
-      `SELECT t.test_id, t.course_id, t.test_type, t.question_paper_url, t.start_time, t.end_time, t.status, t.is_active
+      `SELECT t.test_id, t.course_id, t.test_type, t.question_paper_url, t.question_count, t.max_marks, t.scoring_version, t.start_time, t.end_time, t.status, t.is_active
        FROM weekly_tests t
        JOIN academic_courses c ON c.course_id = t.course_id AND c.tenant_id = t.tenant_id
        WHERE t.test_id = $3 AND t.tenant_id = $1
@@ -322,7 +343,7 @@ export class WeeklyTestsService {
       Array<StudentWeeklyTest & { answer_key: string[] | string | null }>
     >(
       `SELECT t.test_id, t.course_id, t.test_type, t.question_paper_url,
-              t.answer_key, t.start_time, t.end_time, t.status, t.is_active
+              t.answer_key, t.question_count, t.max_marks, t.scoring_version, t.start_time, t.end_time, t.status, t.is_active
        FROM weekly_tests t
        JOIN academic_courses c ON c.course_id = t.course_id AND c.tenant_id = t.tenant_id
        WHERE t.test_id = $1 AND t.tenant_id = $2
@@ -341,10 +362,18 @@ export class WeeklyTestsService {
     const answerKey = Array.isArray(test[0].answer_key)
       ? (test[0].answer_key as string[])
       : (JSON.parse(test[0].answer_key ?? '[]') as string[]);
-    let score = 0;
-    for (let i = 0; i < answerKey.length; i += 1) {
-      if (data.answers[i] === answerKey[i]) score += 1;
+    if (data.answers.length !== test[0].question_count ||
+        answerKey.length !== test[0].question_count ||
+        !data.answers.every((answer) => ['', 'A', 'B', 'C', 'D'].includes(answer))) {
+      throw new BadRequestException('Answers must match the configured question count');
     }
+    let correct = 0;
+    for (let i = 0; i < answerKey.length; i += 1) {
+      if (data.answers[i] === answerKey[i]) correct += 1;
+    }
+    const score = test[0].scoring_version === 2
+      ? Math.round((correct * Number(test[0].max_marks) / answerKey.length) * 100) / 100
+      : correct;
 
     const inserted = await this.dataSource.query<
       Array<{ score: number | string }>
@@ -415,12 +444,15 @@ export class WeeklyTestsService {
 
         await this.dataSource.query(
           `INSERT INTO academic_marks (tenant_id, student_user_id, course_id, exam_type, marks_obtained, max_marks, status, published_at)
-           SELECT t.tenant_id, r.student_user_id, t.course_id, t.test_type, r.score, 5, 'PUBLISHED', NOW()
+           SELECT t.tenant_id, r.student_user_id, t.course_id, t.test_type, r.score,
+                  CASE WHEN t.scoring_version = 2 THEN t.max_marks ELSE 5 END, 'PUBLISHED', NOW()
            FROM weekly_test_responses r
            JOIN weekly_tests t ON t.test_id = r.test_id
            WHERE r.test_id = $1 AND r.submitted_at IS NOT NULL
            ON CONFLICT (tenant_id, student_user_id, course_id, exam_type) DO UPDATE SET
              marks_obtained = EXCLUDED.marks_obtained,
+             max_marks = CASE WHEN (SELECT scoring_version FROM weekly_tests WHERE test_id = $1) = 2
+               THEN EXCLUDED.max_marks ELSE academic_marks.max_marks END,
              status = 'PUBLISHED',
              published_at = NOW()`,
           [t.test_id],

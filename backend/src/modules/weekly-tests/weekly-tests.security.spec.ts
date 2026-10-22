@@ -18,6 +18,9 @@ const test = {
   test_type: 'WT1',
   question_paper_url: '/paper.pdf',
   answer_key: ['A', 'B'],
+  question_count: 2,
+  max_marks: 2,
+  scoring_version: 2,
   start_time: '2026-10-14T09:00:00Z',
   end_time: '2026-10-14T11:00:00Z',
   status: 'ACTIVE',
@@ -32,6 +35,55 @@ function makeService(query: jest.Mock) {
 describe('weekly test student security', () => {
   beforeEach(() => jest.useFakeTimers().setSystemTime(now));
   afterEach(() => jest.useRealTimers());
+
+  it('rejects invalid question counts, maximum marks, and incomplete answer keys before writing', async () => {
+    const query = jest.fn();
+    const service = makeService(query);
+    const base = {
+      course_id: 'course-a', test_type: 'WT1' as const,
+      question_paper_url: '/paper.pdf', start_time: '2026-10-14T09:00:00Z',
+      end_time: '2026-10-14T11:00:00Z', question_count: 2, max_marks: 10,
+      answer_key: ['A', 'B'],
+    };
+    for (const change of [
+      { question_count: 0 }, { question_count: 101 }, { question_count: 1.5 },
+      { max_marks: 0 }, { max_marks: 101 }, { max_marks: 2.5 },
+      { answer_key: ['A'] }, { answer_key: ['A', 'E'] },
+    ]) {
+      await expect(service.createTest(tenantId, 'faculty-a', { ...base, ...change }))
+        .rejects.toBeInstanceOf(BadRequestException);
+    }
+    expect(query).not.toHaveBeenCalled();
+  });
+
+  it('accepts the previous ten-question client during a rolling deployment', async () => {
+    const query = jest.fn<Promise<unknown[]>, [string, unknown[]]>()
+      .mockResolvedValueOnce([{ exists: true }])
+      .mockResolvedValueOnce([{ test_id: testId, course_id: 'course-a', test_type: 'WT1', start_time: now, end_time: now }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+    await makeService(query).createTest(tenantId, 'faculty-a', {
+      course_id: 'course-a', test_type: 'WT1', question_paper_url: '/paper.pdf',
+      answer_key: Array(10).fill('A'), start_time: now.toISOString(), end_time: now.toISOString(),
+    });
+    expect(query.mock.calls[1][1][5]).toBe(10);
+    expect(query.mock.calls[1][1][6]).toBe(10);
+    expect(query.mock.calls[1][1][7]).toBe(1);
+  });
+
+  it('stores configured question count and maximum marks as the new scoring version', async () => {
+    const query = jest.fn<Promise<unknown[]>, [string, unknown[]]>()
+      .mockResolvedValueOnce([{ exists: true }])
+      .mockResolvedValueOnce([{ test_id: testId, course_id: 'course-a', test_type: 'WT1', start_time: now, end_time: now }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+    await makeService(query).createTest(tenantId, 'faculty-a', {
+      course_id: 'course-a', test_type: 'WT1', question_paper_url: '/paper.pdf',
+      question_count: 4, max_marks: 20, answer_key: ['A', 'B', 'C', 'D'],
+      start_time: now.toISOString(), end_time: now.toISOString(),
+    });
+    expect(query.mock.calls[1][1].slice(5, 8)).toEqual([4, 20, 2]);
+  });
 
   it('rejects student calls without tenant context before any service access', () => {
     const tests = { getAvailableTests: jest.fn() };
@@ -122,6 +174,27 @@ describe('weekly test student security', () => {
       0,
       tenantId,
     ]);
+  });
+
+  it('scales correct answers to the configured maximum marks', async () => {
+    const query = jest.fn<Promise<unknown[]>, [string, unknown[]]>()
+      .mockResolvedValueOnce([{ ...test, answer_key: ['A', 'B', 'C', 'D'], question_count: 4, max_marks: 20 }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ score: '15.00' }]);
+    const result = await makeService(query).submitTest(tenantId, studentId, testId, {
+      answers: ['A', 'B', '', 'D'], violation_count: 0,
+    });
+    expect(result).toEqual({ success: true, score: 15 });
+    expect(query.mock.calls[2][1][3]).toBe(15);
+  });
+
+  it('rejects answer arrays with the wrong length', async () => {
+    const query = jest.fn<Promise<unknown[]>, [string, unknown[]]>()
+      .mockResolvedValueOnce([test]).mockResolvedValueOnce([]);
+    await expect(makeService(query).submitTest(tenantId, studentId, testId, {
+      answers: ['A'], violation_count: 0,
+    })).rejects.toThrow('configured question count');
+    expect(query).toHaveBeenCalledTimes(2);
   });
 
   it('returns the original result for an identical retry, even after the test closes', async () => {

@@ -53,10 +53,11 @@ describe('student workflow reliability', () => {
     expect(screen.getByText('Degree panel')).toBeInTheDocument();
   });
 
-  async function startAttempt() {
+  async function startAttempt(questionCount = 10) {
     mocks.api.get.mockResolvedValue({
       course_code: 'CS101', course_name: 'Programming', test_type: 'WT1',
       question_paper_url: '/uploads/paper.pdf',
+      question_count: questionCount, max_marks: 20, scoring_version: 2,
     });
     const params = Promise.resolve({ testId: 'weekly-test' });
     await act(async () => {
@@ -86,6 +87,18 @@ describe('student workflow reliability', () => {
     });
     await act(async () => finish({}));
     expect(mocks.router.replace).toHaveBeenCalledWith('/student/weekly-tests');
+  });
+
+  it('shows and submits exactly the configured number of questions', async () => {
+    mocks.api.post.mockResolvedValue({});
+    await startAttempt(4);
+    expect(screen.getAllByRole('radio')).toHaveLength(16);
+    fireEvent.click(screen.getAllByRole('radio')[0]);
+    fireEvent.click(screen.getByRole('button', { name: 'Final Submit' }));
+    await waitFor(() => expect(mocks.api.post).toHaveBeenCalledWith(
+      '/api/weekly-tests/student/weekly-test/submit',
+      { answers: ['A', '', '', ''], violation_count: 0 },
+    ));
   });
 
   it('auto-submits the actual second fullscreen violation without side effects in a state updater', async () => {
