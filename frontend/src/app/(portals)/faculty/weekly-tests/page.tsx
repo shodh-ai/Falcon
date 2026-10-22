@@ -430,7 +430,7 @@ export default function FacultyWeeklyTestsPage() {
                       </span>
                     </Button>
                   </DialogTrigger>
-                  <DialogContent className="max-w-3xl">
+                  <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
                     <DialogHeader>
                       <DialogTitle className="flex justify-between items-center mr-6">
                         <span>Provide Answer Key</span>
