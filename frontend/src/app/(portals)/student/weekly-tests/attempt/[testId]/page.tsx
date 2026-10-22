@@ -15,6 +15,9 @@ type WeeklyTestDetails = {
   course_name: string;
   test_type: string;
   question_paper_url: string;
+  question_count: number;
+  max_marks: number;
+  scoring_version: number;
 };
 
 export default function AttemptTestPage({ params }: { params: Promise<{ testId: string }> }) {
@@ -47,7 +50,10 @@ export default function AttemptTestPage({ params }: { params: Promise<{ testId: 
           router.replace('/student/weekly-tests');
           return;
         }
-        if (!cancelled) setTest(data);
+        if (!cancelled) {
+          setAnswers(Array(data.question_count).fill(''));
+          setTest(data);
+        }
       } catch (e: unknown) {
         if (cancelled) return;
         toast.error(e instanceof Error ? e.message : "Failed to load test details.");
@@ -139,6 +145,8 @@ export default function AttemptTestPage({ params }: { params: Promise<{ testId: 
           <div className="bg-muted p-4 rounded-lg text-left space-y-2 text-sm">
             <p><strong>Course:</strong> {test.course_code} - {test.course_name}</p>
             <p><strong>Test Type:</strong> {test.test_type}</p>
+            <p><strong>Questions:</strong> {test.question_count}</p>
+            {test.scoring_version === 2 && <p><strong>Maximum Marks:</strong> {test.max_marks}</p>}
           </div>
           <Button onClick={startTest} className="w-full h-12 text-lg">
             <Maximize className="w-5 h-5 mr-2" />
@@ -196,7 +204,7 @@ export default function AttemptTestPage({ params }: { params: Promise<{ testId: 
             <div className="h-2 w-full bg-yellow-400 rounded-full overflow-hidden flex">
               <div 
                 className="h-full bg-green-500 transition-all duration-300" 
-                style={{ width: `${(answers.filter(a => a !== '').length / 10) * 100}%` }}
+                style={{ width: `${(answers.filter(a => a !== '').length / test.question_count) * 100}%` }}
               />
             </div>
           </div>
@@ -241,7 +249,7 @@ export default function AttemptTestPage({ params }: { params: Promise<{ testId: 
               {isLocked ? 'Options Locked' : 'Final Submit'}
             </Button>
             <p className="text-xs text-center text-muted-foreground mt-3">
-              Ensure you have marked all 10 answers before submitting.
+              Review all {test.question_count} questions before submitting. Unanswered questions score zero.
             </p>
           </div>
         </div>

@@ -32,6 +32,8 @@ export class WeeklyTestsController {
       test_type: 'WT1' | 'WT2';
       question_paper_url: string;
       answer_key: string[];
+      question_count?: number;
+      max_marks?: number;
       start_time: string;
       end_time: string;
     },

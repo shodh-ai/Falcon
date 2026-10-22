@@ -44,8 +44,9 @@ export default function FacultyWeeklyTestsPage() {
   const [startTime, setStartTime] = useState('');
   const [endTime, setEndTime] = useState('');
   const [file, setFile] = useState<File | null>(null);
+  const [questionCount, setQuestionCount] = useState('10');
+  const [maxMarks, setMaxMarks] = useState('10');
 
-  // Answer key array, length 10
   const [answerKey, setAnswerKey] = useState<string[]>(Array(10).fill(''));
   const [isAnswerKeyModalOpen, setIsAnswerKeyModalOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -78,7 +79,7 @@ export default function FacultyWeeklyTestsPage() {
             const strCell = String(cell).trim().toUpperCase();
             if (/^Q?\s*(\d+)$/.test(strCell)) {
               const num = parseInt(strCell.replace(/[^0-9]/g, ''), 10);
-              if (num >= 1 && num <= 10) {
+              if (num >= 1 && num <= answerKey.length) {
                 qNum = num - 1;
               }
             } else if (['A', 'B', 'C', 'D'].includes(strCell)) {
@@ -98,7 +99,7 @@ export default function FacultyWeeklyTestsPage() {
             for (const cell of row) {
                const strCell = String(cell).trim().toUpperCase();
                if (['A', 'B', 'C', 'D'].includes(strCell)) {
-                  if (index < 10) {
+                  if (index < answerKey.length) {
                     newAnswerKey[index] = strCell;
                     index++;
                     count++;
@@ -219,7 +220,7 @@ export default function FacultyWeeklyTestsPage() {
     return res.url;
   };
 
-  const isAnswerKeyComplete = answerKey.every(a => a !== '');
+  const isAnswerKeyComplete = answerKey.length === Number(questionCount) && answerKey.every(a => a !== '');
 
   async function handleSchedule() {
     if (!courseId) return toast.error('Please select a course.');
@@ -229,8 +230,10 @@ export default function FacultyWeeklyTestsPage() {
     }
     if (!startTime || !endTime) return toast.error('Please select start and end times.');
     if (new Date(startTime) >= new Date(endTime)) return toast.error('End time must be after start time.');
+    if (!Number.isInteger(Number(questionCount)) || Number(questionCount) < 1 || Number(questionCount) > 100) return toast.error('Enter 1–100 questions.');
+    if (!Number.isInteger(Number(maxMarks)) || Number(maxMarks) < 1 || Number(maxMarks) > 100) return toast.error('Enter maximum marks from 1–100.');
     if (!file) return toast.error('Please upload a PDF question paper.');
-    if (!isAnswerKeyComplete) return toast.error('Please complete the answer key for all 10 questions.');
+    if (!isAnswerKeyComplete) return toast.error(`Please complete the answer key for all ${questionCount} questions.`);
 
     setSubmitting(true);
     try {
@@ -243,6 +246,8 @@ export default function FacultyWeeklyTestsPage() {
         test_type: testType,
         question_paper_url: paperUrl,
         answer_key: answerKey,
+        question_count: Number(questionCount),
+        max_marks: Number(maxMarks),
         start_time: new Date(startTime).toISOString(),
         end_time: new Date(endTime).toISOString(),
       });
@@ -257,6 +262,8 @@ export default function FacultyWeeklyTestsPage() {
       setStartTime('');
       setEndTime('');
       setFile(null);
+      setQuestionCount('10');
+      setMaxMarks('10');
       setAnswerKey(Array(10).fill(''));
 
       // Refresh tests list
@@ -268,13 +275,9 @@ export default function FacultyWeeklyTestsPage() {
     }
   }
 
-  // Answer Key Table UI
-  // Render 5 columns, 2 rows
   const renderAnswerKeyTable = () => {
-    const rows = [
-      [0, 1, 2, 3, 4],
-      [5, 6, 7, 8, 9]
-    ];
+    const rows = Array.from({ length: Math.ceil(answerKey.length / 5) }, (_, row) =>
+      Array.from({ length: Math.min(5, answerKey.length - row * 5) }, (_, column) => row * 5 + column));
 
     return (
       <div className="overflow-x-auto w-full py-4">
@@ -378,7 +381,27 @@ export default function FacultyWeeklyTestsPage() {
                   onChange={(e) => setEndTime(e.target.value)}
                 />
               </label>
+
+              <label className="text-sm">
+                <span className="mb-1.5 block font-medium text-sgvu-navy">Number of Questions</span>
+                <Input type="number" min={1} max={100} step={1} value={questionCount}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setQuestionCount(value);
+                    const count = Number(value);
+                    if (Number.isInteger(count) && count >= 1 && count <= 100) {
+                      setAnswerKey((key) => Array.from({ length: count }, (_, index) => key[index] ?? ''));
+                    }
+                  }} />
+              </label>
+
+              <label className="text-sm">
+                <span className="mb-1.5 block font-medium text-sgvu-navy">Maximum Marks</span>
+                <Input type="number" min={1} max={100} step={1} value={maxMarks}
+                  onChange={(e) => setMaxMarks(e.target.value)} />
+              </label>
             </div>
+            <p className="text-xs text-muted-foreground">Each question is worth an equal share of the maximum marks. Scores are rounded to two decimals.</p>
 
             <div className="grid gap-4 sm:grid-cols-2 pt-2 border-t border-border/40">
               <div className="text-sm">
@@ -403,7 +426,7 @@ export default function FacultyWeeklyTestsPage() {
                         {isAnswerKeyComplete ? 'Answer Key Complete' : 'Upload Answer Key'}
                       </span>
                       <span className="text-xs opacity-70">
-                        {answerKey.filter(a => a !== '').length}/10
+                        {answerKey.filter(a => a !== '').length}/{questionCount || '—'}
                       </span>
                     </Button>
                   </DialogTrigger>
@@ -426,7 +449,7 @@ export default function FacultyWeeklyTestsPage() {
                         </div>
                       </DialogTitle>
                       <DialogDescription>
-                        Select the correct option (A, B, C, or D) for each of the 10 questions, or upload an Excel sheet to map them automatically.
+                        Select the correct option (A, B, C, or D) for each of the {questionCount} questions, or upload an Excel sheet to map them automatically.
                       </DialogDescription>
                     </DialogHeader>
 
