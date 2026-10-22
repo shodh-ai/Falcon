@@ -1,4 +1,5 @@
-import { API_URL, apiFetch } from './client';
+import { API_URL, apiFetch, type ApiRequest } from './client';
+import { extractApiErrorMessage } from '@/lib/notifications/parse-api-error';
 
 const EXAMS = `${API_URL}/api/academics/exams`;
 
@@ -38,6 +39,8 @@ export interface ExamApplication {
   exam_application_id: string;
   student_user_id: string;
   subject_id: number;
+  source_result_id?: string | null;
+  source_session_id?: string | null;
   subject_name?: string;
   subject_code?: string;
   application_type: ExamApplicationType;
@@ -52,10 +55,34 @@ export interface ExamApplication {
   created_at: string;
 }
 
+export interface ReEvaluationSource {
+  result_id: string;
+  session_id: string | null;
+  subject_id: number;
+  subject_name: string;
+  subject_code: string;
+  exam_type: string | null;
+  semester: number;
+  marks_obtained: string | number;
+  max_marks: string | number;
+  published_at?: string | null;
+}
+
+function examFetch<T>(token: string, request: ApiRequest): Promise<T> {
+  return apiFetch<T>(token, request).catch((cause: unknown) => {
+    if (cause instanceof Error) {
+      const response = /^API (\d{3})[^:]*:\s*([\s\S]*)$/.exec(cause.message);
+      if (response) throw new Error(extractApiErrorMessage(response[2], Number(response[1]), request.url));
+    }
+    throw cause;
+  });
+}
+
 export const examsApi = {
-  schedule: (token: string) => apiFetch<ExamSchedule[]>(token, { url: `${EXAMS}/schedule`, headers: {} }),
-  eligibility: (token: string) => apiFetch<ExamEligibilityResult>(token, { url: `${EXAMS}/eligibility`, headers: {} }),
-  myApplications: (token: string) => apiFetch<ExamApplication[]>(token, { url: `${EXAMS}/applications/my`, headers: {} }),
-  apply: (token: string, dto: { subject_id: number; application_type: ExamApplicationType }) =>
-    apiFetch<ExamApplication>(token, { url: `${EXAMS}/applications`, method: 'POST', headers: {}, data: dto }),
+  schedule: (token: string) => examFetch<ExamSchedule[]>(token, { url: `${EXAMS}/schedule`, headers: {} }),
+  eligibility: (token: string) => examFetch<ExamEligibilityResult>(token, { url: `${EXAMS}/eligibility`, headers: {} }),
+  myApplications: (token: string) => examFetch<ExamApplication[]>(token, { url: `${EXAMS}/applications/my`, headers: {} }),
+  reEvaluationSources: (token: string) => examFetch<ReEvaluationSource[]>(token, { url: `${EXAMS}/re-evaluation-sources`, headers: {} }),
+  apply: (token: string, dto: { subject_id: number; application_type: ExamApplicationType; source_result_id?: string; source_session_id?: string | null }) =>
+    examFetch<ExamApplication>(token, { url: `${EXAMS}/applications`, method: 'POST', headers: {}, data: dto }),
 };

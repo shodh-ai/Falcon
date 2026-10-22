@@ -27,6 +27,7 @@ describe('Shared uploads Student isolation', () => {
   const pipe = jest.fn();
   const storage = {
     isEnabled: jest.fn(),
+    getBucketName: jest.fn(() => 'bucket'),
     getDownloadStream: jest.fn(),
     buildKey: jest.fn(),
     upload: jest.fn(),
@@ -39,6 +40,7 @@ describe('Shared uploads Student isolation', () => {
     jest.resetAllMocks();
     query.mockResolvedValue([{ file_reference: `/uploads/${key}` }]);
     storage.isEnabled.mockReturnValue(true);
+    storage.getBucketName.mockReturnValue('bucket');
     storage.getDownloadStream.mockResolvedValue({ pipe });
     controller = new UploadsController(
       storage as unknown as ObjectStorageService,

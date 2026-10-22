@@ -19,7 +19,7 @@ type ParentUser = { parent_mobile?: string; auth_type?: string };
 
 @Controller('api/parent')
 @ReadOnlyPortal()
-@UseGuards(ReadOnlyPortalGuard)
+@UseGuards(JwtAuthGuard, ReadOnlyPortalGuard)
 export class ParentController {
   constructor(private readonly parent: ParentService) {}
 
@@ -154,13 +154,20 @@ export class ParentController {
   paymentConfirm(
     @Req() req: { user: ParentUser },
     @Param('studentUserId') studentUserId: string,
-    @Body() dto: { demand_id: string; payment_id?: string },
+    @Body()
+    dto: {
+      demand_id: string;
+      payment_id?: string;
+      order_id?: string;
+      signature?: string;
+    },
   ) {
     return this.parent.confirmPayment(
       this.parent.resolveMobile(req.user),
       studentUserId,
       dto.demand_id,
       dto.payment_id,
+      { order_id: dto.order_id, signature: dto.signature },
     );
   }
 

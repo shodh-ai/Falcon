@@ -6,7 +6,7 @@ import {
 } from '@/lib/navigation';
 import { filterPortalConfigForLaunchModules } from '@/lib/launch-modules';
 
-// Preserve all 40 destinations from the original Examination Cell sidebar.
+// Preserve the original Examination Cell destinations and the new account links.
 const originalPaths = [
   'dashboard', 'live-dashboard', 'calendar', 'my-tasks', 'search', 'student-timeline',
   'sessions', 'deadlines', 'audit-log', 'schedule', 'form-fillup', 'eligibility',
@@ -15,14 +15,14 @@ const originalPaths = [
   'print-hub', 'question-papers', 'exam-day', 'answer-sheets', 'documents', 'results',
   'grade-cards', 'approvals/grade-change', 'approvals/dofa-inbox', 'course-grades',
   'backlog-exams', 're-evaluations', 'ufm-cases', 'transcripts', 'portfolio-transcripts',
-  'degree-audit', 'reports', 'analytics', 'notifications',
+  'degree-audit', 'reports', 'analytics', 'notifications', 'settings', 'profile',
 ].map((path) => `/exam-cell/${path}`);
 
 describe('Examination Cell navigation', () => {
-  it('uses the seven approved sections', () => {
+  it('uses eight consolidated sections', () => {
     expect(examCellPortal.navGroups.map((group) => group.title)).toEqual([
-      'Dashboard & Tasks', 'Exam Planning', 'Registration & Admit Cards',
-      'Exam Operations', 'Results & Corrections', 'Certificates & Documents', 'Reports & Audit',
+      'Dashboard', 'Exam Planning', 'Students & Eligibility', 'Admit Cards',
+      'Exam Operations', 'Marks & Results', 'Reports & Compliance', 'Master Data & Settings',
     ]);
   });
 
@@ -37,17 +37,17 @@ describe('Examination Cell navigation', () => {
     }
   });
 
-  it('uses the approved simpler names on the original routes', () => {
+  it('keeps clear labels on the original routes', () => {
     const labels = Object.fromEntries(
       examCellPortal.navGroups.flatMap((group) => group.items).map((item) => [item.href, item.label]),
     );
     expect(labels).toMatchObject({
-      '/exam-cell/dashboard': 'Dashboard',
-      '/exam-cell/form-fillup': 'Exam Registration',
-      '/exam-cell/admit-cards': 'Admit Cards',
+      '/exam-cell/dashboard': 'Command Center',
+      '/exam-cell/form-fillup': 'Form Fill-up Desk',
+      '/exam-cell/admit-cards': 'Admit Card Engine',
       '/exam-cell/approvals/grade-change': 'Grade Change DOFA',
       '/exam-cell/approvals/dofa-inbox': 'DOFA Inbox (Universal)',
-      '/exam-cell/ufm-cases': 'Malpractice Cases',
+      '/exam-cell/ufm-cases': 'UFM Malpractice Desk',
     });
   });
 
@@ -59,19 +59,19 @@ describe('Examination Cell navigation', () => {
     ]);
   });
 
-  it('keeps Settings at the bottom and does not duplicate the renamed approval inbox', () => {
+  it('does not duplicate Settings or the approval inbox', () => {
     const withInbox = withRoleAwareDofaInboxNav(examCellPortal, '/exam-cell/approvals/dofa-inbox');
     expect(withInbox).toBe(examCellPortal);
     const config = withAccountSettingsNav(filterPortalConfigForLaunchModules(withInbox, null));
     expect(config.navGroups).toHaveLength(8);
     const account = config.navGroups[config.navGroups.length - 1];
-    expect(account.title).toBe('Account');
-    expect(account.items.map((item) => item.href)).toEqual(['/exam-cell/settings']);
+    expect(account.title).toBe('Master Data & Settings');
+    expect(account.items.filter((item) => item.href === '/exam-cell/settings')).toHaveLength(1);
   });
 
-  it('keeps old names as search aliases after simplifying labels', () => {
+  it('keeps search keywords on key destinations', () => {
     const items = examCellPortal.navGroups.flatMap((group) => group.items);
-    expect(items.find((item) => item.href === '/exam-cell/dashboard')?.keywords).toContain('command center');
-    expect(items.find((item) => item.href === '/exam-cell/approvals/dofa-inbox')?.keywords).toContain('dofa inbox (universal)');
+    expect(items.find((item) => item.href === '/exam-cell/dashboard')?.keywords).toContain('dashboard');
+    expect(items.find((item) => item.href === '/exam-cell/approvals/dofa-inbox')?.keywords).toContain('approvals');
   });
 });

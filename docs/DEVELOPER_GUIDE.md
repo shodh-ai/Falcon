@@ -57,7 +57,7 @@ Copy from `backend/.env.example`. Critical variables:
 
 | Variable | Purpose | Example |
 |----------|---------|---------|
-| `DB_HOST`, `DB_PORT`, `DB_USERNAME`, `DB_PASSWORD`, `DB_DATABASE` | PostgreSQL | `localhost:5433` |
+| `DB_HOST`, `DB_PORT`, `DB_USERNAME`, `DB_PASSWORD`, `DB_DATABASE` | PostgreSQL | `localhost:5434` |
 | `JWT_SECRET` | Token signing | Change in production |
 | `JWT_EXPIRATION` | Token TTL | `7d` |
 | `DEFAULT_TENANT_SUBDOMAIN` | Default tenant | `sgvu` |
@@ -65,12 +65,30 @@ Copy from `backend/.env.example`. Critical variables:
 | `FRONTEND_URL` | OAuth redirect target | `http://localhost:3000` |
 | `GOOGLE_CLIENT_ID/SECRET` | Google SSO | From Google Cloud Console |
 | `ALLOWED_DOMAIN` | Email domain filter | `mygyanvihar.com` |
-| `REDIS_HOST`, `REDIS_PORT` | BullMQ | `127.0.0.1:6379` |
+| `REDIS_HOST`, `REDIS_PORT` | BullMQ | `127.0.0.1:6380` |
 | `S3_*` | File uploads | MinIO defaults |
-| `EMAIL_*` | Nodemailer | SMTP credentials |
+| `EMAIL_*` | External email configuration | Does not enable Examination Cell delivery |
 | `GEMINI_API_KEY` | AI document validation | Optional locally |
 | `DB_SYNCHRONIZE` | **Never `true` in prod** | Use migrations instead |
 | `DB_POOL_MAX`, `DB_POOL_MIN` | Connection pool | See PERFORMANCE.md |
+
+### Examination Cell first-release delivery limits (22 October 2026)
+
+`EMAIL`, `SMS` and `WHATSAPP` Examination Cell campaigns fail closed with **503**:
+the external delivery adapters currently log/stub delivery. Credentials alone do
+not enable them. `IN_APP` campaign persistence and student retrieval were verified
+using synthetic data in the disposable local environment only.
+
+The product owner selected in-app notifications only for the first release.
+External notification channels stay disabled; DigiLocker is deferred. Payment
+capture/settlement and OTP delivery still need safe provider sandbox verification;
+synthetic settlements and local logins do not verify external delivery.
+
+The local backup restore and three reviewed forward migrations passed in the
+explicitly approved disposable recovery database on 22 October. No production
+database was accessed. Target infrastructure, private storage, HTTPS, secrets,
+backups and the production migration ledger remain deployment-specific checks;
+see the first-release scope and unsupported workflows in DEPLOYMENT_GUIDE.md.
 
 Set API URL via environment:
 
@@ -289,7 +307,7 @@ Run from `tests/` — see [TESTING_GUIDE.md](./TESTING_GUIDE.md).
 
 | Symptom | Fix |
 |---------|-----|
-| `ECONNREFUSED` PostgreSQL | Check `DB_HOST`/`DB_PORT`; default example uses `5433` |
+| `ECONNREFUSED` PostgreSQL | Check `DB_HOST`/`DB_PORT`; default example uses `5434` |
 | Migration fails | Run `npm run db:migrate:repair`; inspect SQL error |
 | Redis connection errors | Start Redis or disable Bull-dependent features locally |
 | `JWT malformed` | Clear browser token; re-login via dev-login |
@@ -311,6 +329,14 @@ Run from `tests/` — see [TESTING_GUIDE.md](./TESTING_GUIDE.md).
 - Expected for `ExamAdmin` / `ExamOperator`.
 - Check role with `assertExamCellAction()` matrix.
 - COE needs `ExamCell` or `DeputyCOE` role.
+
+### Grade-card PDF verification
+
+- Apply `20261019113000_grade_card_verifications.sql` through the normal migration runner.
+- Set `GRADE_CARD_VERIFICATION_BASE_URL` to the publicly reachable HTTPS API origin, without a path, query, or credentials. Explicit loopback HTTP origins are accepted for disposable local tests only.
+- Published `PROVISIONAL` and `FINAL` grade-card PDFs receive a real QR code. Its opaque token is stored only as a hash; the public endpoint exposes document type, semester, publication stage, and issue date, without student details, grades, or PDF links.
+- Every scan checks the current tenant-bound grade card and revision. Withholding, open locked UFM cases, revocation, or changed records invalidate an issued QR. Publication validity is checked online; the QR is not an offline academic signature.
+- Authenticated staff previews stay available when the card is unpublished or the verification URL/storage is unavailable, with an explicit unverified notice and no QR. Public deployment also requires the existing edge request protections; no default origin or signing secret is assumed.
 
 ### CORS / cookie issues
 

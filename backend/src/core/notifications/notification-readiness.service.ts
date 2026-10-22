@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { Queue } from 'bullmq';
 import { DataSource } from 'typeorm';
+import { clearTimeout as clearNodeTimeout, setTimeout as setNodeTimeout } from 'node:timers';
 import { NOTIFICATION_DELIVERY_QUEUE } from '../../common/constants/notification-queue.constants';
 import { notificationActivation } from './notification-activation';
 import { NotificationDeliveryProcessor } from './notification-delivery.processor';
@@ -87,10 +88,14 @@ export class NotificationReadinessService {
         redis.value === 'PONG' &&
         queueState.value === false,
     );
+    // Keep the timer API for this probe even if a test environment is torn down
+    // while an underlying database or Redis call is still settling.
+    const cancelTimeout = typeof clearTimeout === 'function' ? clearTimeout : clearNodeTimeout;
+    const scheduleTimeout = typeof setTimeout === 'function' ? setTimeout : setNodeTimeout;
     const bounded = Promise.race([
       pending,
       new Promise<boolean>((resolve) => {
-        timeout = setTimeout(() => resolve(false), 1_500);
+        timeout = scheduleTimeout(() => resolve(false), 1_500);
         timeout.unref?.();
       }),
     ]);
@@ -98,7 +103,7 @@ export class NotificationReadinessService {
     // A response timeout cannot cancel pg/ioredis I/O. Retain this single flight
     // until the underlying calls settle, so repeated probes cannot pile up.
     void pending.then(() => {
-      clearTimeout(timeout);
+      cancelTimeout(timeout);
       if (this.inFlight === bounded) this.inFlight = undefined;
     });
     return bounded;

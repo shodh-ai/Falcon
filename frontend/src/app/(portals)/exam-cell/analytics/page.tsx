@@ -1,9 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis, YAxis, PieChart, Pie, Cell } from 'recharts';
-import { toast } from '@/lib/notifications/falcon-toast';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -22,29 +21,39 @@ type Analytics = {
 
 const PIE_COLORS = ['#1e3a5f', '#c9a227', '#059669', '#dc2626', '#6366f1'];
 
+function csvText(value: string): string {
+  // Quoting preserves field boundaries; an apostrophe prevents spreadsheet formulas in text fields.
+  const text = /^\s*[=+@-]/u.test(value) || /^[\t\r\n]/u.test(value) ? `'${value}` : value;
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
 export default function ExamCellAnalyticsPage() {
   const api = useAuthedApi();
   const [semester, setSemester] = useState('4');
-  const [data, setData] = useState<Analytics | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [revision, setRevision] = useState(0);
+  const request = useMemo(() => ({ api, semester, revision }), [api, semester, revision]);
+  const [result, setResult] = useState<{ request: typeof request; data: Analytics | null; error: string | null } | null>(null);
+  const currentResult = result?.request === request ? result : null;
+  const loading = !currentResult;
+  const data = currentResult?.data;
+  const error = currentResult?.error;
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      setData(await api.get<Analytics>(`/api/exam-cell/analytics/advanced?semester=${semester}`));
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed to load analytics');
-    } finally {
-      setLoading(false);
-    }
-  }, [api, semester]);
-
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    let current = true;
+    const { api, semester } = request;
+    void api.get<Analytics>(`/api/exam-cell/analytics/advanced?semester=${semester}`)
+      .then((data) => {
+        if (current) setResult({ request, data, error: null });
+      }).catch((cause: unknown) => {
+        if (current) setResult({ request, data: null, error: cause instanceof Error ? cause.message : 'Failed to load analytics' });
+      });
+    return () => { current = false; };
+  }, [request]);
 
   function exportCsv() {
-    if (!data) return;
+    if (!data || loading || error) return;
     const lines = data.subject_analysis.map((s) =>
-      [s.subject_code, s.subject_name, s.avg_marks, s.students].join(','),
+      [csvText(s.subject_code), csvText(s.subject_name), s.avg_marks, s.students].join(','),
     );
     const csv = ['Code,Name,Avg Marks,Students', ...lines].join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
@@ -74,13 +83,13 @@ export default function ExamCellAnalyticsPage() {
         <CardContent className="p-5 md:p-6">
           <ExamCellPageHeader pageId="analytics" actions={
             <div className="flex gap-2">
-              <Input type="number" className="w-20" value={semester} onChange={(e) => setSemester(e.target.value)} />
+              <Input aria-label="Semester" type="number" className="w-20" value={semester} onChange={(e) => setSemester(e.target.value)} />
               <Button
                 variant="outline"
                 size="sm"
                 className="h-10 border border-[#0B2447] bg-[#0B2447] px-5 text-sm font-semibold text-white transition-colors hover:bg-[#123A6D] hover:text-white active:border-sgvu-gold active:bg-sgvu-gold active:text-sgvu-navy disabled:opacity-60"
                 onClick={exportCsv}
-                disabled={!data}
+                disabled={loading || !!error || !data}
               >
                 Export CSV
               </Button>
@@ -88,7 +97,16 @@ export default function ExamCellAnalyticsPage() {
           } />
         </CardContent>
       </Card>
-      {loading ? <Loader2 className="h-8 w-8 animate-spin" /> : data ? (
+      {loading ? (
+        <div role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="h-5 w-5 animate-spin" /> Loading analytics…
+        </div>
+      ) : error ? (
+        <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-900">
+          <p>{error}</p>
+          <Button variant="outline" size="sm" className="mt-2" onClick={() => setRevision((current) => current + 1)}>Retry analytics</Button>
+        </div>
+      ) : data ? (
         <div className="grid gap-4 lg:grid-cols-2">
           <Card>
             <CardHeader><CardTitle className="text-base">Pass / fail distribution</CardTitle></CardHeader>

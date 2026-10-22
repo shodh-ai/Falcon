@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Button } from '@/components/ui/button';
@@ -37,27 +37,33 @@ export default function ExamCellAuditLogPage() {
   const [offset, setOffset] = useState(0);
   const pageSize = 50;
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [actionFilter, setActionFilter] = useState('');
+  const latestRequest = useRef(0);
 
   const load = useCallback(async () => {
+    const request = ++latestRequest.current;
     setLoading(true);
+    setError(null);
     try {
       const page = Math.floor(offset / pageSize) + 1;
       const qs = new URLSearchParams({ limit: String(pageSize), page: String(page) });
       if (actionFilter.trim()) qs.set('search', actionFilter.trim());
       const payload = await api.get<AuditResponse>(`/api/exam-cell/audit-log?${qs}`);
+      if (request !== latestRequest.current) return;
       setRows(payload.data ?? []);
       setTotal(payload.total ?? 0);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed to load audit log');
-      setRows([]);
-      setTotal(0);
+      if (request !== latestRequest.current) return;
+      const message = e instanceof Error ? e.message : 'Failed to load audit log';
+      setError(message);
+      toast.error(message);
     } finally {
-      setLoading(false);
+      if (request === latestRequest.current) setLoading(false);
     }
   }, [api, actionFilter, offset]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { void Promise.resolve().then(load); }, [load]);
 
   const columns: DataTableColumn<AuditRow>[] = [
     { key: 'action', header: 'Action', render: (r) => <span className="font-medium">{r.action.replace(/_/g, ' ')}</span> },
@@ -76,9 +82,7 @@ export default function ExamCellAuditLogPage() {
         <CardContent className="p-5 md:p-6">
           <ExamCellPageHeader pageId="audit-log" actions={
             <Button
-              variant="outline"
               size="sm"
-              className="bg-[#0B2447] text-white transition-colors hover:bg-[#123A6D] hover:text-white active:border-sgvu-gold active:bg-sgvu-gold active:text-sgvu-navy"
               onClick={() => void load()}
               disabled={loading}
             >
@@ -91,29 +95,34 @@ export default function ExamCellAuditLogPage() {
       <Card>
         <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
           <CardTitle className="text-base">Examination audit trail</CardTitle>
+          <div className="w-full space-y-2 sm:max-w-xs">
+          <label htmlFor="audit-action-filter" className="text-sm font-medium text-sgvu-navy">Filter by action</label>
           <Input
+            id="audit-action-filter"
             placeholder="Filter by action…"
-            aria-label="Filter audit log by action"
             value={actionFilter}
             onChange={(e) => {
               setActionFilter(e.target.value);
               setOffset(0);
             }}
-            className="max-w-xs"
           />
+          </div>
         </CardHeader>
         <CardContent>
-          {loading ? <Loader2 className="h-6 w-6 animate-spin" aria-label="Loading audit log" /> : (
+          {error ? <div role="alert" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-destructive/20 bg-destructive/5 p-4 text-sm text-destructive"><p>{error}</p><Button variant="outline" size="sm" disabled={loading} onClick={() => void load()}>Retry</Button></div> : null}
+          {loading ? <div role="status" className="flex items-center gap-2 py-6 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />Loading audit log…</div> : !error ? (
             <>
-              <DataTable columns={columns} rows={rows} rowKey={(r) => r.audit_id} emptyMessage="No audit events recorded yet." />
+              <DataTable columns={columns} rows={rows} rowKey={(r) => r.audit_id} emptyMessage={actionFilter.trim() ? 'No audit events match this action filter.' : 'No audit events recorded yet.'} />
+              <div className="mt-4">
               <PaginationBar
                 total={total}
                 limit={pageSize}
                 offset={offset}
                 onPageChange={setOffset}
               />
+              </div>
             </>
-          )}
+          ) : null}
         </CardContent>
       </Card>
     </div>

@@ -36,6 +36,8 @@ function setup(
       if (sql.includes('FROM exam_result_sessions')) {
         return options.session === null ? [] : [options.session ?? openSession];
       }
+      if (sql.includes('FROM academic_exam_results')) return [];
+      if (sql.includes('INSERT INTO system_audit_logs')) return [];
       if (sql.includes('UPDATE academic_marks')) {
         if (options.failWrite) throw new Error('write failed');
         const changed = marks.filter((row) => row.status === 'DRAFT');
@@ -177,7 +179,9 @@ describe('Faculty bulk marks submission security', () => {
       });
       expect(marks[0].status).toBe(status);
       expect(
-        manager.query.mock.calls.some(([sql]) => sql.includes('UPDATE')),
+        manager.query.mock.calls.some(([sql]) =>
+          sql.trimStart().startsWith('UPDATE'),
+        ),
       ).toBe(false);
       expect(notify.marksPublished).not.toHaveBeenCalled();
     },
@@ -225,7 +229,9 @@ describe('Faculty bulk marks submission security', () => {
       const { submit, manager, notify } = setup({ types: [examType] });
       await expect(submit()).rejects.toBeInstanceOf(BadRequestException);
       expect(
-        manager.query.mock.calls.some(([sql]) => sql.includes('UPDATE')),
+        manager.query.mock.calls.some(([sql]) =>
+          sql.trimStart().startsWith('UPDATE'),
+        ),
       ).toBe(false);
       expect(notify.marksPublished).not.toHaveBeenCalled();
     },

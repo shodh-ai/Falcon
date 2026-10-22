@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -42,6 +42,11 @@ interface ExamCalendarProps {
   events: CalendarEvent[];
   onReschedule?: (eventId: string, newDate: string) => void;
   draggable?: boolean;
+  onRangeChange?: (range: { from: string; to: string }) => void;
+}
+
+function localDateKey(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
 function startOfMonth(d: Date) {
@@ -52,10 +57,11 @@ function daysInMonth(d: Date) {
   return new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
 }
 
-export function ExamCalendar({ events, onReschedule, draggable }: ExamCalendarProps) {
+export function ExamCalendar({ events, onReschedule, draggable, onRangeChange }: ExamCalendarProps) {
   const [cursor, setCursor] = useState(() => new Date());
   const [view, setView] = useState<ViewMode>('month');
   const [dragEventId, setDragEventId] = useState<string | null>(null);
+  const rangeCallback = useRef(onRangeChange);
 
   const monthLabel = cursor.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
 
@@ -88,32 +94,54 @@ export function ExamCalendar({ events, onReschedule, draggable }: ExamCalendarPr
     return Array.from({ length: 7 }, (_, i) => {
       const d = new Date(start);
       d.setDate(start.getDate() + i);
-      return d.toISOString().slice(0, 10);
+      return localDateKey(d);
     });
   }, [cursor]);
 
+  const range = useMemo(() => view === 'week'
+    ? { from: weekDates[0], to: weekDates[6] }
+    : { from: localDateKey(startOfMonth(cursor)), to: localDateKey(new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0)) },
+  [cursor, view, weekDates]);
+
+  useEffect(() => { rangeCallback.current = onRangeChange; }, [onRangeChange]);
+  useEffect(() => { rangeCallback.current?.({ from: range.from, to: range.to }); }, [range.from, range.to]);
+
+  const rangeLabel = view === 'week'
+    ? `${new Date(`${weekDates[0]}T12:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })} – ${new Date(`${weekDates[6]}T12:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}`
+    : monthLabel;
+  const today = localDateKey(new Date());
+
+  function navigate(direction: number) {
+    setCursor((current) => {
+      if (view !== 'week') return new Date(current.getFullYear(), current.getMonth() + direction, 1);
+      const next = new Date(current);
+      next.setDate(next.getDate() + direction * 7);
+      return next;
+    });
+  }
+
   function handleDrop(date: string) {
-    if (dragEventId && onReschedule && draggable) {
+    if (dragEventId && onReschedule && draggable && events.some((event) => event.event_id === dragEventId && event.source === 'CALENDAR')) {
       onReschedule(dragEventId, date);
-      setDragEventId(null);
     }
+    setDragEventId(null);
   }
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="icon" onClick={() => setCursor(new Date(cursor.getFullYear(), cursor.getMonth() - 1, 1))}>
-            <ChevronLeft className="h-4 w-4" />
+          <Button variant="outline" size="icon" aria-label={view === 'week' ? 'Previous week' : 'Previous month'} onClick={() => navigate(-1)}>
+            <ChevronLeft className="h-4 w-4" aria-hidden="true" />
           </Button>
-          <span className="min-w-[160px] text-center font-semibold text-sgvu-navy">{monthLabel}</span>
-          <Button variant="outline" size="icon" onClick={() => setCursor(new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1))}>
-            <ChevronRight className="h-4 w-4" />
+          <span aria-live="polite" className="min-w-[160px] text-center font-semibold text-sgvu-navy">{rangeLabel}</span>
+          <Button variant="outline" size="icon" aria-label={view === 'week' ? 'Next week' : 'Next month'} onClick={() => navigate(1)}>
+            <ChevronRight className="h-4 w-4" aria-hidden="true" />
           </Button>
         </div>
-        <div className="flex gap-1 rounded-lg border p-1">
+        <div role="group" aria-label="Calendar view" className="flex gap-1 rounded-lg border p-1">
           {(['month', 'week', 'list'] as ViewMode[]).map((v) => (
-            <Button key={v} size="sm" variant={view === v ? 'default' : 'ghost'} className={view === v ? 'bg-sgvu-navy' : ''} onClick={() => setView(v)}>
+            <Button key={v} size="sm" aria-pressed={view === v} variant={view === v ? 'default' : 'ghost'} className={view === v ? 'bg-sgvu-navy' : ''} onClick={() => setView(v)}>
               {v.charAt(0).toUpperCase() + v.slice(1)}
             </Button>
           ))}
@@ -127,10 +155,11 @@ export function ExamCalendar({ events, onReschedule, draggable }: ExamCalendarPr
           ))}
           {monthDays.map((cell, i) => {
             const dayEvents = cell.date ? eventsByDate.get(cell.date) ?? [] : [];
-            const isToday = cell.date === new Date().toISOString().slice(0, 10);
+            const isToday = cell.date === today;
             return (
               <div
                 key={i}
+                aria-current={isToday ? 'date' : undefined}
                 className={cn(
                   'min-h-[88px] rounded-lg border p-1 transition',
                   cell.date ? 'bg-white hover:border-sgvu-gold/40' : 'bg-transparent border-transparent',
@@ -145,7 +174,8 @@ export function ExamCalendar({ events, onReschedule, draggable }: ExamCalendarPr
                     <div
                       key={ev.event_id}
                       draggable={draggable && ev.source === 'CALENDAR'}
-                      onDragStart={() => setDragEventId(ev.event_id)}
+                      onDragStart={() => setDragEventId(draggable && ev.source === 'CALENDAR' ? ev.event_id : null)}
+                      onDragEnd={() => setDragEventId(null)}
                       className={cn('truncate rounded border px-1 py-0.5 text-[9px] font-medium', TYPE_COLORS[ev.event_type] ?? TYPE_COLORS.OTHER)}
                       title={ev.title}
                     >
@@ -163,7 +193,7 @@ export function ExamCalendar({ events, onReschedule, draggable }: ExamCalendarPr
       {view === 'week' ? (
         <div className="grid gap-2 md:grid-cols-7">
           {weekDates.map((date) => (
-            <div key={date} className="rounded-lg border p-2">
+            <div key={date} aria-current={date === today ? 'date' : undefined} className="rounded-lg border p-2">
               <p className="text-xs font-semibold text-sgvu-navy">{new Date(`${date}T12:00:00`).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric' })}</p>
               <div className="mt-2 space-y-1">
                 {(eventsByDate.get(date) ?? []).map((ev) => (

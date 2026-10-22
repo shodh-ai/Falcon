@@ -3,13 +3,13 @@
  *
  * Uses DB_HOST, DB_PORT, DB_USERNAME, DB_PASSWORD, DB_DATABASE from the environment
  * (same vars as the NestJS app). On a fresh database, base tables are bootstrapped from
- * TypeORM entities before SQL migrations run. Safe to run in Coolify backend terminal:
- *   npm run db:migrate
- *   npm run db:migrate:repair
- *   npm run db:seed
+ * TypeORM entities before SQL migrations run only with explicit local opt-in.
+ * Production pending migrations require a reviewed filename/SHA-256 manifest.
+ * Ledger repair and known-password seed commands are local development only.
  */
 const fs = require('fs');
 const path = require('path');
+const { createHash } = require('crypto');
 const { Client } = require('pg');
 const { run: syncSchema, coreTablesExist } = require('./sync-schema');
 
@@ -34,8 +34,6 @@ function loadEnvFile() {
   }
 }
 
-loadEnvFile();
-
 const MIGRATIONS_DIR = path.join(__dirname, '..', 'migrations');
 const MIGRATION_LOCK_NAME = 'falcon:schema-migrations';
 
@@ -51,6 +49,83 @@ const SEED_FILES = [
  * environment-guarded db:seed:dofa-qa command.
  */
 const DOFA_QA_SEED_FILES = ['20260907120000_dofa_qa_personas.seed.sql'];
+
+function isProductionEnvironment() {
+  return ['NODE_ENV', 'DATABASE_ENV', 'DEPLOYMENT_ENV'].some((name) =>
+    ['production', 'prod'].includes(
+      String(process.env[name] || '')
+        .trim()
+        .toLowerCase(),
+    ),
+  );
+}
+
+/**
+ * Historical SQL includes credential resets and data seeds. Do not infer which
+ * files are safe from their names. Production must explicitly review every
+ * pending file and bind that review to the bytes that will actually execute.
+ */
+async function reviewedProductionMigrations(client, files) {
+  const relation = await client.query(
+    "SELECT to_regclass('public.schema_migrations') AS migration_table",
+  );
+  const applied = relation.rows[0]?.migration_table
+    ? new Set(
+        (await client.query('SELECT filename FROM schema_migrations')).rows.map(
+          (row) => row.filename,
+        ),
+      )
+    : new Set();
+  const pending = files.filter((file) => !applied.has(path.basename(file)));
+  if (pending.length === 0) return new Map();
+
+  const manifestPath = process.env.PRODUCTION_MIGRATION_MANIFEST;
+  if (!manifestPath) {
+    throw new Error(
+      'Refusing unreviewed production migrations: configure PRODUCTION_MIGRATION_MANIFEST with exact reviewed filenames and SHA-256 hashes.',
+    );
+  }
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  if (
+    !manifest ||
+    manifest.version !== 1 ||
+    !manifest.migrations ||
+    typeof manifest.migrations !== 'object' ||
+    Array.isArray(manifest.migrations) ||
+    Object.keys(manifest).some(
+      (key) => !['version', 'migrations'].includes(key),
+    )
+  ) {
+    throw new Error(
+      'Invalid production migration manifest: expected version 1 and a migrations filename/hash object.',
+    );
+  }
+  const knownFiles = new Set(files.map((file) => path.basename(file)));
+  for (const [name, hash] of Object.entries(manifest.migrations)) {
+    if (
+      !knownFiles.has(name) ||
+      typeof hash !== 'string' ||
+      !/^[a-f0-9]{64}$/.test(hash)
+    ) {
+      throw new Error(`Invalid production migration manifest entry: ${name}`);
+    }
+  }
+
+  const reviewed = new Map();
+  for (const file of pending) {
+    const name = path.basename(file);
+    const bytes = fs.readFileSync(file);
+    const hash = createHash('sha256').update(bytes).digest('hex');
+    if (manifest.migrations[name] !== hash) {
+      throw new Error(
+        `Refusing unreviewed or changed production migration: ${name}`,
+      );
+    }
+    // Retain the reviewed SQL so a later file change cannot alter execution.
+    reviewed.set(name, bytes.toString('utf8'));
+  }
+  return reviewed;
+}
 
 function dbConfig() {
   return {
@@ -93,12 +168,33 @@ function assertDofaQaSeedAllowed() {
     );
   }
   if (
-    nodeEnv === 'production' ||
-    databaseEnv === 'production' ||
-    databaseEnv === 'prod'
+    isProductionEnvironment() ||
+    !['development', 'test'].includes(nodeEnv) ||
+    !['local', 'development', 'test'].includes(databaseEnv)
   ) {
     throw new Error(
-      'Refusing DoFA QA seed: known-password QA accounts cannot be installed in production.',
+      'Refusing DoFA QA seed outside an explicitly local development environment.',
+    );
+  }
+}
+
+function assertStandardSeedAllowed() {
+  const nodeEnv = String(process.env.NODE_ENV || '').toLowerCase();
+  const databaseEnv = String(
+    process.env.DATABASE_ENV || process.env.DEPLOYMENT_ENV || '',
+  ).toLowerCase();
+  if (process.env.ALLOW_STANDARD_SEED !== 'true') {
+    throw new Error(
+      'Refusing standard seed: set ALLOW_STANDARD_SEED=true explicitly.',
+    );
+  }
+  if (
+    isProductionEnvironment() ||
+    nodeEnv !== 'development' ||
+    !['local', 'development', 'test'].includes(databaseEnv)
+  ) {
+    throw new Error(
+      'Refusing standard seed outside an explicitly local development environment.',
     );
   }
 }
@@ -131,13 +227,26 @@ async function resetMigrationLedger(client) {
   await client.query('TRUNCATE schema_migrations');
 }
 
+function assertBootstrapSyncAllowed() {
+  if (process.env.ALLOW_SCHEMA_BOOTSTRAP_SYNC !== 'true') {
+    throw new Error(
+      'Refusing automatic schema bootstrap: set ALLOW_SCHEMA_BOOTSTRAP_SYNC=true explicitly.',
+    );
+  }
+  if (isProductionEnvironment()) {
+    throw new Error('Refusing automatic schema bootstrap in production.');
+  }
+}
+
 async function run() {
+  loadEnvFile();
   const seedOnly = process.argv.includes('--seed');
   const dofaQaSeedOnly = process.argv.includes('--dofa-qa-seed');
   if (seedOnly && dofaQaSeedOnly) {
     throw new Error('Choose either --seed or --dofa-qa-seed, not both.');
   }
   if (dofaQaSeedOnly) assertDofaQaSeedAllowed();
+  else if (seedOnly) assertStandardSeedAllowed();
   const seedMode = dofaQaSeedOnly
     ? 'dofa-qa'
     : seedOnly
@@ -145,6 +254,12 @@ async function run() {
       : 'migrations';
   const forceAll = process.argv.includes('--force');
   const repair = process.argv.includes('--repair');
+  const production = isProductionEnvironment();
+  if (production && (forceAll || repair)) {
+    throw new Error(
+      'Refusing production migration replay or ledger repair (--force/--repair).',
+    );
+  }
   const files = listSqlFiles(seedMode);
 
   const cfg = dbConfig();
@@ -165,8 +280,13 @@ async function run() {
     try {
       const hadCoreTables = await coreTablesExist();
       if (!hadCoreTables) {
+        assertBootstrapSyncAllowed();
         await syncSchema({ quiet: false });
       }
+      // Validate the entire pending plan before any migration or ledger write.
+      const reviewed = production
+        ? await reviewedProductionMigrations(client, files)
+        : null;
       await ensureMigrationTable(client);
 
       const ledger = await client.query(
@@ -184,10 +304,16 @@ async function run() {
       const failures = [];
 
       for (const file of files) {
-        const sql = fs.readFileSync(file, 'utf8');
         const base = path.basename(file);
+        const sql = production
+          ? reviewed.get(base)
+          : fs.readFileSync(file, 'utf8');
 
-        if (!forceAll && (await isApplied(client, base))) {
+        if (
+          production
+            ? !reviewed.has(base)
+            : !forceAll && (await isApplied(client, base))
+        ) {
           skipped += 1;
           console.log(`--- ${base} (skipped)`);
           continue;
@@ -225,9 +351,7 @@ async function run() {
       }
     } finally {
       await client
-        .query('SELECT pg_advisory_unlock(hashtext($1))', [
-          MIGRATION_LOCK_NAME,
-        ])
+        .query('SELECT pg_advisory_unlock(hashtext($1))', [MIGRATION_LOCK_NAME])
         .catch(() => undefined);
       await client.end();
     }
@@ -298,7 +422,11 @@ async function run() {
   }
 }
 
-run().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+module.exports = { run, isProductionEnvironment, reviewedProductionMigrations };
+
+if (require.main === module) {
+  run().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}

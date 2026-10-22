@@ -12,6 +12,12 @@ import {
   uploadRoles,
   type UploadUser,
 } from './upload-file-access';
+import { EXAM_CELL_ACCESS_ROLES } from '../modules/exam-cell/exam-cell.constants';
+import { normalizeExamCellRole } from '../modules/exam-cell/exam-cell-rbac.util';
+import {
+  isCurrentTranscript,
+  type TranscriptRevisionMetadata,
+} from '../modules/exam-cell/official-transcript-revisions';
 
 @Injectable()
 export class UploadsService {
@@ -42,6 +48,13 @@ export class UploadsService {
     user: UploadUser,
     key: string,
   ): Promise<void> {
+    // Official transcripts have stricter, revision-aware access than ordinary
+    // student uploads. Check everyone (including exam staff) before the
+    // general staff exemption can apply.
+    if (key.includes('/transcripts/')) {
+      await this.assertTranscriptAccess(user, key);
+      return;
+    }
     if (!needsStudentFileOwnership(user)) return;
     if (!user.tenant_id || !user.user_id)
       throw new UnauthorizedException('Student identity required');
@@ -104,5 +117,46 @@ export class UploadsService {
       throw new NotFoundException('File not found');
     }
     throw new NotFoundException('File not found');
+  }
+
+  private async assertTranscriptAccess(user: UploadUser, key: string) {
+    const match = key.match(
+      /(?:^|\/)transcripts\/([0-9a-f-]{36})(?:-[0-9a-f]{32})?\.pdf$/i,
+    );
+    if (!match || !user.tenant_id || !user.user_id) {
+      throw new NotFoundException('File not found');
+    }
+    const transcriptId = match[1];
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(transcriptId)) {
+      throw new NotFoundException('File not found');
+    }
+    const rows = await this.dataSource.query<Array<{
+      transcript_id: string;
+      tenant_id: string;
+      student_user_id: string;
+      semester: number;
+      status: string;
+      metadata: TranscriptRevisionMetadata;
+      pdf_url: string;
+      verification_code: string;
+    }>>(
+      `SELECT transcript_id, tenant_id, student_user_id, semester, status, metadata, pdf_url, verification_code
+       FROM official_transcripts
+       WHERE tenant_id = $1 AND transcript_id = $2 AND pdf_url IS NOT NULL`,
+      [user.tenant_id, transcriptId],
+    );
+    const record = rows[0];
+    const examStaff = uploadRoles(user).some((role) =>
+      EXAM_CELL_ACCESS_ROLES.some(
+        (allowed) => normalizeExamCellRole(role) === normalizeExamCellRole(allowed),
+      ),
+    );
+    if (!record || (record.student_user_id !== user.user_id && !examStaff)) {
+      throw new NotFoundException('File not found');
+    }
+    const expectedKey = this.canonicalKey(record.pdf_url, user.tenant_id);
+    if (expectedKey !== key || !(await isCurrentTranscript(this.dataSource, record))) {
+      throw new NotFoundException('File not found');
+    }
   }
 }

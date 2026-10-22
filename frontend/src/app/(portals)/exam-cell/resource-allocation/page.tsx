@@ -1,7 +1,7 @@
 'use client';
 
 import { Select } from '@/components/ui/select';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -17,67 +17,77 @@ type Schedule = {
 };
 type Block = { block: string; halls: { name: string; capacity: number }[] };
 type Faculty = { user_id: string; name: string };
+const EMPTY_SCHEDULES: Schedule[] = [];
+const EMPTY_BLOCKS: Block[] = [];
+const EMPTY_FACULTY: Faculty[] = [];
 
 export default function ExamCellResourceAllocationPage() {
   const api = useAuthedApi();
-  const [schedules, setSchedules] = useState<Schedule[]>([]);
-  const [blocks, setBlocks] = useState<Block[]>([]);
-  const [faculty, setFaculty] = useState<Faculty[]>([]);
+  const [lookupRevision, setLookupRevision] = useState(0);
+  const [facultyRevision, setFacultyRevision] = useState(0);
+  const [lookups, setLookups] = useState<{ api: typeof api; revision: number; schedules: Schedule[]; blocks: Block[]; error: string | null } | null>(null);
+  const [facultyResult, setFacultyResult] = useState<{ api: typeof api; key: string; rows: Faculty[]; error: string | null } | null>(null);
+  const currentLookups = lookups?.api === api && lookups.revision === lookupRevision ? lookups : null;
+  const lookupLoading = !currentLookups;
+  const lookupError = currentLookups?.error;
+  const schedules = currentLookups?.schedules ?? EMPTY_SCHEDULES;
+  const blocks = currentLookups?.blocks ?? EMPTY_BLOCKS;
   const [examId, setExamId] = useState('');
   const [block, setBlock] = useState('');
   const [room, setRoom] = useState('');
   const [semester, setSemester] = useState('4');
   const [coordinatorId, setCoordinatorId] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [lastResult, setLastResult] = useState<{
+  const submissionPending = useRef(false);
+  const [allocationResult, setLastResult] = useState<{ api: typeof api; key: string; data: {
     allocated: number;
     room: string;
     subject_name?: string;
-  } | null>(null);
+  } } | null>(null);
 
   useEffect(() => {
-    void api.get<Schedule[]>('/api/exam-cell/schedules').then((data) => {
-      const rows = Array.isArray(data) ? data : [];
-      setSchedules(rows);
-      if (rows[0]) setExamId(rows[0].exam_schedule_id);
+    let current = true;
+    void Promise.all([
+      api.get<Schedule[]>('/api/exam-cell/schedules'),
+      api.get<Block[]>('/api/exam-cell/blocks-halls'),
+    ]).then(([scheduleRows, blockRows]) => {
+      if (current) setLookups({ api, revision: lookupRevision, schedules: Array.isArray(scheduleRows) ? scheduleRows : [], blocks: Array.isArray(blockRows) ? blockRows : [], error: null });
+    }).catch((cause: unknown) => {
+      if (current) setLookups({ api, revision: lookupRevision, schedules: [], blocks: [], error: cause instanceof Error ? cause.message : 'Could not load resource lookups' });
     });
-    void api.get<Block[]>('/api/exam-cell/blocks-halls').then((data) => {
-      const rows = Array.isArray(data) ? data : [];
-      setBlocks(rows);
-      if (rows[0]) {
-        setBlock(rows[0].block);
-        if (rows[0].halls?.[0]?.name) setRoom(rows[0].halls[0].name);
-      }
-    });
-  }, [api]);
+    return () => { current = false; };
+  }, [api, lookupRevision]);
 
-  const selectedSchedule = schedules.find((s) => s.exam_schedule_id === examId);
-  const halls = useMemo(() => blocks.find((b) => b.block === block)?.halls ?? [], [blocks, block]);
-
-  // Keep room in sync with the halls list for the selected block (Radix Select goes blank if value is missing from options).
-  useEffect(() => {
-    if (halls.length === 0) {
-      if (room) setRoom('');
-      return;
-    }
-    if (!halls.some((h) => h.name === room)) {
-      setRoom(halls[0].name);
-    }
-  }, [halls, room]);
+  const selectedSchedule = schedules.find((s) => s.exam_schedule_id === examId) ?? schedules[0];
+  const selectedExamId = selectedSchedule?.exam_schedule_id ?? '';
+  const selectedBlock = blocks.some((item) => item.block === block) ? block : blocks[0]?.block ?? '';
+  const halls = useMemo(() => blocks.find((b) => b.block === selectedBlock)?.halls ?? [], [blocks, selectedBlock]);
+  const selectedRoom = halls.some((hall) => hall.name === room) ? room : halls[0]?.name ?? '';
+  const facultyKey = `${lookupRevision}:${selectedExamId}:${String(selectedSchedule?.exam_date ?? '').slice(0, 10)}:${facultyRevision}`;
+  const currentFaculty = facultyResult?.api === api && facultyResult.key === facultyKey ? facultyResult : null;
+  const facultyLoading = Boolean(selectedSchedule) && !currentFaculty;
+  const facultyError = currentFaculty?.error;
+  const faculty = currentFaculty?.rows ?? EMPTY_FACULTY;
+  const coordinatorInvalid = Boolean(coordinatorId) && !faculty.some((member) => member.user_id === coordinatorId);
+  const parametersReady = !lookupLoading && !lookupError && !facultyLoading && !facultyError && !coordinatorInvalid && Boolean(selectedSchedule && selectedRoom);
+  const allocationKey = JSON.stringify([selectedExamId, selectedBlock, selectedRoom, semester, coordinatorId]);
+  const lastResult = allocationResult?.api === api && allocationResult.key === allocationKey ? allocationResult.data : null;
 
   useEffect(() => {
     if (!selectedSchedule) return;
+    let current = true;
     const dateStr = String(selectedSchedule.exam_date).slice(0, 10);
     void api.get<Faculty[]>(`/api/exam-cell/faculty-roster?date=${dateStr}`).then((data) => {
-      setFaculty(Array.isArray(data) ? data : []);
+      if (current) setFacultyResult({ api, key: facultyKey, rows: Array.isArray(data) ? data : [], error: null });
+    }).catch((cause: unknown) => {
+      if (current) setFacultyResult({ api, key: facultyKey, rows: [], error: cause instanceof Error ? cause.message : 'Could not load faculty roster' });
     });
-  }, [api, selectedSchedule]);
+    return () => { current = false; };
+  }, [api, selectedSchedule, facultyKey]);
 
   async function assignResource() {
-    if (!examId || !room) {
-      toast.error('Select subject schedule and room');
-      return;
-    }
+    if (submissionPending.current || !parametersReady) return;
+    submissionPending.current = true;
     setSubmitting(true);
     try {
       const result = await api.post<{
@@ -85,17 +95,18 @@ export default function ExamCellResourceAllocationPage() {
         room: string;
         subject_name?: string;
       }>('/api/exam-cell/seating/assign-resource', {
-        exam_schedule_id: examId,
-        room,
+        exam_schedule_id: selectedExamId,
+        room: selectedRoom,
         semester: Number(semester),
         coordinator_faculty_user_id: coordinatorId || undefined,
-        block,
+        block: selectedBlock,
       });
-      setLastResult(result);
+      setLastResult({ api, key: allocationKey, data: result });
       toast.success(`Allocated ${result.allocated} seats in ${result.room}`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Allocation failed');
     } finally {
+      submissionPending.current = false;
       setSubmitting(false);
     }
   }
@@ -123,10 +134,21 @@ export default function ExamCellResourceAllocationPage() {
             </p>
           </div>
 
+          {lookupLoading && <p role="status" className="text-sm text-muted-foreground">Loading schedules and rooms…</p>}
+          {lookupError && <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-900">
+            <p>{lookupError}</p><Button variant="outline" size="sm" className="mt-2" onClick={() => setLookupRevision((revision) => revision + 1)}>Retry resource lookups</Button>
+          </div>}
+          {!lookupLoading && !lookupError && schedules.length === 0 && <p className="text-sm text-muted-foreground">No exam schedules available.</p>}
+          {facultyLoading && <p role="status" className="text-sm text-muted-foreground">Loading faculty roster…</p>}
+          {facultyError && <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-900">
+            <p>{facultyError}</p><Button variant="outline" size="sm" className="mt-2" onClick={() => setFacultyRevision((revision) => revision + 1)}>Retry faculty roster</Button>
+          </div>}
+          {!facultyLoading && !facultyError && coordinatorInvalid && <p role="alert" className="text-sm text-red-900">The selected coordinator is no longer available. Choose a coordinator or None.</p>}
+
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="flex flex-col gap-1.5 sm:col-span-2">
-              <label className={labelClass}>Subject / exam schedule</label>
-              <Select className={fieldClass} value={examId} onChange={(e) => setExamId(e.target.value)}>
+              <label htmlFor="resource-exam-schedule" className={labelClass}>Subject / exam schedule</label>
+              <Select id="resource-exam-schedule" disabled={submitting || lookupLoading || Boolean(lookupError) || schedules.length === 0} className={fieldClass} value={selectedExamId} onChange={(e) => { setExamId(e.target.value); setCoordinatorId(''); }}>
                 {schedules.map((s) => (
                   <option key={s.exam_schedule_id} value={s.exam_schedule_id}>
                     {s.subject_name ?? s.subject_code ?? s.exam_type} — {String(s.exam_date).slice(0, 10)}
@@ -136,8 +158,8 @@ export default function ExamCellResourceAllocationPage() {
             </div>
 
             <div className="flex flex-col gap-1.5">
-              <label className={labelClass}>Semester</label>
-              <Select className={fieldClass} value={semester} onChange={(e) => setSemester(e.target.value)}>
+              <label htmlFor="resource-semester" className={labelClass}>Semester</label>
+              <Select id="resource-semester" disabled={submitting} className={fieldClass} value={semester} onChange={(e) => setSemester(e.target.value)}>
                 {[1, 2, 3, 4, 5, 6, 7, 8].map((s) => (
                   <option key={s} value={String(s)}>Semester {s}</option>
                 ))}
@@ -145,14 +167,16 @@ export default function ExamCellResourceAllocationPage() {
             </div>
 
             <div className="flex flex-col gap-1.5">
-              <label className={labelClass}>Block</label>
+              <label htmlFor="resource-block" className={labelClass}>Block</label>
               <Select
+                id="resource-block"
+                disabled={submitting || lookupLoading || Boolean(lookupError) || blocks.length === 0}
                 className={fieldClass}
-                value={block}
+                value={selectedBlock}
                 onChange={(e) => {
                   setBlock(e.target.value);
                   const next = blocks.find((b) => b.block === e.target.value);
-                  if (next?.halls[0]) setRoom(next.halls[0].name);
+                  setRoom(next?.halls[0]?.name ?? '');
                 }}
               >
                 {blocks.map((b) => (
@@ -162,17 +186,18 @@ export default function ExamCellResourceAllocationPage() {
             </div>
 
             <div className="flex flex-col gap-1.5">
-              <label className={labelClass}>Room / resource</label>
+              <label htmlFor="resource-room" className={labelClass}>Room / resource</label>
               <Select
-                key={`room-${block}-${halls.map((h) => h.name).join('|')}`}
+                id="resource-room"
+                key={`room-${selectedBlock}-${halls.map((h) => h.name).join('|')}`}
                 className={fieldClass}
-                value={halls.some((h) => h.name === room) ? room : undefined}
-                placeholder={halls.length === 0 ? 'No rooms in this block' : 'Select room'}
-                disabled={halls.length === 0}
+                value={selectedRoom}
+                placeholder={lookupLoading ? 'Loading rooms…' : lookupError ? 'Rooms unavailable' : halls.length === 0 ? 'No rooms in this block' : 'Select room'}
+                disabled={submitting || lookupLoading || Boolean(lookupError) || halls.length === 0}
                 onChange={(e) => setRoom(e.target.value)}
               >
                 {halls.length === 0 ? (
-                  <option value="">No rooms in this block</option>
+                  <option value="">{lookupLoading ? 'Loading rooms…' : lookupError ? 'Rooms unavailable' : 'No rooms in this block'}</option>
                 ) : null}
                 {halls.map((h) => (
                   <option key={h.name} value={h.name}>
@@ -183,12 +208,15 @@ export default function ExamCellResourceAllocationPage() {
             </div>
 
             <div className="flex flex-col gap-1.5">
-              <label className={labelClass}>Exam coordinator / invigilator</label>
+              <label htmlFor="resource-coordinator" className={labelClass}>Exam coordinator / invigilator</label>
               <Select
+                id="resource-coordinator"
+                disabled={submitting || lookupLoading || Boolean(lookupError) || facultyLoading || Boolean(facultyError) || !selectedSchedule}
                 className={fieldClass}
-                value={coordinatorId || 'NONE'}
+                value={coordinatorInvalid ? '' : coordinatorId || 'NONE'}
                 onChange={(e) => setCoordinatorId(e.target.value === 'NONE' ? '' : e.target.value)}
               >
+                {coordinatorInvalid && <option value="">Choose coordinator</option>}
                 <option value="NONE">Optional — none selected</option>
                 {faculty.map((f) => (
                   <option key={f.user_id} value={f.user_id}>{f.name}</option>
@@ -198,7 +226,7 @@ export default function ExamCellResourceAllocationPage() {
           </div>
 
           <div className="flex justify-center pt-1">
-            <Button className={btnPrimary} disabled={submitting} onClick={() => void assignResource()}>
+            <Button className={btnPrimary} disabled={submitting || !parametersReady} onClick={() => void assignResource()}>
               {submitting ? 'Allocating…' : 'Assign roll seats & publish plan'}
             </Button>
           </div>

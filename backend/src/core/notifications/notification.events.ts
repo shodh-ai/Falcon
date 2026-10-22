@@ -84,7 +84,9 @@ export type FeeGeneratedPayload = BaseNotificationPayload & {
   feeHead?: string;
 };
 
-export type AdmitCardLockedPayload = BaseNotificationPayload;
+export type AdmitCardLockedPayload = BaseNotificationPayload & {
+  reason?: 'FINANCE' | 'EXAM_ELIGIBILITY';
+};
 
 export type AttendanceWarningPayload = BaseNotificationPayload & {
   attendancePercent: number;

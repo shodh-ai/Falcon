@@ -991,7 +991,7 @@ export class FacultyWorkspacesService {
         AND m.exam_type = $3
        WHERE e.tenant_id = $1
          AND e.course_id = $2
-         AND e.status = 'ENROLLED'
+         AND e.status IN ('ENROLLED', 'COMPLETED', 'FAILED')
        ORDER BY u.name`,
       [tenantId, courseId, examType],
     );
@@ -1102,7 +1102,10 @@ export class FacultyWorkspacesService {
       const locked = await this.dataSource.query(
         `SELECT 1 FROM academic_marks
          WHERE tenant_id = $1 AND course_id = $2 AND exam_type = $3
-           AND status IN ('PENDING_COE', 'PUBLISHED') LIMIT 1`,
+           AND status IN ('PENDING_COE', 'PUBLISHED')
+         UNION ALL SELECT 1 FROM academic_exam_results
+         WHERE tenant_id = $1 AND course_id = $2 AND exam_type = $3
+           AND status = 'PUBLISHED' LIMIT 1`,
         [tenantId, dto.course_id, examType],
       );
       if (locked[0]) {
@@ -1133,12 +1136,14 @@ export class FacultyWorkspacesService {
         const enrolledRows = await manager.query<
           Array<{ student_user_id: string }>
         >(
-          `SELECT student_user_id
-           FROM student_course_enrollments
-           WHERE tenant_id = $1
-             AND course_id = $2
-             AND status = 'ENROLLED'
-             AND student_user_id = ANY($3::uuid[])`,
+          `SELECT DISTINCT e.student_user_id
+           FROM student_course_enrollments e
+           JOIN users u ON u.user_id = e.student_user_id AND u.tenant_id = e.tenant_id
+           WHERE e.tenant_id = $1
+             AND e.course_id = $2
+             AND e.status IN ('ENROLLED', 'COMPLETED', 'FAILED')
+             AND e.deleted_at IS NULL
+             AND e.student_user_id = ANY($3::uuid[])`,
           [tenantId, dto.course_id, studentIds],
         );
         const enrolledStudentIds = new Set(
@@ -1285,7 +1290,7 @@ export class FacultyWorkspacesService {
       >(
         `SELECT mark_id, exam_type FROM academic_marks
          WHERE tenant_id = $1 AND course_id = $2 AND uploaded_by = $3
-           AND status = 'DRAFT'`,
+           AND status = 'DRAFT' FOR UPDATE`,
         [tenantId, courseId, facultyUserId],
       );
       if (!drafts.length) return [];
@@ -1298,6 +1303,16 @@ export class FacultyWorkspacesService {
           throw new BadRequestException(`${examType} cannot be submitted manually`);
         }
         if (examType === 'QUIZ') continue;
+        const published = await manager.query<Array<{ result_id: string }>>(
+          `SELECT result_id FROM academic_exam_results WHERE tenant_id = $1
+             AND course_id = $2 AND exam_type = $3 AND status = 'PUBLISHED' LIMIT 1`,
+          [tenantId, courseId, examType],
+        );
+        if (published[0]) {
+          throw new ForbiddenException(
+            'Published examination results are locked; use the authorized reassessment workflow',
+          );
+        }
         const session = await this.getResultSession(
           tenantId,
           courseId,
@@ -1326,11 +1341,27 @@ export class FacultyWorkspacesService {
           drafts.map((row) => row.mark_id),
         ],
       );
-      return (Array.isArray(result[0]) ? result[0] : result) as Array<{
+      const changed = (Array.isArray(result[0]) ? result[0] : result) as Array<{
         mark_id: string;
         exam_type: string;
         status: string;
       }>;
+      await manager.query(
+        `INSERT INTO system_audit_logs (table_name, record_id, action, old_value, new_value, changed_by_user_id)
+         VALUES ('academic_marks', $1, 'UPDATE', $2::jsonb, $3::jsonb, $4)`,
+        [
+          courseId,
+          JSON.stringify({ status: 'DRAFT', tenant_id: tenantId }),
+          JSON.stringify({
+            action: 'FACULTY_BULK_MARKS_SUBMITTED',
+            tenant_id: tenantId,
+            published: changed.filter((row) => row.status === 'PUBLISHED').length,
+            submitted: changed.filter((row) => row.status === 'PENDING_COE').length,
+          }),
+          facultyUserId,
+        ],
+      );
+      return changed;
     });
     const publishedRows = rows.filter((row) => row.status === 'PUBLISHED');
     const submittedCount = rows.filter(
@@ -1361,7 +1392,7 @@ export class FacultyWorkspacesService {
       submitted: submittedCount,
       status:
         submittedCount > 0
-          ? 'PENDING_COE'
+          ? publishedRows.length > 0 ? 'MIXED' : 'PENDING_COE'
           : publishedRows.length > 0
             ? 'PUBLISHED'
             : 'UNCHANGED',
@@ -1401,7 +1432,7 @@ export class FacultyWorkspacesService {
         AND m.course_id = e.course_id
        WHERE e.tenant_id = $1
          AND e.course_id = $2
-         AND e.status = 'ENROLLED'
+         AND e.status IN ('ENROLLED', 'COMPLETED', 'FAILED')
        ORDER BY u.name`,
       [tenantId, courseId],
     );

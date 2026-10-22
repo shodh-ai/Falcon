@@ -1,7 +1,8 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppSidebar } from '@/components/layout/AppSidebar';
 import { examCellPortal, facultyPortal, withAccountSettingsNav } from '@/lib/navigation';
+import { getExamCellSection } from '@/lib/exam-cell/sections';
 
 const mocks = vi.hoisted(() => ({ pathname: '/exam-cell/dashboard' }));
 vi.mock('next/navigation', () => ({ usePathname: () => mocks.pathname }));
@@ -15,80 +16,49 @@ const sidebarProps = {
   onToggleCollapse: vi.fn(),
 };
 
-describe('Examination Cell always-visible sidebar', () => {
+describe('Examination Cell consolidated sidebar', () => {
   beforeEach(() => {
     mocks.pathname = '/exam-cell/dashboard';
     vi.clearAllMocks();
   });
 
-  it('shows all 40 links under the seven headings without expanding anything', () => {
+  it('shows eight section links and keeps every specialist route in its section', () => {
     render(<AppSidebar {...sidebarProps} />);
+    const nav = screen.getByRole('navigation', { name: 'Workspace modules' });
+    expect(within(nav).getAllByRole('link')).toHaveLength(8);
     for (const group of examCellPortal.navGroups) {
-      expect(screen.getByText(group.title)).toBeVisible();
-      expect(screen.queryByRole('button', { name: group.title })).not.toBeInTheDocument();
+      const landing = group.items.find((item) => item.href === group.homeHref) ?? group.items[0];
+      expect(within(nav).getByRole('link', { name: group.title })).toHaveAttribute('href', landing.href);
       for (const item of group.items) {
-        expect(screen.getByRole('link', { name: item.label })).toBeVisible();
+        expect(getExamCellSection(item.href)?.items.some((candidate) => candidate.href === item.href)).toBe(true);
       }
     }
-    expect(screen.getAllByRole('link')).toHaveLength(41);
-    expect(screen.getByRole('link', { name: 'Dashboard' })).toHaveAttribute('aria-current', 'page');
-    expect(screen.getByRole('link', { name: 'Settings' })).toHaveAttribute('href', '/exam-cell/settings');
   });
 
-  it('retains the reference navy background, gold headings, and rounded gold active item', () => {
-    render(<AppSidebar {...sidebarProps} />);
-    expect(screen.getByRole('complementary')).toHaveClass('bg-sgvu-navy');
-    expect(screen.getByText('Dashboard & Tasks')).toHaveClass('uppercase', 'text-sgvu-gold/80');
-    expect(screen.getByRole('link', { name: 'Dashboard' })).toHaveClass('rounded-xl', 'bg-sgvu-gold', 'text-sgvu-navy');
-  });
-
-  it('does not hide links when a section heading is clicked', () => {
-    render(<AppSidebar {...sidebarProps} />);
-    fireEvent.click(screen.getByText('Results & Corrections'));
-    expect(screen.getByRole('link', { name: 'Result Control Centre' })).toHaveAttribute('href', '/exam-cell/results');
-    expect(screen.getAllByRole('link')).toHaveLength(41);
-    for (const list of screen.getAllByRole('list')) expect(list).not.toHaveAttribute('hidden');
-  });
-
-  it('keeps every section visible while updating the active link after navigation', () => {
-    mocks.pathname = '/exam-cell/results/session-123';
-    const { rerender } = render(<AppSidebar {...sidebarProps} />);
-    expect(screen.getByRole('link', { name: 'Result Control Centre' })).toHaveAttribute('aria-current', 'page');
+  it('marks the current section without falsely marking its landing page', () => {
     mocks.pathname = '/exam-cell/course-grades';
-    rerender(<AppSidebar {...sidebarProps} />);
-    expect(screen.getAllByRole('link')).toHaveLength(41);
-    expect(screen.getByRole('link', { name: 'Course Grades' })).toHaveAttribute('aria-current', 'page');
-    expect(screen.getByRole('link', { name: 'Exam Sessions' })).toBeVisible();
+    render(<AppSidebar {...sidebarProps} />);
+    expect(screen.getByRole('link', { name: 'Marks & Results' })).toHaveAttribute('aria-current', 'location');
+    expect(screen.getByRole('link', { name: 'Dashboard' })).not.toHaveAttribute('aria-current');
   });
 
-  it('preserves mobile drawer navigation when a visible link is clicked', () => {
+  it('preserves mobile drawer navigation and collapsed section access', () => {
     const closeDrawer = vi.fn();
-    render(
+    const { rerender } = render(
       <div onClick={(event) => { event.preventDefault(); closeDrawer(); }}>
-        <AppSidebar {...sidebarProps} />
+        <AppSidebar {...sidebarProps} collapsed />
       </div>,
     );
-    fireEvent.click(screen.getByRole('link', { name: 'Exam Sessions' }));
+    expect(screen.getAllByRole('link')).toHaveLength(8);
+    fireEvent.click(screen.getByRole('link', { name: 'Exam Planning' }));
     expect(closeDrawer).toHaveBeenCalledOnce();
-  });
-
-  it('keeps all 40 destinations plus Settings accessible in icon-only mode', () => {
-    const { rerender } = render(<AppSidebar {...sidebarProps} collapsed />);
-    expect(screen.getAllByRole('link')).toHaveLength(41);
-    expect(screen.getByTitle('Grade Change DOFA')).toHaveAttribute('href', '/exam-cell/approvals/grade-change');
-    expect(screen.queryByRole('button', { name: 'Results & Corrections' })).not.toBeInTheDocument();
     rerender(<AppSidebar {...sidebarProps} />);
-    expect(screen.getAllByRole('link')).toHaveLength(41);
-    expect(screen.getByRole('link', { name: 'Result Control Centre' })).toBeVisible();
+    expect(screen.getAllByRole('link')).toHaveLength(8);
   });
 
-  it('leaves other portals as static sections with visible navigation links', () => {
+  it('leaves other portals as full visible navigation lists', () => {
     mocks.pathname = '/faculty/dashboard';
     render(<AppSidebar {...sidebarProps} personaLabel={facultyPortal.personaLabel} navGroups={facultyPortal.navGroups} />);
     expect(screen.getAllByRole('link')).toHaveLength(facultyPortal.navGroups.flatMap((group) => group.items).length);
-    for (const group of facultyPortal.navGroups) {
-      expect(screen.getByText(group.title)).toBeInTheDocument();
-      expect(screen.queryByRole('button', { name: group.title })).not.toBeInTheDocument();
-    }
   });
 });

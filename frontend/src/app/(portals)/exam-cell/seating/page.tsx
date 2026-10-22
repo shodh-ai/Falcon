@@ -2,7 +2,7 @@
 
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Select } from '@/components/ui/select';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -93,24 +93,41 @@ export default function ExamCellSeatingPage() {
   const [swapA, setSwapA] = useState('');
   const [swapB, setSwapB] = useState('');
   const [loading, setLoading] = useState(true);
-  const [publishing, setPublishing] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadRetry, setLoadRetry] = useState(0);
+  const [runsLoading, setRunsLoading] = useState(true);
+  const [runsError, setRunsError] = useState<string | null>(null);
+  const [branchesLoading, setBranchesLoading] = useState(true);
+  const [branchesError, setBranchesError] = useState<string | null>(null);
+  const [branchesRetry, setBranchesRetry] = useState(0);
+  const [busyAction, setBusyAction] = useState<'allocate' | 'publish' | 'swap' | 'delete' | null>(null);
+  const pendingAction = useRef(false);
+  const runsGeneration = useRef(0);
+  const [visualContext, setVisualContext] = useState('');
+  const [visualScheduleId, setVisualScheduleId] = useState<string | null>(null);
+  const [visualRunId, setVisualRunId] = useState<string | null>(null);
+  const contextKey = JSON.stringify([strategy, examType, examId, semester, branch]);
+  const visualCurrent = visualContext === contextKey;
+  const parametersReady = !loading && !loadError && !branchesLoading && !branchesError;
 
   async function publishPlans() {
-    const scheduleId = strategy === 'by_schedule' ? examId : schedules.find((s) => s.exam_type === examType)?.exam_schedule_id;
-    if (!scheduleId) {
-      toast.error('Select an exam schedule to publish seating plans');
+    if (pendingAction.current || !parametersReady) return;
+    if (strategy !== 'by_schedule' || !examId) {
+      toast.error('Choose Specific schedule and select the schedule to publish');
       return;
     }
-    setPublishing(true);
+    pendingAction.current = true;
+    setBusyAction('publish');
     try {
       const res = await api.post<{ published_rooms: number }>('/api/exam-cell/seating/publish-plans', {
-        exam_schedule_id: scheduleId,
+        exam_schedule_id: examId,
       });
       toast.success(`Published ${res.published_rooms} room plan(s) to student portal`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Publish failed');
     } finally {
-      setPublishing(false);
+      pendingAction.current = false;
+      setBusyAction(null);
     }
   }
 
@@ -119,6 +136,7 @@ export default function ExamCellSeatingPage() {
 
     async function loadInitial() {
       setLoading(true);
+      setLoadError(null);
       try {
         const [scheduleRows, blockRows] = await Promise.all([
           api.get<Schedule[]>('/api/exam-cell/schedules'),
@@ -130,11 +148,12 @@ export default function ExamCellSeatingPage() {
         const nextBlocks = asArray<Block>(blockRows);
         setSchedules(nextSchedules);
         setBlocksData(nextBlocks);
-        if (nextSchedules[0]) setExamId(nextSchedules[0].exam_schedule_id);
+        setExamId((current) => nextSchedules.some((row) => row.exam_schedule_id === current) ? current : '');
         if (nextBlocks[0]?.block) setSelectedBlock(nextBlocks[0].block);
       } catch (err) {
         if (!cancelled) {
           toast.error(err instanceof Error ? err.message : 'Could not load seating planner data');
+          setLoadError(err instanceof Error ? err.message : 'Could not load seating planner data');
           setSchedules([]);
           setBlocksData([]);
         }
@@ -143,34 +162,45 @@ export default function ExamCellSeatingPage() {
       }
     }
 
-    void loadInitial();
+    queueMicrotask(() => { if (!cancelled) void loadInitial(); });
     return () => {
       cancelled = true;
     };
-  }, [api]);
+  }, [api, loadRetry]);
 
   useEffect(() => {
     if (!semester) return;
     let cancelled = false;
 
     async function loadBranches() {
+      setBranchesLoading(true);
+      setBranchesError(null);
       try {
         const rows = await api.get<string[]>(`/api/exam-cell/branches?semester=${semester}`);
         if (!cancelled) setBranches(asArray<string>(rows));
-      } catch {
-        if (!cancelled) setBranches([]);
+      } catch (error) {
+        if (!cancelled) {
+          setBranches([]);
+          setBranchesError(error instanceof Error ? error.message : 'Could not load branches');
+        }
+      } finally {
+        if (!cancelled) setBranchesLoading(false);
       }
     }
 
-    void loadBranches();
+    queueMicrotask(() => { if (!cancelled) void loadBranches(); });
     return () => {
       cancelled = true;
     };
-  }, [api, semester]);
+  }, [api, semester, branchesRetry]);
 
   const loadRuns = useCallback(async () => {
+    const generation = ++runsGeneration.current;
+    setRunsLoading(true);
+    setRunsError(null);
     try {
       const rows = await api.get<SeatingRun[]>('/api/exam-cell/seating-runs');
+      if (generation !== runsGeneration.current) return;
       setRuns(
         asArray<SeatingRun>(rows).map((run) => ({
           ...run,
@@ -179,18 +209,32 @@ export default function ExamCellSeatingPage() {
         })),
       );
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Could not load seating runs');
+      if (generation !== runsGeneration.current) return;
+      const message = err instanceof Error ? err.message : 'Could not load seating runs';
+      toast.error(message);
+      setRunsError(message);
       setRuns([]);
+    } finally {
+      if (generation === runsGeneration.current) setRunsLoading(false);
     }
   }, [api]);
 
   useEffect(() => {
-    void loadRuns();
+    let cancelled = false;
+    queueMicrotask(() => { if (!cancelled) void loadRuns(); });
+    return () => { cancelled = true; runsGeneration.current += 1; };
   }, [loadRuns]);
 
   async function allocate() {
+    if (pendingAction.current || !parametersReady || selectedHalls.length === 0) return;
+    if (strategy === 'by_schedule' && !examId) {
+      toast.error('Select an exam schedule');
+      return;
+    }
+    pendingAction.current = true;
+    setBusyAction('allocate');
     try {
-      const res = await api.post<{ allocated: number }>('/api/exam-cell/seating/auto-allocate', {
+      const res = await api.post<{ allocated: number; run_id?: string; allocations?: SeatingAllocation[] }>('/api/exam-cell/seating/auto-allocate', {
         allocation_strategy: strategy,
         exam_type: strategy === 'by_exam_type' ? examType : undefined,
         exam_schedule_id: strategy === 'by_schedule' ? examId : undefined,
@@ -199,40 +243,44 @@ export default function ExamCellSeatingPage() {
         rooms: selectedHalls,
       });
       toast.success(`Allocated ${res.allocated} seats — published to student portal`);
+      // Use this operation's response; global history may include another user's newer run.
+      const allocations = asArray<SeatingAllocation>(res.allocations);
+      setVisualAllocations(allocations);
+      setVisualContext(contextKey);
+      setVisualScheduleId(strategy === 'by_schedule' ? examId : null);
+      setVisualRunId(res.run_id ?? null);
+      setShowVisualRooms(allocations.length > 0);
       await loadRuns();
-      const allRuns = await api.get<SeatingRun[]>('/api/exam-cell/seating-runs');
-      const latest = asArray<SeatingRun>(allRuns)[0];
-      if (latest) {
-        const allocations = asArray<SeatingAllocation>(latest.allocations);
-        setVisualAllocations(allocations);
-        setShowVisualRooms(allocations.length > 0);
-      }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Allocation failed');
+    } finally {
+      pendingAction.current = false;
+      setBusyAction(null);
     }
   }
 
-  function hallCapacity(roomName: string): number {
+  const hallCapacity = useCallback((roomName: string): number => {
     for (const block of blocksData) {
       const hall = block.halls.find((h) => h.name === roomName);
       if (hall) return hall.capacity ?? hall.rows * hall.cols;
     }
     return 60;
-  }
+  }, [blocksData]);
 
   async function applyManualSwap() {
+    if (pendingAction.current || !parametersReady) return;
     if (!swapRoom || !swapA || !swapB || swapA === swapB) {
       toast.error('Select two different students in the same room');
       return;
     }
-    const scheduleId =
-      strategy === 'by_schedule'
-        ? examId
-        : schedules.find((s) => s.exam_type === examType)?.exam_schedule_id;
-    if (!scheduleId) {
-      toast.error('Select an exam schedule before swapping seats');
+    if (strategy !== 'by_schedule' || !examId || visualScheduleId !== examId || !visualCurrent) {
+      toast.error('Choose Specific schedule and allocate that schedule before swapping seats');
       return;
     }
+    const scheduleId = examId;
+    pendingAction.current = true;
+    setBusyAction('swap');
+    let saved = false;
     try {
       await api.post('/api/exam-cell/seating/swap', {
         exam_schedule_id: scheduleId,
@@ -240,14 +288,23 @@ export default function ExamCellSeatingPage() {
         student_user_id_a: swapA,
         student_user_id_b: swapB,
       });
+      saved = true;
       const refreshed = await api.get<SeatingAllocation[]>(
         `/api/exam-cell/seating-allocations?exam_schedule_id=${scheduleId}`,
       );
       setVisualAllocations(asArray(refreshed));
       toast.success('Seats swapped and saved');
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Swap failed');
-      return;
+      if (!saved) {
+        toast.error(e instanceof Error ? e.message : 'Swap failed');
+        return;
+      }
+      setVisualAllocations([]);
+      setShowVisualRooms(false);
+      toast.error('Seats were saved, but the refreshed allocation could not be loaded. Reload the schedule before another swap.');
+    } finally {
+      pendingAction.current = false;
+      setBusyAction(null);
     }
     setSwapRoom(null);
     setSwapA('');
@@ -255,6 +312,7 @@ export default function ExamCellSeatingPage() {
   }
 
   const roomsVisual = useMemo(() => {
+    if (!visualCurrent) return [];
     const branchIndex = new Map<string, number>();
     const byRoom = new Map<string, SeatingAllocation[]>();
     for (const a of visualAllocations) {
@@ -281,16 +339,26 @@ export default function ExamCellSeatingPage() {
         students: items,
       };
     });
-  }, [visualAllocations, blocksData]);
+  }, [visualAllocations, blocksData, visualCurrent, hallCapacity]);
 
   async function deleteRun(runId: string) {
+    if (pendingAction.current) return;
     if (!confirm('Are you sure you want to delete this run?')) return;
+    pendingAction.current = true;
+    setBusyAction('delete');
     try {
       await api.del(`/api/exam-cell/seating-runs/${runId}`);
       toast.success('Run deleted');
+      if (runId === visualRunId) {
+        setVisualAllocations([]);
+        setShowVisualRooms(false);
+      }
       await loadRuns();
-    } catch (e) {
-      toast.error('Failed to delete run');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to delete run');
+    } finally {
+      pendingAction.current = false;
+      setBusyAction(null);
     }
   }
 
@@ -330,8 +398,14 @@ export default function ExamCellSeatingPage() {
         <CardContent className="p-5 md:p-6">
           <ExamCellPageHeader pageId="seating" />
           {loading ? (
-            <p className="mt-3 text-xs text-muted-foreground">Loading exam schedules and halls…</p>
+            <p role="status" className="mt-3 text-xs text-muted-foreground">Loading exam schedules and halls…</p>
           ) : null}
+          {loadError ? <div role="alert" className="mt-3 text-sm text-destructive">
+            <p>{loadError}</p><Button variant="outline" onClick={() => setLoadRetry((value) => value + 1)}>Retry</Button>
+          </div> : null}
+          {branchesError ? <div role="alert" className="mt-3 text-sm text-destructive">
+            <p>{branchesError}</p><Button variant="outline" onClick={() => setBranchesRetry((value) => value + 1)}>Retry branches</Button>
+          </div> : null}
         </CardContent>
       </Card>
 
@@ -350,6 +424,7 @@ export default function ExamCellSeatingPage() {
                 variant="outline"
                 size="sm"
                 className={strategy === 'by_exam_type' ? btnPrimary : btnOutline}
+                disabled={busyAction !== null || loading}
                 onClick={() => setStrategy('by_exam_type')}
               >
                 Entire exam
@@ -359,6 +434,7 @@ export default function ExamCellSeatingPage() {
                 variant="outline"
                 size="sm"
                 className={strategy === 'by_schedule' ? btnPrimary : btnOutline}
+                disabled={busyAction !== null || loading}
                 onClick={() => setStrategy('by_schedule')}
               >
                 Specific schedule
@@ -370,7 +446,7 @@ export default function ExamCellSeatingPage() {
             {strategy === 'by_exam_type' ? (
               <div className="flex flex-col gap-1.5">
                 <label className={labelClass}>Exam type</label>
-                <Select className={fieldClass} value={examType} onChange={(e) => setExamType(e.target.value)}>
+                <Select aria-label="Exam type" disabled={busyAction !== null || loading} className={fieldClass} value={examType} onChange={(e) => setExamType(e.target.value)}>
                   <option value="MID_TERM">Mid Term</option>
                   <option value="END_TERM">End Term</option>
                 </Select>
@@ -378,7 +454,8 @@ export default function ExamCellSeatingPage() {
             ) : (
               <div className="flex flex-col gap-1.5">
                 <label className={labelClass}>Exam schedule</label>
-                <Select className={fieldClass} value={examId} onChange={(e) => setExamId(e.target.value)}>
+                <Select aria-label="Exam schedule" disabled={busyAction !== null || loading} className={fieldClass} value={examId} onChange={(e) => setExamId(e.target.value)}>
+                  <option value="">Select schedule</option>
                   {schedules.map((s) => (
                     <option key={s.exam_schedule_id} value={s.exam_schedule_id}>
                       {s.subject_name ? `${s.subject_name} (${s.subject_code})` : s.exam_type} · {String(s.exam_date).slice(0, 10)}
@@ -389,7 +466,7 @@ export default function ExamCellSeatingPage() {
             )}
             <div className="flex flex-col gap-1.5">
               <label className={labelClass}>Semester</label>
-              <Select className={fieldClass} value={semester} onChange={(e) => setSemester(e.target.value)}>
+              <Select aria-label="Semester" disabled={busyAction !== null || loading} className={fieldClass} value={semester} onChange={(e) => { setSemester(e.target.value); setBranch('All Branches'); setBranchesLoading(true); }}>
                 {[1, 2, 3, 4, 5, 6, 7, 8].map((s) => (
                   <option key={s} value={s}>Semester {s}</option>
                 ))}
@@ -397,7 +474,7 @@ export default function ExamCellSeatingPage() {
             </div>
             <div className="flex flex-col gap-1.5">
               <label className={labelClass}>Branch</label>
-              <Select className={fieldClass} value={branch} onChange={(e) => setBranch(e.target.value)}>
+              <Select aria-label="Branch" disabled={busyAction !== null || loading || branchesLoading || !!branchesError} className={fieldClass} value={branch} onChange={(e) => setBranch(e.target.value)}>
                 <option value="All Branches">All Branches</option>
                 {branches.map((b) => (
                   <option key={b} value={b}>{b}</option>
@@ -408,6 +485,8 @@ export default function ExamCellSeatingPage() {
               <label className={labelClass}>Block</label>
               <Select
                 className={fieldClass}
+                aria-label="Block"
+                disabled={busyAction !== null || loading}
                 value={selectedBlock}
                 onChange={(e) => {
                   setSelectedBlock(e.target.value);
@@ -445,6 +524,7 @@ export default function ExamCellSeatingPage() {
                     >
                       <input
                         type="checkbox"
+                        disabled={busyAction !== null || !parametersReady}
                         className="h-4 w-4 accent-[#0B2447]"
                         checked={checked}
                         onChange={(e) => {
@@ -469,17 +549,17 @@ export default function ExamCellSeatingPage() {
             <Button
               className={btnPrimary}
               onClick={() => void allocate()}
-              disabled={selectedHalls.length === 0}
+              disabled={busyAction !== null || !parametersReady || selectedHalls.length === 0}
             >
-              Auto-allocate seats
+              {busyAction === 'allocate' ? 'Allocating…' : 'Auto-allocate seats'}
             </Button>
             <Button
               variant="outline"
               className={btnOutline}
               onClick={() => void publishPlans()}
-              disabled={publishing}
+              disabled={busyAction !== null || !parametersReady}
             >
-              {publishing ? 'Publishing…' : 'Publish to student portal'}
+              {busyAction === 'publish' ? 'Publishing…' : 'Publish to student portal'}
             </Button>
           </div>
         </CardContent>
@@ -531,7 +611,12 @@ export default function ExamCellSeatingPage() {
                     size="sm"
                     variant="outline"
                     className={`mt-4 w-full ${btnOutline}`}
+                    disabled={busyAction !== null}
                     onClick={() => {
+                      if (strategy !== 'by_schedule' || visualScheduleId !== examId) {
+                        toast.error('Choose Specific schedule and allocate that schedule before swapping seats');
+                        return;
+                      }
                       setSwapRoom(room.room);
                       setSwapA('');
                       setSwapB('');
@@ -551,13 +636,17 @@ export default function ExamCellSeatingPage() {
           <div>
             <h2 className="text-lg font-bold text-sgvu-navy">Seating plan history</h2>
             <p className="mt-0.5 text-sm text-muted-foreground">
-              {runs.length === 0
+              {runsLoading ? 'Loading seating plan history…' : runsError ? 'Seating plan history unavailable' : runs.length === 0
                 ? 'No seating plans generated yet'
                 : `${runs.length} plan${runs.length === 1 ? '' : 's'} on record`}
             </p>
           </div>
 
-          {runs.length === 0 ? (
+          {runsLoading ? <p role="status" className="text-sm text-muted-foreground">Loading seating plans…</p> : runsError ? (
+            <div role="alert" className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm">
+              <p>{runsError}</p><Button variant="outline" disabled={busyAction !== null} onClick={() => void loadRuns()}>Retry</Button>
+            </div>
+          ) : runs.length === 0 ? (
             <div className="rounded-xl border border-dashed border-sgvu-navy/20 px-6 py-12 text-center">
               <p className="text-sm font-semibold text-sgvu-navy">No seating plans yet</p>
               <p className="mt-1 text-sm text-muted-foreground">
@@ -618,6 +707,7 @@ export default function ExamCellSeatingPage() {
                       size="sm"
                       variant="outline"
                       className="h-10 border-red-600/30 px-4 text-sm font-semibold text-red-700 hover:bg-red-50 active:border-sgvu-gold active:bg-sgvu-gold active:text-sgvu-navy"
+                      disabled={busyAction !== null}
                       onClick={() => void deleteRun(r.run_id)}
                     >
                       Delete
@@ -672,13 +762,13 @@ export default function ExamCellSeatingPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={!!swapRoom} onOpenChange={(open) => !open && setSwapRoom(null)}>
+      <Dialog open={!!swapRoom} onOpenChange={(open) => !open && busyAction === null && setSwapRoom(null)}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Manually swap students — {swapRoom}</DialogTitle>
           </DialogHeader>
           <div className="grid gap-3 py-2">
-            <Select className={fieldClass} value={swapA} onChange={(e) => setSwapA(e.target.value)}>
+            <Select aria-label="Student A" disabled={busyAction !== null} className={fieldClass} value={swapA} onChange={(e) => setSwapA(e.target.value)}>
               <option value="">Student A</option>
               {visualAllocations
                 .filter((a) => a.room === swapRoom)
@@ -688,7 +778,7 @@ export default function ExamCellSeatingPage() {
                   </option>
                 ))}
             </Select>
-            <Select className={fieldClass} value={swapB} onChange={(e) => setSwapB(e.target.value)}>
+            <Select aria-label="Student B" disabled={busyAction !== null} className={fieldClass} value={swapB} onChange={(e) => setSwapB(e.target.value)}>
               <option value="">Student B</option>
               {visualAllocations
                 .filter((a) => a.room === swapRoom)
@@ -700,11 +790,11 @@ export default function ExamCellSeatingPage() {
             </Select>
           </div>
           <DialogFooter>
-            <Button variant="outline" className={btnOutline} onClick={() => setSwapRoom(null)}>
+            <Button disabled={busyAction !== null} variant="outline" className={btnOutline} onClick={() => setSwapRoom(null)}>
               Cancel
             </Button>
-            <Button className={btnPrimary} onClick={applyManualSwap}>
-              Swap seats
+            <Button disabled={busyAction !== null} className={btnPrimary} onClick={applyManualSwap}>
+              {busyAction === 'swap' ? 'Swapping…' : 'Swap seats'}
             </Button>
           </DialogFooter>
         </DialogContent>

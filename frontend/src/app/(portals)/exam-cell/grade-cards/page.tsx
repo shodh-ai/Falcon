@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Award, FileCheck2, Medal } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Badge } from '@/components/ui/badge';
@@ -12,6 +12,7 @@ import { getApiBaseUrl } from '@/lib/api-base-url';
 import { getSubdomainFromClient } from '@/lib/tenant';
 import { useAuth } from '@/context/AuthContext';
 import { ExamCellPageHeader } from '@/components/exam-cell/ExamCellPageHeader';
+import { canExamCellAction } from '@/lib/exam-cell-rbac';
 
 const btnBase =
   'h-10 border px-5 text-sm font-semibold transition-colors disabled:opacity-60';
@@ -69,48 +70,78 @@ function stageBadge(row: GradeCardRow) {
 
 export default function ExamCellGradeCardsPage() {
   const api = useAuthedApi();
-  const { token } = useAuth();
+  const { token, user } = useAuth();
+  const roles = [...(user?.roles ?? []), user?.primaryRole ?? '', user?.role ?? ''];
+  const canGenerate = canExamCellAction(roles, 'manage_sessions');
+  const canPublish = canExamCellAction(roles, 'publish_results');
   const [semester, setSemester] = useState('4');
   const [rows, setRows] = useState<GradeCardRow[]>([]);
   const [topStudents, setTopStudents] = useState<TopStudent[]>([]);
   const [busyKey, setBusyKey] = useState<BusyKey>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const requestGeneration = useRef(0);
+  const pendingAction = useRef<BusyKey>(null);
 
   const load = useCallback(async () => {
+    const generation = ++requestGeneration.current;
     const sem = Number(semester);
-    if (!Number.isFinite(sem) || sem < 1) return;
+    setRows([]);
+    setTopStudents([]);
+    setLoadError(null);
+    if (!Number.isInteger(sem) || sem < 1) {
+      setLoading(false);
+      setLoadError('Enter a valid semester');
+      return;
+    }
+    setLoading(true);
     try {
       const [cards, toppers] = await Promise.all([
         api.get<GradeCardRow[]>(`/api/exam-cell/grade-cards?semester=${sem}`),
         api.get<TopStudent[]>(`/api/exam-cell/grade-cards/top-students?semester=${sem}&limit=10`),
       ]);
-      setRows(cards);
-      setTopStudents(toppers);
+      if (generation !== requestGeneration.current) return;
+      setRows(Array.isArray(cards) ? cards : []);
+      setTopStudents(Array.isArray(toppers) ? toppers : []);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Could not load grade cards');
+      if (generation !== requestGeneration.current) return;
+      const message = e instanceof Error ? e.message : 'Could not load grade cards';
+      toast.error(message);
+      setLoadError(message);
       setRows([]);
       setTopStudents([]);
+    } finally {
+      if (generation === requestGeneration.current) setLoading(false);
     }
   }, [api, semester]);
 
   useEffect(() => {
-    void load();
+    let cancelled = false;
+    queueMicrotask(() => { if (!cancelled) void load(); });
+    return () => { cancelled = true; requestGeneration.current += 1; };
   }, [load]);
 
   async function refresh() {
+    if (pendingAction.current) return;
+    pendingAction.current = 'refresh';
     setBusyKey('refresh');
     try {
       await load();
     } finally {
+      pendingAction.current = null;
       setBusyKey(null);
     }
   }
 
   async function runAction(action: 'generate' | 'publish-provisional' | 'finalize') {
+    if (pendingAction.current || loading || loadError) return;
+    if (action === 'generate' ? !canGenerate : !canPublish) return;
     const sem = Number(semester);
-    if (!Number.isFinite(sem) || sem < 1) {
+    if (!Number.isInteger(sem) || sem < 1) {
       toast.error('Enter a valid semester');
       return;
     }
+    pendingAction.current = action;
     setBusyKey(action);
     try {
       const path =
@@ -124,16 +155,19 @@ export default function ExamCellGradeCardsPage() {
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Action failed');
     } finally {
+      pendingAction.current = null;
       setBusyKey(null);
     }
   }
 
   async function downloadPdf(gradeCardId: string) {
+    if (pendingAction.current || loading || loadError) return;
     if (!token) {
       toast.error('Sign in again to download PDFs');
       return;
     }
     const key = `pdf:${gradeCardId}` as const;
+    pendingAction.current = key;
     setBusyKey(key);
     try {
       const res = await fetch(
@@ -157,6 +191,7 @@ export default function ExamCellGradeCardsPage() {
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'PDF export failed');
     } finally {
+      pendingAction.current = null;
       setBusyKey(null);
     }
   }
@@ -180,15 +215,24 @@ export default function ExamCellGradeCardsPage() {
                   className="w-28"
                   type="number"
                   min={1}
+                  aria-label="Semester"
                   value={semester}
-                  onChange={(e) => setSemester(e.target.value)}
+                  disabled={busyKey !== null}
+                  onChange={(e) => {
+                    requestGeneration.current += 1;
+                    setRows([]);
+                    setTopStudents([]);
+                    setLoadError(null);
+                    setLoading(true);
+                    setSemester(e.target.value);
+                  }}
                   placeholder="Semester"
                 />
                 <Button
                   variant="outline"
                   className={actionBtnClass(busyKey, 'refresh')}
                   onClick={() => void refresh()}
-                  disabled={busyKey === 'refresh'}
+                  disabled={busyKey !== null || loading}
                 >
                   Refresh
                 </Button>
@@ -197,6 +241,13 @@ export default function ExamCellGradeCardsPage() {
           />
         </CardContent>
       </Card>
+
+      {loadError ? (
+        <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm">
+          <p>{loadError}</p>
+          <Button variant="outline" disabled={busyKey !== null || loading} onClick={() => void refresh()}>Retry</Button>
+        </div>
+      ) : null}
 
       <div className="grid gap-4 md:grid-cols-4">
         <MetricCard icon={<FileCheck2 className="size-5" />} label="Grade cards" value={summary.total} />
@@ -210,30 +261,35 @@ export default function ExamCellGradeCardsPage() {
           <CardTitle className="text-base">Semester result workflow</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-wrap gap-3">
-          <Button
+          {!canGenerate && !canPublish ? (
+            <p className="w-full text-sm text-muted-foreground">Read-only access: you can review grade cards and download PDFs. Generating and publishing results requires an authorized Examination Cell role.</p>
+          ) : !canPublish ? (
+            <p className="w-full text-sm text-muted-foreground">You can generate grade cards. Publication and finalization require permission to publish results.</p>
+          ) : null}
+          {canGenerate ? <Button
             variant="outline"
             className={actionBtnClass(busyKey, 'generate')}
             onClick={() => void runAction('generate')}
-            disabled={busyKey === 'generate'}
+            disabled={busyKey !== null || loading || !!loadError}
           >
             Generate provisional batch
-          </Button>
-          <Button
+          </Button> : null}
+          {canPublish ? <Button
             variant="outline"
             className={actionBtnClass(busyKey, 'publish-provisional')}
             onClick={() => void runAction('publish-provisional')}
-            disabled={busyKey === 'publish-provisional' || rows.length === 0}
+            disabled={busyKey !== null || loading || !!loadError || rows.length === 0}
           >
             Publish provisional
-          </Button>
-          <Button
+          </Button> : null}
+          {canPublish ? <Button
             variant="outline"
             className={actionBtnClass(busyKey, 'finalize')}
             onClick={() => void runAction('finalize')}
-            disabled={busyKey === 'finalize' || rows.length === 0}
+            disabled={busyKey !== null || loading || !!loadError || rows.length === 0}
           >
             Finalize marksheets
-          </Button>
+          </Button> : null}
           <p className="w-full text-xs text-muted-foreground">
             Formula used: SGPA/CGPA = Σ(credits × grade points) / Σ(attempted credits). Withheld students are excluded from ranking.
           </p>
@@ -260,7 +316,11 @@ export default function ExamCellGradeCardsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.length === 0 ? (
+                  {loading || loadError ? (
+                    <tr><td className="px-3 py-8 text-center text-muted-foreground" colSpan={7}>
+                      {loading ? <span role="status">Loading grade cards…</span> : 'Grade cards could not be loaded.'}
+                    </td></tr>
+                  ) : rows.length === 0 ? (
                     <tr>
                       <td className="px-3 py-8 text-center text-muted-foreground" colSpan={7}>
                         No grade cards yet. Generate a provisional batch for this semester.
@@ -290,7 +350,7 @@ export default function ExamCellGradeCardsPage() {
                             className={actionBtnClass(busyKey, `pdf:${row.grade_card_id}`)}
                             aria-label={`Download grade card PDF for ${row.student_name}`}
                             onClick={() => void downloadPdf(row.grade_card_id)}
-                            disabled={busyKey === `pdf:${row.grade_card_id}`}
+                            disabled={busyKey !== null || loading || !!loadError}
                           >
                             PDF
                           </Button>
@@ -309,7 +369,9 @@ export default function ExamCellGradeCardsPage() {
             <CardTitle className="text-base">Top students</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            {topStudents.length === 0 ? (
+            {loading || loadError ? (
+              <p className="text-sm text-muted-foreground">{loading ? 'Loading merit list…' : 'Merit list could not be loaded.'}</p>
+            ) : topStudents.length === 0 ? (
               <p className="text-sm text-muted-foreground">Generate grade cards to calculate the merit list.</p>
             ) : (
               topStudents.map((student) => (

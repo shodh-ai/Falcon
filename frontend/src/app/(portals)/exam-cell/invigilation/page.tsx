@@ -83,8 +83,20 @@ export default function ExamCellInvigilationPage() {
   const [reassignFacultyId, setReassignFacultyId] = useState('');
 
   const load = useCallback(() => {
-    void api.get<Duty[]>('/api/exam-cell/invigilation').then(setDuties);
-    void api.get<Request[]>('/api/exam-cell/invigilation-requests').then(setRequests);
+    void api
+      .get<Duty[]>('/api/exam-cell/invigilation')
+      .then((rows) => setDuties(Array.isArray(rows) ? rows : []))
+      .catch((error) => {
+        setDuties([]);
+        toast.error(error instanceof Error ? error.message : 'Could not load invigilation duties');
+      });
+    void api
+      .get<Request[]>('/api/exam-cell/invigilation-requests')
+      .then((rows) => setRequests(Array.isArray(rows) ? rows : []))
+      .catch((error) => {
+        setRequests([]);
+        toast.error(error instanceof Error ? error.message : 'Could not load invigilation requests');
+      });
     void api
       .get<DutySwap[]>('/api/exam-cell/invigilation-swaps')
       .then((rows) => setSwaps(Array.isArray(rows) ? rows : []))
@@ -97,11 +109,19 @@ export default function ExamCellInvigilationPage() {
       const rows = Array.isArray(data) ? data : [];
       setBlocksHalls(rows);
       if (rows[0]?.block) setBlock(rows[0].block);
+    }).catch((error) => {
+      setBlocksHalls([]);
+      setBlock('');
+      toast.error(error instanceof Error ? error.message : 'Could not load exam halls');
     });
     void api.get<Schedule[]>('/api/exam-cell/schedules').then((data) => {
       const rows = Array.isArray(data) ? data : [];
       setSchedules(rows);
       if (rows[0]) setExamId(rows[0].exam_schedule_id);
+    }).catch((error) => {
+      setSchedules([]);
+      setExamId('');
+      toast.error(error instanceof Error ? error.message : 'Could not load exam schedules');
     });
   }, [api, load]);
 
@@ -111,10 +131,16 @@ export default function ExamCellInvigilationPage() {
       const dateStr = String(selectedSchedule.exam_date).slice(0, 10);
       void api.get<Faculty[]>(`/api/exam-cell/faculty-roster?date=${dateStr}`).then((data) => {
         setFaculty(Array.isArray(data) ? data : []);
+      }).catch((error) => {
+        setFaculty([]);
+        toast.error(error instanceof Error ? error.message : 'Could not load faculty roster');
       });
     } else {
       void api.get<Faculty[]>('/api/exam-cell/faculty-roster').then((data) => {
         setFaculty(Array.isArray(data) ? data : []);
+      }).catch((error) => {
+        setFaculty([]);
+        toast.error(error instanceof Error ? error.message : 'Could not load faculty roster');
       });
     }
   }, [examId, schedules, api]);

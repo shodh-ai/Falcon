@@ -80,6 +80,9 @@ export class MarksheetPdfService {
     if (gradeCard && gradeCard.payload?.result_stage === 'DRAFT') {
       throw new ForbiddenException('Marksheet is not published yet');
     }
+    if (type === 'final' && gradeCard?.payload?.result_stage !== 'FINAL') {
+      throw new ForbiddenException('Final marksheet is not published yet');
+    }
 
     const rows = await this.enrollments.find({
       where: { tenant_id: tenantId, student_user_id: studentUserId, semester },
@@ -123,18 +126,22 @@ export class MarksheetPdfService {
     const bold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
 
     const isFinal = type === 'final';
-    page.drawText(
-      isFinal
-        ? 'Falcon Campus OS - Final'
-        : 'Generated via Falcon Campus OS - Provisional',
-      {
-        x: isFinal ? 160 : 120,
-        y: height / 2,
-        size: isFinal ? 34 : 36,
-        font: bold,
-        color: rgb(0.88, 0.88, 0.88),
-      },
+    const watermark = isFinal
+      ? 'Falcon Campus OS - Final'
+      : 'Generated via Falcon Campus OS - Provisional';
+    const watermarkSize = Math.min(
+      isFinal ? 34 : 36,
+      (page.getWidth() - 100) / bold.widthOfTextAtSize(watermark, 1),
     );
+    page.drawText(watermark, {
+      x:
+        (page.getWidth() - bold.widthOfTextAtSize(watermark, watermarkSize)) /
+        2,
+      y: height / 2,
+      size: watermarkSize,
+      font: bold,
+      color: rgb(0.88, 0.88, 0.88),
+    });
 
     let y = height - 50;
     page.drawText('SURESH GYAN VIHAR UNIVERSITY', {
@@ -163,7 +170,7 @@ export class MarksheetPdfService {
     page.drawText(`Semester: ${semester}`, { x: 50, y, size: 11, font });
     y -= 24;
 
-    const cols = [50, 120, 320, 380, 440, 500];
+    const cols = [50, 160, 330, 385, 435, 485];
     ['Code', 'Course', 'Credits', 'Grade', 'Points', 'Status'].forEach(
       (h, i) => {
         page.drawText(h, { x: cols[i], y, size: 10, font: bold });

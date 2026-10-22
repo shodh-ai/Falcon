@@ -31,8 +31,8 @@ export class ExamsController {
     @Query('semester', new ParseIntPipe({ optional: true })) semester?: number,
   ) {
     return this.exams.listUpcomingSchedulesForStudent(
-      req.user.user_id,
       requireTenantId(req.user.tenant_id),
+      req.user.user_id,
       semester,
     );
   }
@@ -41,8 +41,8 @@ export class ExamsController {
   @Roles('Student')
   eligibility(@Req() req: { user: AuthUser }) {
     return this.exams.checkEligibility(
-      req.user.user_id,
       requireTenantId(req.user.tenant_id),
+      req.user.user_id,
     );
   }
 
@@ -50,8 +50,8 @@ export class ExamsController {
   @Roles('Student')
   async admitCard(@Req() req: { user: AuthUser }, @Res() res: Response) {
     const pdf = await this.exams.generateAdmitCardOrThrow(
-      req.user.user_id,
       requireTenantId(req.user.tenant_id),
+      req.user.user_id,
     );
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader(
@@ -65,8 +65,8 @@ export class ExamsController {
   @Roles('Student')
   myApplications(@Req() req: { user: AuthUser }) {
     return this.exams.listMyApplications(
-      req.user.user_id,
       requireTenantId(req.user.tenant_id),
+      req.user.user_id,
     );
   }
 
@@ -74,9 +74,18 @@ export class ExamsController {
   @Roles('Student')
   apply(@Req() req: { user: AuthUser }, @Body() dto: CreateExamApplicationDto) {
     return this.exams.createApplication(
+      requireTenantId(req.user.tenant_id),
       req.user.user_id,
       dto,
+    );
+  }
+
+  @Get('re-evaluation-sources')
+  @Roles('Student')
+  reEvaluationSources(@Req() req: { user: AuthUser }) {
+    return this.exams.listReEvaluationSources(
       requireTenantId(req.user.tenant_id),
+      req.user.user_id,
     );
   }
 }

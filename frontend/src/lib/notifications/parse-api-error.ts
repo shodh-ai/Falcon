@@ -195,6 +195,18 @@ export function parseApiError(raw: string, fallbackTitle = 'Action could not be 
     }
   }
 
+  // Examination documents are not helpdesk tickets. Preserve the actual
+  // verification/revocation failure instead of replacing it with ticket copy.
+  if (/hall[ -]?ticket|admit[ -]?card/i.test(text)) {
+    return {
+      title: 'Hall-ticket action could not be completed',
+      message: text,
+      category: 'EXAMS',
+      severity: 'warning',
+      intent: 'action_required',
+    };
+  }
+
   const hinted = matchRouteHint(text);
   if (hinted) return hinted;
 

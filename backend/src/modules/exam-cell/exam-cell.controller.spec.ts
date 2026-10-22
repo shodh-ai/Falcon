@@ -1,4 +1,4 @@
-import { ForbiddenException } from '@nestjs/common';
+import { UnauthorizedException } from '@nestjs/common';
 import { ExamCellController } from './exam-cell.controller';
 
 describe('ExamCellController tenant context', () => {
@@ -56,7 +56,7 @@ describe('ExamCellController tenant context', () => {
             role: 'ExamCell',
           },
         }),
-      ).toThrow(ForbiddenException);
+      ).toThrow(UnauthorizedException);
       expect(examCell.listSchedules).not.toHaveBeenCalled();
     },
   );

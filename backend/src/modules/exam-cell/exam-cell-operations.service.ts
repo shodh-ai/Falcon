@@ -2,9 +2,11 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { isUUID } from 'class-validator';
 import { AttendanceEligibilityService } from '../attendance-policy/attendance-eligibility.service';
 import { FinanceService } from '../finance/finance.service';
 import { ExamCellAuditService } from './exam-cell-audit.service';
@@ -45,7 +47,7 @@ export class ExamCellOperationsService {
     return this.queryOrEmpty(
       `SELECT w.*, s.session_name
        FROM exam_form_windows w
-       LEFT JOIN exam_sessions s ON s.session_id = w.session_id
+       LEFT JOIN exam_sessions s ON s.session_id = w.session_id AND s.tenant_id = w.tenant_id
        WHERE w.tenant_id = $1
        ORDER BY w.opens_at DESC`,
       [tenantId],
@@ -64,29 +66,47 @@ export class ExamCellOperationsService {
       closes_at: string;
     },
   ) {
-    const [row] = await this.db.query(
-      `INSERT INTO exam_form_windows
+    if (dto.session_id != null && !isUUID(dto.session_id)) {
+      throw new BadRequestException('session_id must be a UUID');
+    }
+    return this.db.transaction(async (manager) => {
+      if (dto.session_id != null) {
+        const [session] = await manager.query<Array<{ session_id: string }>>(
+          `SELECT session_id FROM exam_sessions
+           WHERE tenant_id = $1 AND session_id = $2 FOR KEY SHARE`,
+          [tenantId, dto.session_id],
+        );
+        if (!session) throw new NotFoundException('Exam session not found');
+      }
+      const [row] = await manager.query<Array<{ window_id: string }>>(
+        `INSERT INTO exam_form_windows
          (tenant_id, session_id, title, semester, program_label, opens_at, closes_at, status, created_by)
        VALUES ($1,$2,$3,$4,$5,$6,$7,'DRAFT',$8)
        RETURNING *`,
-      [
+        [
+          tenantId,
+          dto.session_id ?? null,
+          dto.title,
+          dto.semester,
+          dto.program_label ?? null,
+          dto.opens_at,
+          dto.closes_at,
+          actorUserId,
+        ],
+      );
+      await this.audit.log(
         tenantId,
-        dto.session_id ?? null,
-        dto.title,
-        dto.semester,
-        dto.program_label ?? null,
-        dto.opens_at,
-        dto.closes_at,
         actorUserId,
-      ],
-    );
-    await this.audit.log(tenantId, actorUserId, {
-      action: 'FORM_WINDOW_CREATED',
-      resource_type: 'exam_form_window',
-      resource_id: row.window_id,
-      new_value: { title: dto.title, semester: dto.semester },
+        {
+          action: 'FORM_WINDOW_CREATED',
+          resource_type: 'exam_form_window',
+          resource_id: row.window_id,
+          new_value: { title: dto.title, semester: dto.semester },
+        },
+        manager,
+      );
+      return row;
     });
-    return row;
   }
 
   async updateFormWindowStatus(
@@ -95,20 +115,27 @@ export class ExamCellOperationsService {
     actorUserId: string,
     status: 'OPEN' | 'CLOSED' | 'DRAFT',
   ) {
-    const [row] = await this.db.query(
-      `UPDATE exam_form_windows SET status = $3, updated_at = NOW()
-       WHERE tenant_id = $1 AND window_id = $2
-       RETURNING *`,
-      [tenantId, windowId, status],
-    );
-    if (!row) throw new NotFoundException('Form window not found');
-    await this.audit.log(tenantId, actorUserId, {
-      action: 'FORM_WINDOW_STATUS_CHANGED',
-      resource_type: 'exam_form_window',
-      resource_id: windowId,
-      new_value: { status },
+    return this.db.transaction(async (manager) => {
+      const [row] = await manager.query(
+        `WITH updated AS (UPDATE exam_form_windows SET status = $3, updated_at = NOW()
+         WHERE tenant_id = $1 AND window_id = $2
+         RETURNING *) SELECT * FROM updated`,
+        [tenantId, windowId, status],
+      );
+      if (!row) throw new NotFoundException('Form window not found');
+      await this.audit.log(
+        tenantId,
+        actorUserId,
+        {
+          action: 'FORM_WINDOW_STATUS_CHANGED',
+          resource_type: 'exam_form_window',
+          resource_id: windowId,
+          new_value: { status },
+        },
+        manager,
+      );
+      return row;
     });
-    return row;
   }
 
   /* ── Semester registrations desk ── */
@@ -122,9 +149,9 @@ export class ExamCellOperationsService {
       SELECT r.*, u.name AS student_name, sp.enrollment_number, sp.prn_number,
              w.title AS window_title
       FROM exam_semester_registrations r
-      JOIN users u ON u.user_id = r.student_user_id
+      JOIN users u ON u.user_id = r.student_user_id AND u.tenant_id = r.tenant_id
       LEFT JOIN student_profiles sp ON sp.user_id = r.student_user_id
-      LEFT JOIN exam_form_windows w ON w.window_id = r.window_id
+      LEFT JOIN exam_form_windows w ON w.window_id = r.window_id AND w.tenant_id = r.tenant_id
       WHERE r.tenant_id = $1`;
     if (filters.window_id) {
       params.push(filters.window_id);
@@ -148,23 +175,30 @@ export class ExamCellOperationsService {
     actorUserId: string,
     status: 'APPROVED' | 'REJECTED',
   ) {
-    const [row] = await this.db.query(
-      `UPDATE exam_semester_registrations
-       SET status = $3, reviewed_by = $4, reviewed_at = NOW()
-       WHERE tenant_id = $1 AND registration_id = $2
-       RETURNING *`,
-      [tenantId, registrationId, status, actorUserId],
-    );
-    if (!row) throw new NotFoundException('Registration not found');
-    await this.audit.log(tenantId, actorUserId, {
-      action:
-        status === 'APPROVED'
-          ? 'REGISTRATION_APPROVED'
-          : 'REGISTRATION_REJECTED',
-      resource_type: 'exam_semester_registration',
-      resource_id: registrationId,
+    return this.db.transaction(async (manager) => {
+      const [row] = await manager.query(
+        `WITH updated AS (UPDATE exam_semester_registrations
+         SET status = $3, reviewed_by = $4, reviewed_at = NOW()
+         WHERE tenant_id = $1 AND registration_id = $2
+         RETURNING *) SELECT * FROM updated`,
+        [tenantId, registrationId, status, actorUserId],
+      );
+      if (!row) throw new NotFoundException('Registration not found');
+      await this.audit.log(
+        tenantId,
+        actorUserId,
+        {
+          action:
+            status === 'APPROVED'
+              ? 'REGISTRATION_APPROVED'
+              : 'REGISTRATION_REJECTED',
+          resource_type: 'exam_semester_registration',
+          resource_id: registrationId,
+        },
+        manager,
+      );
+      return row;
     });
-    return row;
   }
 
   async seedRegistrationsFromSemester(
@@ -172,45 +206,53 @@ export class ExamCellOperationsService {
     windowId: string,
     semester: number,
   ) {
-    const students = await this.db.query(
-      `SELECT DISTINCT u.user_id
-       FROM users u
-       JOIN student_course_enrollments e ON e.student_user_id = u.user_id AND e.tenant_id = $1
-       WHERE u.tenant_id = $1 AND e.semester = $2`,
-      [tenantId, semester],
-    );
-
-    let created = 0;
-    for (const s of students) {
-      const eligibility = await this.buildEligibilitySnapshot(
-        tenantId,
-        s.user_id,
+    return this.db.transaction(async (manager) => {
+      const [window] = await manager.query<
+        Array<{ semester: number; session_id: string | null }>
+      >(
+        `SELECT semester, session_id FROM exam_form_windows
+         WHERE tenant_id = $1 AND window_id = $2 FOR UPDATE`,
+        [tenantId, windowId],
       );
-      const feeClear = eligibility.fee_clear;
-      const [existing] = await this.db.query(
-        `SELECT registration_id FROM exam_semester_registrations
-         WHERE window_id = $1 AND student_user_id = $2`,
-        [windowId, s.user_id],
+      if (!window) throw new NotFoundException('Form window not found');
+      if (Number(window.semester) !== semester) {
+        throw new BadRequestException(
+          'Semester must match the selected form window',
+        );
+      }
+      const students = await manager.query<Array<{ user_id: string }>>(
+        `SELECT DISTINCT u.user_id
+         FROM users u
+         JOIN student_course_enrollments e ON e.student_user_id = u.user_id AND e.tenant_id = $1
+         WHERE u.tenant_id = $1 AND e.semester = $2`,
+        [tenantId, semester],
       );
-      if (existing) continue;
-
-      await this.db.query(
-        `INSERT INTO exam_semester_registrations
-           (tenant_id, window_id, student_user_id, semester, fee_status, eligibility_snapshot, status)
-         VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-        [
+      let created = 0;
+      for (const student of students) {
+        const eligibility = await this.buildEligibilitySnapshot(
           tenantId,
-          windowId,
-          s.user_id,
-          semester,
-          feeClear ? 'PAID' : 'PENDING',
-          JSON.stringify(eligibility),
-          eligibility.eligible ? 'PENDING' : 'REJECTED',
-        ],
-      );
-      created++;
-    }
-    return { created, total_students: students.length };
+          student.user_id,
+        );
+        const rows = await manager.query<Array<{ registration_id: string }>>(
+          `INSERT INTO exam_semester_registrations
+             (tenant_id, window_id, student_user_id, semester, fee_status, eligibility_snapshot, status, session_id)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+           ON CONFLICT (window_id, student_user_id) DO NOTHING RETURNING registration_id`,
+          [
+            tenantId,
+            windowId,
+            student.user_id,
+            semester,
+            eligibility.fee_clear ? 'PAID' : 'PENDING',
+            JSON.stringify(eligibility),
+            eligibility.eligible ? 'PENDING' : 'REJECTED',
+            window.session_id,
+          ],
+        );
+        created += rows.length;
+      }
+      return { created, total_students: students.length };
+    });
   }
 
   private async buildEligibilitySnapshot(
@@ -221,7 +263,7 @@ export class ExamCellOperationsService {
       this.attendanceEligibility.evaluate(tenantId, studentUserId, {
         context: 'EXAM_DESK',
       }),
-      this.finance.getPendingDues(studentUserId),
+      this.finance.getPendingDues(studentUserId, tenantId),
     ]);
     const blockReasons: string[] = [];
     if (!attendance.eligible && attendance.reason) {
@@ -249,7 +291,7 @@ export class ExamCellOperationsService {
       JOIN users u ON u.user_id = a.student_user_id
       LEFT JOIN student_profiles sp ON sp.user_id = a.student_user_id
       LEFT JOIN academic_subjects sub ON sub.subject_id = a.subject_id
-      WHERE u.tenant_id = $1 AND a.application_type = 'BACKLOG'`;
+      WHERE u.tenant_id = $1 AND a.tenant_id = $1 AND a.application_type = 'BACKLOG'`;
     if (status) {
       params.push(status);
       sql += ` AND a.status = $${params.length}`;
@@ -267,8 +309,8 @@ export class ExamCellOperationsService {
              es.exam_date, es.exam_type, setter.name AS setter_name
       FROM public.exam_question_papers qp
       LEFT JOIN academic_subjects sub ON sub.subject_id = qp.subject_id
-      LEFT JOIN exam_schedules es ON es.exam_schedule_id = qp.exam_schedule_id
-      LEFT JOIN users setter ON setter.user_id = qp.setter_user_id
+      LEFT JOIN exam_schedules es ON es.exam_schedule_id = qp.exam_schedule_id AND es.tenant_id = qp.tenant_id
+      LEFT JOIN users setter ON setter.user_id = qp.setter_user_id AND setter.tenant_id = qp.tenant_id
       WHERE qp.tenant_id = $1`;
     if (status) {
       params.push(status);
@@ -288,42 +330,73 @@ export class ExamCellOperationsService {
       notes?: string;
     },
   ) {
-    let rows: Record<string, unknown>[];
-    try {
-      rows = await this.db.query(
-        `INSERT INTO public.exam_question_papers
+    for (const field of ['exam_schedule_id', 'setter_user_id'] as const) {
+      if (dto[field] != null && !isUUID(dto[field])) {
+        throw new BadRequestException(`${field} must be a UUID`);
+      }
+    }
+    return this.db.transaction(async (manager) => {
+      if (dto.exam_schedule_id != null) {
+        const [schedule] = await manager.query<
+          Array<{ exam_schedule_id: string }>
+        >(
+          `SELECT exam_schedule_id FROM exam_schedules
+           WHERE tenant_id = $1 AND exam_schedule_id = $2 FOR KEY SHARE`,
+          [tenantId, dto.exam_schedule_id],
+        );
+        if (!schedule) throw new NotFoundException('Exam schedule not found');
+      }
+      if (dto.setter_user_id != null) {
+        const [setter] = await manager.query<Array<{ user_id: string }>>(
+          `SELECT user_id FROM users
+           WHERE tenant_id = $1 AND user_id = $2 FOR KEY SHARE`,
+          [tenantId, dto.setter_user_id],
+        );
+        if (!setter)
+          throw new NotFoundException('Question paper setter not found');
+      }
+      let rows: Record<string, unknown>[];
+      try {
+        rows = await manager.query(
+          `INSERT INTO public.exam_question_papers
            (tenant_id, exam_schedule_id, subject_id, setter_user_id, notes, created_by, status)
          VALUES ($1,$2,$3,$4,$5,$6,'UPLOADED')
          RETURNING *`,
-        [
-          tenantId,
-          dto.exam_schedule_id ?? null,
-          dto.subject_id ?? null,
-          dto.setter_user_id ?? null,
-          dto.notes ?? null,
-          actorUserId,
-        ],
-      );
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      if (/relation "exam_question_papers" does not exist/i.test(message)) {
+          [
+            tenantId,
+            dto.exam_schedule_id ?? null,
+            dto.subject_id ?? null,
+            dto.setter_user_id ?? null,
+            dto.notes ?? null,
+            actorUserId,
+          ],
+        );
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (/relation "exam_question_papers" does not exist/i.test(message)) {
+          throw new BadRequestException(
+            'Question paper table not found. Run database migrations (npm run db:migrate) and restart the backend.',
+          );
+        }
         throw new BadRequestException(
-          'Question paper table not found. Run database migrations (npm run db:migrate) and restart the backend.',
+          message || 'Could not create question paper record',
         );
       }
-      throw new BadRequestException(
-        message || 'Could not create question paper record',
+      const row = rows[0];
+      if (!row)
+        throw new BadRequestException('Could not create question paper record');
+      await this.audit.log(
+        tenantId,
+        actorUserId,
+        {
+          action: 'QP_UPLOADED',
+          resource_type: 'exam_question_paper',
+          resource_id: String(row.qp_id),
+        },
+        manager,
       );
-    }
-    const row = rows[0];
-    if (!row)
-      throw new BadRequestException('Could not create question paper record');
-    await this.audit.log(tenantId, actorUserId, {
-      action: 'QP_UPLOADED',
-      resource_type: 'exam_question_paper',
-      resource_id: String(row.qp_id),
+      return row;
     });
-    return row;
   }
 
   async updateQuestionPaperStatus(
@@ -341,23 +414,30 @@ export class ExamCellOperationsService {
     if (!allowed.includes(status)) {
       throw new BadRequestException('Invalid QP status transition');
     }
-    const [row] = await this.queryOrEmpty<Record<string, unknown>>(
-      `UPDATE exam_question_papers
-       SET status = $3, updated_at = NOW(),
-           approved_by = CASE WHEN $3 IN ('COE_APPROVED','PRINT_AUTHORIZED') THEN $4 ELSE approved_by END,
-           approved_at = CASE WHEN $3 IN ('COE_APPROVED','PRINT_AUTHORIZED') THEN NOW() ELSE approved_at END
+    return this.db.transaction(async (manager) => {
+      const [row] = await manager.query<Array<Record<string, unknown>>>(
+        `WITH updated AS (UPDATE exam_question_papers
+       SET status = $3::varchar, updated_at = NOW(),
+           approved_by = CASE WHEN $3::varchar IN ('COE_APPROVED','PRINT_AUTHORIZED') THEN $4 ELSE approved_by END,
+           approved_at = CASE WHEN $3::varchar IN ('COE_APPROVED','PRINT_AUTHORIZED') THEN NOW() ELSE approved_at END
        WHERE tenant_id = $1 AND qp_id = $2
-       RETURNING *`,
-      [tenantId, qpId, status, actorUserId],
-    );
-    if (!row) throw new NotFoundException('Question paper not found');
-    await this.audit.log(tenantId, actorUserId, {
-      action: `QP_${status}`,
-      resource_type: 'exam_question_paper',
-      resource_id: qpId,
-      new_value: { status },
+       RETURNING *) SELECT * FROM updated`,
+        [tenantId, qpId, status, actorUserId],
+      );
+      if (!row) throw new NotFoundException('Question paper not found');
+      await this.audit.log(
+        tenantId,
+        actorUserId,
+        {
+          action: `QP_${status}`,
+          resource_type: 'exam_question_paper',
+          resource_id: qpId,
+          new_value: { status },
+        },
+        manager,
+      );
+      return row;
     });
-    return row;
   }
 
   /* ── Exam day ── */
@@ -365,11 +445,12 @@ export class ExamCellOperationsService {
   async listTodayExams(tenantId: string) {
     const today = new Date().toISOString().slice(0, 10);
     return this.queryOrEmpty(
-      `SELECT es.exam_schedule_id, es.exam_type, es.exam_date, es.start_time, es.end_time, es.venue,
+      `SELECT es.exam_schedule_id, es.exam_type, es.exam_date::text AS exam_date, es.start_time, es.end_time, es.venue,
               sub.subject_name, sub.subject_code,
               COALESCE((
                 SELECT COUNT(*)::int FROM exam_day_attendance da
-                WHERE da.exam_schedule_id = es.exam_schedule_id
+                WHERE da.tenant_id = es.tenant_id
+                  AND da.exam_schedule_id = es.exam_schedule_id
               ), 0) AS marked_count
        FROM exam_schedules es
        LEFT JOIN academic_subjects sub ON sub.subject_id = es.subject_id
@@ -388,7 +469,9 @@ export class ExamCellOperationsService {
        JOIN users u ON u.user_id = esa.student_user_id
        LEFT JOIN student_profiles sp ON sp.user_id = u.user_id
        LEFT JOIN exam_day_attendance da
-         ON da.exam_schedule_id = esa.exam_schedule_id AND da.student_user_id = esa.student_user_id
+         ON da.tenant_id = esa.tenant_id
+        AND da.exam_schedule_id = esa.exam_schedule_id
+        AND da.student_user_id = esa.student_user_id
        WHERE esa.tenant_id = $1 AND esa.exam_schedule_id = $2
        ORDER BY esa.room, esa.seat_number, u.name`,
       [tenantId, examScheduleId],
@@ -422,6 +505,23 @@ export class ExamCellOperationsService {
     if (!allowed.includes(dto.status)) {
       throw new BadRequestException('Invalid attendance status');
     }
+    const [schedule] = await this.db.query(
+      `SELECT exam_schedule_id FROM exam_schedules
+       WHERE tenant_id = $1 AND exam_schedule_id = $2`,
+      [tenantId, dto.exam_schedule_id],
+    );
+    if (!schedule) throw new BadRequestException('Exam schedule not found');
+
+    const [student] = await this.db.query(
+      `SELECT u.user_id
+       FROM users u
+       JOIN roles r ON r.role_id = u.role_id
+       WHERE u.tenant_id = $1 AND u.user_id = $2 AND r.role_name = 'Student'
+       LIMIT 1`,
+      [tenantId, dto.student_user_id],
+    );
+    if (!student) throw new BadRequestException('Student not found in tenant');
+
     const [row] = await this.db.query(
       `INSERT INTO exam_day_attendance
          (tenant_id, exam_schedule_id, student_user_id, status, marked_by)
@@ -464,13 +564,16 @@ export class ExamCellOperationsService {
     const sem = semester ?? 4;
     const [passFail, topRankers, deptStats, backlogCount] = await Promise.all([
       this.db.query<Array<{ label: string; count: number }>>(
-        `SELECT ser.result_status AS label, COUNT(*)::int AS count
+        `SELECT COALESCE(br.result_status, ser.result_status) AS label, COUNT(*)::int AS count
          FROM student_exam_reports ser
          JOIN exam_result_sessions ers
            ON ers.session_id = ser.session_id AND ers.tenant_id = ser.tenant_id
+         LEFT JOIN exam_backlog_current_results br ON br.source_report_id = ser.report_id
+           AND br.tenant_id = ser.tenant_id AND br.student_user_id = ser.student_user_id
+           AND br.semester = ers.semester AND br.selected_attempt_id IS NOT NULL
          WHERE ser.tenant_id = $1 AND ers.semester = $2
            AND ser.declared_at IS NOT NULL AND ers.declared_at IS NOT NULL
-         GROUP BY ser.result_status ORDER BY ser.result_status`,
+         GROUP BY COALESCE(br.result_status, ser.result_status) ORDER BY label`,
         [tenantId, sem],
       ),
       this.semesterResults.topStudents(tenantId, sem, 10),
@@ -521,14 +624,41 @@ export class ExamCellOperationsService {
     actorUserId: string,
     dto: { channel: string; subject: string; body: string; audience: string },
   ) {
-    const students = await this.db.query(
+    const channel = String(dto.channel ?? '')
+      .trim()
+      .toUpperCase();
+    if (['EMAIL', 'SMS', 'WHATSAPP'].includes(channel)) {
+      throw new ServiceUnavailableException(
+        'External examination alerts are unavailable: email, SMS and WhatsApp provider delivery has not been implemented. Use in-app notifications.',
+      );
+    }
+    if (channel !== 'IN_APP')
+      throw new BadRequestException(
+        'Unsupported examination notification channel',
+      );
+    const subject = typeof dto.subject === 'string' ? dto.subject.trim() : '';
+    const body = typeof dto.body === 'string' ? dto.body.trim() : '';
+    if (!subject || subject.length > 200 || !body)
+      throw new BadRequestException(
+        'A subject of at most 200 characters and a non-empty message are required',
+      );
+    if (dto.audience !== 'ALL_STUDENTS')
+      throw new BadRequestException(
+        'Only the all active students audience is supported',
+      );
+    dto = { ...dto, channel, subject, body };
+
+    const students = await this.db.query<Array<{ user_id: string }>>(
       `SELECT u.user_id FROM users u
        JOIN roles r ON r.role_id = u.role_id
-       WHERE u.tenant_id = $1 AND r.role_name = 'Student'`,
+       WHERE u.tenant_id = $1 AND r.role_name = 'Student'
+         AND u.is_active = TRUE AND u.deleted_at IS NULL`,
       [tenantId],
     );
 
-    const [row] = await this.db.query(
+    const [row] = await this.db.query<
+      Array<{ campaign_id: string } & Record<string, unknown>>
+    >(
       `INSERT INTO exam_notification_campaigns
          (tenant_id, channel, subject, body, audience, recipient_count, sent_by)
        VALUES ($1,$2,$3,$4,$5,$6,$7)
@@ -544,10 +674,8 @@ export class ExamCellOperationsService {
       ],
     );
 
-    const queueDelivery =
-      dto.channel === 'EMAIL' ||
-      dto.channel === 'WHATSAPP' ||
-      dto.channel === 'SMS';
+    // External provider implementations are absent; never enqueue delivery stubs.
+    const queueDelivery = false;
     const userIds = students.map((s) => s.user_id);
 
     let delivered = 0;
@@ -587,9 +715,7 @@ export class ExamCellOperationsService {
       message:
         delivered === 0
           ? 'No students found for this tenant — campaign saved but nothing was delivered.'
-          : dto.channel === 'IN_APP'
-            ? `${delivered} in-app notifications created on student accounts.`
-            : `${delivered} notifications queued (${dto.channel} + in-app). Check student portal or delivery logs.`,
+          : `${delivered} in-app notifications created on student accounts.`,
     };
   }
 

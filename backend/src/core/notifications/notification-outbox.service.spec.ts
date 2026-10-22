@@ -1,4 +1,10 @@
 import { ConfigService } from '@nestjs/config';
+import {
+  clearInterval as clearNodeInterval,
+  clearTimeout as clearNodeTimeout,
+  setInterval as setNodeInterval,
+  setTimeout as setNodeTimeout,
+} from 'node:timers';
 import { NotificationOutboxService } from './notification-outbox.service';
 
 describe('NotificationOutboxService new-alert reconciliation', () => {
@@ -30,6 +36,11 @@ describe('NotificationOutboxService new-alert reconciliation', () => {
   let service: NotificationOutboxService;
 
   beforeEach(() => {
+    // Jest under Node 26 can remove these globals after fake-timer teardown.
+    if (typeof global.setInterval !== 'function') global.setInterval = setNodeInterval;
+    if (typeof global.clearInterval !== 'function') global.clearInterval = clearNodeInterval;
+    if (typeof global.setTimeout !== 'function') global.setTimeout = setNodeTimeout;
+    if (typeof global.clearTimeout !== 'function') global.clearTimeout = clearNodeTimeout;
     values = {
       PORTAL_EMAIL_DELIVERY_ENABLED: 'true',
       PORTAL_NOTIFICATION_QUEUE_PREFIX: prefix,
@@ -60,7 +71,13 @@ describe('NotificationOutboxService new-alert reconciliation', () => {
   it.each(['disabled', 'missing-cutoff', 'legacy-prefix', 'queue-mismatch'])(
     'does not scan data or register a timer for %s',
     async (scenario) => {
-      const interval = jest.spyOn(global, 'setInterval');
+      const originalInterval = Object.getOwnPropertyDescriptor(global, 'setInterval');
+      const interval = jest.fn();
+      Object.defineProperty(global, 'setInterval', {
+        configurable: true,
+        writable: true,
+        value: interval,
+      });
       if (scenario === 'disabled')
         values.PORTAL_EMAIL_DELIVERY_ENABLED = 'false';
       if (scenario === 'missing-cutoff')
@@ -73,7 +90,8 @@ describe('NotificationOutboxService new-alert reconciliation', () => {
       expect(db.query).not.toHaveBeenCalled();
       expect(queue.add).not.toHaveBeenCalled();
       expect(interval).not.toHaveBeenCalled();
-      interval.mockRestore();
+      if (originalInterval) Object.defineProperty(global, 'setInterval', originalInterval);
+      else delete (global as { setInterval?: typeof setInterval }).setInterval;
     },
   );
 

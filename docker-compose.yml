@@ -13,15 +13,15 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: ${POSTGRES_DB:-university_governance}
     ports:
-      # 5433 avoids conflict with a local Windows PostgreSQL service on 5432
-      - '${POSTGRES_HOST_PORT:-5433}:5432'
+      # 5434 avoids conflict with common local PostgreSQL services on 5432/5433.
+      - '${POSTGRES_HOST_PORT:-5434}:5432'
     volumes:
       - falcon_pg_data:/var/lib/postgresql/data
 
   redis:
     image: redis:7-alpine
     ports:
-      - '${REDIS_HOST_PORT:-6379}:6379'
+      - '${REDIS_HOST_PORT:-6380}:6379'
     volumes:
       - falcon_redis_data:/data
 

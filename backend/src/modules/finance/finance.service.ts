@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { EntityManager, Repository } from 'typeorm';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { FeeDemand } from '../../entities/fee-demand.entity';
 import { Transaction } from '../../entities/transaction.entity';
@@ -37,17 +37,28 @@ export class FinanceService {
     return this.demands.find({ where: { tenant_id: tenantId }, order: { created_at: 'DESC' }, ...paging });
   }
 
-  async createDemand(dto: CreateFeeDemandDto, tenantId: string) {
+  async createDemand(
+    dto: CreateFeeDemandDto,
+    tenantId: string,
+    options?: { manager?: EntityManager; notify?: boolean },
+  ) {
     const scopedTenantId = requireTenantId(tenantId);
-    const owners = await this.demands.manager.query<Array<{ tenant_id: string }>>(
-      `SELECT tenant_id FROM users WHERE user_id = $1 LIMIT 1`,
-      [dto.student_user_id],
+    const manager = options?.manager ?? this.demands.manager;
+    const owners = await manager.query<Array<{ tenant_id: string }>>(
+      `SELECT tenant_id FROM users WHERE user_id = $1 AND tenant_id = $2 AND deleted_at IS NULL LIMIT 1`,
+      [dto.student_user_id, scopedTenantId],
     );
     if (owners[0]?.tenant_id !== scopedTenantId)
       throw new BadRequestException('Student is not in this institution');
-    const saved = await this.demands.save(
-      this.demands.create({ ...dto, tenant_id: scopedTenantId }),
+    const demands = options?.manager?.getRepository(FeeDemand) ?? this.demands;
+    const saved = await demands.save(
+      demands.create({ ...dto, tenant_id: scopedTenantId }),
     );
+    if (options?.notify !== false) this.notifyDemandGenerated(saved, scopedTenantId);
+    return saved;
+  }
+
+  notifyDemandGenerated(saved: FeeDemand, tenantId: string) {
     this.notify.feeGenerated({
       tenantId,
       userId: saved.student_user_id,
@@ -55,7 +66,6 @@ export class FinanceService {
       dueDate: String(saved.due_date),
       feeHead: saved.fee_head,
     });
-    return saved;
   }
 
   async getDashboard(tenantId: string) {

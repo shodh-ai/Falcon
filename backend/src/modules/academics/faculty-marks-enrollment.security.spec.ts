@@ -76,7 +76,8 @@ describe('Faculty marks enrollment authorization', () => {
 
     expect(dataSource.transaction).toHaveBeenCalledTimes(1);
     expect(manager.query.mock.calls[0][0]).toContain('FROM student_course_enrollments');
-    expect(manager.query.mock.calls[0][0]).toContain("status = 'ENROLLED'");
+    expect(manager.query.mock.calls[0][0]).toContain("e.status IN ('ENROLLED', 'COMPLETED', 'FAILED')");
+    expect(manager.query.mock.calls[0][0]).toContain('e.deleted_at IS NULL');
     expect(manager.query.mock.calls[0][1]).toEqual([tenantId, courseId, [enrolledStudentId]]);
     expect(manager.query.mock.calls[1][0]).toContain('INSERT INTO academic_marks');
   });

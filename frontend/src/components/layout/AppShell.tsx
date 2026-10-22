@@ -73,6 +73,7 @@ export function AppShell({ config, children, profileHref, headerExtra, contentMa
 
   const activeNav = useMemo(() => findActiveNavItem(launchConfig, pathname), [launchConfig, pathname]);
   const isHome = pathname === launchConfig.homeHref;
+  const isExamCellPortal = launchConfig.personaLabel === 'Falcon Exam OS';
   const mobileItems = launchConfig.mobileNavItems ?? launchConfig.commandItems.slice(0, 4);
   const mobileHrefs = mobileItems.map((item) => item.href);
 
@@ -110,14 +111,14 @@ export function AppShell({ config, children, profileHref, headerExtra, contentMa
 
         {/* Below lg the bottom padding clears the fixed mobile nav; at lg+ the wrapper's own
             py already provides ~20px, so only a small extra keeps total trailing space ≈32px. */}
-        <main className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto pb-[calc(4.5rem+env(safe-area-inset-bottom))] lg:pb-3">
+        <main className={cn('min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto pb-[calc(4.5rem+env(safe-area-inset-bottom))] lg:pb-3', isExamCellPortal && 'pb-4')}>
           <div className={cn('mx-auto w-full min-w-0 px-3 py-3 sm:px-5 sm:py-5 lg:px-6', contentMaxWidthClass)}>
             {children}
           </div>
         </main>
       </div>
 
-      <nav
+      {!isExamCellPortal && <nav
         className="fixed inset-x-0 bottom-0 z-40 border-t border-border/80 bg-background/95 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden"
         aria-label="Quick navigation"
       >
@@ -144,7 +145,7 @@ export function AppShell({ config, children, profileHref, headerExtra, contentMa
             );
           })}
         </ul>
-      </nav>
+      </nav>}
     </div>
   );
 }

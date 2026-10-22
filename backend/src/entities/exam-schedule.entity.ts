@@ -16,6 +16,9 @@ export class ExamSchedule extends BaseSoftDeleteEntity {
   @PrimaryGeneratedColumn('uuid')
   exam_schedule_id: string;
 
+  @Column({ type: 'uuid', nullable: true })
+  tenant_id: string | null;
+
   @Column({ length: 20 })
   exam_type: ExamType;
 
@@ -33,6 +36,15 @@ export class ExamSchedule extends BaseSoftDeleteEntity {
 
   @Column({ length: 120 })
   venue: string;
+
+  @Column({ type: 'int', default: 100 })
+  max_marks: number;
+
+  @Column({ length: 50, default: 'SCHEDULED' })
+  status: string;
+
+  @Column({ type: 'varchar', length: 80, nullable: true })
+  batch_label: string | null;
 
   @Column({ type: 'varchar', length: 40, nullable: true })
   seat_no: string | null;

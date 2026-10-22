@@ -1,13 +1,14 @@
 'use client';
 
 import { Select } from '@/components/ui/select';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Loader2, CheckCircle2, UserPlus, Send, XCircle } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { useAuthedApi } from '@/lib/api';
+import { ExamCellPageHeader } from '@/components/exam-cell/ExamCellPageHeader';
 
 type ReEval = {
   exam_application_id: string;
@@ -45,10 +46,16 @@ export default function ExamCellReEvaluationsPage() {
   const [statusFilter, setStatusFilter] = useState('');
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [facultyLoading, setFacultyLoading] = useState(true);
+  const [facultyError, setFacultyError] = useState<string | null>(null);
+  const requestGeneration = useRef(0);
+  const facultyGeneration = useRef(0);
+  const mutationPending = useRef(false);
 
   const filteredItems = statusFilter ? items.filter((i) => i.status === statusFilter) : items;
   const selected = filteredItems.find((item) => item.exam_application_id === selectedId)
-    ?? items.find((item) => item.exam_application_id === selectedId)
+    ?? filteredItems[0]
     ?? null;
 
   const steps = [
@@ -65,32 +72,60 @@ export default function ExamCellReEvaluationsPage() {
   }
 
   const load = useCallback(async () => {
+    const generation = ++requestGeneration.current;
     setLoading(true);
+    setLoadError(null);
     try {
       const rows = await api.get<ReEval[]>('/api/exam-cell/re-evaluations');
+      if (generation !== requestGeneration.current) return;
       setItems(rows);
       setSelectedId((prev) => {
         if (prev && rows.some((r) => r.exam_application_id === prev)) return prev;
         return rows[0]?.exam_application_id ?? null;
       });
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Could not load re-evaluations');
+      if (generation !== requestGeneration.current) return;
+      const message = e instanceof Error ? e.message : 'Could not load re-evaluations';
+      toast.error(message);
+      setLoadError(message);
       setItems([]);
+      setSelectedId(null);
     } finally {
-      setLoading(false);
+      if (generation === requestGeneration.current) setLoading(false);
+    }
+  }, [api]);
+
+  const loadFaculty = useCallback(async () => {
+    const generation = ++facultyGeneration.current;
+    setFacultyLoading(true);
+    setFacultyError(null);
+    try {
+      const rows = await api.get<Faculty[]>('/api/exam-cell/faculty-roster');
+      if (generation !== facultyGeneration.current) return;
+      setFaculty(rows);
+    } catch (error) {
+      if (generation !== facultyGeneration.current) return;
+      setFaculty([]);
+      setFacultyId('');
+      setFacultyError(error instanceof Error ? error.message : 'Could not load faculty list');
+    } finally {
+      if (generation === facultyGeneration.current) setFacultyLoading(false);
     }
   }, [api]);
 
   useEffect(() => {
-    void load();
-    void api.get<Faculty[]>('/api/exam-cell/faculty-roster').then(setFaculty).catch(() => setFaculty([]));
-  }, [api, load]);
+    void Promise.resolve().then(load);
+    void Promise.resolve().then(loadFaculty);
+    return () => { requestGeneration.current += 1; facultyGeneration.current += 1; };
+  }, [load, loadFaculty]);
 
   async function assign() {
+    if (mutationPending.current) return;
     if (!selected || !facultyId) {
       toast.error('Select a faculty member');
       return;
     }
+    mutationPending.current = true;
     setBusy(true);
     try {
       await api.post(`/api/exam-cell/re-evaluations/${selected.exam_application_id}/assign`, {
@@ -102,12 +137,14 @@ export default function ExamCellReEvaluationsPage() {
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Assign failed');
     } finally {
+      mutationPending.current = false;
       setBusy(false);
     }
   }
 
   async function publish() {
-    if (!selected) return;
+    if (!selected || mutationPending.current) return;
+    mutationPending.current = true;
     setBusy(true);
     try {
       await api.post(`/api/exam-cell/re-evaluations/${selected.exam_application_id}/publish`, {});
@@ -116,12 +153,14 @@ export default function ExamCellReEvaluationsPage() {
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Publish failed');
     } finally {
+      mutationPending.current = false;
       setBusy(false);
     }
   }
 
   async function reject() {
-    if (!selected) return;
+    if (!selected || mutationPending.current) return;
+    mutationPending.current = true;
     setBusy(true);
     try {
       await api.post(`/api/exam-cell/re-evaluations/${selected.exam_application_id}/reject`, {
@@ -133,6 +172,7 @@ export default function ExamCellReEvaluationsPage() {
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Reject failed');
     } finally {
+      mutationPending.current = false;
       setBusy(false);
     }
   }
@@ -141,11 +181,10 @@ export default function ExamCellReEvaluationsPage() {
     <div className="mx-auto max-w-6xl space-y-6 p-4 md:p-6">
       <Card className="border-sgvu-navy/10 bg-white shadow-sm">
         <CardContent className="p-5 md:p-6">
-          <p className="text-sm font-semibold text-sgvu-gold">Falcon Exam OS</p>
-          <h1 className="text-2xl font-bold text-sgvu-navy">Re-evaluations</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Workflow: Student pays fee → Assign faculty → Faculty submits report → Publish to student & parent.
-          </p>
+          <ExamCellPageHeader
+            pageId="re-evaluations"
+            subtitle="Workflow: Student pays fee → Assign faculty → Faculty submits report → Publish to student & parent."
+          />
         </CardContent>
       </Card>
 
@@ -162,9 +201,10 @@ export default function ExamCellReEvaluationsPage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between gap-2">
             <CardTitle className="text-base">{loading ? 'Loading…' : `${filteredItems.length} applications`}</CardTitle>
-            <select className="rounded-md border px-2 py-1 text-xs" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+            <select aria-label="Revaluation status" className="rounded-md border px-2 py-1 text-xs" value={statusFilter} disabled={busy} onChange={(e) => { setStatusFilter(e.target.value); setFacultyId(''); setRejectReason(''); }}>
               <option value="">All</option>
               <option value="PENDING">Pending</option>
+              <option value="ASSIGNED">Faculty assigned</option>
               <option value="UNDER_REVIEW">Under review</option>
               <option value="COMPLETED">Completed</option>
               <option value="REJECTED">Rejected</option>
@@ -175,6 +215,8 @@ export default function ExamCellReEvaluationsPage() {
               <div className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin" /> Loading queue…
               </div>
+            ) : loadError ? (
+              <div role="alert" className="space-y-2 text-sm text-destructive"><p>{loadError}</p><Button variant="outline" onClick={() => void load()}>Retry</Button></div>
             ) : filteredItems.length === 0 ? (
               <p className="text-sm text-muted-foreground">No re-evaluation requests in this filter.</p>
             ) : (
@@ -182,9 +224,10 @@ export default function ExamCellReEvaluationsPage() {
                 <button
                   key={r.exam_application_id}
                   type="button"
-                  onClick={() => setSelectedId(r.exam_application_id)}
+                  disabled={busy}
+                  onClick={() => { setSelectedId(r.exam_application_id); setFacultyId(''); setRejectReason(''); }}
                   className={`w-full rounded-lg border px-3 py-2 text-left text-sm transition ${
-                    selectedId === r.exam_application_id ? 'border-sgvu-gold bg-sgvu-gold/5' : 'hover:bg-slate-50'
+                    selected?.exam_application_id === r.exam_application_id ? 'border-sgvu-gold bg-sgvu-gold/5' : 'hover:bg-slate-50'
                   }`}
                 >
                   <p className="font-semibold text-sgvu-navy">{r.student_name}</p>
@@ -250,7 +293,12 @@ export default function ExamCellReEvaluationsPage() {
               {selected.status === 'PENDING' ? (
                 <div className="space-y-2 rounded-lg border p-3">
                   <p className="font-medium">Assign faculty</p>
+                  {facultyLoading ? <p role="status">Loading faculty…</p> : facultyError ? (
+                    <div role="alert" className="space-y-2 text-destructive"><p>{facultyError}</p><Button variant="outline" onClick={() => void loadFaculty()}>Retry faculty list</Button></div>
+                  ) : faculty.length === 0 ? <p className="text-muted-foreground">No faculty available for assignment.</p> : null}
                   <Select
+                    aria-label="Faculty member"
+                    disabled={busy || facultyLoading || !!facultyError}
                     className="w-full rounded-md border px-3 py-2"
                     value={facultyId}
                     onChange={(e) => setFacultyId(e.target.value)}
@@ -262,7 +310,7 @@ export default function ExamCellReEvaluationsPage() {
                       </option>
                     ))}
                   </Select>
-                  <Button disabled={busy} onClick={() => void assign()}>
+                  <Button disabled={busy || facultyLoading || !!facultyError || !facultyId} onClick={() => void assign()}>
                     Assign for reassessment
                   </Button>
                 </div>
@@ -280,6 +328,7 @@ export default function ExamCellReEvaluationsPage() {
                 <div className="space-y-2 rounded-lg border border-destructive/30 p-3">
                   <p className="flex items-center gap-1 font-medium text-destructive"><XCircle className="h-4 w-4" /> Reject application</p>
                   <textarea
+                    aria-label="Rejection reason"
                     className="min-h-16 w-full rounded-md border px-3 py-2"
                     placeholder="Reason (optional)"
                     value={rejectReason}

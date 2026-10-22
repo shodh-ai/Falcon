@@ -19,7 +19,11 @@ export type EnterpriseAuditContext = {
 export class EnterpriseAuditService {
   constructor(@InjectDataSource() private readonly db: DataSource) {}
 
-  async log(ctx: EnterpriseAuditContext) {
+  async log(
+    ctx: EnterpriseAuditContext,
+    transaction?: Pick<DataSource, 'query'>,
+  ) {
+    const db = transaction ?? this.db;
     const meta = {
       tenant_id: ctx.tenantId,
       role: ctx.role ?? null,
@@ -30,7 +34,7 @@ export class EnterpriseAuditService {
       timestamp: new Date().toISOString(),
     };
 
-    await this.db.query(
+    await db.query(
       `INSERT INTO system_audit_logs (table_name, record_id, action, old_value, new_value, changed_by_user_id)
        VALUES ($1, $2, 'UPDATE', $3, $4, $5)`,
       [
@@ -42,23 +46,25 @@ export class EnterpriseAuditService {
       ],
     );
 
-    await this.db
-      .query(
-        `INSERT INTO audit_log (user_id, action, entity_type, entity_id, details, created_at)
+    const secondaryAudit = db.query(
+      `INSERT INTO audit_log (user_id, action, entity_type, entity_id, details, created_at)
        VALUES ($1, $2, $3, $4, $5::jsonb, NOW())`,
-        [
-          ctx.userId,
-          ctx.action,
-          ctx.module,
-          ctx.recordId ?? null,
-          JSON.stringify({
-            ...meta,
-            old_value: ctx.oldValue ?? null,
-            new_value: ctx.newValue ?? null,
-          }),
-        ],
-      )
-      .catch(() => undefined);
+      [
+        ctx.userId,
+        ctx.action,
+        ctx.module,
+        ctx.recordId ?? null,
+        JSON.stringify({
+          ...meta,
+          old_value: ctx.oldValue ?? null,
+          new_value: ctx.newValue ?? null,
+        }),
+      ],
+    );
+    // A transaction must fail if its audit cannot be recorded. Outside a
+    // transaction retain the existing optional secondary audit behavior.
+    if (transaction) await secondaryAudit;
+    else await secondaryAudit.catch(() => undefined);
   }
 
   async listForTenant(

@@ -34,22 +34,22 @@ describe('student exam data isolation', () => {
       unused,
       unused,
     );
-    await service.listUpcomingSchedulesForStudent('student-a', 'tenant-a');
-    expect(builder.andWhere.mock.calls[0]).toEqual([
+    await service.listUpcomingSchedulesForStudent('tenant-a', 'student-a');
+    expect(builder.where.mock.calls[0]).toEqual([
       's.tenant_id = :tenantId',
       { tenantId: 'tenant-a' },
     ]);
-    expect(builder.andWhere.mock.calls[1][0]).toContain(
+    expect(builder.andWhere.mock.calls[0][0]).toContain(
       'e.student_user_id = :studentUserId',
     );
-    expect(builder.andWhere.mock.calls[1][0]).toContain(
+    expect(builder.andWhere.mock.calls[0][0]).toContain(
       "e.status = 'ENROLLED'",
     );
-    expect(builder.andWhere.mock.calls[1][0]).toContain('e.deleted_at IS NULL');
-    expect(builder.andWhere.mock.calls[1][1]).toEqual({
+    expect(builder.andWhere.mock.calls[0][0]).toContain('e.deleted_at IS NULL');
+    expect(builder.andWhere.mock.calls[0][1]).toEqual({
       studentUserId: 'student-a',
     });
-    expect(builder.andWhere.mock.calls[1][0]).not.toContain('e.semester =');
+    expect(builder.andWhere.mock.calls[0][0]).not.toContain('e.semester =');
     expect(builder.orderBy).toHaveBeenCalledWith('s.exam_date', 'ASC');
     expect(builder.addOrderBy).toHaveBeenCalledWith('s.start_time', 'ASC');
   });
@@ -77,15 +77,15 @@ describe('student exam data isolation', () => {
     );
 
     await expect(
-      service.listUpcomingSchedulesForStudent('student-a', 'tenant-a', 3),
+      service.listUpcomingSchedulesForStudent('tenant-a', 'student-a', 3),
     ).resolves.toEqual([row]);
-    expect(builder.andWhere.mock.calls[0]).toEqual([
+    expect(builder.where.mock.calls[0]).toEqual([
       's.tenant_id = :tenantId',
       { tenantId: 'tenant-a' },
     ]);
-    const [enrollmentSql, params] = builder.andWhere.mock.calls[1];
+    const [enrollmentSql, params] = builder.andWhere.mock.calls[0];
     expect(enrollmentSql).toContain('EXISTS (');
-    expect(enrollmentSql).toContain('e.tenant_id = :tenantId');
+    expect(enrollmentSql).toContain('e.tenant_id = s.tenant_id');
     expect(enrollmentSql).toContain('e.student_user_id = :studentUserId');
     expect(enrollmentSql).toContain("e.status = 'ENROLLED'");
     expect(enrollmentSql).toContain('e.deleted_at IS NULL');
@@ -116,8 +116,8 @@ describe('student exam data isolation', () => {
       );
       await expect(
         service.listUpcomingSchedulesForStudent(
-          'student-a',
           'tenant-a',
+          'student-a',
           semester,
         ),
       ).rejects.toBeInstanceOf(BadRequestException);
@@ -133,14 +133,14 @@ describe('student exam data isolation', () => {
     const req = { user: { user_id: 'student-a', tenant_id: 'tenant-a' } };
     await controller.schedule(req, 3);
     expect(listUpcomingSchedulesForStudent).toHaveBeenLastCalledWith(
-      'student-a',
       'tenant-a',
+      'student-a',
       3,
     );
     await controller.schedule(req);
     expect(listUpcomingSchedulesForStudent).toHaveBeenLastCalledWith(
-      'student-a',
       'tenant-a',
+      'student-a',
       undefined,
     );
     expect(Reflect.getMetadata(GUARDS_METADATA, ExamsController)).toEqual([
@@ -187,11 +187,12 @@ describe('student exam data isolation', () => {
       .fn<Promise<unknown[]>, [string, unknown[]]>()
       .mockResolvedValue([]);
     const applications = { create: jest.fn(), save: jest.fn() };
+    const users = { findOne: jest.fn().mockResolvedValue(null) };
     const unused = {} as never;
     const service = new ExamsService(
       unused,
       applications as never,
-      unused,
+      users as never,
       { query } as never,
       unused,
       unused,
@@ -199,18 +200,15 @@ describe('student exam data isolation', () => {
     );
     await expect(
       service.createApplication(
-        'student-a',
-        { subject_id: 99, application_type: 'BACKLOG' },
         'tenant-a',
+        'student-a',
+        { subject_id: 99, application_type: 'RE_EVALUATION' },
       ),
     ).rejects.toBeInstanceOf(ForbiddenException);
-    expect(query.mock.calls[0][1]).toEqual(['student-a', 'tenant-a', 99]);
-    expect(query.mock.calls[0][0]).toContain('e.student_user_id = $1');
-    expect(query.mock.calls[0][0]).toContain('e.tenant_id = $2');
-    expect(query.mock.calls[0][0]).toContain('e.deleted_at IS NULL');
-    expect(query.mock.calls[0][0]).toContain(
-      "e.status IN ('ENROLLED', 'COMPLETED', 'FAILED')",
-    );
+    expect(users.findOne).toHaveBeenCalledWith({
+      where: { user_id: 'student-a', tenant_id: 'tenant-a' },
+    });
+    expect(query).not.toHaveBeenCalled();
     expect(applications.create).not.toHaveBeenCalled();
     expect(applications.save).not.toHaveBeenCalled();
   });
@@ -227,11 +225,12 @@ describe('student exam data isolation', () => {
         ADMIT_CARD_DEMO_BYPASS: demoFlag,
       });
       const unused = {} as never;
+      const users = { findOne: jest.fn().mockResolvedValue({ user_id: 'student-a' }) };
       const service = new ExamsService(
         unused,
         unused,
-        unused,
-        unused,
+        users as never,
+        { query: jest.fn().mockResolvedValue([{ c: 0 }]) } as never,
         { getPendingDues: jest.fn().mockResolvedValue([]) } as never,
         unused,
         {
@@ -244,8 +243,8 @@ describe('student exam data isolation', () => {
         } as never,
       );
       const eligibility = await service.checkEligibility(
-        'student-a',
         'tenant-a',
+        'student-a',
       );
       expect(eligibility.eligible).toBe(false);
       expect(eligibility.attendance_percent).toBe(10);
@@ -264,11 +263,12 @@ describe('student exam data isolation', () => {
         ]);
       });
     const pdf = { generate: jest.fn() };
+    const users = { findOne: jest.fn().mockResolvedValue({ user_id: 'student-a' }) };
     const unused = {} as never;
     const service = new ExamsService(
       unused,
       unused,
-      unused,
+      users as never,
       { query } as never,
       { getPendingDues: jest.fn().mockResolvedValue([]) } as never,
       pdf as never,
@@ -281,7 +281,7 @@ describe('student exam data isolation', () => {
       } as never,
     );
     await expect(
-      service.generateAdmitCardOrThrow('student-a', 'tenant-a'),
+      service.generateAdmitCardOrThrow('tenant-a', 'student-a'),
     ).rejects.toThrow('Database unavailable');
     expect(pdf.generate).not.toHaveBeenCalled();
   });

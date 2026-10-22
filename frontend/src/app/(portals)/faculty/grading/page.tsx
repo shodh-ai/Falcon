@@ -1,7 +1,7 @@
 'use client';
 
 import { Select } from '@/components/ui/select';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Loader2, Save, Send, ChevronDown } from 'lucide-react';
 import {
@@ -82,6 +82,7 @@ export default function FacultyGradingPage() {
   const [rows, setRows] = useState<UnifiedMarkRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const submissionPending = useRef(false);
   const [rosterError, setRosterError] = useState<string | null>(null);
 
   const courseOptions = useMemo(() => {
@@ -252,8 +253,8 @@ export default function FacultyGradingPage() {
   async function saveDraft(options?: { silent?: boolean }): Promise<boolean> {
     if (!courseId) return false;
     if (isFacultyDemoEntityId(courseId) || rows.some((r) => isFacultyDemoEntityId(r.student_user_id))) {
-      if (!options?.silent) toast.success('Draft saved successfully (demo)');
-      return true;
+      toast.error('Demonstration marks cannot be saved to the database');
+      return false;
     }
 
     const manualColumns = activeColumns.filter((col) => !col.readOnly);
@@ -315,11 +316,12 @@ export default function FacultyGradingPage() {
   }
 
   async function publishAll() {
-    if (!courseId) return;
+    if (!courseId || submissionPending.current) return;
     if (isFacultyDemoEntityId(courseId) || rows.some((r) => isFacultyDemoEntityId(r.student_user_id))) {
       toast.success('Marks submitted for approval (demo)');
       return;
     }
+    submissionPending.current = true;
     setSaving(true);
     try {
       if (!(await saveDraft({ silent: true }))) return;
@@ -347,6 +349,7 @@ export default function FacultyGradingPage() {
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Submission failed');
     } finally {
+      submissionPending.current = false;
       setSaving(false);
     }
   }
@@ -522,7 +525,7 @@ export default function FacultyGradingPage() {
                               max={col.max}
                               className={`h-8 w-16 text-center ${isLocked || col.readOnly ? 'border-transparent bg-muted/50 text-muted-foreground' : ''}`}
                               value={m?.obtained ?? ''}
-                              disabled={col.readOnly || isLocked}
+                              disabled={saving || col.readOnly || isLocked}
                               onChange={(e) => updateMark(row.student_user_id, col, e.target.value)}
                             />
                             {m?.status && m.status !== 'DRAFT' && (

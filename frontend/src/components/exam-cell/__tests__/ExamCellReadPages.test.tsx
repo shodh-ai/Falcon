@@ -119,7 +119,11 @@ describe('Examination read pages retain their existing API contracts', () => {
   ] as const)('%s reports an API failure instead of claiming success or showing a fabricated chart', async (_name, Page) => {
     mocks.api.get.mockRejectedValue(new Error('Database unavailable'));
     render(<Page />);
-    await waitFor(() => expect(mocks.error).toHaveBeenCalledWith('Database unavailable'));
+    if (_name === 'Analytics') {
+      expect(await screen.findByRole('alert')).toHaveTextContent('Database unavailable');
+    } else {
+      await waitFor(() => expect(mocks.error).toHaveBeenCalledWith('Database unavailable'));
+    }
     expect(mocks.barData).not.toHaveBeenCalled();
     expect(screen.queryByText('0%')).not.toBeInTheDocument();
   });

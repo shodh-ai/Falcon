@@ -18,6 +18,9 @@ export type ToastOptions = FalconToastOptions & {
   description?: string;
 };
 
+const CONNECTIVITY_ERROR_RE =
+  /cannot reach (?:the )?(?:api|server)|could not connect to (?:the )?api|failed to fetch|network(?: request)? failed|econnrefused|service temporarily unavailable/i;
+
 function showToast(
   title: string,
   message: string,
@@ -32,6 +35,17 @@ function showToast(
     duration = 7000,
   } = options;
 
+  // A page can issue several requests during its initial load. When the API is
+  // offline, all of those requests fail together and previously rendered one
+  // identical alert per request. Reuse a stable Sonner id for connectivity
+  // failures so the user sees one actionable alert instead of a toast flood.
+  const connectivityToast = CONNECTIVITY_ERROR_RE.test(`${title} ${message}`);
+  const duplicateErrorToast =
+    severity === 'critical' && !connectivityToast
+      ? `falcon-error-${hashToastKey(`${title}\u0000${message}`)}`
+      : undefined;
+  const toastId = connectivityToast ? 'falcon-api-connectivity' : duplicateErrorToast;
+
   sonnerToast.custom(
     (id) => (
       <FalconToastCard
@@ -45,12 +59,21 @@ function showToast(
         onDismiss={() => sonnerToast.dismiss(id)}
       />
     ),
-    { duration },
+    { duration, ...(toastId ? { id: toastId } : {}) },
   );
+}
+
+function hashToastKey(value: string): string {
+  let hash = 5381;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash * 33) ^ value.charCodeAt(index);
+  }
+  return (hash >>> 0).toString(36);
 }
 
 function inferCategory(title: string, message: string): string {
   const text = `${title} ${message}`.toLowerCase();
+  if (/hall[ -]?ticket|admit[ -]?card/.test(text)) return 'EXAMS';
   if (/fee|payment|finance|receipt|ledger|budget|scholarship|vendor/.test(text)) return 'FINANCE';
   if (/leave|gate pass|payroll|hr|onboarding|employee|attendance sync/.test(text)) return 'HR';
   if (/course|class|exam|grade|mark|attendance|timetable|syllabus|mentor|proctor/.test(text)) {
@@ -150,12 +173,26 @@ function showEnhancedError(raw: string, options?: ToastOptions): boolean {
   return false;
 }
 
+function showConnectivityError(raw: string, options?: ToastOptions): boolean {
+  if (!CONNECTIVITY_ERROR_RE.test(raw)) return false;
+
+  const parsed = parseApiError(raw);
+  showToast(parsed.title, parsed.message, {
+    ...options,
+    severity: parsed.severity,
+    intent: parsed.intent,
+    category: options?.category ?? parsed.category,
+  });
+  return true;
+}
+
 /** Map common API errors to descriptive Falcon toasts. */
 export function falconToastFromError(
   err: unknown,
   context?: { category?: string; fallbackTitle?: string },
 ): void {
   const raw = err instanceof Error ? err.message : String(err ?? 'Something went wrong');
+  if (showConnectivityError(raw, { category: context?.category })) return;
   if (showEnhancedError(raw, { category: context?.category })) return;
 
   const parsed = parseApiError(raw, context?.fallbackTitle);
@@ -201,6 +238,7 @@ export const toast = {
     });
   },
   error(message: string, options?: ToastOptions) {
+    if (showConnectivityError(message, options)) return;
     if (showEnhancedError(message, options)) return;
 
     if (options?.description) {

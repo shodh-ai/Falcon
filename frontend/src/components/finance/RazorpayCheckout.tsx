@@ -22,7 +22,7 @@ type RazorpayCheckoutProps = {
   studentEmail?: string;
   studentPhone?: string;
   onClose: () => void;
-  onSuccess: (paymentId: string) => Promise<void>;
+  onSuccess: (paymentId: string, verification?: { order_id?: string; signature?: string }) => Promise<void>;
 };
 
 // ─── Script Loader ───────────────────────────────────────────────────────────
@@ -97,9 +97,13 @@ export function RazorpayCheckout({
         email: studentEmail ?? '',
         contact: studentPhone ?? '',
       },
-      handler: async (response: { razorpay_payment_id: string }) => {
+      handler: async (response: { razorpay_payment_id: string; razorpay_order_id?: string; razorpay_signature?: string }) => {
         setProcessing(true);
-        try { await onSuccess(response.razorpay_payment_id); }
+        try { await onSuccess(response.razorpay_payment_id, { order_id: response.razorpay_order_id, signature: response.razorpay_signature }); }
+        catch (error) {
+          setErrorMessage(error instanceof Error ? error.message : 'Payment verification did not complete. Check your payment history before retrying.');
+          setMode('error');
+        }
         finally { setProcessing(false); }
       },
       modal: { ondismiss: onClose },

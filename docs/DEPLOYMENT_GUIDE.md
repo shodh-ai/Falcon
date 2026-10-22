@@ -38,8 +38,8 @@ Single VPS (Coolify) or split: app server + managed PostgreSQL.
 
 | Service | Port | Purpose |
 |---------|------|---------|
-| postgres | 5433→5432 | `university_governance` |
-| redis | 6379 | BullMQ |
+| postgres | 5434→5432 | `university_governance` |
+| redis | 6380 | BullMQ |
 | minio | 9000/9001 | S3-compatible uploads |
 | prometheus | 9090 | Metrics scrape |
 | grafana | 3001→3000 | Dashboards |
@@ -65,6 +65,9 @@ Frontend image: Next.js standalone output; build args for `NEXT_PUBLIC_API_URL`,
 
 After backend redeploy, exec into the API container (or run on host with production `DB_*` in `.env`):
 
+For a host command, first set the production safety environment in §1. Do not
+reuse a local development `.env` or bootstrap flags.
+
 ```bash
 npm run db:migrate
 npm run bootstrap:departments
@@ -85,13 +88,62 @@ npm run sync:department-enrollments -- mechanical
 
 ### Run migrations
 
+Use a separately provisioned production environment with reviewed `DB_*`
+connections and secrets supplied by deployment tooling. `.env.example` is for
+local development and is **not** a production configuration.
+
 ```bash
 cd backend
-cp .env.example .env
-# Configure production DATABASE_URL / DB_* 
-
+# Required before migrations; do not inherit local bootstrap/demo/seed flags.
+export NODE_ENV=production DATABASE_ENV=production DEPLOYMENT_ENV=production
+export DB_SYNCHRONIZE=false ALLOW_SCHEMA_BOOTSTRAP_SYNC=false
+export ALLOW_STANDARD_SEED=false DOFA_QA_SEED_ENABLED=false ALLOW_MOCK_PAYMENTS=false
+export NEXT_PUBLIC_EXAM_CELL_DEV_FALLBACK=false NEXT_PUBLIC_FACULTY_DEMO_MODE=false NEXT_PUBLIC_STUDENT_DEMO_MODE=false
+# DB_HOST/PORT/USERNAME/PASSWORD/DATABASE and the reviewed manifest are
+# supplied securely by deployment tooling, not copied from local examples.
 npm run db:migrate
 ```
+
+### Production migration review guard
+
+Production startup now refuses **all unreviewed pending migrations**. Historical
+SQL includes account creation, credential resets and data seeds; do not approve
+the entire directory or infer safety from filenames. A maintainer must compare
+the target database's migration ledger with the tested release, review each
+specific pending SQL file and confirm its data impact and backup/recovery plan.
+Existing applied migrations are skipped. Production schema synchronization,
+`--force`, `--repair`, `--seed` and `--dofa-qa-seed` are refused.
+Direct `npm run db:sync` is also local-only: it requires explicit bootstrap
+opt-in and refuses every production marker before connecting or synchronizing.
+
+For reviewed forward migrations only, provide a JSON file with this shape:
+
+```json
+{
+  "version": 1,
+  "migrations": {
+    "20261017100000_exam_result_session_identity.sql": "REPLACE_WITH_REVIEWED_FILE_SHA256"
+  }
+}
+```
+
+The placeholder is deliberately invalid: replace it with the exact lowercase
+64-character SHA-256 of the reviewed release file, calculated with
+`shasum -a 256 backend/migrations/<reviewed-file>.sql`. Include every pending file
+only after review, never generate a blanket approval. Any missing entry, changed
+file hash, unknown filename or invalid manifest stops startup **before the first
+migration or ledger write**. SQL execution uses the reviewed bytes.
+
+Mount this reviewed file read-only in the backend container and set
+`PRODUCTION_MIGRATION_MANIFEST=/run/falcon/reviewed-migrations.json` at runtime.
+`NODE_ENV=production`, `DATABASE_ENV=production` or
+`DEPLOYMENT_ENV=production` enables the guard; a conflicting local marker cannot
+disable it. No manifest is needed if there are no pending migrations.
+
+Use explicit `DB_HOST`, `DB_PORT`, `DB_USERNAME`, `DB_PASSWORD` and `DB_DATABASE`
+for both the app and migration runner. `DATABASE_URL` alone is not consumed by
+the current implementation. Never copy local example passwords or QA accounts
+into an internet-facing deployment.
 
 ### Critical migrations (pilot)
 
@@ -131,8 +183,14 @@ For 500+ concurrent users, add PgBouncer — see [PERFORMANCE.md](./PERFORMANCE.
 
 ```bash
 cd backend
-npm ci
+# With the separately provisioned DB/secrets and reviewed migration manifest:
+export NODE_ENV=production DATABASE_ENV=production DEPLOYMENT_ENV=production
+export DB_SYNCHRONIZE=false ALLOW_SCHEMA_BOOTSTRAP_SYNC=false
+export ALLOW_STANDARD_SEED=false DOFA_QA_SEED_ENABLED=false ALLOW_MOCK_PAYMENTS=false
+export NEXT_PUBLIC_EXAM_CELL_DEV_FALLBACK=false NEXT_PUBLIC_FACULTY_DEMO_MODE=false NEXT_PUBLIC_STUDENT_DEMO_MODE=false
+npm ci --include=dev
 npm run build
+npm run db:migrate
 npm run start:prod    # or PM2 / Docker CMD
 ```
 
@@ -142,14 +200,47 @@ npm run start:prod    # or PM2 / Docker CMD
 |----------|-------|
 | `NODE_ENV=production` | Disables dev login |
 | `JWT_SECRET` | Strong random secret |
-| `DB_*` or `DATABASE_URL` | Production PostgreSQL |
+| `DB_HOST/PORT/USERNAME/PASSWORD/DATABASE` | Explicit production PostgreSQL settings; `DATABASE_URL` alone is unsupported |
 | `REDIS_HOST` | Required for BullMQ queues |
 | `FRONTEND_URL` | Production frontend URL (OAuth redirect) |
 | `DEFAULT_TENANT_SUBDOMAIN` | e.g. `sgvu` |
 | `SAAS_BASE_DOMAIN` | Production domain |
 | `GOOGLE_CLIENT_ID/SECRET` | Production OAuth credentials |
 | `S3_*` | Production object storage |
-| `EMAIL_*` | SMTP for notifications |
+| `EMAIL_*` | External email configuration; does not enable Examination Cell delivery |
+
+### Examination Cell first-release scope (22 October 2026)
+
+Examination Cell `EMAIL`, `SMS` and `WHATSAPP` campaigns return **503** before
+campaign or delivery writes. Their delivery adapters currently log/stub delivery;
+setting provider credentials does not implement these channels. `IN_APP` campaign
+persistence and student retrieval were verified with synthetic data on the
+identified disposable local database only.
+
+The product owner selected **in-app notifications only** for the first release.
+Keep external notification channels disabled. Email/SMS/WhatsApp delivery and
+DigiLocker are deferred integrations; adding credentials must not expose stub
+delivery as successful delivery.
+
+Payment gateway capture/settlement and OTP delivery still need a safe provider
+sandbox before those workflows can be enabled for live use. A synthetic payment
+fixture or local login does not verify these providers. Required-fee applications
+must remain blocked until a genuine matching settlement is confirmed.
+
+Local verification on 22 October passed a fresh production-mode backend startup,
+backup restore into the explicitly approved disposable recovery database, and
+the three reviewed backlog/revaluation/hall-ticket forward migrations. Existing
+academic records were unchanged by those migrations. This does not establish
+recovery or migration safety for an unidentified production database: the target
+ledger, reviewed migration manifest, private storage, HTTPS, secrets, backups,
+monitoring and role/departments setup still require authorized deployment checks.
+
+Backlog offerings require explicit authorized staff configuration of fees,
+attempt limits, grading rules and BEST/LATEST selection policy. No default
+academic policy is supplied. The supported source components are INTERNAL and
+END_TERM. Published retake attempts are immutable; retake correction/revaluation,
+MID_TERM retakes and UFM closure/penalty reversal are not implemented workflows.
+Do not use direct database edits as a staff workflow for these cases.
 
 ### Health check
 
@@ -170,7 +261,7 @@ curl -s -o /dev/null -w "%{http_code}" https://api.yourdomain.com/auth/me
 
 ```bash
 cd frontend
-npm ci
+npm ci --include=dev
 npm run build
 npm run start       # or static export + CDN
 ```
@@ -184,7 +275,7 @@ npm run start       # or static export + CDN
 Verify build:
 
 ```bash
-npm run build   # must exit 0
+npm run build   # uses the project's explicit webpack configuration; must exit 0
 ```
 
 ---

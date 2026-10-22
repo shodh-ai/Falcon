@@ -76,10 +76,11 @@ describe('Examination dashboard declared result outcomes', () => {
 
   it('uses the actual result_status field and both official declaration timestamps', async () => {
     const [sql, params] = await reportQuery();
-    expect(sql).toContain('ser.result_status AS label');
+    expect(sql).toContain('COALESCE(br.result_status, ser.result_status) AS label');
     expect(sql).toContain('COUNT(*)::int AS count');
-    expect(sql).toContain('GROUP BY ser.result_status');
-    expect(sql).toContain('ORDER BY ser.result_status');
+    expect(sql).toContain('GROUP BY COALESCE(br.result_status, ser.result_status)');
+    expect(sql).toContain('ORDER BY label');
+    expect(sql).toContain('br.tenant_id = ser.tenant_id');
     expect(sql).not.toContain('ser.status');
     expect(sql).not.toContain("'PUBLISHED'");
     expect(sql).toContain(

@@ -11,6 +11,7 @@ export type StudentExamReportStatus = 'PASS' | 'FAIL' | 'WITHHELD' | 'ABSENT';
 
 @Entity('student_exam_reports')
 @Index(['tenant_id', 'student_user_id'])
+@Index(['session_id', 'student_user_id'], { unique: true })
 export class StudentExamReport extends BaseSoftDeleteEntity {
   @PrimaryGeneratedColumn('uuid')
   report_id: string;

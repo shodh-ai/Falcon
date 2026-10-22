@@ -12,7 +12,7 @@ function services(query: Query) {
   const finance = { getPendingDues: jest.fn(() => Promise.resolve([])) };
   const audit = { log: jest.fn() };
   const notifications = { dispatch: jest.fn() };
-  const semesterResults = new SemesterResultsService(db);
+  const semesterResults = new SemesterResultsService(db, {} as never);
   return {
     enterprise: new ExamCellEnterpriseService(
       db,

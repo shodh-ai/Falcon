@@ -5,6 +5,7 @@ import {
   Param,
   Post,
   Req,
+  UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -182,6 +183,9 @@ export class AttendancePolicyController {
   }
 
   private tenant(req: { user: AuthUser }) {
-    return req.user.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
+    const tenantId = req.user.tenant_id?.trim();
+    if (!tenantId)
+      throw new UnauthorizedException('Tenant context is required');
+    return tenantId;
   }
 }

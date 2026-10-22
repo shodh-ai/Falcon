@@ -15,6 +15,7 @@ describe('result publication security', () => {
     events?: string[];
   } = {}) {
     const events = options.events ?? [];
+    let currentHash = '';
     const managerQuery = jest.fn(async (sql: string) => {
       if (options.failWhen?.(sql)) throw new Error('database write failed');
       if (sql.includes('FROM exam_result_sessions s')) {
@@ -26,8 +27,12 @@ describe('result publication security', () => {
                 tenant_id: tenantId,
                 course_id: 'course-a',
                 course_name: 'Algorithms',
+                course_code: 'SYNTH',
                 exam_type: 'END_TERM',
                 semester: 4,
+                entry_status: 'LOCKED',
+                marks_locked: true,
+                grading_rules: null,
                 grading_policy_id: null,
                 pass_marks: 40,
                 max_marks: 100,
@@ -36,7 +41,10 @@ describe('result publication security', () => {
             ];
       }
       if (sql.includes('FROM exam_result_dean_approval_requests')) {
-        return options.approval === false ? [] : [{ ok: true }];
+        return options.approval === false ? [] : [{ status: 'APPROVED', request_summary: { input_hash: currentHash } }];
+      }
+      if (sql.includes('FROM exam_audit_logs')) {
+        return [{ action: 'RESULT_COE_AUDIT_PASSED', new_value: { input_hash: currentHash } }];
       }
       if (sql.includes('FROM academic_marks')) {
         return options.marks ?? [
@@ -45,6 +53,7 @@ describe('result publication security', () => {
             student_user_id: 'student-a',
             marks_obtained: 80,
             max_marks: 100,
+            status: 'PENDING_COE',
           },
         ];
       }
@@ -73,6 +82,12 @@ describe('result publication security', () => {
       notify as never,
       audit as never,
     );
+    const originalSnapshot = (service as any).workflowSnapshot.bind(service);
+    jest.spyOn(service as any, 'workflowSnapshot').mockImplementation(async (...args: unknown[]) => {
+      const snapshot = await originalSnapshot(...args);
+      currentHash = snapshot.input_hash;
+      return snapshot;
+    });
     return { service, db, managerQuery, notify, audit, events };
   }
 
@@ -84,7 +99,10 @@ describe('result publication security', () => {
     ).resolves.toMatchObject({ declared: 1, session_id: sessionId });
 
     expect(db.transaction).toHaveBeenCalledTimes(1);
-    expect(db.query).not.toHaveBeenCalled();
+    expect(db.query).toHaveBeenCalledWith(
+      expect.stringContaining('UPDATE student_exam_reports SET notified_at'),
+      [sessionId, 'student-a', tenantId],
+    );
     expect(managerQuery.mock.calls[0][0]).toContain('FOR UPDATE OF s');
     expect(
       managerQuery.mock.calls.some(
@@ -103,9 +121,10 @@ describe('result publication security', () => {
         resource_id: sessionId,
         new_value: expect.objectContaining({ outcome: 'SUCCESS' }),
       }),
+      expect.anything(),
     );
     expect(events.indexOf('commit')).toBeLessThan(events.indexOf('notify'));
-    expect(events.indexOf('notify')).toBeLessThan(events.indexOf('audit:RESULT_DECLARED'));
+    expect(events.indexOf('audit:RESULT_DECLARED')).toBeLessThan(events.indexOf('commit'));
   });
 
   it('rolls back the logical publication when a required report write fails', async () => {
@@ -145,9 +164,7 @@ describe('result publication security', () => {
     await expect(
       service.declareSession(tenantId, sessionId, actorUserId, {}),
     ).rejects.toBeInstanceOf(BadRequestException);
-    expect(
-      managerQuery.mock.calls.some(([sql]) => sql.includes('FROM academic_marks')),
-    ).toBe(false);
+    expect(managerQuery.mock.calls.some(([sql]) => sql.includes('UPDATE academic_marks'))).toBe(false);
     expect(notify.examResultsPublished).not.toHaveBeenCalled();
   });
 
@@ -169,6 +186,8 @@ describe('result publication security', () => {
         course_name: 'Algorithms',
         exam_type: 'END_TERM',
         semester: 4,
+        entry_status: 'LOCKED',
+        marks_locked: true,
         declared_at: new Date().toISOString(),
       },
     });
@@ -176,15 +195,14 @@ describe('result publication security', () => {
     await expect(
       service.declareSession(tenantId, sessionId, actorUserId, {}),
     ).rejects.toBeInstanceOf(BadRequestException);
-    expect(
-      managerQuery.mock.calls.some(([sql]) => sql.includes('FROM academic_marks')),
-    ).toBe(false);
+    expect(managerQuery.mock.calls.some(([sql]) => sql.includes('UPDATE academic_marks'))).toBe(false);
     expect(notify.examResultsPublished).not.toHaveBeenCalled();
   });
 
   it('routes the legacy service method through the declared-session workflow', async () => {
+    const courseId = '11111111-1111-4111-8111-111111111111';
     const resultControl = {
-      getSessionForCourse: jest.fn().mockResolvedValue({ session_id: sessionId }),
+      getSessionForCourse: jest.fn().mockResolvedValue({ session_id: sessionId, semester: 4 }),
       declareSession: jest.fn().mockResolvedValue({ declared: 1 }),
     };
     const service = Object.create(ExamCellService.prototype) as ExamCellService;
@@ -192,14 +210,14 @@ describe('result publication security', () => {
 
     await expect(
       service.publishResults(tenantId, {
-        course_id: 'course-a',
+        course_id: courseId,
         exam_type: 'END_TERM',
         batch_semester: 4,
       }, actorUserId),
     ).resolves.toEqual({ declared: 1 });
     expect(resultControl.getSessionForCourse).toHaveBeenCalledWith(
       tenantId,
-      'course-a',
+      courseId,
       'END_TERM',
       4,
     );

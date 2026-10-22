@@ -14,6 +14,8 @@ import {
   Req,
 } from '@nestjs/common';
 import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
+import { InjectDataSource } from '@nestjs/typeorm';
+import { DataSource } from 'typeorm';
 import { memoryStorage } from 'multer';
 import { extname } from 'path';
 import { v4 as uuidv4 } from 'uuid';
@@ -22,7 +24,7 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { ObjectStorageService } from '../storage/object-storage.service';
 import { createReadStream, existsSync, mkdirSync, writeFileSync } from 'fs';
-import { basename, resolve } from 'path';
+import { basename, relative, resolve, sep } from 'path';
 import type { Response } from 'express';
 import { UploadsService } from './uploads.service';
 import {
@@ -124,6 +126,20 @@ export class UploadsController {
       (filePath?.startsWith('s3://') || filePath?.startsWith(`${tenantId}/`)
         ? filePath
         : undefined);
+    if (keyReference?.startsWith('s3://')) {
+      let stored: URL;
+      try {
+        stored = new URL(keyReference);
+      } catch {
+        throw new NotFoundException('File not found');
+      }
+      if (
+        stored.hostname !== this.objectStorage.getBucketName() ||
+        stored.username || stored.password || stored.search || stored.hash
+      ) {
+        throw new NotFoundException('File not found');
+      }
+    }
     if (keyReference && this.objectStorage.isEnabled()) {
       const key = this.uploads.canonicalKey(keyReference, tenantId);
       if (!key) {

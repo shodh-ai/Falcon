@@ -12,6 +12,7 @@ import { ProfileMenu } from '@/components/layout/ProfileMenu';
 import { AppSidebar } from '@/components/layout/AppSidebar';
 import { WorkspaceSwitcher } from '@/components/layout/WorkspaceSwitcher';
 import type { PortalConfig } from '@/lib/navigation';
+import { cn } from '@/lib/utils';
 
 interface AppTopBarProps {
   config: PortalConfig;
@@ -32,9 +33,11 @@ export function AppTopBar({
   mobileOpen,
   onMobileOpenChange,
 }: AppTopBarProps) {
+  const isExamCellPortal = config.personaLabel === 'Falcon Exam OS';
+  const PageTitle = isExamCellPortal ? 'p' : 'h1';
   return (
     <header className="sticky top-0 z-20 border-b-2 border-sgvu-gold/30 bg-white shadow-sm">
-      <div className="flex h-14 w-full min-w-0 items-center gap-1.5 px-2.5 sm:h-16 sm:gap-3 sm:px-6">
+      <div className={cn('flex h-14 w-full min-w-0 items-center gap-1.5 px-2.5 sm:h-16 sm:gap-3 sm:px-6', isExamCellPortal && 'sm:h-14')}>
         <Sheet open={mobileOpen} onOpenChange={onMobileOpenChange}>
           <SheetTrigger asChild>
             <Button
@@ -51,7 +54,9 @@ export function AppTopBar({
             className="flex h-svh w-[min(100vw,18rem)] max-w-[85vw] flex-col overflow-hidden p-0"
             onInteractOutside={() => onMobileOpenChange(false)}
           >
-            <div className="min-h-0 flex-1" onClick={() => onMobileOpenChange(false)}>
+            <div className="min-h-0 flex-1" onClick={(event) => {
+              if (!isExamCellPortal || (event.target instanceof Element && event.target.closest('a[href]'))) onMobileOpenChange(false);
+            }}>
               <AppSidebar
                 personaLabel={config.personaLabel}
                 navGroups={config.navGroups}
@@ -64,7 +69,7 @@ export function AppTopBar({
         </Sheet>
 
         <Link href={config.homeHref} className="min-w-0 flex-1 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sgvu-gold" aria-label={`Go to ${config.personaTitle} home`}>
-          <h1 className="truncate text-sm font-bold tracking-tight text-sgvu-navy sm:text-base md:text-lg">
+          <PageTitle className={cn('truncate text-sm font-bold tracking-tight text-sgvu-navy sm:text-base md:text-lg', isExamCellPortal && 'md:text-base')}>
             {pageShortTitle ? (
               <>
                 <span className="sm:hidden">{pageShortTitle}</span>
@@ -73,7 +78,7 @@ export function AppTopBar({
             ) : (
               pageTitle
             )}
-          </h1>
+          </PageTitle>
           <p className="hidden truncate text-[11px] font-medium text-sgvu-navy/50 sm:block">
             {config.personaLabel}
           </p>

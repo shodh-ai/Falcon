@@ -1,8 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Loader2 } from 'lucide-react';
-import { toast } from '@/lib/notifications/falcon-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
@@ -21,6 +20,8 @@ type Centre = {
   status: string;
   facilities: unknown;
 };
+type CentresResult = { api: ReturnType<typeof useAuthedApi>; revision: number; data: Centre[]; error: string | null };
+const EMPTY_CENTRES: Centre[] = [];
 
 function facilityLabels(facilities: Centre['facilities']): string[] {
   if (facilities == null) return [];
@@ -63,28 +64,27 @@ function capacityBand(capacity: number | null): string {
 
 export default function ExamCellExamCentresPage() {
   const api = useAuthedApi();
-  const [rows, setRows] = useState<Centre[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [revision, setRevision] = useState(0);
+  const [result, setResult] = useState<CentresResult | null>(null);
+  const currentResult = result?.api === api && result.revision === revision ? result : null;
+  const rows = currentResult?.data ?? EMPTY_CENTRES;
+  const loading = !currentResult;
+  const error = currentResult?.error;
   const [search, setSearch] = useState('');
   const [buildingFilter, setBuildingFilter] = useState('ALL');
   const [statusFilter, setStatusFilter] = useState('ALL');
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await api.get<Centre[] | { data: Centre[] }>('/api/exam-cell/exam-centres');
-      setRows(Array.isArray(res) ? res : (res?.data ?? []));
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed to load exam centres');
-      setRows([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [api]);
-
   useEffect(() => {
-    void load();
-  }, [load]);
+    let current = true;
+    void api.get<Centre[] | { data: Centre[] }>('/api/exam-cell/exam-centres')
+      .then((res) => {
+        if (current) setResult({ api, revision, data: Array.isArray(res) ? res : res?.data ?? [], error: null });
+      })
+      .catch((e: unknown) => {
+        if (current) setResult({ api, revision, data: [], error: e instanceof Error ? e.message : 'Failed to load exam centres' });
+      });
+    return () => { current = false; };
+  }, [api, revision]);
 
   const buildings = useMemo(
     () => [...new Set(rows.map((r) => r.building_name).filter(Boolean))].sort(),
@@ -188,7 +188,7 @@ export default function ExamCellExamCentresPage() {
                 size="sm"
                 className={actionBtnClass}
                 disabled={loading}
-                onClick={() => void load()}
+                onClick={() => setRevision((current) => current + 1)}
               >
                 {loading ? 'Refreshing…' : 'Refresh'}
               </Button>
@@ -197,7 +197,7 @@ export default function ExamCellExamCentresPage() {
         </CardContent>
       </Card>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      {!loading && !error && <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {[
           { label: 'Total rooms', value: rows.length },
           { label: 'Total capacity', value: totalCapacity.toLocaleString() },
@@ -211,7 +211,7 @@ export default function ExamCellExamCentresPage() {
             </CardContent>
           </Card>
         ))}
-      </div>
+      </div>}
 
       <Card className="border-sgvu-navy/10 bg-white shadow-sm">
         <CardContent className="space-y-5 p-5 md:p-6">
@@ -221,6 +221,7 @@ export default function ExamCellExamCentresPage() {
               <p className="mt-0.5 text-sm text-muted-foreground">
                 {loading
                   ? 'Loading rooms…'
+                  : error ? 'Room data unavailable'
                   : `Showing ${filtered.length} of ${rows.length} rooms · ${filteredCapacity.toLocaleString()} seats in view`}
               </p>
             </div>
@@ -228,8 +229,9 @@ export default function ExamCellExamCentresPage() {
 
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <div className="flex flex-col gap-1.5 sm:col-span-2 lg:col-span-2">
-              <label className="text-xs font-bold uppercase tracking-wide text-sgvu-navy/60">Search</label>
+              <label htmlFor="exam-room-search" className="text-xs font-bold uppercase tracking-wide text-sgvu-navy/60">Search</label>
               <Input
+                id="exam-room-search"
                 className="h-10 rounded-lg border-sgvu-navy/20 focus-visible:ring-sgvu-gold/40"
                 placeholder="Search building or room…"
                 value={search}
@@ -237,8 +239,9 @@ export default function ExamCellExamCentresPage() {
               />
             </div>
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-bold uppercase tracking-wide text-sgvu-navy/60">Building</label>
+              <label htmlFor="exam-room-building" className="text-xs font-bold uppercase tracking-wide text-sgvu-navy/60">Building</label>
               <Select
+                id="exam-room-building"
                 className={filterSelectClass}
                 value={buildingFilter}
                 onChange={(e) => setBuildingFilter(e.target.value)}
@@ -250,8 +253,9 @@ export default function ExamCellExamCentresPage() {
               </Select>
             </div>
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-bold uppercase tracking-wide text-sgvu-navy/60">Status</label>
+              <label htmlFor="exam-room-status" className="text-xs font-bold uppercase tracking-wide text-sgvu-navy/60">Status</label>
               <Select
+                id="exam-room-status"
                 className={filterSelectClass}
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value)}
@@ -265,8 +269,13 @@ export default function ExamCellExamCentresPage() {
           </div>
 
           {loading ? (
-            <div className="flex justify-center py-12">
+            <div role="status" aria-label="Loading rooms" className="flex justify-center py-12">
               <Loader2 className="h-7 w-7 animate-spin text-sgvu-navy" />
+            </div>
+          ) : error ? (
+            <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-900">
+              <p>Could not load examination rooms: {error}</p>
+              <Button variant="outline" size="sm" className="mt-2" onClick={() => setRevision((current) => current + 1)}>Retry rooms</Button>
             </div>
           ) : (
             <DataTable

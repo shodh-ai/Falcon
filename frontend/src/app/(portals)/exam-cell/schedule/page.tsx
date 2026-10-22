@@ -1,7 +1,7 @@
 'use client';
 
 import { Select } from '@/components/ui/select';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Button } from '@/components/ui/button';
@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { useAuthedApi } from '@/lib/api';
+import { ExamCellPageHeader } from '@/components/exam-cell/ExamCellPageHeader';
 
 type Schedule = {
   exam_schedule_id: string;
@@ -31,6 +32,8 @@ export default function ExamCellSchedulePage() {
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [loading, setLoading] = useState(true);
+  const [creating, setCreating] = useState(false);
+  const createPending = useRef(false);
   const [form, setForm] = useState({
     exam_type: 'END_TERM',
     subject_id: '',
@@ -65,14 +68,17 @@ export default function ExamCellSchedulePage() {
   }, [api]);
 
   useEffect(() => {
-    void load();
+    void Promise.resolve().then(load);
   }, [load]);
 
   async function create() {
+    if (createPending.current) return;
     if (!form.exam_date || !form.subject_id) {
       toast.error('Select a subject and exam date');
       return;
     }
+    createPending.current = true;
+    setCreating(true);
     try {
       await api.post('/api/exam-cell/schedules', {
         ...form,
@@ -83,6 +89,9 @@ export default function ExamCellSchedulePage() {
       await load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed');
+    } finally {
+      createPending.current = false;
+      setCreating(false);
     }
   }
 
@@ -90,12 +99,10 @@ export default function ExamCellSchedulePage() {
     <div className="mx-auto max-w-5xl space-y-6 p-4 md:p-6">
       <Card className="border-sgvu-navy/10 bg-white shadow-sm">
         <CardContent className="p-5 md:p-6">
-          <p className="text-sm font-semibold text-sgvu-gold">Falcon Exam OS</p>
-          <h1 className="text-2xl font-bold text-sgvu-navy">Master Exam Schedule</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Central timetable for admit cards, seating, and invigilation. Students receive an in-app
-            notification when a new slot is added.
-          </p>
+          <ExamCellPageHeader
+            pageId="schedule"
+            subtitle="Central timetable for admit cards, seating, and invigilation. Students receive an in-app notification when a new slot is added."
+          />
         </CardContent>
       </Card>
 
@@ -109,16 +116,16 @@ export default function ExamCellSchedulePage() {
         <CardHeader><CardTitle className="text-base">Add exam slot</CardTitle></CardHeader>
         <CardContent className="grid gap-4 sm:grid-cols-2">
           <div className="flex min-h-[4.5rem] flex-col gap-1.5">
-            <label className="text-sm font-bold leading-5 text-sgvu-navy">Exam type</label>
-            <Select className="h-10 w-full rounded-md border px-3 text-sm" value={form.exam_type} onChange={(e) => setForm((f) => ({ ...f, exam_type: e.target.value }))}>
+            <label htmlFor="schedule-exam-type" className="text-sm font-bold leading-5 text-sgvu-navy">Exam type</label>
+            <Select id="schedule-exam-type" className="h-10 w-full rounded-md border px-3 text-sm" value={form.exam_type} onChange={(e) => setForm((f) => ({ ...f, exam_type: e.target.value }))}>
               <option value="MID_TERM">Mid Term</option>
               <option value="END_TERM">End Term</option>
               <option value="PRACTICAL">Practical</option>
             </Select>
           </div>
           <div className="flex min-h-[4.5rem] flex-col gap-1.5">
-            <label className="text-sm font-bold leading-5 text-sgvu-navy">Subject</label>
-            <Select className="h-10 w-full rounded-md border px-3 text-sm" value={form.subject_id} onChange={(e) => setForm((f) => ({ ...f, subject_id: e.target.value }))}>
+            <label htmlFor="schedule-subject" className="text-sm font-bold leading-5 text-sgvu-navy">Subject</label>
+            <Select id="schedule-subject" className="h-10 w-full rounded-md border px-3 text-sm" value={form.subject_id} onChange={(e) => setForm((f) => ({ ...f, subject_id: e.target.value }))}>
               <option value="">Select subject</option>
               {subjects.map((s) => (
                 <option key={s.subject_id} value={s.subject_id}>
@@ -128,18 +135,30 @@ export default function ExamCellSchedulePage() {
             </Select>
           </div>
           <div className="flex min-h-[4.5rem] flex-col gap-1.5">
-            <label className="text-sm font-bold leading-5 text-sgvu-navy">Exam date</label>
-            <Input type="date" className="h-10" value={form.exam_date} onChange={(e) => setForm((f) => ({ ...f, exam_date: e.target.value }))} />
+            <label htmlFor="schedule-date" className="text-sm font-bold leading-5 text-sgvu-navy">Exam date</label>
+            <Input id="schedule-date" type="date" className="h-10" value={form.exam_date} onChange={(e) => setForm((f) => ({ ...f, exam_date: e.target.value }))} />
           </div>
           <div className="flex min-h-[4.5rem] flex-col gap-1.5">
-            <label className="text-sm font-bold leading-5 text-sgvu-navy">Batch label</label>
-            <Input className="h-10" value={form.batch_label} onChange={(e) => setForm((f) => ({ ...f, batch_label: e.target.value }))} />
+            <label htmlFor="schedule-batch" className="text-sm font-bold leading-5 text-sgvu-navy">Batch label</label>
+            <Input id="schedule-batch" className="h-10" value={form.batch_label} onChange={(e) => setForm((f) => ({ ...f, batch_label: e.target.value }))} />
           </div>
-          <Input type="time" className="h-10" value={form.start_time} onChange={(e) => setForm((f) => ({ ...f, start_time: e.target.value }))} />
-          <Input type="time" className="h-10" value={form.end_time} onChange={(e) => setForm((f) => ({ ...f, end_time: e.target.value }))} />
-          <Input className="h-10" placeholder="Venue" value={form.venue} onChange={(e) => setForm((f) => ({ ...f, venue: e.target.value }))} />
-          <Input className="h-10" placeholder="Max marks" value={form.max_marks} onChange={(e) => setForm((f) => ({ ...f, max_marks: e.target.value }))} />
-          <Button className="sm:col-span-2" onClick={() => void create()}>Add to schedule</Button>
+          <div className="flex min-h-[4.5rem] flex-col gap-1.5">
+            <label htmlFor="schedule-start-time" className="text-sm font-bold leading-5 text-sgvu-navy">Start time</label>
+            <Input id="schedule-start-time" type="time" className="h-10" value={form.start_time} onChange={(e) => setForm((f) => ({ ...f, start_time: e.target.value }))} />
+          </div>
+          <div className="flex min-h-[4.5rem] flex-col gap-1.5">
+            <label htmlFor="schedule-end-time" className="text-sm font-bold leading-5 text-sgvu-navy">End time</label>
+            <Input id="schedule-end-time" type="time" className="h-10" value={form.end_time} onChange={(e) => setForm((f) => ({ ...f, end_time: e.target.value }))} />
+          </div>
+          <div className="flex min-h-[4.5rem] flex-col gap-1.5">
+            <label htmlFor="schedule-venue" className="text-sm font-bold leading-5 text-sgvu-navy">Venue</label>
+            <Input id="schedule-venue" className="h-10" placeholder="Venue" value={form.venue} onChange={(e) => setForm((f) => ({ ...f, venue: e.target.value }))} />
+          </div>
+          <div className="flex min-h-[4.5rem] flex-col gap-1.5">
+            <label htmlFor="schedule-max-marks" className="text-sm font-bold leading-5 text-sgvu-navy">Max marks</label>
+            <Input id="schedule-max-marks" className="h-10" placeholder="Max marks" value={form.max_marks} onChange={(e) => setForm((f) => ({ ...f, max_marks: e.target.value }))} />
+          </div>
+          <Button className="sm:col-span-2" disabled={creating} onClick={() => void create()}>{creating ? 'Adding to schedule…' : 'Add to schedule'}</Button>
         </CardContent>
       </Card>
 

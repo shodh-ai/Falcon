@@ -1,8 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
-import { toast } from '@/lib/notifications/falcon-toast';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -27,25 +26,23 @@ function seatCount(map: unknown): number {
 
 export default function ExamCellSeatingPlansPage() {
   const api = useAuthedApi();
-  const [plans, setPlans] = useState<SeatingPlan[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const rows = await api.get<SeatingPlan[]>('/api/exam-cell/seating-plans');
-      setPlans(rows);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Could not load seating plans');
-      setPlans([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [api]);
+  const [revision, setRevision] = useState(0);
+  const [result, setResult] = useState<{ api: typeof api; revision: number; plans: SeatingPlan[]; error: string | null } | null>(null);
+  const currentResult = result?.api === api && result.revision === revision ? result : null;
+  const loading = !currentResult;
+  const error = currentResult?.error;
+  const plans = currentResult?.plans ?? [];
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    let current = true;
+    void api.get<SeatingPlan[]>('/api/exam-cell/seating-plans')
+      .then((plans) => {
+        if (current) setResult({ api, revision, plans, error: null });
+      }).catch((cause: unknown) => {
+        if (current) setResult({ api, revision, plans: [], error: cause instanceof Error ? cause.message : 'Could not load seating plans' });
+      });
+    return () => { current = false; };
+  }, [api, revision]);
 
   return (
     <div className="mx-auto max-w-6xl space-y-6 p-4 md:p-6">
@@ -69,12 +66,17 @@ export default function ExamCellSeatingPlansPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">{plans.length} published room plans</CardTitle>
+          <CardTitle className="text-base">{loading ? 'Loading published room plans' : error ? 'Published room plans unavailable' : `${plans.length} published room plans`}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-2">
           {loading ? (
-            <div className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
+            <div role="status" className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
               <Loader2 className="h-4 w-4 animate-spin" /> Loading plans…
+            </div>
+          ) : error ? (
+            <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-900">
+              <p>{error}</p>
+              <Button variant="outline" size="sm" className="mt-2" onClick={() => setRevision((current) => current + 1)}>Retry seating plans</Button>
             </div>
           ) : plans.length === 0 ? (
             <p className="py-8 text-center text-sm text-muted-foreground">

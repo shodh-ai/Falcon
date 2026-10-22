@@ -1,6 +1,7 @@
 /**
  * Bootstrap base tables from TypeORM entities (same as DB_SYNCHRONIZE=true).
  * SQL migrations in backend/migrations/ expect this schema to exist first.
+ * Explicit local opt-in is required; production schema synchronization is refused.
  */
 const fs = require('fs');
 const path = require('path');
@@ -77,11 +78,29 @@ async function syncFromEntities() {
 
 async function run({ quiet = false } = {}) {
   loadEnvFile();
+  if (
+    ['NODE_ENV', 'DATABASE_ENV', 'DEPLOYMENT_ENV'].some((name) =>
+      ['production', 'prod'].includes(
+        String(process.env[name] || '')
+          .trim()
+          .toLowerCase(),
+      ),
+    )
+  ) {
+    throw new Error('Refusing automatic schema bootstrap in production.');
+  }
+  if (process.env.ALLOW_SCHEMA_BOOTSTRAP_SYNC !== 'true') {
+    throw new Error(
+      'Refusing automatic schema bootstrap: set ALLOW_SCHEMA_BOOTSTRAP_SYNC=true explicitly for a disposable local database.',
+    );
+  }
   const cfg = dbConfig();
 
   if (await coreTablesExist()) {
     if (!quiet) {
-      console.log('Schema bootstrap: core tables already exist (users, roles, tenants).');
+      console.log(
+        'Schema bootstrap: core tables already exist (users, roles, tenants).',
+      );
     }
     return { bootstrapped: false };
   }

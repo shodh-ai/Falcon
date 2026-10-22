@@ -18,5 +18,6 @@ import { ExamCellModule } from '../exam-cell/exam-cell.module';
   ],
   controllers: [StudentPortalController],
   providers: [StudentPortalService, HrFieldEncryptionService],
+  exports: [StudentPortalService],
 })
 export class StudentPortalModule {}

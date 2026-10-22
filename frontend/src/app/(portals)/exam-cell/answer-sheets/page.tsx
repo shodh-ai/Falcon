@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Button } from '@/components/ui/button';
@@ -11,6 +11,8 @@ import { Select } from '@/components/ui/select';
 import { DataTable, type DataTableColumn } from '@/components/ui/DataTable';
 import { ExamCellPageHeader } from '@/components/exam-cell/ExamCellPageHeader';
 import { useAuthedApi } from '@/lib/api';
+import { useAuth } from '@/context/AuthContext';
+import { canExamCellAction } from '@/lib/exam-cell-rbac';
 
 type AnswerSheet = {
   sheet_id: string;
@@ -50,62 +52,69 @@ function statusTone(status: string) {
 
 export default function ExamCellAnswerSheetsPage() {
   const api = useAuthedApi();
-  const [rows, setRows] = useState<AnswerSheet[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
+  const { user } = useAuth();
+  const canManage = canExamCellAction([...(user?.roles ?? []), user?.primaryRole ?? '', user?.role ?? ''], 'manage_sessions');
+  const [activeAction, setActiveAction] = useState<'issue' | 'advance' | null>(null);
+  const busy = activeAction !== null;
+  const mutationPending = useRef(false);
   const [sheetNumber, setSheetNumber] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const qs = statusFilter !== 'ALL' ? `?status=${statusFilter}` : '';
-      const res = await api.get<AnswerSheet[] | { data: AnswerSheet[] }>(
-        `/api/exam-cell/answer-sheets${qs}`,
-      );
-      setRows(Array.isArray(res) ? res : (res?.data ?? []));
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed to load answer sheets');
-      setRows([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [api, statusFilter]);
+  const [revision, setRevision] = useState(0);
+  const requestKey = `${statusFilter}:${revision}`;
+  const [resource, setResource] = useState<{ api: typeof api | null; key: string; rows: AnswerSheet[]; error: string | null }>({ api: null, key: '', rows: [], error: null });
+  const loading = resource.api !== api || resource.key !== requestKey;
+  const rows = loading ? [] : resource.rows;
+  const error = loading ? null : resource.error;
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    let cancelled = false;
+    const qs = statusFilter !== 'ALL' ? `?status=${statusFilter}` : '';
+    api.get<AnswerSheet[] | { data: AnswerSheet[] }>(`/api/exam-cell/answer-sheets${qs}`).then(
+      (data) => { if (!cancelled) setResource({ api, key: requestKey, rows: Array.isArray(data) ? data : (data?.data ?? []), error: null }); },
+      (cause) => { if (!cancelled) setResource({ api, key: requestKey, rows: [], error: cause instanceof Error ? cause.message : 'Failed to load answer sheets' }); },
+    );
+    return () => { cancelled = true; };
+  }, [api, statusFilter, requestKey]);
 
   async function issueSheet() {
+    if (!canManage || mutationPending.current) return;
     if (!sheetNumber.trim()) {
       toast.error('Sheet number required');
       return;
     }
-    setBusy(true);
+    mutationPending.current = true;
+    setActiveAction('issue');
     try {
       const row = await api.post<AnswerSheet>('/api/exam-cell/answer-sheets', {
         sheet_number: sheetNumber.trim(),
       });
       toast.success(`Issued sheet ${sheetNumber} · QR: ${row.qr_payload.slice(0, 20)}…`);
       setSheetNumber('');
-      await load();
+      setRevision((value) => value + 1);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Issue failed');
     } finally {
-      setBusy(false);
+      mutationPending.current = false;
+      setActiveAction(null);
     }
   }
 
   async function advanceStatus(sheetId: string, current: string) {
+    if (!canManage || mutationPending.current) return;
     const idx = STATUS_FLOW.indexOf(current as (typeof STATUS_FLOW)[number]);
     const next = STATUS_FLOW[idx + 1];
-    if (!next) return;
+    if (idx < 0 || !next) return;
+    mutationPending.current = true;
+    setActiveAction('advance');
     try {
       await api.post(`/api/exam-cell/answer-sheets/${sheetId}/status`, { status: next });
       toast.success(`Status → ${next.replace(/_/g, ' ')}`);
-      await load();
+      setRevision((value) => value + 1);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Update failed');
+    } finally {
+      mutationPending.current = false;
+      setActiveAction(null);
     }
   }
 
@@ -159,18 +168,19 @@ export default function ExamCellAnswerSheetsPage() {
     {
       key: 'actions',
       header: 'Lifecycle',
-      render: (r) =>
-        STATUS_FLOW.indexOf(r.status as (typeof STATUS_FLOW)[number]) < STATUS_FLOW.length - 1 ? (
+      render: (r) => !canManage ? null :
+        STATUS_FLOW.indexOf(r.status as (typeof STATUS_FLOW)[number]) >= 0 && STATUS_FLOW.indexOf(r.status as (typeof STATUS_FLOW)[number]) < STATUS_FLOW.length - 1 ? (
           <Button
             size="sm"
             variant="outline"
             className={btnPrimary}
+            disabled={busy}
             onClick={() => void advanceStatus(r.sheet_id, r.status)}
           >
-            Next stage
+            {activeAction === 'advance' ? 'Updating…' : 'Next stage'}
           </Button>
         ) : (
-          <span className="text-xs font-medium text-muted-foreground">Complete</span>
+          <span className="text-xs font-medium text-muted-foreground">{r.status === 'ARCHIVED' ? 'Complete' : 'Unknown status'}</span>
         ),
     },
   ];
@@ -183,7 +193,7 @@ export default function ExamCellAnswerSheetsPage() {
         </CardContent>
       </Card>
 
-      <Card className="border-sgvu-navy/10 bg-white shadow-sm">
+      {canManage && <Card className="border-sgvu-navy/10 bg-white shadow-sm">
         <CardContent className="space-y-5 p-5 md:p-6">
           <div className="border-b border-sgvu-navy/10 pb-4">
             <h2 className="text-lg font-bold text-sgvu-navy">Issue answer booklet</h2>
@@ -194,8 +204,10 @@ export default function ExamCellAnswerSheetsPage() {
 
           <div className="grid gap-4 sm:grid-cols-[1fr_auto] sm:items-end">
             <div className="flex flex-col gap-1.5">
-              <label className={labelClass}>Sheet number</label>
+              <label htmlFor="answer-sheet-number" className={labelClass}>Sheet number</label>
               <Input
+                id="answer-sheet-number"
+                disabled={busy}
                 className="h-10 rounded-lg border-sgvu-navy/20 focus-visible:ring-sgvu-gold/40"
                 placeholder="e.g. AS-2026-001"
                 value={sheetNumber}
@@ -214,11 +226,11 @@ export default function ExamCellAnswerSheetsPage() {
               disabled={busy}
               onClick={() => void issueSheet()}
             >
-              {busy ? 'Issuing…' : 'Issue & generate QR'}
+              {activeAction === 'issue' ? 'Issuing…' : 'Issue & generate QR'}
             </Button>
           </div>
         </CardContent>
-      </Card>
+      </Card>}
 
       <Card className="border-sgvu-navy/10 bg-white shadow-sm">
         <CardContent className="space-y-5 p-5 md:p-6">
@@ -232,8 +244,9 @@ export default function ExamCellAnswerSheetsPage() {
               </p>
             </div>
             <div className="flex w-full flex-col gap-1.5 sm:w-56">
-              <label className={labelClass}>Status</label>
+              <label htmlFor="answer-sheet-status" className={labelClass}>Status</label>
               <Select
+                id="answer-sheet-status"
                 className={fieldClass}
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value)}
@@ -250,6 +263,8 @@ export default function ExamCellAnswerSheetsPage() {
             <div className="flex justify-center py-12">
               <Loader2 className="h-7 w-7 animate-spin text-sgvu-navy" />
             </div>
+          ) : error ? (
+            <div role="alert" className="space-y-3 text-sm text-destructive"><p>{error}</p><Button variant="outline" onClick={() => setRevision((value) => value + 1)}>Retry</Button></div>
           ) : rows.length === 0 ? (
             <div className="rounded-xl border border-dashed border-sgvu-navy/20 px-6 py-12 text-center">
               <p className="text-sm font-semibold text-sgvu-navy">No answer sheets tracked yet</p>

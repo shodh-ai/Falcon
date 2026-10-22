@@ -7,8 +7,10 @@ import {
   type PDFPage,
 } from 'pdf-lib';
 import type { ExamSchedule } from '../../../entities/exam-schedule.entity';
+import qrcode from 'qrcode-generator';
 
 export type AdmitCardExamRow = {
+  exam_schedule_id?: string;
   exam_date: string;
   start_time: string;
   end_time: string;
@@ -260,7 +262,7 @@ export class AdmitCardPdfService {
     }
 
     y -= 18;
-    if (y < 150) {
+    if (y < 300) {
       this.drawFooter(page, font);
       page = pdfDoc.addPage([PAGE_W, PAGE_H]);
       y = PAGE_H - 56;
@@ -307,6 +309,56 @@ export class AdmitCardPdfService {
       font,
       color: MUTED,
     });
+
+    if (input.barcodePayload?.startsWith('FALCON-HALL-TICKET:')) {
+      const qr = qrcode(0, 'M');
+      qr.addData(input.barcodePayload, 'Byte');
+      qr.make();
+      const count = qr.getModuleCount();
+      const size = 90;
+      const unit = size / (count + 8);
+      const bottom = y - 78;
+      page.drawRectangle({
+        x: MARGIN_X,
+        y: bottom,
+        width: size,
+        height: size,
+        color: rgb(1, 1, 1),
+      });
+      for (let row = 0; row < count; row++) {
+        for (let col = 0; col < count; col++) {
+          if (qr.isDark(row, col))
+            page.drawRectangle({
+              x: MARGIN_X + (col + 4) * unit,
+              y: bottom + (count - row + 3) * unit,
+              width: unit,
+              height: unit,
+              color: rgb(0, 0, 0),
+            });
+        }
+      }
+      page.drawText('Scan in Exam Day Operations', {
+        x: MARGIN_X + 98,
+        y: bottom + 46,
+        size: 8,
+        font: bold,
+        color: NAVY,
+      });
+      page.drawText('Checks the current hall-ticket record.', {
+        x: MARGIN_X + 98,
+        y: bottom + 32,
+        size: 7,
+        font,
+        color: MUTED,
+      });
+      page.drawText('Not a digital PDF signature.', {
+        x: MARGIN_X + 98,
+        y: bottom + 20,
+        size: 7,
+        font,
+        color: MUTED,
+      });
+    }
 
     this.drawFooter(page, font);
     return Buffer.from(await pdfDoc.save());

@@ -58,12 +58,15 @@ export default function ParentFinancePage() {
     }
   }
 
-  async function confirmPayment(paymentId: string) {
+  async function confirmPayment(paymentId: string, verification?: { order_id?: string; signature?: string }) {
     if (!selectedChildId || !checkout) return;
-    await api.post(`/api/parent/students/${selectedChildId}/payments/confirm`, {
+    const result = await api.post<{ paid?: boolean }>(`/api/parent/students/${selectedChildId}/payments/confirm`, {
       demand_id: checkout.demandId,
       payment_id: paymentId,
+      order_id: verification?.order_id ?? checkout.order.order_id,
+      signature: verification?.signature,
     });
+    if (result.paid !== true) throw new Error('Payment has not been verified. Refresh your payment history before retrying.');
     toast.success('Payment recorded successfully');
     setCheckout(null);
     await mutate();

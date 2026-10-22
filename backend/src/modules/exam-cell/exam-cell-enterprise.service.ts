@@ -19,6 +19,15 @@ export type EligibilityCategory =
   | 'DISCIPLINARY_HOLD'
   | 'DEBARRED';
 
+const HALL_TICKET_FLOW = [
+  'REGISTRATION',
+  'ELIGIBILITY',
+  'FINANCE',
+  'EXAM_OFFICE',
+  'COE',
+  'APPROVED',
+];
+
 @Injectable()
 export class ExamCellEnterpriseService {
   constructor(
@@ -56,14 +65,19 @@ export class ExamCellEnterpriseService {
       semester?: number;
     },
   ) {
+    const from = this.validateDateFilter(filters.from, 'from');
+    const to = this.validateDateFilter(filters.to, 'to');
+    if (from && to && from > to) {
+      throw new BadRequestException('Calendar date range is invalid');
+    }
     const params: unknown[] = [tenantId];
-    let sql = `SELECT * FROM exam_calendar_events WHERE tenant_id = $1`;
-    if (filters.from) {
-      params.push(filters.from);
+    let sql = `SELECT *, event_date::text AS event_date, end_date::text AS end_date FROM exam_calendar_events WHERE tenant_id = $1`;
+    if (from) {
+      params.push(from);
       sql += ` AND event_date >= $${params.length}::date`;
     }
-    if (filters.to) {
-      params.push(filters.to);
+    if (to) {
+      params.push(to);
       sql += ` AND event_date <= $${params.length}::date`;
     }
     if (filters.event_type) {
@@ -74,20 +88,20 @@ export class ExamCellEnterpriseService {
       params.push(filters.semester);
       sql += ` AND (semester IS NULL OR semester = $${params.length})`;
     }
-    sql += ' ORDER BY event_date, start_time NULLS LAST';
+    sql += ' ORDER BY exam_calendar_events.event_date, start_time NULLS LAST';
 
     const [customEvents, scheduleEvents] = await Promise.all([
       this.queryOrEmpty(sql, params),
       this.db.query(
-        `SELECT es.exam_schedule_id, es.exam_type, es.exam_date, es.start_time, es.end_time,
+        `SELECT es.exam_schedule_id, es.exam_type, es.exam_date::text AS exam_date, es.start_time, es.end_time,
                 es.venue, es.batch_label, sub.subject_name, sub.subject_code
          FROM exam_schedules es
          LEFT JOIN academic_subjects sub ON sub.subject_id = es.subject_id
          WHERE es.tenant_id = $1
-           ${filters.from ? `AND es.exam_date >= '${filters.from}'::date` : ''}
-           ${filters.to ? `AND es.exam_date <= '${filters.to}'::date` : ''}
+           ${from ? 'AND es.exam_date >= $2::date' : ''}
+           ${to ? `AND es.exam_date <= $${from ? 3 : 2}::date` : ''}
          ORDER BY es.exam_date, es.start_time`,
-        [tenantId],
+        [tenantId, ...(from ? [from] : []), ...(to ? [to] : [])],
       ),
     ]);
 
@@ -118,40 +132,66 @@ export class ExamCellEnterpriseService {
     ];
   }
 
+  private validateDateFilter(
+    value: string | undefined,
+    name: string,
+  ): string | undefined {
+    if (value == null || value === '') return undefined;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      throw new BadRequestException(`Invalid calendar ${name} date`);
+    }
+    const parsed = new Date(`${value}T00:00:00.000Z`);
+    if (
+      Number.isNaN(parsed.getTime()) ||
+      parsed.toISOString().slice(0, 10) !== value
+    ) {
+      throw new BadRequestException(`Invalid calendar ${name} date`);
+    }
+    return value;
+  }
+
   async createCalendarEvent(
     tenantId: string,
     actorUserId: string,
     dto: Record<string, unknown>,
   ) {
-    const [row] = await this.queryOrEmpty<Record<string, unknown>>(
-      `INSERT INTO exam_calendar_events
+    return this.db.transaction(async (manager) => {
+      const [row] = await manager.query<Array<Record<string, unknown>>>(
+        `INSERT INTO exam_calendar_events
          (tenant_id, title, event_type, event_date, end_date, start_time, end_time,
           department, program_label, semester, color_code, description, created_by)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
-       RETURNING *`,
-      [
+       RETURNING *, event_date::text AS event_date, end_date::text AS end_date`,
+        [
+          tenantId,
+          dto.title,
+          dto.event_type ?? 'OTHER',
+          dto.event_date,
+          dto.end_date ?? null,
+          dto.start_time ?? null,
+          dto.end_time ?? null,
+          dto.department ?? null,
+          dto.program_label ?? null,
+          dto.semester ?? null,
+          dto.color_code ?? '#1e3a5f',
+          dto.description ?? null,
+          actorUserId,
+        ],
+      );
+      if (!row)
+        throw new BadRequestException('Could not create calendar event');
+      await this.audit.log(
         tenantId,
-        dto.title,
-        dto.event_type ?? 'OTHER',
-        dto.event_date,
-        dto.end_date ?? null,
-        dto.start_time ?? null,
-        dto.end_time ?? null,
-        dto.department ?? null,
-        dto.program_label ?? null,
-        dto.semester ?? null,
-        dto.color_code ?? '#1e3a5f',
-        dto.description ?? null,
         actorUserId,
-      ],
-    );
-    if (!row) throw new BadRequestException('Could not create calendar event');
-    await this.audit.log(tenantId, actorUserId, {
-      action: 'CALENDAR_EVENT_CREATED',
-      resource_type: 'exam_calendar_event',
-      resource_id: String(row.event_id),
+        {
+          action: 'CALENDAR_EVENT_CREATED',
+          resource_type: 'exam_calendar_event',
+          resource_id: String(row.event_id),
+        },
+        manager,
+      );
+      return row;
     });
-    return row;
   }
 
   async updateCalendarEventDate(
@@ -160,19 +200,26 @@ export class ExamCellEnterpriseService {
     actorUserId: string,
     eventDate: string,
   ) {
-    const [row] = await this.queryOrEmpty<Record<string, unknown>>(
-      `UPDATE exam_calendar_events SET event_date = $3, updated_at = NOW()
-       WHERE tenant_id = $1 AND event_id = $2 RETURNING *`,
-      [tenantId, eventId, eventDate],
-    );
-    if (!row) throw new NotFoundException('Calendar event not found');
-    await this.audit.log(tenantId, actorUserId, {
-      action: 'CALENDAR_EVENT_RESCHEDULED',
-      resource_type: 'exam_calendar_event',
-      resource_id: eventId,
-      new_value: { event_date: eventDate },
+    return this.db.transaction(async (manager) => {
+      const [row] = await manager.query<Array<Record<string, unknown>>>(
+        `WITH updated AS (UPDATE exam_calendar_events SET event_date = $3, updated_at = NOW()
+         WHERE tenant_id = $1 AND event_id = $2 RETURNING *) SELECT *, event_date::text AS event_date, end_date::text AS end_date FROM updated`,
+        [tenantId, eventId, eventDate],
+      );
+      if (!row) throw new NotFoundException('Calendar event not found');
+      await this.audit.log(
+        tenantId,
+        actorUserId,
+        {
+          action: 'CALENDAR_EVENT_RESCHEDULED',
+          resource_type: 'exam_calendar_event',
+          resource_id: eventId,
+          new_value: { event_date: eventDate },
+        },
+        manager,
+      );
+      return row;
     });
-    return row;
   }
 
   /* ── 2. Student Eligibility Dashboard ── */
@@ -233,7 +280,7 @@ export class ExamCellEnterpriseService {
         this.attendanceEligibility.evaluate(tenantId, studentUserId, {
           context: 'EXAM_DESK',
         }),
-        this.finance.getPendingDues(studentUserId),
+        this.finance.getPendingDues(studentUserId, tenantId),
         this.db.query(
           `SELECT COUNT(*)::int AS c FROM ufm_cases
          WHERE tenant_id = $1 AND student_user_id = $2 AND status != 'CLOSED'`,
@@ -287,48 +334,82 @@ export class ExamCellEnterpriseService {
     tenantId: string,
     semester: number,
     batchLabel: string,
+    actorUserId?: string,
   ) {
+    if (
+      !Number.isInteger(semester) ||
+      semester < 1 ||
+      typeof batchLabel !== 'string' ||
+      !batchLabel.trim() ||
+      batchLabel.trim().length > 80
+    )
+      throw new BadRequestException(
+        'A valid semester and batch label are required',
+      );
     const dash = await this.eligibilityDashboard(tenantId, semester);
-    let synced = 0;
+    return this.db.transaction(async (manager) => {
+      await manager.query(
+        'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+        [
+          `hall-ticket-approval-sync:${tenantId}:${semester}:${batchLabel.trim()}`,
+        ],
+      );
+      let updated = 0;
+      for (const item of [...dash.items].sort((a, b) =>
+        a.student_user_id.localeCompare(b.student_user_id),
+      )) {
+        const stage =
+          item.category === 'ELIGIBLE'
+            ? 'ELIGIBILITY'
+            : item.category === 'FEE_PENDING'
+              ? 'FINANCE'
+              : 'REGISTRATION';
 
-    for (const item of dash.items) {
-      const stage =
-        item.category === 'ELIGIBLE'
-          ? 'ELIGIBILITY'
-          : item.category === 'FEE_PENDING'
-            ? 'FINANCE'
-            : 'REGISTRATION';
-
-      try {
-        await this.db.query(
+        const changed = await manager.query<Array<{ approval_id: string }>>(
           `INSERT INTO hall_ticket_approvals
              (tenant_id, student_user_id, semester, batch_label, stage, block_reasons,
               eligibility_status, finance_status)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
            ON CONFLICT (tenant_id, student_user_id, semester, batch_label)
            DO UPDATE SET
-             stage = EXCLUDED.stage,
              block_reasons = EXCLUDED.block_reasons,
              eligibility_status = EXCLUDED.eligibility_status,
              finance_status = EXCLUDED.finance_status,
-             updated_at = NOW()`,
+             updated_at = NOW()
+           WHERE (hall_ticket_approvals.block_reasons, hall_ticket_approvals.eligibility_status, hall_ticket_approvals.finance_status)
+             IS DISTINCT FROM (EXCLUDED.block_reasons, EXCLUDED.eligibility_status, EXCLUDED.finance_status)
+           RETURNING approval_id`,
           [
             tenantId,
             item.student_user_id,
             semester,
-            batchLabel,
+            batchLabel.trim(),
             stage,
             JSON.stringify(item.block_reasons),
             item.category === 'ELIGIBLE' ? 'APPROVED' : 'PENDING',
             item.fee_clear ? 'APPROVED' : 'PENDING',
           ],
         );
-        synced++;
-      } catch {
-        /* skip row on conflict with missing table — caller sees synced < total */
+        updated += changed.length;
       }
-    }
-    return { synced, total: dash.items.length };
+      await this.audit.log(
+        tenantId,
+        actorUserId,
+        {
+          action: 'HALL_TICKET_QUEUE_SYNCED',
+          resource_type: 'hall_ticket_approval',
+          new_value: {
+            semester,
+            batch_label: batchLabel.trim(),
+            processed: dash.items.length,
+            updated,
+            existing_stages_preserved: true,
+          },
+        },
+        manager,
+      );
+      return { synced: dash.items.length, total: dash.items.length, updated };
+    });
   }
 
   async listHallTicketApprovals(
@@ -393,49 +474,66 @@ export class ExamCellEnterpriseService {
     action: 'APPROVE' | 'REJECT',
     stage?: string,
   ) {
-    const [current] = await this.queryOrEmpty<Record<string, unknown>>(
-      `SELECT * FROM hall_ticket_approvals WHERE tenant_id = $1 AND approval_id = $2`,
-      [tenantId, approvalId],
-    );
-    if (!current) throw new NotFoundException('Approval record not found');
+    if (
+      !['APPROVE', 'REJECT'].includes(action) ||
+      (stage !== undefined && typeof stage !== 'string')
+    )
+      throw new BadRequestException('A valid approval action is required');
+    return this.db.transaction(async (manager) => {
+      const [current] = await manager.query<Array<Record<string, unknown>>>(
+        `SELECT * FROM hall_ticket_approvals WHERE tenant_id = $1 AND approval_id = $2 FOR UPDATE`,
+        [tenantId, approvalId],
+      );
+      if (!current) throw new NotFoundException('Approval record not found');
 
-    const flow = [
-      'REGISTRATION',
-      'ELIGIBILITY',
-      'FINANCE',
-      'EXAM_OFFICE',
-      'COE',
-      'APPROVED',
-    ];
-    let nextStage = String(current.stage);
+      const currentStage = String(current.stage);
+      if (['APPROVED', 'REJECTED'].includes(currentStage)) {
+        if (
+          ((action === 'APPROVE' && currentStage === 'APPROVED') ||
+            (action === 'REJECT' && currentStage === 'REJECTED')) &&
+          (stage === undefined || stage === currentStage)
+        )
+          return current;
+        throw new BadRequestException(
+          'A completed or rejected approval cannot be advanced or reversed',
+        );
+      }
+      const index = HALL_TICKET_FLOW.indexOf(currentStage);
+      if (index < 0)
+        throw new BadRequestException('Unknown hall-ticket approval stage');
+      const nextStage =
+        action === 'REJECT' ? 'REJECTED' : HALL_TICKET_FLOW[index + 1];
+      if (stage !== undefined && stage !== nextStage)
+        throw new BadRequestException(
+          'Hall-ticket approval must advance exactly one stage',
+        );
 
-    if (action === 'REJECT') {
-      nextStage = 'REJECTED';
-    } else if (stage) {
-      nextStage = stage;
-    } else {
-      const idx = flow.indexOf(nextStage);
-      nextStage =
-        idx >= 0 && idx < flow.length - 1 ? flow[idx + 1] : 'APPROVED';
-    }
-
-    const [row] = await this.queryOrEmpty<Record<string, unknown>>(
-      `UPDATE hall_ticket_approvals
-       SET stage = $3, approved_by = $4, approved_at = NOW(), updated_at = NOW(),
-           coe_status = CASE WHEN $3 = 'APPROVED' THEN 'APPROVED' ELSE coe_status END
+      const [row] = await manager.query<Array<Record<string, unknown>>>(
+        `WITH updated AS (UPDATE hall_ticket_approvals
+       SET stage = $3::varchar, approved_by = $4, approved_at = CASE WHEN $3::varchar = 'APPROVED' THEN NOW() ELSE approved_at END, updated_at = NOW(),
+           coe_status = CASE WHEN $3::varchar = 'APPROVED' THEN 'APPROVED' ELSE coe_status END
        WHERE tenant_id = $1 AND approval_id = $2
-       RETURNING *`,
-      [tenantId, approvalId, nextStage, actorUserId],
-    );
+       RETURNING *) SELECT * FROM updated`,
+        [tenantId, approvalId, nextStage, actorUserId],
+      );
 
-    await this.audit.log(tenantId, actorUserId, {
-      action:
-        action === 'REJECT' ? 'HALL_TICKET_REJECTED' : 'HALL_TICKET_APPROVED',
-      resource_type: 'hall_ticket_approval',
-      resource_id: approvalId,
-      new_value: { stage: nextStage },
+      await this.audit.log(
+        tenantId,
+        actorUserId,
+        {
+          action:
+            action === 'REJECT'
+              ? 'HALL_TICKET_REJECTED'
+              : 'HALL_TICKET_APPROVED',
+          resource_type: 'hall_ticket_approval',
+          resource_id: approvalId,
+          old_value: { stage: currentStage },
+          new_value: { stage: nextStage },
+        },
+        manager,
+      );
+      return row;
     });
-    return row;
   }
 
   async bulkApproveHallTickets(
@@ -443,20 +541,52 @@ export class ExamCellEnterpriseService {
     actorUserId: string,
     dto: { semester: number; batch_label: string; target_stage: string },
   ) {
-    const result = await this.db.query(
-      `UPDATE hall_ticket_approvals
-       SET stage = $4, approved_by = $5, approved_at = NOW(), updated_at = NOW()
+    const index = HALL_TICKET_FLOW.indexOf(dto.target_stage);
+    if (
+      index < 1 ||
+      !Number.isInteger(dto.semester) ||
+      dto.semester < 1 ||
+      typeof dto.batch_label !== 'string' ||
+      !dto.batch_label.trim() ||
+      dto.batch_label.trim().length > 80
+    )
+      throw new BadRequestException(
+        'A valid next stage, semester and batch label are required',
+      );
+    return this.db.transaction(async (manager) => {
+      const result = await manager.query<Array<{ approval_id: string }>>(
+        `WITH updated AS (UPDATE hall_ticket_approvals
+       SET stage = $4::varchar, approved_by = $5,
+           approved_at = CASE WHEN $4::varchar = 'APPROVED' THEN NOW() ELSE approved_at END, updated_at = NOW(),
+           coe_status = CASE WHEN $4::varchar = 'APPROVED' THEN 'APPROVED' ELSE coe_status END
        WHERE tenant_id = $1 AND semester = $2 AND batch_label = $3
-         AND stage NOT IN ('REJECTED', 'APPROVED')
-       RETURNING approval_id`,
-      [tenantId, dto.semester, dto.batch_label, dto.target_stage, actorUserId],
-    );
-    await this.audit.log(tenantId, actorUserId, {
-      action: 'HALL_TICKET_BULK_APPROVED',
-      resource_type: 'hall_ticket_approval',
-      new_value: { count: result.length, target_stage: dto.target_stage },
+         AND stage = $6::varchar
+       RETURNING approval_id) SELECT * FROM updated`,
+        [
+          tenantId,
+          dto.semester,
+          dto.batch_label.trim(),
+          dto.target_stage,
+          actorUserId,
+          HALL_TICKET_FLOW[index - 1],
+        ],
+      );
+      await this.audit.log(
+        tenantId,
+        actorUserId,
+        {
+          action: 'HALL_TICKET_BULK_APPROVED',
+          resource_type: 'hall_ticket_approval',
+          new_value: {
+            count: result.length,
+            target_stage: dto.target_stage,
+            previous_stage: HALL_TICKET_FLOW[index - 1],
+          },
+        },
+        manager,
+      );
+      return { approved: result.length };
     });
-    return { approved: result.length };
   }
 
   /* ── 5. Auto Invigilator Assignment ── */
@@ -593,20 +723,27 @@ export class ExamCellEnterpriseService {
     status: string,
     evaluatorUserId?: string,
   ) {
-    const [row] = await this.queryOrEmpty<Record<string, unknown>>(
-      `UPDATE answer_sheet_tracking
-       SET status = $3, evaluator_user_id = COALESCE($4, evaluator_user_id), status_changed_at = NOW()
-       WHERE tenant_id = $1 AND sheet_id = $2
-       RETURNING *`,
-      [tenantId, sheetId, status, evaluatorUserId ?? null],
-    );
-    if (!row) throw new NotFoundException('Answer sheet not found');
-    await this.audit.log(tenantId, actorUserId, {
-      action: `ANSWER_SHEET_${status}`,
-      resource_type: 'answer_sheet',
-      resource_id: sheetId,
+    return this.db.transaction(async (manager) => {
+      const [row] = await manager.query<Array<Record<string, unknown>>>(
+        `WITH updated AS (UPDATE answer_sheet_tracking
+         SET status = $3, evaluator_user_id = COALESCE($4, evaluator_user_id), status_changed_at = NOW()
+         WHERE tenant_id = $1 AND sheet_id = $2
+         RETURNING *) SELECT * FROM updated`,
+        [tenantId, sheetId, status, evaluatorUserId ?? null],
+      );
+      if (!row) throw new NotFoundException('Answer sheet not found');
+      await this.audit.log(
+        tenantId,
+        actorUserId,
+        {
+          action: `ANSWER_SHEET_${status}`,
+          resource_type: 'answer_sheet',
+          resource_id: sheetId,
+        },
+        manager,
+      );
+      return row;
     });
-    return row;
   }
 
   /* ── 7. Student Identity Verification ── */
@@ -623,23 +760,26 @@ export class ExamCellEnterpriseService {
       );
     }
 
-    const studentMatch = payload.match(/student:([a-f0-9-]{36})/i);
+    const studentMatch = payload.match(
+      /student:([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})/i,
+    );
     const bareUuid = payload.match(
       /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i,
     );
     const studentUserId = studentMatch?.[1] ?? bareUuid?.[0];
 
     const studentSelect = `
-      SELECT u.user_id, u.name, u.profile_picture_url,
+      SELECT u.user_id, u.name, sp.profile_photo_url AS profile_picture_url,
              sp.enrollment_number, sp.prn_number,
              sp.branch_name,
              sp.branch_name AS branch,
              e.semester
       FROM users u
-      LEFT JOIN student_profiles sp ON sp.user_id = u.user_id
+      JOIN roles student_role ON student_role.role_id = u.role_id AND student_role.role_name = 'Student'
+      JOIN student_profiles sp ON sp.user_id = u.user_id AND sp.tenant_id = u.tenant_id
       LEFT JOIN LATERAL (
         SELECT semester FROM student_course_enrollments
-        WHERE student_user_id = u.user_id ORDER BY semester DESC LIMIT 1
+        WHERE student_user_id = u.user_id AND tenant_id = u.tenant_id ORDER BY semester DESC LIMIT 1
       ) e ON true
     `;
 
@@ -648,27 +788,31 @@ export class ExamCellEnterpriseService {
     if (studentUserId) {
       const rows = await this.queryOrEmpty<Record<string, unknown>>(
         `${studentSelect}
-         WHERE u.user_id = $1::uuid AND u.tenant_id = $2
+         WHERE u.user_id = $1::uuid AND u.tenant_id = $2 AND u.is_active = true
          LIMIT 1`,
         [studentUserId, tenantId],
       );
       student = rows[0];
     }
 
-    if (!student) {
+    if (!student && !studentUserId) {
       const rows = await this.queryOrEmpty<Record<string, unknown>>(
         `${studentSelect}
-         WHERE u.tenant_id = $1
+         WHERE u.tenant_id = $1 AND u.is_active = true
            AND (
              LOWER(TRIM(COALESCE(sp.enrollment_number, ''))) = LOWER($2)
+             OR LOWER(TRIM(COALESCE(sp.enrollment_no, ''))) = LOWER($2)
              OR LOWER(TRIM(COALESCE(sp.prn_number, ''))) = LOWER($2)
              OR LOWER(TRIM(u.name)) = LOWER($2)
-             OR sp.enrollment_number ILIKE $3
-             OR sp.prn_number ILIKE $3
            )
-         LIMIT 1`,
-        [tenantId, payload, `%${payload}%`],
+         LIMIT 2`,
+        [tenantId, payload],
       );
+      if (rows.length > 1) {
+        throw new BadRequestException(
+          'Multiple students match this identifier. Use an exact enrollment number, PRN, or hall ticket QR.',
+        );
+      }
       student = rows[0];
     }
 
@@ -686,7 +830,7 @@ export class ExamCellEnterpriseService {
     }>(
       `SELECT esa.room, esa.seat_number, es.exam_date, es.exam_type, sub.subject_name
        FROM exam_seating_allocations esa
-       JOIN exam_schedules es ON es.exam_schedule_id = esa.exam_schedule_id
+       JOIN exam_schedules es ON es.exam_schedule_id = esa.exam_schedule_id AND es.tenant_id = esa.tenant_id
        LEFT JOIN academic_subjects sub ON sub.subject_id = es.subject_id
        WHERE esa.student_user_id = $1 AND esa.tenant_id = $2
        ORDER BY es.exam_date DESC
@@ -698,11 +842,15 @@ export class ExamCellEnterpriseService {
       `SELECT es.*, sub.subject_name FROM exam_schedules es
        LEFT JOIN academic_subjects sub ON sub.subject_id = es.subject_id
        WHERE es.tenant_id = $1 AND es.exam_date >= CURRENT_DATE
+         AND EXISTS (SELECT 1 FROM student_course_enrollments e
+           JOIN academic_courses c ON c.course_id = e.course_id AND c.tenant_id = e.tenant_id
+           WHERE e.tenant_id = es.tenant_id AND e.student_user_id = $2
+             AND c.course_code = sub.subject_code AND e.semester = sub.semester)
        ORDER BY es.exam_date LIMIT 5`,
-      [tenantId],
+      [tenantId, student.user_id],
     );
 
-    await this.queryOrEmpty(
+    await this.db.query(
       `INSERT INTO student_identity_verifications
          (tenant_id, student_user_id, qr_payload, verified, verified_by, verified_at)
        VALUES ($1,$2,$3,true,$4,NOW())`,
@@ -876,11 +1024,15 @@ export class ExamCellEnterpriseService {
 
     const [backlogs] = await this.db.query(
       `SELECT COUNT(*)::int AS c FROM exam_applications
-       WHERE student_user_id = $1 AND application_type = 'BACKLOG' AND status = 'PENDING'`,
-      [studentUserId],
+       WHERE tenant_id = $1 AND student_user_id = $2
+         AND application_type = 'BACKLOG' AND status = 'PENDING'`,
+      [tenantId, studentUserId],
     );
 
-    const pendingDues = await this.finance.getPendingDues(studentUserId);
+    const pendingDues = await this.finance.getPendingDues(
+      studentUserId,
+      tenantId,
+    );
     const cgpaEarned = grade?.cgpa != null ? Number(grade.cgpa) : null;
     const creditsEarned = credits?.earned ?? 0;
     const pendingBacklogs = backlogs?.c ?? 0;
@@ -982,7 +1134,7 @@ export class ExamCellEnterpriseService {
       at: reg[0]?.created_at ?? null,
     });
 
-    const dues = await this.finance.getPendingDues(studentUserId);
+    const dues = await this.finance.getPendingDues(studentUserId, tenantId);
     events.push({
       stage: 'Fee Paid',
       status: dues.length === 0 ? 'COMPLETED' : 'PENDING',
@@ -1232,22 +1384,28 @@ export class ExamCellEnterpriseService {
   async advancedAnalytics(tenantId: string, semester: number) {
     const [gradeDist, subjectAnalysis, facultyPerf, passFail] = await Promise.all([
       this.db.query(
-        `SELECT ser.grade, COUNT(*)::int AS count
+        `SELECT COALESCE(br.grade, ser.grade) AS grade, COUNT(*)::int AS count
          FROM student_exam_reports ser
          JOIN exam_result_sessions ers
            ON ers.session_id = ser.session_id AND ers.tenant_id = ser.tenant_id
+         LEFT JOIN exam_backlog_current_results br ON br.source_report_id = ser.report_id
+           AND br.tenant_id = ser.tenant_id AND br.student_user_id = ser.student_user_id
+           AND br.semester = ers.semester AND br.selected_attempt_id IS NOT NULL
          WHERE ser.tenant_id = $1 AND ers.semester = $2
            AND ser.declared_at IS NOT NULL AND ers.declared_at IS NOT NULL
-         GROUP BY ser.grade ORDER BY ser.grade`,
+         GROUP BY COALESCE(br.grade, ser.grade) ORDER BY grade`,
         [tenantId, semester],
       ),
       this.db.query(
         `SELECT c.course_code AS subject_code, c.course_name AS subject_name,
-                AVG(ser.marks_obtained)::float8 AS avg_marks,
+                AVG(COALESCE(br.marks_obtained, ser.marks_obtained))::float8 AS avg_marks,
                 COUNT(DISTINCT ser.student_user_id)::int AS students
          FROM student_exam_reports ser
          JOIN exam_result_sessions ers
            ON ers.session_id = ser.session_id AND ers.tenant_id = ser.tenant_id
+         LEFT JOIN exam_backlog_current_results br ON br.source_report_id = ser.report_id
+           AND br.tenant_id = ser.tenant_id AND br.student_user_id = ser.student_user_id
+           AND br.semester = ers.semester AND br.selected_attempt_id IS NOT NULL
          JOIN academic_courses c ON c.course_id = ser.course_id AND c.tenant_id = ser.tenant_id
          WHERE ser.tenant_id = $1 AND ers.semester = $2
            AND ser.declared_at IS NOT NULL AND ers.declared_at IS NOT NULL
@@ -1269,13 +1427,16 @@ export class ExamCellEnterpriseService {
         [tenantId, semester],
       ),
       this.db.query(
-        `SELECT ser.result_status AS label, COUNT(*)::int AS count
+        `SELECT COALESCE(br.result_status, ser.result_status) AS label, COUNT(*)::int AS count
          FROM student_exam_reports ser
          JOIN exam_result_sessions ers
            ON ers.session_id = ser.session_id AND ers.tenant_id = ser.tenant_id
+         LEFT JOIN exam_backlog_current_results br ON br.source_report_id = ser.report_id
+           AND br.tenant_id = ser.tenant_id AND br.student_user_id = ser.student_user_id
+           AND br.semester = ers.semester AND br.selected_attempt_id IS NOT NULL
          WHERE ser.tenant_id = $1 AND ers.semester = $2
            AND ser.declared_at IS NOT NULL AND ers.declared_at IS NOT NULL
-         GROUP BY ser.result_status ORDER BY ser.result_status`,
+         GROUP BY COALESCE(br.result_status, ser.result_status) ORDER BY label`,
         [tenantId, semester],
       ),
     ]);

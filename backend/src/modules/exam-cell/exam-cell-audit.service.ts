@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
+import { DataSource, type EntityManager } from 'typeorm';
 
 @Injectable()
 export class ExamCellAuditService {
@@ -17,26 +17,25 @@ export class ExamCellAuditService {
       new_value?: unknown;
       ip_address?: string;
     },
+    queryExecutor: Pick<EntityManager, 'query'> = this.db,
   ) {
-    try {
-      await this.db.query(
-        `INSERT INTO exam_audit_logs
+    // Pass the mutation's transaction manager to make audit failure roll back
+    // that mutation. Propagate failures instead of silently losing the audit.
+    await queryExecutor.query(
+      `INSERT INTO exam_audit_logs
            (tenant_id, actor_user_id, action, resource_type, resource_id, old_value, new_value, ip_address)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-        [
-          tenantId,
-          actorUserId ?? null,
-          payload.action,
-          payload.resource_type,
-          payload.resource_id ?? null,
-          payload.old_value ? JSON.stringify(payload.old_value) : null,
-          payload.new_value ? JSON.stringify(payload.new_value) : null,
-          payload.ip_address ?? null,
-        ],
-      );
-    } catch {
-      /* audit must not break primary flows */
-    }
+      [
+        tenantId,
+        actorUserId ?? null,
+        payload.action,
+        payload.resource_type,
+        payload.resource_id ?? null,
+        payload.old_value ? JSON.stringify(payload.old_value) : null,
+        payload.new_value ? JSON.stringify(payload.new_value) : null,
+        payload.ip_address ?? null,
+      ],
+    );
   }
 
   async listRecent(tenantId: string, limit = 15) {
@@ -113,30 +112,26 @@ export class ExamCellAuditService {
       sql += ` AND (a.action ILIKE $${params.length} OR a.resource_type ILIKE $${params.length} OR COALESCE(u.name, '') ILIKE $${params.length})`;
     }
 
-    try {
-      const countRows = await this.db.query<Array<{ total: string }>>(
-        `SELECT COUNT(*)::int AS total ${sql}`,
-        params,
-      );
-      const listParams = [...params, limit, offset];
-      const rows = await this.db.query(
-        `SELECT a.audit_id, a.action, a.resource_type, a.resource_id,
+    const countRows = await this.db.query<Array<{ total: string }>>(
+      `SELECT COUNT(*)::int AS total ${sql}`,
+      params,
+    );
+    const listParams = [...params, limit, offset];
+    const rows = await this.db.query(
+      `SELECT a.audit_id, a.action, a.resource_type, a.resource_id,
                 a.old_value, a.new_value, a.ip_address, a.created_at,
                 u.name AS actor_name ${sql}
          ORDER BY a.created_at DESC
          LIMIT $${listParams.length - 1} OFFSET $${listParams.length}`,
-        listParams,
-      );
-      const total = Number(countRows[0]?.total ?? 0);
-      return {
-        data: rows,
-        total,
-        limit,
-        offset,
-        page,
-      };
-    } catch {
-      return { data: [], total: 0, limit, offset, page };
-    }
+      listParams,
+    );
+    const total = Number(countRows[0]?.total ?? 0);
+    return {
+      data: rows,
+      total,
+      limit,
+      offset,
+      page,
+    };
   }
 }

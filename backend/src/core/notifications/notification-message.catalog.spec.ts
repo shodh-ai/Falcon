@@ -1,10 +1,31 @@
 import {
+  admitCardLockedMessage,
   feeGeneratedMessage,
   workflowApprovalRequiredMessage,
   onboardingCredentialsMessage,
 } from './notification-message.catalog';
 
 describe('notification-message.catalog', () => {
+  it('describes an academic admit-card hold without inventing fee dues', () => {
+    const message = admitCardLockedMessage({
+      tenantId: 't1',
+      userId: 'u1',
+      reason: 'EXAM_ELIGIBILITY',
+      message: 'Blocked: Open UFM case',
+    });
+    expect(message.title).toBe('Admit card blocked');
+    expect(message.message).toBe('Blocked: Open UFM case');
+    expect(message.category).toBe('EXAMS');
+    expect(message.actionLink).toBe('/student/exams');
+    expect(message.actionLabel).toBe('View exam eligibility');
+  });
+
+  it('preserves the fee hold message when no academic reason is supplied', () => {
+    const message = admitCardLockedMessage({ tenantId: 't1', userId: 'u1' });
+    expect(message.title).toContain('outstanding fees');
+    expect(message.actionLink).toBe('/student/finance');
+    expect(message.actionLabel).toBe('View fee dues');
+  });
   it('builds descriptive fee messages with action context', () => {
     const msg = feeGeneratedMessage({
       tenantId: 't1',
