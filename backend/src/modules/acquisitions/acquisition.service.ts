@@ -68,7 +68,7 @@ export class AcquisitionService {
     departmentId?: number | null,
   ) {
     const effectiveDepartmentId =
-      departmentId ?? actor.dept_id ?? actor.department_id;
+      departmentId === undefined ? actor.dept_id ?? actor.department_id : departmentId;
     const rows = await this.db.query(
       `SELECT scope_type, scope_reference
        FROM acq_access_grants
@@ -558,9 +558,10 @@ export class AcquisitionService {
       )
     )
       return;
-    if (await this.hasCapability(actor, 'ACQUISITION_VENDOR_REVIEW')) return;
-    if (await this.hasCapability(actor, 'ACQUISITION_BUDGET_OVERSIGHT')) return;
-    if (await this.hasCapability(actor, 'ACQUISITION_AUDIT_OVERSIGHT')) return;
+    const departmentId = row.requesting_department_id ?? row.intended_department_id;
+    if (await this.hasCapability(actor, 'ACQUISITION_VENDOR_REVIEW', departmentId)) return;
+    if (await this.hasCapability(actor, 'ACQUISITION_BUDGET_OVERSIGHT', departmentId)) return;
+    if (await this.hasCapability(actor, 'ACQUISITION_AUDIT_OVERSIGHT', departmentId)) return;
     throw new ForbiddenException({
       message: 'Acquisition is outside your scope',
       code: 'ACQUISITION_SCOPE_DENIED',
@@ -721,17 +722,28 @@ export class AcquisitionService {
 
   async list(actor: AcquisitionActor, status?: string) {
     const tenantId = this.tenant(actor);
-    const oversight =
-      (await this.hasCapability(actor, 'ACQUISITION_VIEW_SCOPE')) ||
-      (await this.hasCapability(actor, 'ACQUISITION_VENDOR_REVIEW')) ||
-      (await this.hasCapability(actor, 'ACQUISITION_BUDGET_OVERSIGHT')) ||
-      (await this.hasCapability(actor, 'ACQUISITION_AUDIT_OVERSIGHT'));
+    const grants = await this.db.query<Array<{ capability: string; scope_type: string; scope_reference: string | null }>>(
+      `SELECT capability, scope_type, scope_reference FROM acq_access_grants
+       WHERE tenant_id = $1 AND capability = ANY($2::text[])
+         AND valid_from <= NOW() AND (valid_until IS NULL OR valid_until > NOW())
+         AND (principal_user_id = $3::uuid OR lower(principal_role) = ANY($4::text[]))`,
+      [tenantId, ['ACQUISITION_VIEW_SCOPE', 'ACQUISITION_VENDOR_REVIEW',
+        'ACQUISITION_BUDGET_OVERSIGHT', 'ACQUISITION_AUDIT_OVERSIGHT'],
+      actor.user_id, this.roles(actor).map((role) => role.toLowerCase())],
+    );
+    const visible = (row: { requester_id: string; requesting_department_id?: number | null; intended_department_id?: number | null }) => {
+      if (String(row.requester_id) === actor.user_id) return true;
+      const departmentId = row.requesting_department_id ?? row.intended_department_id;
+      return grants.some((grant) => grant.scope_type === 'TENANT' ||
+        (grant.scope_type === 'DEPARTMENT' && departmentId != null && String(departmentId) === String(grant.scope_reference)));
+    };
     let statusSql = '';
     if (status) {
       statusSql = 'AND v.status = $4';
     }
     const current = await this.db.query(
       `SELECT r.acquisition_id, r.acquisition_number, r.requester_id, r.source,
+              v.requesting_department_id, v.intended_department_id,
               v.acquisition_version_id, v.version_number, v.status, v.priority,
               v.required_by_date, v.estimated_total, v.currency, v.created_at
        FROM acq_requests r
@@ -739,20 +751,21 @@ export class AcquisitionService {
        WHERE r.tenant_id = $1 AND ($3::boolean OR r.requester_id = $2)
        ${statusSql}
        ORDER BY v.created_at DESC LIMIT 200`,
-      [tenantId, actor.user_id, oversight, ...(status ? [status] : [])],
+      [tenantId, actor.user_id, grants.length > 0, ...(status ? [status] : [])],
     );
     const legacy = await this.db.query(
       `SELECT pr_id AS acquisition_id, 'LEGACY-' || left(pr_id::text, 8) AS acquisition_number,
               requested_by AS requester_id, 'LEGACY_P2P' AS source,
+              dept_id AS requesting_department_id, NULL::int AS intended_department_id,
               NULL::uuid AS acquisition_version_id, 1 AS version_number, status,
               NULL::text AS priority, NULL::date AS required_by_date,
               amount_estimate AS estimated_total, 'INR' AS currency, created_at
        FROM fin_purchase_requisitions
        WHERE tenant_id = $1 AND ($2::boolean OR requested_by = $3)
        ORDER BY created_at DESC LIMIT 100`,
-      [tenantId, oversight, actor.user_id],
+      [tenantId, grants.length > 0, actor.user_id],
     );
-    return [...current, ...legacy].sort(
+    return [...current, ...legacy].filter(visible).sort(
       (a, b) =>
         new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
     );

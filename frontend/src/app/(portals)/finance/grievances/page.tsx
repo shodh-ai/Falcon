@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 type Row = {
   ticket_id: string;
   subject: string;
+  description?: string;
   category: string;
   status: string;
   created_at: string;
@@ -25,6 +26,7 @@ export default function FinanceGrievancesPage() {
   const [selectedTicket, setSelectedTicket] = useState<Row | null>(null);
   const [message, setMessage] = useState('');
   const [resolving, setResolving] = useState(false);
+  const [decision, setDecision] = useState<'RESOLVED' | 'REJECTED'>('RESOLVED');
 
   const loadRows = useCallback(async () => {
     setLoading(true);
@@ -45,13 +47,20 @@ export default function FinanceGrievancesPage() {
 
   const handleResolve = async () => {
     if (!selectedTicket) return;
+    if (decision === 'REJECTED' && message.trim().length < 10) {
+      toast.error('Enter a rejection reason of at least 10 characters.');
+      return;
+    }
     setResolving(true);
     try {
-      if (message.trim()) {
+      if (message.trim() && decision === 'RESOLVED') {
         await api.post(`/api/helpdesk/tickets/${selectedTicket.ticket_id}/messages`, { message });
       }
-      await api.patch(`/api/helpdesk/tickets/${selectedTicket.ticket_id}/status`, { status: 'RESOLVED' });
-      toast.success('Ticket resolved successfully');
+      await api.patch(`/api/helpdesk/tickets/${selectedTicket.ticket_id}/status`, {
+        status: decision,
+        ...(decision === 'REJECTED' ? { rejection_reason: message.trim() } : {}),
+      });
+      toast.success(decision === 'REJECTED' ? 'Ticket rejected with reason' : 'Ticket resolved successfully');
       setRows((prev) => prev.filter((r) => r.ticket_id !== selectedTicket.ticket_id));
       setSelectedTicket(null);
       setMessage('');
@@ -103,6 +112,7 @@ export default function FinanceGrievancesPage() {
                       <td className="p-3">
                         <p className="font-medium">{r.subject}</p>
                         <p className="text-muted-foreground">{r.category}</p>
+                        <p className="mt-1 max-w-lg whitespace-pre-wrap text-xs">{r.description || 'No description provided'}</p>
                       </td>
                       <td className="p-3">
                         <span
@@ -134,14 +144,17 @@ export default function FinanceGrievancesPage() {
 
       <Dialog open={!!selectedTicket} onOpenChange={(open) => !open && setSelectedTicket(null)}>
         <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Resolve Ticket</DialogTitle>
-          </DialogHeader>
+          <DialogHeader><DialogTitle>{selectedTicket?.subject}</DialogTitle></DialogHeader>
+          <p className="whitespace-pre-wrap text-sm">{selectedTicket?.description || 'No description provided'}</p>
+          <div className="flex gap-2">
+            <Button type="button" variant={decision === 'RESOLVED' ? 'default' : 'outline'} onClick={() => { setDecision('RESOLVED'); setMessage(''); }}>Resolve</Button>
+            <Button type="button" variant={decision === 'REJECTED' ? 'destructive' : 'outline'} onClick={() => { setDecision('REJECTED'); setMessage(''); }}>Reject</Button>
+          </div>
           <div className="py-4">
             <textarea
               className="w-full rounded-md border p-3 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900"
               rows={4}
-              placeholder="Optional message to student..."
+              placeholder={decision === 'REJECTED' ? 'Required rejection reason (at least 10 characters)' : 'Optional resolution message to student...'}
               value={message}
               onChange={(e) => setMessage(e.target.value)}
             />
@@ -149,7 +162,7 @@ export default function FinanceGrievancesPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setSelectedTicket(null)}>Cancel</Button>
             <Button onClick={() => void handleResolve()} disabled={resolving}>
-              {resolving ? 'Resolving...' : 'Resolve'}
+              {resolving ? 'Saving...' : decision === 'REJECTED' ? 'Reject with reason' : 'Resolve'}
             </Button>
           </DialogFooter>
         </DialogContent>

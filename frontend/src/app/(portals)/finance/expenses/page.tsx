@@ -28,6 +28,11 @@ type Bill = {
   invoice_id: string;
   vendor_name: string;
   head_name: string;
+  invoice_number?: string;
+  invoice_date?: string;
+  po_id?: string;
+  status?: string;
+  taxable_amount?: string;
   total_amount: string;
   net_payable: string;
   gst_amount: string;
@@ -50,7 +55,7 @@ export default function FinanceExpensesPage() {
     vendor_id: '',
     expense_head_id: '',
     invoice_number: '',
-    invoice_date: new Date().toISOString().slice(0, 10),
+    invoice_date: '',
     taxable_amount: '',
     gst_rate: '0',
     department_id: '',
@@ -75,7 +80,7 @@ export default function FinanceExpensesPage() {
       setBills(billRows);
       setBudgets(budgetRows);
       setApprovedPos(
-        (Array.isArray(poRows) ? poRows : []).filter((p) => p.status === 'APPROVED'),
+        (Array.isArray(poRows) ? poRows : []).filter((p) => p.status === 'APPROVED' && p.source_system !== 'MODULE2'),
       );
       setLoadError(null);
     } catch (e) {
@@ -127,12 +132,12 @@ export default function FinanceExpensesPage() {
 
   async function submit() {
     try {
-      if (!form.vendor_id || !form.expense_head_id || !form.taxable_amount) {
-        throw new Error('Please fill vendor, expense head, and taxable amount');
+      if (!form.vendor_id || !form.expense_head_id || !form.taxable_amount || !form.invoice_number.trim() || !form.invoice_date) {
+        throw new Error('Vendor, expense head, invoice number, invoice date and taxable amount are required');
       }
       if (!form.po_id) {
         throw new Error(
-          'Select a linked purchase order — required for 3-way match and payment on AP Desk',
+          'Select a legacy purchase order. For Module 2 purchase orders, enter the invoice in Progressive Procurement.',
         );
       }
       await api.post('/finance/expenses', {
@@ -175,6 +180,7 @@ export default function FinanceExpensesPage() {
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Log bill</CardTitle>
+          <p className="text-xs text-muted-foreground">This form is for legacy purchase orders only. For a Progressive Procurement (Module 2) order, upload the invoice in <Link className="underline" href="/finance/procurements">Progressive Procurement</Link>; its approved invoice flows to AP Desk.</p>
         </CardHeader>
         <CardContent className="grid gap-2 sm:grid-cols-2">
           <Select
@@ -182,7 +188,7 @@ export default function FinanceExpensesPage() {
             value={form.po_id}
             onChange={(e) => onPoChange(e.target.value)}
           >
-            <option value="">Link to approved PO (required for payment)</option>
+            <option value="">Select approved legacy PO (required for payment)</option>
             {approvedPos.map((p) => (
               <option key={p.po_id} value={p.po_id}>
                 {formatPoOptionLabel(p)}
@@ -226,11 +232,9 @@ export default function FinanceExpensesPage() {
             value={form.invoice_number}
             onChange={(e) => setForm({ ...form, invoice_number: e.target.value })}
           />
-          <Input
-            type="date"
-            value={form.invoice_date}
-            onChange={(e) => setForm({ ...form, invoice_date: e.target.value })}
-          />
+          <label className="grid gap-1 text-sm">Invoice date (shown on vendor invoice)
+            <Input type="date" value={form.invoice_date} onChange={(e) => setForm({ ...form, invoice_date: e.target.value })} required />
+          </label>
           <Input
             placeholder="Taxable amount (₹)"
             type="number"
@@ -267,7 +271,7 @@ export default function FinanceExpensesPage() {
             </p>
           )}
           <div className="flex flex-wrap gap-2 sm:col-span-2">
-            <Button onClick={() => void submit()}>Approve bill</Button>
+            <Button onClick={() => void submit()}>Log legacy bill</Button>
             {form.po_id ? (
               <Button variant="secondary" asChild>
                 <Link href="/finance/ap-desk">Go to AP Desk</Link>
@@ -279,10 +283,19 @@ export default function FinanceExpensesPage() {
       {bills.map((b) => (
         <Card key={b.invoice_id}>
           <CardContent className="p-4 text-sm">
-            <p className="font-semibold">{b.vendor_name}</p>
-            <p className="text-muted-foreground">
-              {b.head_name} · Total {formatInr(b.total_amount)} · Net {formatInr(b.net_payable)}
-            </p>
+            <details>
+              <summary className="cursor-pointer font-semibold">{b.vendor_name} · {b.head_name} · Total {formatInr(b.total_amount)} · Net {formatInr(b.net_payable)} <span className="text-xs font-normal underline">View details</span></summary>
+              <dl className="mt-3 grid gap-1 text-muted-foreground sm:grid-cols-2">
+                <div>Invoice: {b.invoice_number || 'Not recorded'}</div>
+                <div>Date: {b.invoice_date || 'Not recorded'}</div>
+                <div>PO: {b.po_id || 'Not linked'}</div>
+                <div>Status: {b.status || 'Not recorded'}</div>
+                <div>Taxable: {formatInr(b.taxable_amount)}</div>
+                <div>GST: {formatInr(b.gst_amount)}</div>
+                <div>TDS: {formatInr(b.tds_amount)}</div>
+                <div>Net payable: {formatInr(b.net_payable)}</div>
+              </dl>
+            </details>
           </CardContent>
         </Card>
       ))}

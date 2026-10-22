@@ -5,6 +5,12 @@ export type PurchaseOrderRow = {
   description?: string | null;
   amount?: string | number | null;
   status?: string | null;
+  source_system?: string | null;
+  vendor_id?: string | null;
+  requested_by?: string | null;
+  approved_by?: string | null;
+  created_at?: string | null;
+  approved_at?: string | null;
 };
 
 export function shortPoId(poId: string | undefined | null): string {

@@ -25,14 +25,27 @@ describe('FinanceChequeService', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
+  it('returns a client error for a malformed student or demand ID before querying PostgreSQL', async () => {
+    await expect(service.logCheque('t1', {
+      student_user_id: 'not-a-uuid',
+      demand_id: 'also-invalid',
+      amount: 100,
+      cheque_number: 'CHQ001',
+      bank_name: 'Test Bank',
+    })).rejects.toBeInstanceOf(BadRequestException);
+    expect(dataSource.transaction).not.toHaveBeenCalled();
+  });
+
   it('logs cheque with PENDING_CLEARANCE status', async () => {
+    const studentId = 'aa989437-ede9-4576-81d3-a107b7c84766';
+    const demandId = '010b9ef0-02d3-4cdf-826c-3c002216038f';
     dataSource.query
-      .mockResolvedValueOnce([{ user_id: 'stu-1', tenant_id: 't1' }])
+      .mockResolvedValueOnce([{ user_id: studentId, tenant_id: 't1' }])
       .mockResolvedValueOnce([
         {
-          demand_id: 'dem-1',
+          demand_id: demandId,
           tenant_id: 't1',
-          student_user_id: 'stu-1',
+          student_user_id: studentId,
           status: 'PENDING',
           total_amount: 10000,
           paid_amount: 0,
@@ -42,8 +55,8 @@ describe('FinanceChequeService', () => {
       .mockResolvedValueOnce([]);
 
     const txn = await service.logCheque('t1', {
-      student_user_id: 'stu-1',
-      demand_id: 'dem-1',
+      student_user_id: studentId,
+      demand_id: demandId,
       amount: 5000,
       cheque_number: 'CHQ001',
       bank_name: 'Test Bank',

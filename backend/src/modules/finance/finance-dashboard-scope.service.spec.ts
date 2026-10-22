@@ -46,6 +46,10 @@ describe('Finance dashboard tenant scope', () => {
         { tenantId: 'tenant-gvmc' },
       );
     }
+    expect(demands.manager.query).toHaveBeenCalledWith(
+      expect.stringContaining('FROM fin_dept_budgets b'),
+      ['tenant-gvmc'],
+    );
   });
 
   it('rejects a demand for a student in another institution', async () => {

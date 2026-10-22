@@ -48,6 +48,10 @@ export default function ChequeClearingPage() {
 
   async function logCheque(e: FormEvent) {
     e.preventDefault();
+    if (!Number.isFinite(Number(form.amount)) || Number(form.amount) <= 0) {
+      toast.error('Enter a positive cheque amount.');
+      return;
+    }
     try {
       await api.post('/finance/cheques/log', {
         student_user_id: form.student_user_id,
@@ -96,9 +100,9 @@ export default function ChequeClearingPage() {
       <FinancePageHeader title="Cheque Clearing" description="Deposit cheques, track clearance, and handle bounces" />
 
       <form onSubmit={logCheque} className="grid gap-3 rounded-xl border p-4 md:grid-cols-3">
-        <Input placeholder="Student user ID" value={form.student_user_id} onChange={(e) => setForm((f) => ({ ...f, student_user_id: e.target.value }))} required />
-        <Input placeholder="Demand ID (optional)" value={form.demand_id} onChange={(e) => setForm((f) => ({ ...f, demand_id: e.target.value }))} />
-        <Input placeholder="Amount" type="number" value={form.amount} onChange={(e) => setForm((f) => ({ ...f, amount: e.target.value }))} required />
+        <Input aria-label="Student user UUID" placeholder="Student user UUID (not enrollment number)" value={form.student_user_id} onChange={(e) => setForm((f) => ({ ...f, student_user_id: e.target.value }))} required />
+        <Input aria-label="Fee demand UUID" placeholder="Fee demand UUID (optional)" value={form.demand_id} onChange={(e) => setForm((f) => ({ ...f, demand_id: e.target.value }))} />
+        <Input placeholder="Amount" type="number" min="0.01" step="0.01" value={form.amount} onChange={(e) => setForm((f) => ({ ...f, amount: e.target.value }))} required />
         <Input placeholder="Cheque number" value={form.cheque_number} onChange={(e) => setForm((f) => ({ ...f, cheque_number: e.target.value }))} required />
         <Input placeholder="Bank name" value={form.bank_name} onChange={(e) => setForm((f) => ({ ...f, bank_name: e.target.value }))} required />
         <Button type="submit">Log cheque deposit</Button>

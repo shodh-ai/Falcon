@@ -11,6 +11,7 @@ describe('student exam fee campus isolation', () => {
       create: jest.fn((dto: Partial<FeeDemand>) => dto),
       save: jest.fn((demand: Partial<FeeDemand>) => Promise.resolve(demand)),
       find: jest.fn<Promise<FeeDemand[]>, [unknown]>().mockResolvedValue([]),
+      findOne: jest.fn().mockResolvedValue(null),
     };
     const notify = { feeGenerated: jest.fn() };
     const service = new FinanceService(
@@ -87,5 +88,71 @@ describe('student exam fee campus isolation', () => {
       service.getPendingDues('student-a', ''),
     ).rejects.toBeInstanceOf(ForbiddenException);
     expect(demands.find).not.toHaveBeenCalled();
+  });
+
+  it('does not select a scholarship demand outside the authenticated tenant', async () => {
+    const { service, demands } = setup();
+    const studentId = 'aa989437-ede9-4576-81d3-a107b7c84766';
+    await expect(service.applyScholarship('campus-b', {
+      student_user_id: studentId,
+      discount_percent: 15,
+    })).rejects.toThrow('No active fee demand');
+    expect(demands.findOne).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.arrayContaining([expect.objectContaining({ tenant_id: 'campus-b', student_user_id: studentId })]),
+    }));
+    expect(demands.save).not.toHaveBeenCalled();
+  });
+
+  it('rejects a missing scholarship percentage before touching the database', async () => {
+    const { service, demands } = setup();
+    await expect(service.applyScholarship('campus-b', {
+      student_user_id: 'aa989437-ede9-4576-81d3-a107b7c84766',
+    })).rejects.toBeInstanceOf(BadRequestException);
+    expect(demands.manager.query).not.toHaveBeenCalled();
+  });
+
+  it('applies a scholarship with a tenant-scoped, single-use compare-and-set update', async () => {
+    const { service, demands } = setup();
+    const studentId = 'aa989437-ede9-4576-81d3-a107b7c84766';
+    const demand = {
+      demand_id: '010b9ef0-02d3-4cdf-826c-3c002216038f',
+      student_user_id: studentId,
+      tenant_id: 'campus-b',
+      total_amount: 1000,
+      paid_amount: 100,
+      fee_breakup: null,
+    };
+    demands.manager.query.mockResolvedValueOnce([{ user_id: studentId }]);
+    demands.findOne.mockResolvedValueOnce(demand);
+    demands.manager.query.mockResolvedValueOnce([[{ ...demand, total_amount: 900 }], 1]);
+
+    await expect(service.applyScholarship('campus-b', {
+      student_user_id: studentId,
+      discount_percent: 10,
+    })).resolves.toMatchObject({ total_amount: 900 });
+    expect(demands.manager.query).toHaveBeenLastCalledWith(
+      expect.stringContaining("fee_breakup->>'scholarship_discount_percent' IS NULL"),
+      [demand.demand_id, 'campus-b', 900, 10, 1000, studentId, 100],
+    );
+    expect(demands.save).not.toHaveBeenCalled();
+  });
+
+  it('rejects a concurrent scholarship or payment change without overwriting it', async () => {
+    const { service, demands } = setup();
+    const studentId = 'aa989437-ede9-4576-81d3-a107b7c84766';
+    demands.manager.query.mockResolvedValueOnce([{ user_id: studentId }]);
+    demands.findOne.mockResolvedValueOnce({
+      demand_id: '010b9ef0-02d3-4cdf-826c-3c002216038f',
+      total_amount: 1000,
+      paid_amount: 0,
+      fee_breakup: null,
+    });
+    demands.manager.query.mockResolvedValueOnce([[], 0]);
+
+    await expect(service.applyScholarship('campus-b', {
+      student_user_id: studentId,
+      discount_percent: 10,
+    })).rejects.toThrow('Fee demand changed');
+    expect(demands.save).not.toHaveBeenCalled();
   });
 });
