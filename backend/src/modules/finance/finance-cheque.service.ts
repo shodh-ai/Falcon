@@ -89,13 +89,15 @@ export class FinanceChequeService {
       bank_name: string;
     },
   ) {
+    const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
     if (
-      !dto.student_user_id ||
+      !uuid.test(dto.student_user_id ?? '') ||
+      (dto.demand_id && !uuid.test(dto.demand_id)) ||
       !dto.cheque_number?.trim() ||
       !dto.bank_name?.trim()
     ) {
       throw new BadRequestException(
-        'Student, cheque number, and bank name are required',
+        'Valid student ID, optional demand ID, cheque number and bank name are required',
       );
     }
     const tenant = tenantId?.trim();

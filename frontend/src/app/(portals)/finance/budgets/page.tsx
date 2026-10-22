@@ -23,9 +23,9 @@ type Budget = {
 export default function FinanceBudgetsPage() {
   const api = useAuthedApi();
   const [rows, setRows] = useState<Budget[]>([]);
-  const [deptId, setDeptId] = useState('1');
-  const [year, setYear] = useState('2026-2027');
-  const [amount, setAmount] = useState('5000000');
+  const [deptId, setDeptId] = useState('');
+  const [year, setYear] = useState('');
+  const [amount, setAmount] = useState('');
 
   const load = () => void api.get<Budget[]>('/finance/budgets').then(setRows).catch(() => setRows([]));
 
@@ -34,13 +34,20 @@ export default function FinanceBudgetsPage() {
   }, [api]);
 
   async function allocate() {
+    if (!Number.isSafeInteger(Number(deptId)) || Number(deptId) <= 0 || !/^\d{4}-\d{4}$/.test(year) || !amount.trim() || !Number.isFinite(Number(amount)) || Number(amount) < 0) {
+      toast.error('Enter a valid department ID, financial year and non-negative allocation.');
+      return;
+    }
     try {
       await api.post('/finance/budgets', {
         department_id: Number(deptId),
         financial_year: year,
         allocated_amount: Number(amount),
       });
-      toast.success('Budget allocated');
+      toast.success('Department budget saved');
+      setDeptId('');
+      setYear('');
+      setAmount('');
       load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed');
@@ -72,20 +79,21 @@ export default function FinanceBudgetsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Allocate annual budget (legacy)</CardTitle>
+          <CardTitle className="text-base">Edit draft department allocation</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-wrap gap-2">
-          <Input placeholder="Department ID" value={deptId} onChange={(e) => setDeptId(e.target.value)} />
-          <Input placeholder="FY e.g. 2026-2027" value={year} onChange={(e) => setYear(e.target.value)} />
-          <Input placeholder="Amount (₹)" value={amount} onChange={(e) => setAmount(e.target.value)} />
+          <Input aria-label="Department ID" type="number" min="1" placeholder="Department ID" value={deptId} onChange={(e) => setDeptId(e.target.value)} />
+          <Input aria-label="Financial year" placeholder="FY e.g. 2026-2027" value={year} onChange={(e) => setYear(e.target.value)} />
+          <Input aria-label="Total allocation in rupees" type="number" min="0" step="0.01" placeholder="Total allocation (₹)" value={amount} onChange={(e) => setAmount(e.target.value)} />
           <Button onClick={() => void allocate()}>Save allocation</Button>
+          <p className="w-full text-xs text-muted-foreground">Saving an existing draft department/year replaces its total allocation; it does not add to the current amount. First create a university budget in the Allocation Board. Locked budgets require a reviewed expansion request there.</p>
         </CardContent>
       </Card>
       {rows.map((r) => (
         <Card key={r.budget_id}>
           <CardContent className="space-y-2 p-4">
             <div className="flex justify-between text-sm">
-              <span className="font-semibold">{r.department_name ?? `Dept ${deptId}`}</span>
+              <span className="font-semibold">{r.department_name ?? 'Department'} · {r.financial_year}</span>
               <span>
                 {formatInr(r.utilized_amount)} / {formatInr(r.allocated_amount)} ({r.utilization_percent}%)
               </span>

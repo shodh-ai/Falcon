@@ -53,6 +53,19 @@ describe('AcquisitionService authorization and sensitive data', () => {
     );
   });
 
+  it('does not list another department acquisition under a department-scoped view grant', async () => {
+    db.query
+      .mockResolvedValueOnce([{ capability: 'ACQUISITION_VIEW_SCOPE', scope_type: 'DEPARTMENT', scope_reference: '7' }])
+      .mockResolvedValueOnce([
+        { acquisition_id: 'own', requester_id: actor.user_id, requesting_department_id: 7, created_at: '2026-01-03' },
+        { acquisition_id: 'same-dept', requester_id: 'other', requesting_department_id: 7, created_at: '2026-01-02' },
+        { acquisition_id: 'foreign-dept', requester_id: 'other', requesting_department_id: 9, created_at: '2026-01-01' },
+      ])
+      .mockResolvedValueOnce([]);
+    const rows = await service.list(actor);
+    expect(rows.map((row: { acquisition_id: string }) => row.acquisition_id)).toEqual(['own', 'same-dept']);
+  });
+
   it('denies draft creation without a scoped requester capability', async () => {
     db.query.mockResolvedValueOnce([]);
     await expect(service.createDraft(actor, draft)).rejects.toBeInstanceOf(

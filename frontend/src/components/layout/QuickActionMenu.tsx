@@ -58,7 +58,7 @@ export function QuickActionMenu() {
   });
   const [odForm, setOdForm] = useState({ start_date: '', end_date: '', start_time: '', end_time: '', reason: '' });
   const [ticketForm, setTicketForm] = useState({ category: 'IT', subject: '', description: '' });
-  const [roomForm, setRoomForm] = useState({ date: '', slot: '10:00', end: '11:00', room: '', purpose: '' });
+  const [roomForm, setRoomForm] = useState({ date: '', slot: '', end: '', room: '', purpose: '' });
   const roomDuration = timeRangeMinutes(roomForm.slot, roomForm.end);
 
   async function submitLeave(e: FormEvent) {
@@ -153,7 +153,7 @@ export function QuickActionMenu() {
       toast.success('Facilities request submitted. The room is not booked until confirmed.');
       window.dispatchEvent(new Event('falcon:notifications-refresh'));
       setOpen(null);
-      setRoomForm({ date: '', slot: '10:00', end: '11:00', room: '', purpose: '' });
+      setRoomForm({ date: '', slot: '', end: '', room: '', purpose: '' });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Could not submit the room request');
     } finally {
@@ -272,7 +272,7 @@ export function QuickActionMenu() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Apply On Duty (OD)</DialogTitle>
-            <DialogDescription>Choose leave or official on-duty work. Your draft is retained when switching.</DialogDescription>
+            <DialogDescription>On Duty is separate from leave and needs no leave category. Select dates and enter the purpose or venue; your draft is retained when switching.</DialogDescription>
           </DialogHeader>
           <div className="flex gap-2" aria-label="Request type">
             <Button type="button" size="sm" aria-pressed={false} variant="outline" disabled={submitting} onClick={() => setOpen('leave')}>Leave</Button>
@@ -356,7 +356,7 @@ export function QuickActionMenu() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Request Meeting Room</DialogTitle>
-            <DialogDescription>Request is routed to facilities for confirmation.</DialogDescription>
+            <DialogDescription>Select the meeting date and both times explicitly. Your request is routed to facilities for confirmation.</DialogDescription>
           </DialogHeader>
           <form onSubmit={submitRoom} className="grid gap-3">
             <label className="grid gap-1 text-sm font-medium">Meeting Date

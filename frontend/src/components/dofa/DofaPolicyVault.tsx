@@ -168,6 +168,7 @@ export function DofaPolicyVault() {
   const [tab, setTab] = useState<'board' | 'audit'>('board');
   const [domain, setDomain] = useState<string>('P2P');
   const [graphs, setGraphs] = useState<GraphMeta[]>([]);
+  const [graphLoadError, setGraphLoadError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selected, setSelected] = useState<GraphMeta | null>(null);
   const [audit, setAudit] = useState<AuditRow[]>([]);
@@ -184,11 +185,13 @@ export function DofaPolicyVault() {
       .get<GraphMeta[]>(`/api/dofa/policy/graphs?domain=${domain}`)
       .then((list) => {
         setGraphs(list);
+        setGraphLoadError(null);
         const pub = list.find((g) => g.status === 'PUBLISHED') ?? list[0];
         if (pub) setSelectedId(pub.graph_id);
+        else { setSelectedId(null); setSelected(null); setNodes([]); setEdges([]); }
       })
-      .catch(() => setGraphs([]));
-  }, [api, domain]);
+      .catch((error) => { setGraphs([]); setSelectedId(null); setSelected(null); setGraphLoadError(error instanceof Error ? error.message : 'Policy graphs could not be loaded'); });
+  }, [api, domain, setEdges, setNodes]);
 
   useEffect(() => {
     loadGraphs();
@@ -445,12 +448,15 @@ export function DofaPolicyVault() {
           value={selectedId ?? ''}
           onChange={(e) => setSelectedId(e.target.value)}
         >
+          <option value="" disabled>{graphs.length ? 'Select policy graph' : 'No policy graph in this domain'}</option>
           {graphs.map((g) => (
             <option key={g.graph_id} value={g.graph_id}>
               v{g.version} · {g.status} · {g.title}
             </option>
           ))}
         </select>
+        {graphLoadError ? <span role="alert" className="text-xs text-red-700">{graphLoadError}</span> : null}
+        {!graphLoadError && !graphs.length ? <span className="text-xs text-muted-foreground">No published or draft policy is configured for this domain. An authorized administrator can create a draft; a CFO must approve publication.</span> : null}
         {selected && (
           <span className="text-xs font-semibold uppercase tracking-wide text-sgvu-navy">
             {selected.status}

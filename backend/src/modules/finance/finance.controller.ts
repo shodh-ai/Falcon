@@ -185,9 +185,16 @@ export class FinanceController {
   @Post('scholarships')
   @Roles(...FINANCE_DESK)
   applyScholarship(
+    @Req() req: { user: AuthUser },
     @Body() dto: { student_user_id?: string; discount_percent?: number },
   ) {
-    return this.finance.applyScholarship(dto);
+    return this.finance.applyScholarship(this.tenant(req), dto);
+  }
+
+  @Get('scholarships/student/:studentId')
+  @Roles(...FINANCE_DESK)
+  lookupScholarshipStudent(@Req() req: { user: AuthUser }, @Param('studentId') studentId: string) {
+    return this.finance.lookupScholarshipStudent(this.tenant(req), studentId);
   }
 
   @Get('fine-policies')
@@ -208,6 +215,12 @@ export class FinanceController {
     @Body() dto: Record<string, unknown>,
   ) {
     return this.accounts.createVendor(this.tenant(req), dto);
+  }
+
+  @Patch('vendors/:vendorId')
+  @Roles(...FINANCE_DESK)
+  updateVendor(@Req() req: { user: AuthUser }, @Param('vendorId') vendorId: string, @Body() dto: Record<string, unknown>) {
+    return this.accounts.updateVendor(this.tenant(req), vendorId, dto);
   }
 
   @Get('expense-heads')

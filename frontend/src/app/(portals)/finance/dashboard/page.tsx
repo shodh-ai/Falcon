@@ -17,6 +17,8 @@ type Dashboard = {
     utilization_percent: number;
     allocated_amount: string;
     utilized_amount: string;
+    encumbered_amount: string;
+    financial_year: string;
   }>;
   recent_transactions: Array<{
     transaction_id: string;
@@ -98,11 +100,12 @@ export default function FinanceDashboardPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           {(data?.budget_utilization ?? []).map((row) => (
-            <div key={row.department} className="space-y-1">
+            <div key={`${row.department}-${row.financial_year}`} className="space-y-1">
               <div className="flex justify-between text-sm">
-                <span>{row.department ?? 'General'}</span>
-                <span className="text-muted-foreground">{row.utilization_percent}% used</span>
+                <span>{row.department ?? 'General'} · {row.financial_year}</span>
+                <span className="text-muted-foreground">{row.utilization_percent}% utilized or committed</span>
               </div>
+              <p className="text-xs text-muted-foreground">Allocated {formatInr(row.allocated_amount)} · Spent {formatInr(row.utilized_amount)} · Committed {formatInr(row.encumbered_amount)} · Available {formatInr(Math.max(0, Number(row.allocated_amount) - Number(row.utilized_amount) - Number(row.encumbered_amount)))}</p>
               <Progress value={Math.min(100, Number(row.utilization_percent))} />
             </div>
           ))}

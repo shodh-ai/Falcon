@@ -26,6 +26,83 @@ describe('FinanceAccountsService fee template and job validation', () => {
     expect(query).not.toHaveBeenCalled();
   });
 
+  it('rejects an empty vendor name and invalid IFSC before saving', () => {
+    expect(() => service.createVendor('tenant-1', { business_name: '' })).toThrow(BadRequestException);
+    expect(() => service.createVendor('tenant-1', { business_name: 'Vendor', ifsc_code: 'bad' })).toThrow(BadRequestException);
+    expect(query).not.toHaveBeenCalled();
+  });
+
+  it('rejects invalid department-budget amounts before touching a transaction', () => {
+    expect(() => service.upsertBudget('tenant-1', {
+      department_id: 1, financial_year: '2026-2027', allocated_amount: -1,
+    })).toThrow(BadRequestException);
+    expect(query).not.toHaveBeenCalled();
+  });
+
+  it('does not change a department allocation under a locked university budget', async () => {
+    const manager = { query: jest.fn((sql: string) => {
+      if (sql.includes('FROM departments d')) return [{ dept_id: 1 }];
+      if (sql.includes('FROM fin_dept_budgets') && sql.includes('FOR UPDATE')) return [];
+      if (sql.includes('FROM fin_university_budgets')) return [{ university_budget_id: 'univ-1', status: 'LOCKED', total_allocated: '100.00' }];
+      if (sql.includes('SUM(allocated_amount)')) return [{ allocated: '70.00' }];
+      return [];
+    }) };
+    const dataSource = { transaction: jest.fn((work: (value: typeof manager) => unknown) => work(manager)) };
+    const scopedService = new FinanceAccountsService(
+      dataSource as never, {} as never, {} as never, {} as never,
+      {} as never, {} as never, {} as never,
+    );
+    await expect(scopedService.upsertBudget('tenant-1', {
+      department_id: 1, financial_year: '2026-2027', allocated_amount: 40,
+    })).rejects.toThrow('submit a budget expansion for approval');
+    expect(manager.query).not.toHaveBeenCalledWith(expect.stringContaining('INSERT INTO fin_dept_budgets'), expect.anything());
+  });
+
+  it('enforces the university cap before updating a draft allocation', async () => {
+    const manager = { query: jest.fn((sql: string) => {
+      if (sql.includes('FROM departments d')) return [{ dept_id: 1 }];
+      if (sql.includes('FROM fin_dept_budgets') && sql.includes('FOR UPDATE')) return [];
+      if (sql.includes('FROM fin_university_budgets')) return [{ university_budget_id: 'univ-1', status: 'DRAFT', total_allocated: '100.00' }];
+      if (sql.includes('SUM(allocated_amount)')) return [{ allocated: '70.00' }];
+      return [];
+    }) };
+    const dataSource = { transaction: jest.fn((work: (value: typeof manager) => unknown) => work(manager)) };
+    const scopedService = new FinanceAccountsService(
+      dataSource as never, {} as never, {} as never, {} as never,
+      {} as never, {} as never, {} as never,
+    );
+    await expect(scopedService.upsertBudget('tenant-1', {
+      department_id: 1, financial_year: '2026-2027', allocated_amount: 40,
+    })).rejects.toThrow('exceed the university budget cap');
+    expect(manager.query).not.toHaveBeenCalledWith(expect.stringContaining('INSERT INTO fin_dept_budgets'), expect.anything());
+  });
+
+  it('updates a draft department allocation under the same university budget', async () => {
+    const manager = { query: jest.fn((sql: string) => {
+      if (sql.includes('FROM departments d')) return [{ dept_id: 1 }];
+      if (sql.includes('FROM fin_dept_budgets') && sql.includes('FOR UPDATE'))
+        return [{ budget_id: 'dept-1', status: 'DRAFT', utilized_amount: '10.00', encumbered_amount: '5.00' }];
+      if (sql.includes('FROM fin_program_budgets')) return [{ allocated: '20.00' }];
+      if (sql.includes('FROM fin_university_budgets'))
+        return [{ university_budget_id: 'univ-1', status: 'DRAFT', total_allocated: '100.00' }];
+      if (sql.includes('SUM(allocated_amount)')) return [{ allocated: '30.00' }];
+      if (sql.includes('INSERT INTO fin_dept_budgets')) return [{ budget_id: 'dept-1', allocated_amount: '60.00' }];
+      return [];
+    }) };
+    const dataSource = { transaction: jest.fn((work: (value: typeof manager) => unknown) => work(manager)) };
+    const scopedService = new FinanceAccountsService(
+      dataSource as never, {} as never, {} as never, {} as never,
+      {} as never, {} as never, {} as never,
+    );
+    await expect(scopedService.upsertBudget('tenant-1', {
+      department_id: 1, financial_year: '2026-2027', allocated_amount: 60,
+    })).resolves.toEqual([{ budget_id: 'dept-1', allocated_amount: '60.00' }]);
+    expect(manager.query).toHaveBeenCalledWith(
+      expect.stringContaining('university_budget_id = EXCLUDED.university_budget_id'),
+      ['tenant-1', 1, '2026-2027', 60, 'univ-1'],
+    );
+  });
+
   it('keeps the saved semester and monetary values', async () => {
     query.mockResolvedValueOnce([{ template_id: 'template-1' }]);
     await service.createTemplate('tenant-1', {
