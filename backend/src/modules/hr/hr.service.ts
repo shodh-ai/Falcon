@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -719,6 +720,38 @@ export class HrService {
     });
   }
 
+  async listHrGatePassReviews(tenantId: string, entityId: number, actorUserId: string) {
+    const hrAdmin = await this.workflowRouting.getHrAdmin(tenantId);
+    return this.users.manager.query(
+      `SELECT pass.pass_id, pass.staff_user_id, pass.out_time, pass.expected_in_time,
+              pass.reason, pass.status, employee.name AS employee_name,
+              employee.official_email AS employee_email, department.dept_name,
+              (pass.status = 'PENDING_HR' AND $3::uuid = $4::uuid
+                AND pass.staff_user_id <> $3
+                AND pass.reporting_officer_id IS DISTINCT FROM $3
+                AND NOT EXISTS (
+                  SELECT 1 FROM hr_access_controls access
+                  WHERE access.tenant_id = pass.tenant_id AND access.user_id = $3
+                    AND access.module_name = 'LEAVES' AND access.can_approve = false
+                )) AS can_review
+       FROM staff_gate_passes pass
+       JOIN users employee ON employee.user_id = pass.staff_user_id AND employee.tenant_id = pass.tenant_id
+       LEFT JOIN hr_employee_profiles profile ON profile.user_id = employee.user_id AND profile.tenant_id = pass.tenant_id
+       LEFT JOIN departments department ON department.dept_id = employee.dept_id
+       WHERE pass.tenant_id = $1 AND COALESCE(profile.entity_id, employee.entity_id) = $2
+         AND pass.status IN ('PENDING', 'PENDING_HR')
+         AND NOT EXISTS (
+           SELECT 1 FROM hr_access_controls access
+           WHERE access.tenant_id = pass.tenant_id AND access.user_id = $3 AND access.module_name = 'LEAVES'
+             AND (access.can_view = false
+               OR (access.entity_scope IS NOT NULL AND NOT (COALESCE(COALESCE(profile.entity_id, employee.entity_id) = ANY(access.entity_scope), false)))
+               OR (access.department_scope IS NOT NULL AND NOT (COALESCE(employee.dept_id = ANY(access.department_scope), false))))
+         )
+       ORDER BY pass.out_time ASC`,
+      [tenantId, entityId, actorUserId, hrAdmin.userId],
+    );
+  }
+
   async actOnGatePass(
     passId: string,
     actorUserId: string,
@@ -726,11 +759,24 @@ export class HrService {
     status: 'APPROVED' | 'REJECTED',
     roles: string[] = [],
   ) {
+    if (status !== 'APPROVED' && status !== 'REJECTED') {
+      throw new BadRequestException('status must be APPROVED or REJECTED');
+    }
     const pass = await this.gatePasses.findOne({
       where: { pass_id: passId, tenant_id: tenantId },
       relations: ['staff'],
     });
     if (!pass) throw new NotFoundException('Gate pass not found');
+    if (pass.staff_user_id === actorUserId) throw new ForbiddenException('You cannot review your own gate pass');
+    const expectedStatus = pass.status;
+    const saveDecision = async () => {
+      const result = await this.gatePasses.update(
+        { pass_id: passId, tenant_id: tenantId, status: expectedStatus },
+        { status: pass.status },
+      );
+      if (result.affected !== 1) throw new ConflictException('This gate pass changed. Refresh before reviewing it again.');
+      return pass;
+    };
 
     const staff = await this.users.findOne({
       where: { user_id: pass.staff_user_id },
@@ -754,7 +800,7 @@ export class HrService {
       }
       if (status === 'REJECTED') {
         pass.status = 'REJECTED';
-        const saved = await this.gatePasses.save(pass);
+        const saved = await saveDecision();
         if (staff?.tenant_id) {
           this.notify.gatePassUpdated({
             tenantId: staff.tenant_id,
@@ -766,7 +812,7 @@ export class HrService {
         return saved;
       }
       pass.status = 'PENDING_HR';
-      const saved = await this.gatePasses.save(pass);
+      const saved = await saveDecision();
       const hrAdmin = await this.workflowRouting.getHrAdmin(tenantId);
       this.workflowNotify.notifyApprover({
         tenantId,
@@ -781,6 +827,25 @@ export class HrService {
     }
 
     if (pass.status === 'PENDING_HR') {
+      if (pass.reporting_officer_id === actorUserId) {
+        throw new ForbiddenException('Final HR sign-off requires an independent reviewer');
+      }
+      const [scope] = await this.users.manager.query(
+        `SELECT COALESCE(profile.entity_id, employee.entity_id) AS entity_id
+         FROM users employee LEFT JOIN hr_employee_profiles profile
+           ON profile.user_id = employee.user_id AND profile.tenant_id = employee.tenant_id
+         JOIN users actor ON actor.user_id = $3 AND actor.tenant_id = employee.tenant_id AND actor.is_active = true
+         WHERE employee.tenant_id = $1 AND employee.user_id = $2
+           AND (EXISTS (SELECT 1 FROM roles r WHERE r.role_id = actor.role_id AND r.role_name IN ('HR','HRAdmin','SuperAdmin'))
+             OR EXISTS (SELECT 1 FROM user_roles ur JOIN roles r ON r.role_id = ur.role_id
+               WHERE ur.user_id = actor.user_id AND r.role_name IN ('HR','HRAdmin','SuperAdmin')))`,
+        [tenantId, pass.staff_user_id, actorUserId],
+      );
+      if (!scope?.entity_id) throw new ForbiddenException('Live HR access and employee entity scope are required');
+      const reviews = await this.listHrGatePassReviews(tenantId, Number(scope.entity_id), actorUserId);
+      if (!reviews.some((row) => row.pass_id === passId && row.can_review)) {
+        throw new ForbiddenException('This gate pass is outside your final HR approval scope');
+      }
       const hrAdmin = await this.workflowRouting.getHrAdmin(tenantId);
       if (hrAdmin.userId !== actorUserId) {
         throw new ForbiddenException(
@@ -788,7 +853,7 @@ export class HrService {
         );
       }
       pass.status = status === 'APPROVED' ? 'APPROVED' : 'REJECTED';
-      const saved = await this.gatePasses.save(pass);
+      const saved = await saveDecision();
       if (staff?.tenant_id) {
         this.notify.gatePassUpdated({
           tenantId: staff.tenant_id,

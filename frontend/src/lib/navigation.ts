@@ -812,6 +812,7 @@ export const hrPortal: PortalConfig = {
         { label: 'Meetings', href: '/hr/meetings', icon: CalendarClock, keywords: ['schedule', 'minutes', 'agenda'] },
         { label: 'Leave Management', href: '/hr/leaves', icon: CalendarDays, keywords: ['cl', 'sl', 'el', 'maternity', 'approval', 'balances'], hrModule: 'leaves' },
         { label: 'Attendance Regularizations', href: '/hr/regularizations', icon: CalendarClock, keywords: ['missed punch', 'correction', 'approval'], hrModule: 'leaves' },
+        { label: 'Gate Passes', href: '/hr/gate-passes', icon: DoorOpen, keywords: ['exit', 'outpass', 'mid-duty', 'approval'], hrModule: 'leaves' },
       ],
     },
     {
@@ -861,6 +862,7 @@ export const hrPortal: PortalConfig = {
     { label: 'Attendance & Biometrics', href: '/hr/attendance', icon: Timer, hrModule: 'attendance' },
     { label: 'Leave Management', href: '/hr/leaves', icon: CalendarDays, hrModule: 'leaves' },
     { label: 'Attendance Regularizations', href: '/hr/regularizations', icon: CalendarClock, hrModule: 'leaves' },
+    { label: 'Gate Passes', href: '/hr/gate-passes', icon: DoorOpen, hrModule: 'leaves' },
     { label: 'Salary Structures', href: '/hr/payroll/structures', icon: Wallet, hrModule: 'payroll' },
     { label: 'Payroll Processing', href: '/hr/payroll/processing', icon: Banknote, hrModule: 'payroll' },
     { label: 'Payslip Download Requests', href: '/hr/payroll/payslip-downloads', icon: FileDown, hrModule: 'payroll' },

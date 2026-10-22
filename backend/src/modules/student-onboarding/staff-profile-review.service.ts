@@ -617,7 +617,7 @@ export class StaffProfileReviewService {
 
   async returnForCorrection(
     tenantId: string, reviewId: string, actorId: string,
-    body: { reason?: string; fields?: string[]; documents?: string[] },
+    body: { reason?: string; fields?: string[]; documents?: string[]; revision?: number },
   ) {
     const reason = body.reason?.trim();
     const fields = [...new Set(body.fields ?? [])];
@@ -640,6 +640,9 @@ export class StaffProfileReviewService {
       if (!review) throw new NotFoundException('Staff review not found');
       if (review.user_id === actorId) throw new ForbiddenException('Cannot review your own profile');
       if (review.status !== 'PENDING_HR') throw new ConflictException('Review is not awaiting HR');
+      if (body.revision !== undefined && body.revision !== review.revision) {
+        throw new ConflictException('This profile changed since you opened it. Refresh and review the latest submission before requesting corrections.');
+      }
       await qr.query(
         `UPDATE staff_profile_reviews
          SET status = 'RETURNED_FOR_CORRECTION', requested_fields = $3,

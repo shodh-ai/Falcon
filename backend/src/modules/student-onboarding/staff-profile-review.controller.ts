@@ -164,7 +164,7 @@ export class StaffProfileReviewAdminController {
   @Roles('HRAdmin')
   async returnForCorrection(
     @Req() req: { user: ReviewActor }, @Param('reviewId') reviewId: string,
-    @Body() body: { reason?: string; fields?: string[]; documents?: string[] },
+    @Body() body: { reason?: string; fields?: string[]; documents?: string[]; revision?: number },
   ) {
     // Match the same campus/object-scope check used by the approval path.
     await this.reviews.detail(req.user.tenant_id, reviewId, req.user);
