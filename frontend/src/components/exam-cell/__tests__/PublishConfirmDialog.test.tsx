@@ -50,4 +50,25 @@ describe('PublishConfirmDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: /Cancel/i }));
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
+
+  it('passes typed confirmation text to the parent without publishing early', () => {
+    const onConfirmTextChange = vi.fn();
+    const onConfirm = vi.fn();
+    render(
+      <PublishConfirmDialog
+        open
+        onOpenChange={() => {}}
+        confirmText=""
+        onConfirmTextChange={onConfirmTextChange}
+        onConfirm={onConfirm}
+      />,
+    );
+
+    fireEvent.change(screen.getByPlaceholderText('Type PUBLISH'), {
+      target: { value: 'PUBLISH' },
+    });
+
+    expect(onConfirmTextChange).toHaveBeenCalledWith('PUBLISH');
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
 });

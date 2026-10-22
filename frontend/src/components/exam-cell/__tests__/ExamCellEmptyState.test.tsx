@@ -1,12 +1,14 @@
-import { describe, it, expect, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { beforeEach, describe, it, expect, vi } from 'vitest';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { ExamCellEmptyState } from '@/components/exam-cell/ExamCellEmptyState';
+import { toast } from '@/lib/notifications/falcon-toast';
 
 const fallbackEnabled = vi.hoisted(() => ({ value: false }));
+const post = vi.hoisted(() => vi.fn());
 
 vi.mock('@/lib/api', () => ({
   useAuthedApi: () => ({
-    post: vi.fn().mockResolvedValue({ message: 'Seeded' }),
+    post,
   }),
 }));
 
@@ -19,6 +21,13 @@ vi.mock('@/lib/exam-cell/dev-fallback', () => ({
 }));
 
 describe('ExamCellEmptyState', () => {
+  beforeEach(() => {
+    fallbackEnabled.value = false;
+    post.mockReset();
+    vi.mocked(toast.success).mockClear();
+    vi.mocked(toast.error).mockClear();
+  });
+
   it('renders default empty copy', () => {
     render(<ExamCellEmptyState showBootstrap={false} />);
     expect(screen.getByText(/No examination records found/i)).toBeTruthy();
@@ -41,5 +50,30 @@ describe('ExamCellEmptyState', () => {
     render(<ExamCellEmptyState onRetry={onRetry} showBootstrap={false} />);
     fireEvent.click(screen.getByRole('button', { name: /Refresh/i }));
     expect(onRetry).toHaveBeenCalled();
+  });
+
+  it('refreshes after the explicitly enabled demo bootstrap succeeds', async () => {
+    fallbackEnabled.value = true;
+    post.mockResolvedValue({ message: 'Seeded' });
+    const onRetry = vi.fn();
+    render(<ExamCellEmptyState onRetry={onRetry} />);
+
+    fireEvent.click(screen.getByRole('button', { name: /Create sample data/i }));
+
+    await waitFor(() => expect(onRetry).toHaveBeenCalledOnce());
+    expect(post).toHaveBeenCalledWith('/api/exam-cell/dev/bootstrap', {});
+    expect(toast.success).toHaveBeenCalledWith('Seeded');
+  });
+
+  it('reports a bootstrap failure without refreshing', async () => {
+    fallbackEnabled.value = true;
+    post.mockRejectedValue(new Error('Bootstrap unavailable'));
+    const onRetry = vi.fn();
+    render(<ExamCellEmptyState onRetry={onRetry} />);
+
+    fireEvent.click(screen.getByRole('button', { name: /Create sample data/i }));
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Bootstrap unavailable'));
+    expect(onRetry).not.toHaveBeenCalled();
   });
 });
