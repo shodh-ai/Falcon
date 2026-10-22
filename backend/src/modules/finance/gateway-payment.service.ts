@@ -38,7 +38,19 @@ export class GatewayPaymentService {
    * Never enable in internet-facing production.
    */
   mockPaymentsAllowed(): boolean {
-    return process.env.ALLOW_MOCK_PAYMENTS === 'true';
+    const production = ['NODE_ENV', 'DATABASE_ENV', 'DEPLOYMENT_ENV'].some(
+      (key) =>
+        ['production', 'prod'].includes(
+          String(process.env[key] ?? '')
+            .trim()
+            .toLowerCase(),
+        ),
+    );
+    return (
+      !production &&
+      ['development', 'test'].includes(process.env.NODE_ENV ?? '') &&
+      process.env.ALLOW_MOCK_PAYMENTS === 'true'
+    );
   }
 
   private credentials(): { keyId: string; keySecret: string } | null {
@@ -88,7 +100,7 @@ export class GatewayPaymentService {
     notes: Record<string, string>;
   }): Promise<GatewayOrderResult> {
     const amountPaise = Math.round(Number(input.amountInr) * 100);
-    if (!Number.isFinite(amountPaise) || amountPaise < 100) {
+    if (!Number.isSafeInteger(amountPaise) || amountPaise < 100) {
       throw new BadRequestException('Invalid payment amount');
     }
 
@@ -132,9 +144,18 @@ export class GatewayPaymentService {
       );
     }
 
-    const data = (await res.json()) as { id?: string; amount?: number };
+    const data = (await res.json()) as {
+      id?: string;
+      amount?: number;
+      currency?: string;
+    };
     if (!data.id) {
       throw new BadRequestException('Gateway did not return an order id');
+    }
+    if (data.amount !== amountPaise || data.currency !== 'INR') {
+      throw new BadRequestException(
+        'Gateway order amount or currency does not match the fee demand',
+      );
     }
 
     return {
@@ -156,11 +177,18 @@ export class GatewayPaymentService {
     expectedOrderId?: string | null;
     expectedDemandId?: string | null;
     expectedStudentUserId?: string | null;
+    expectedTenantId?: string | null;
     signature?: string | null;
   }): Promise<VerifiedGatewayPayment> {
     const paymentId = (input.paymentId ?? '').trim();
     if (!paymentId || paymentId.length < 8 || paymentId.length > 120) {
       throw new BadRequestException('Invalid payment id');
+    }
+    if (
+      !Number.isSafeInteger(input.expectedAmountPaise) ||
+      input.expectedAmountPaise <= 0
+    ) {
+      throw new BadRequestException('Invalid expected payment amount');
     }
 
     if (this.isMockPaymentId(paymentId)) {
@@ -187,6 +215,7 @@ export class GatewayPaymentService {
         notes: {
           demand_id: input.expectedDemandId ?? '',
           student_user_id: input.expectedStudentUserId ?? '',
+          tenant_id: input.expectedTenantId ?? '',
         },
         mock: true,
       };
@@ -233,50 +262,101 @@ export class GatewayPaymentService {
       id?: string;
       order_id?: string;
       amount?: number;
+      currency?: string;
       status?: string;
       method?: string;
       notes?: Record<string, string>;
     };
 
     const status = String(payment.status ?? '').toLowerCase();
-    if (!['captured', 'authorized'].includes(status)) {
+    if (status !== 'captured') {
       throw new UnauthorizedException(
         `Payment is not successful (status=${status || 'unknown'})`,
       );
     }
 
-    const amountPaise = Number(payment.amount ?? 0);
+    if (payment.id !== paymentId)
+      throw new UnauthorizedException('Payment identity mismatch');
+    if (payment.currency !== 'INR')
+      throw new UnauthorizedException('Payment currency mismatch');
+    const amountPaise = payment.amount;
     if (
-      !Number.isFinite(amountPaise) ||
-      Math.abs(amountPaise - input.expectedAmountPaise) > 1
+      !Number.isSafeInteger(amountPaise) ||
+      amountPaise !== input.expectedAmountPaise
     ) {
       throw new UnauthorizedException(
         'Payment amount does not match the fee demand',
       );
     }
 
-    if (
-      input.expectedOrderId &&
-      payment.order_id &&
-      payment.order_id !== input.expectedOrderId
-    ) {
+    if (input.expectedOrderId && payment.order_id !== input.expectedOrderId) {
       throw new UnauthorizedException('Payment order mismatch');
     }
 
     const notes = payment.notes ?? {};
+    let ownershipNotes = notes;
+    if (
+      input.expectedOrderId &&
+      (input.expectedDemandId ||
+        input.expectedStudentUserId ||
+        input.expectedTenantId)
+    ) {
+      const orderResponse = await fetch(
+        `https://api.razorpay.com/v1/orders/${encodeURIComponent(input.expectedOrderId)}`,
+        {
+          headers: {
+            Authorization: this.basicAuthHeader(creds.keyId, creds.keySecret),
+          },
+        },
+      );
+      if (orderResponse.status === 404)
+        throw new UnauthorizedException('Payment order not found at gateway');
+      if (!orderResponse.ok)
+        throw new BadRequestException(
+          'Could not verify payment order with gateway',
+        );
+      const order = (await orderResponse.json()) as {
+        id?: string;
+        amount?: number;
+        currency?: string;
+        notes?: Record<string, string>;
+      };
+      if (
+        order.id !== input.expectedOrderId ||
+        order.amount !== input.expectedAmountPaise ||
+        order.currency !== 'INR'
+      ) {
+        throw new UnauthorizedException(
+          'Payment order identity, amount or currency mismatch',
+        );
+      }
+      ownershipNotes = order.notes ?? {};
+    }
+    // Checkout may omit payment notes. Ownership must come from the fetched
+    // order, and any notes returned on the payment must agree with it.
     if (
       input.expectedDemandId &&
-      notes.demand_id &&
-      notes.demand_id !== input.expectedDemandId
+      (ownershipNotes.demand_id !== input.expectedDemandId ||
+        (notes.demand_id !== undefined &&
+          notes.demand_id !== input.expectedDemandId))
     ) {
       throw new UnauthorizedException('Payment demand mismatch');
     }
     if (
       input.expectedStudentUserId &&
-      notes.student_user_id &&
-      notes.student_user_id !== input.expectedStudentUserId
+      (ownershipNotes.student_user_id !== input.expectedStudentUserId ||
+        (notes.student_user_id !== undefined &&
+          notes.student_user_id !== input.expectedStudentUserId))
     ) {
       throw new UnauthorizedException('Payment student mismatch');
+    }
+    if (
+      input.expectedTenantId &&
+      (ownershipNotes.tenant_id !== input.expectedTenantId ||
+        (notes.tenant_id !== undefined &&
+          notes.tenant_id !== input.expectedTenantId))
+    ) {
+      throw new UnauthorizedException('Payment tenant mismatch');
     }
 
     return {

@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -8,12 +9,6 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { useAuthedApi } from '@/lib/api';
 import { FacultyPageHeader, FacultyPageShell } from '@/components/faculty';
-import {
-  isEmptyArray,
-  isFacultyDemoSmokeId,
-  withFacultyDemoFallback,
-} from '@/lib/faculty-demo-mode';
-import { facultyDemoReEvaluations } from '@/lib/mock/faculty-portal-demo';
 
 type ReEvalCase = {
   exam_application_id: string;
@@ -33,50 +28,54 @@ export default function FacultyReEvaluationsPage() {
   const [revisedMarks, setRevisedMarks] = useState('');
   const [reportNotes, setReportNotes] = useState('');
   const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const requestGeneration = useRef(0);
+  const mutationPending = useRef(false);
 
   const selected = cases.find((item) => item.exam_application_id === selectedId) ?? null;
 
-  const load = useCallback(() => {
-    void api
-      .get<ReEvalCase[]>('/api/academics/faculty/re-evaluations')
-      .then((rows) => {
-        const resolved = withFacultyDemoFallback(
-          rows,
-          facultyDemoReEvaluations() as ReEvalCase[],
-          isEmptyArray,
-        );
-        setCases(resolved);
-        if (selectedId && !resolved.some((r) => r.exam_application_id === selectedId)) {
-          setSelectedId(resolved[0]?.exam_application_id ?? null);
-        } else if (!selectedId && resolved[0]) {
-          setSelectedId(resolved[0].exam_application_id);
-        }
-      })
-      .catch(() => {
-        const resolved = withFacultyDemoFallback(
-          [],
-          facultyDemoReEvaluations() as ReEvalCase[],
-          isEmptyArray,
-        );
-        setCases(resolved);
-        setSelectedId(resolved[0]?.exam_application_id ?? null);
-      });
-  }, [api, selectedId]);
+  const load = useCallback(async () => {
+    const generation = ++requestGeneration.current;
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const rows = await api.get<ReEvalCase[]>('/api/academics/faculty/re-evaluations');
+      if (generation !== requestGeneration.current) return;
+      setCases(rows);
+      setSelectedId((current) => rows.some((row) => row.exam_application_id === current) ? current : rows[0]?.exam_application_id ?? null);
+    } catch (error) {
+      if (generation !== requestGeneration.current) return;
+      setCases([]);
+      setSelectedId(null);
+      const message = error instanceof Error ? error.message : 'Could not load re-evaluation assignments';
+      setLoadError(message);
+      toast.error(message);
+    } finally {
+      if (generation === requestGeneration.current) setLoading(false);
+    }
+  }, [api]);
 
   useEffect(() => {
-    load();
+    void Promise.resolve().then(load);
+    return () => { requestGeneration.current += 1; };
   }, [load]);
 
   useEffect(() => {
     if (!selected) return;
-    setRevisedMarks(selected.revised_marks != null ? String(selected.revised_marks) : '');
-    setReportNotes(selected.report_notes ?? '');
-  }, [selected?.exam_application_id]);
+    let active = true;
+    void Promise.resolve().then(() => {
+      if (!active) return;
+      setRevisedMarks(selected.revised_marks != null ? String(selected.revised_marks) : '');
+      setReportNotes(selected.report_notes ?? '');
+    });
+    return () => { active = false; };
+  }, [selected]);
 
   async function submitReport() {
-    if (!selected) return;
+    if (!selected || mutationPending.current) return;
     const marks = Number(revisedMarks);
-    if (!Number.isFinite(marks) || marks < 0) {
+    if (!revisedMarks.trim() || !Number.isFinite(marks) || marks < 0) {
       toast.error('Enter valid revised marks');
       return;
     }
@@ -84,22 +83,7 @@ export default function FacultyReEvaluationsPage() {
       toast.error('Add reassessment notes');
       return;
     }
-    if (isFacultyDemoSmokeId(selected.exam_application_id)) {
-      setCases((prev) =>
-        prev.map((c) =>
-          c.exam_application_id === selected.exam_application_id
-            ? {
-                ...c,
-                revised_marks: marks,
-                report_notes: reportNotes.trim(),
-                status: 'REPORT_SUBMITTED',
-              }
-            : c,
-        ),
-      );
-      toast.success('Reassessment report submitted to Exam Cell (demo)');
-      return;
-    }
+    mutationPending.current = true;
     setBusy(true);
     try {
       await api.post(`/api/academics/faculty/re-evaluations/${selected.exam_application_id}/report`, {
@@ -107,10 +91,11 @@ export default function FacultyReEvaluationsPage() {
         report_notes: reportNotes.trim(),
       });
       toast.success('Reassessment report submitted to Exam Cell');
-      load();
+      await load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Submit failed');
     } finally {
+      mutationPending.current = false;
       setBusy(false);
     }
   }
@@ -120,6 +105,7 @@ export default function FacultyReEvaluationsPage() {
       <FacultyPageHeader
         title="Re-evaluation"
         description="Cases assigned by Exam Cell. Submit your report for COE review and publishing."
+        actions={<Button asChild variant="outline"><Link href="/faculty/backlog">Backlog & supplementary marks</Link></Button>}
       />
 
       <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
@@ -128,13 +114,16 @@ export default function FacultyReEvaluationsPage() {
             <CardTitle className="text-base">{cases.length} assigned cases</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
-            {cases.length === 0 ? (
+            {loading ? <p role="status" className="text-sm text-muted-foreground">Loading assignments…</p> : loadError ? (
+              <div role="alert" className="space-y-2 text-sm text-destructive"><p>{loadError}</p><Button variant="outline" onClick={() => void load()}>Retry</Button></div>
+            ) : cases.length === 0 ? (
               <p className="text-sm text-muted-foreground">No re-evaluation assignments yet.</p>
             ) : (
               cases.map((item) => (
                 <button
                   key={item.exam_application_id}
                   type="button"
+                  disabled={busy}
                   onClick={() => setSelectedId(item.exam_application_id)}
                   className={`w-full rounded-lg border px-3 py-2 text-left text-sm ${
                     selectedId === item.exam_application_id ? 'border-sgvu-gold bg-sgvu-gold/5' : 'hover:bg-slate-50'
@@ -172,6 +161,7 @@ export default function FacultyReEvaluationsPage() {
                 <div className="space-y-3 rounded-lg border p-4">
                   <p className="font-medium">Submit reassessment report</p>
                   <Input
+                    aria-label="Revised marks"
                     type="number"
                     min={0}
                     placeholder="Revised marks"
@@ -179,6 +169,7 @@ export default function FacultyReEvaluationsPage() {
                     onChange={(e) => setRevisedMarks(e.target.value)}
                   />
                   <textarea
+                    aria-label="Reassessment report notes"
                     className="min-h-28 w-full rounded-md border px-3 py-2"
                     placeholder="Reassessment notes, observations, and justification"
                     value={reportNotes}

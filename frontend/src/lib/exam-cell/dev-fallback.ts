@@ -21,12 +21,20 @@ function emitFallback(path: string, method: Method, reason: string) {
 }
 
 export function isExamCellDevFallbackEnabled(): boolean {
+  // Seed data is an explicit local-development opt-in. NODE_ENV alone must
+  // never enable simulated privileged mutations in shared environments.
+  if (
+    process.env.NODE_ENV !== 'development' ||
+    process.env.NEXT_PUBLIC_EXAM_CELL_DEV_FALLBACK !== 'true'
+  ) {
+    return false;
+  }
   if (typeof window !== 'undefined') {
     const flag = window.localStorage.getItem('exam_cell_dev_fallback');
     if (flag === 'false') return false;
     if (flag === 'true') return true;
   }
-  return process.env.NODE_ENV === 'development' || process.env.NEXT_PUBLIC_EXAM_CELL_DEV_FALLBACK === 'true';
+  return true;
 }
 
 function queryParam(path: string, key: string): string | null {
@@ -49,7 +57,9 @@ export function resolveExamCellDevFallback(
   method: Method,
   body?: unknown,
 ): unknown | undefined {
-  if (!path.startsWith('/api/exam-cell/')) return undefined;
+  if (!isExamCellDevFallbackEnabled() || !path.startsWith('/api/exam-cell/')) {
+    return undefined;
+  }
 
   const p = pathOnly(path);
   const reason = 'API unavailable — using development seed data';
@@ -111,7 +121,7 @@ export function resolveExamCellDevFallback(
     if (p === '/api/exam-cell/deadlines') return postOk({ dev_seed: true });
     if (p.includes('/ufm-cases') && !p.includes('form-options')) return postOk({ dev_seed: true });
     emitFallback(path, method, reason);
-    return postOk();
+    return undefined;
   }
 
   let result: unknown;

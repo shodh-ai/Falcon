@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Download, Loader2 } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Button } from '@/components/ui/button';
@@ -35,6 +35,7 @@ type AuditResponse = {
   blocked_count: number;
   items: AuditRow[];
 };
+type AuditResult = { api: ReturnType<typeof useAuthedApi>; key: string; data: AuditResponse | null; error: string | null };
 
 const ATTENDANCE_THRESHOLD = 75;
 
@@ -81,48 +82,49 @@ function StatusBadge({ eligible }: { eligible: boolean }) {
 export default function ExamCellAdmitCardsPage() {
   const api = useAuthedApi();
   const { user } = useAuth();
-  const canGenerate = canExamCellAction(user?.roles ?? user?.role, 'generate_admit_cards');
+  const canGenerate = canExamCellAction([...(user?.roles ?? []), user?.primaryRole ?? '', user?.role ?? ''], 'generate_admit_cards');
 
   const [semester, setSemester] = useState('4');
   const [examType, setExamType] = useState<ExamType>('END_TERM');
-  const [audit, setAudit] = useState<AuditResponse | null>(null);
-  const [auditLoading, setAuditLoading] = useState(false);
+  const [auditResult, setAuditResult] = useState<AuditResult | null>(null);
+  const [auditRevision, setAuditRevision] = useState(0);
   const [generating, setGenerating] = useState(false);
   const [progress, setProgress] = useState(0);
+  const generationPending = useRef(false);
 
   const batchLabel = useMemo(
     () => buildExamBatchLabel(semester, examType),
     [semester, examType],
   );
-
-  const loadAudit = useCallback(async () => {
-    setAuditLoading(true);
-    try {
-      const data = await api.get<AuditResponse>(
-        `/api/exam-cell/admit-cards/audit?batch_label=${encodeURIComponent(batchLabel)}&semester=${semester}`,
-      );
-      setAudit(data);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Audit load failed');
-      setAudit(null);
-    } finally {
-      setAuditLoading(false);
-    }
-  }, [api, batchLabel, semester]);
+  const auditKey = `${semester}:${examType}:${auditRevision}`;
+  const currentAudit = auditResult?.api === api && auditResult.key === auditKey ? auditResult : null;
+  const auditLoading = !currentAudit;
+  const auditError = currentAudit?.error;
+  const audit = currentAudit?.data;
 
   useEffect(() => {
-    void loadAudit();
-  }, [loadAudit]);
+    let current = true;
+    void api.get<AuditResponse>(
+        `/api/exam-cell/admit-cards/audit?batch_label=${encodeURIComponent(batchLabel)}&semester=${semester}`,
+      ).then((data) => {
+        if (current) setAuditResult({ api, key: auditKey, data, error: null });
+      }).catch((e: unknown) => {
+        if (current) setAuditResult({ api, key: auditKey, data: null, error: e instanceof Error ? e.message : 'Audit load failed' });
+      });
+    return () => { current = false; };
+  }, [api, batchLabel, semester, auditKey]);
 
   const rows = audit?.items ?? [];
   const eligibleCount = audit?.eligible_count ?? 0;
   const blockedCount = audit?.blocked_count ?? 0;
 
-  const runGenerate = useCallback(async () => {
+  async function runGenerate() {
+    if (generationPending.current || !canGenerate || auditLoading || auditError) return;
     if (!eligibleCount) {
       toast.error('No eligible students in the audit matrix');
       return;
     }
+    generationPending.current = true;
     setGenerating(true);
     setProgress(0);
     try {
@@ -132,14 +134,15 @@ export default function ExamCellAdmitCardsPage() {
       });
       setProgress(100);
       toast.success(`Generated ${res.generated} admit cards · ${res.blocked} blocked`);
-      await loadAudit();
+      setAuditRevision((revision) => revision + 1);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Generation failed');
     } finally {
+      generationPending.current = false;
       setGenerating(false);
       setProgress(0);
     }
-  }, [api, batchLabel, semester, eligibleCount, loadAudit]);
+  }
 
   return (
     <div className="mx-auto max-w-6xl space-y-6 p-4 md:p-6">
@@ -156,14 +159,14 @@ export default function ExamCellAdmitCardsPage() {
         </CardHeader>
         <CardContent className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <div className="space-y-1.5">
-            <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Semester</label>
-            <Select className="h-10 w-full rounded-lg border px-3 text-sm" value={semester} onChange={(e) => setSemester(e.target.value)}>
+            <label htmlFor="admit-card-semester" className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Semester</label>
+            <Select id="admit-card-semester" disabled={generating} className="h-10 w-full rounded-lg border px-3 text-sm" value={semester} onChange={(e) => setSemester(e.target.value)}>
               {[1, 2, 3, 4, 5, 6, 7, 8].map((s) => <option key={s} value={String(s)}>Semester {s}</option>)}
             </Select>
           </div>
           <div className="space-y-1.5">
-            <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Exam type</label>
-            <Select className="h-10 w-full rounded-lg border px-3 text-sm" value={examType} onChange={(e) => setExamType(e.target.value as ExamType)}>
+            <label htmlFor="admit-card-exam-type" className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Exam type</label>
+            <Select id="admit-card-exam-type" disabled={generating} className="h-10 w-full rounded-lg border px-3 text-sm" value={examType} onChange={(e) => setExamType(e.target.value as ExamType)}>
               <option value="MID_TERM">Mid Term</option>
               <option value="END_TERM">End Term</option>
             </Select>
@@ -172,8 +175,8 @@ export default function ExamCellAdmitCardsPage() {
             <Button
               variant="outline"
               className="h-10 w-full border-[#0B2447] bg-[#0B2447] text-white transition-colors hover:bg-[#123A6D] hover:text-white active:border-sgvu-gold active:bg-sgvu-gold active:text-sgvu-navy"
-              onClick={() => void loadAudit()}
-              disabled={auditLoading}
+              onClick={() => setAuditRevision((revision) => revision + 1)}
+              disabled={auditLoading || generating}
             >
               {auditLoading ? 'Refreshing…' : 'Refresh'}
             </Button>
@@ -185,10 +188,16 @@ export default function ExamCellAdmitCardsPage() {
         <CardHeader className="border-b bg-slate-50/80">
           <CardTitle className="text-base text-sgvu-navy">Pre-generation audit matrix</CardTitle>
           <CardDescription>
-            {auditLoading ? 'Loading…' : `${eligibleCount} eligible · ${blockedCount} blocked · Fee paid + attendance ≥ ${ATTENDANCE_THRESHOLD}%`}
+            {auditLoading ? 'Loading…' : auditError ? 'Eligibility audit unavailable' : `${eligibleCount} eligible · ${blockedCount} blocked · Fee paid + attendance ≥ ${ATTENDANCE_THRESHOLD}%`}
           </CardDescription>
         </CardHeader>
         <CardContent className="p-0">
+          {auditError && (
+            <div role="alert" className="m-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-900">
+              <p>Could not load admit-card audit: {auditError}</p>
+              <Button variant="outline" size="sm" className="mt-2" onClick={() => setAuditRevision((revision) => revision + 1)}>Retry audit</Button>
+            </div>
+          )}
           <div className="hidden md:block">
             <table className="w-full text-sm">
               <thead>
@@ -203,7 +212,7 @@ export default function ExamCellAdmitCardsPage() {
               <tbody className="divide-y">
                 {auditLoading ? (
                   <tr><td colSpan={5} className="px-4 py-8 text-center"><Loader2 className="mx-auto h-6 w-6 animate-spin" /></td></tr>
-                ) : rows.length === 0 ? (
+                ) : auditError ? null : rows.length === 0 ? (
                   <tr><td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">No enrolled students for this semester.</td></tr>
                 ) : rows.map((student) => {
                   const lowAtt = student.attendance_percent < ATTENDANCE_THRESHOLD && !student.has_exemption;
@@ -221,6 +230,7 @@ export default function ExamCellAdmitCardsPage() {
             </table>
           </div>
           <div className="space-y-3 p-4 md:hidden">
+            {auditLoading ? <p role="status" className="text-center text-sm text-muted-foreground">Loading audit…</p> : !auditError && rows.length === 0 ? <p className="text-center text-sm text-muted-foreground">No enrolled students for this semester.</p> : null}
             {rows.map((student) => (
               <div key={student.student_user_id} className="rounded-xl border p-4">
                 <div className="flex justify-between gap-2">
@@ -242,7 +252,7 @@ export default function ExamCellAdmitCardsPage() {
           {generating ? (
             <div className="space-y-2 rounded-lg border border-sgvu-gold/30 bg-amber-50/40 p-4">
               <div className="flex justify-between text-sm">
-                <span className="font-medium text-sgvu-navy">Generating secure PDF batch…</span>
+                <span className="font-medium text-sgvu-navy">Generating admit cards…</span>
                 <span className="tabular-nums">{progress}%</span>
               </div>
               <Progress value={progress} indicatorClassName="bg-sgvu-navy" />
@@ -250,7 +260,7 @@ export default function ExamCellAdmitCardsPage() {
           ) : null}
           <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
             {canGenerate ? (
-              <Button size="lg" className="h-11 bg-sgvu-navy hover:bg-sgvu-navy/90" onClick={() => void runGenerate()} disabled={generating || eligibleCount === 0}>
+              <Button size="lg" className="h-11 bg-sgvu-navy hover:bg-sgvu-navy/90" onClick={() => void runGenerate()} disabled={generating || auditLoading || Boolean(auditError) || eligibleCount === 0}>
                 {generating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                 Generate Admit Cards for Eligible Students ({eligibleCount})
               </Button>
@@ -258,7 +268,7 @@ export default function ExamCellAdmitCardsPage() {
             <Button asChild variant="outline" size="lg" className="h-11">
               <a href="/exam-cell/hall-ticket-approvals">Hall Ticket Approval Workflow →</a>
             </Button>
-            <Button variant="ghost" size="lg" className="h-11" disabled={blockedCount === 0 || generating} onClick={() => exportDefaultersCsv(rows, semester, examType)}>
+            <Button variant="ghost" size="lg" className="h-11" disabled={blockedCount === 0 || generating || auditLoading || Boolean(auditError)} onClick={() => exportDefaultersCsv(rows, semester, examType)}>
               <Download className="mr-2 h-4 w-4" />
               Export Defaulter List
             </Button>

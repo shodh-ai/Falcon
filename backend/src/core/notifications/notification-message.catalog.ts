@@ -72,14 +72,19 @@ export function admitCardLockedMessage(
   payload: AdmitCardLockedPayload,
   overrides?: NotificationMessageOverrides,
 ): NotificationMessage {
+  const eligibilityBlock = payload.reason === 'EXAM_ELIGIBILITY';
   return applyNotificationOverrides(
     {
-      category: 'FINANCE',
-      title: 'Admit card locked due to outstanding fees',
-      message:
-        'Your admit card is locked because fee dues are pending. Clear the balance to download your admit card and sit for exams.',
-      actionLink: '/student/finance',
-      actionLabel: 'View fee dues',
+      category: eligibilityBlock ? 'EXAMS' : 'FINANCE',
+      title: eligibilityBlock
+        ? 'Admit card blocked'
+        : 'Admit card locked due to outstanding fees',
+      message: eligibilityBlock
+        ? (payload.message ??
+          'Your admit card is blocked. Contact the Examination Cell to review your eligibility.')
+        : 'Your admit card is locked because fee dues are pending. Clear the balance to download your admit card and sit for exams.',
+      actionLink: eligibilityBlock ? '/student/exams' : '/student/finance',
+      actionLabel: eligibilityBlock ? 'View exam eligibility' : 'View fee dues',
       severity: 'critical',
       intent: 'action_required',
     },

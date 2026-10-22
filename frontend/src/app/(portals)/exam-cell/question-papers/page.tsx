@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Button } from '@/components/ui/button';
@@ -40,6 +40,8 @@ export default function ExamCellQuestionPapersPage() {
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const mutationPending = useRef(false);
   const [form, setForm] = useState({ subject_id: '', exam_schedule_id: '', notes: '' });
 
   const load = useCallback(async () => {
@@ -61,13 +63,15 @@ export default function ExamCellQuestionPapersPage() {
     }
   }, [api]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { void Promise.resolve().then(load); }, [load]);
 
   async function createRecord() {
+    if (mutationPending.current) return;
     if (!form.subject_id && !form.exam_schedule_id) {
       toast.error('Select at least a subject or exam schedule');
       return;
     }
+    mutationPending.current = true;
     setBusy(true);
     try {
       await api.post('/api/exam-cell/question-papers', {
@@ -81,20 +85,29 @@ export default function ExamCellQuestionPapersPage() {
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not create question paper record');
     } finally {
+      mutationPending.current = false;
       setBusy(false);
     }
   }
 
   async function advanceStatus(qpId: string, current: string) {
+    if (mutationPending.current) return;
     const idx = STATUS_FLOW.indexOf(current);
     const next = STATUS_FLOW[idx + 1];
     if (!next) return;
+    mutationPending.current = true;
+    setBusy(true);
+    setUpdatingId(qpId);
     try {
       await api.post(`/api/exam-cell/question-papers/${qpId}/status`, { status: next });
       toast.success(`Status updated to ${next.replace(/_/g, ' ')}`);
       await load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Update failed');
+    } finally {
+      mutationPending.current = false;
+      setBusy(false);
+      setUpdatingId(null);
     }
   }
 
@@ -109,7 +122,7 @@ export default function ExamCellQuestionPapersPage() {
       key: 'actions',
       header: 'Workflow',
       render: (r) => canManage && STATUS_FLOW.indexOf(r.status) < STATUS_FLOW.length - 1 ? (
-        <Button size="sm" variant="outline" onClick={() => void advanceStatus(r.qp_id, r.status)}>Advance</Button>
+        <Button size="sm" variant="outline" disabled={busy} onClick={() => void advanceStatus(r.qp_id, r.status)}>{updatingId === r.qp_id ? 'Updating…' : 'Advance'}</Button>
       ) : null,
     },
   ];
@@ -127,8 +140,8 @@ export default function ExamCellQuestionPapersPage() {
           <CardHeader><CardTitle className="text-base">Register question paper</CardTitle></CardHeader>
           <CardContent className="grid gap-3 sm:grid-cols-2">
             <div>
-              <label className="mb-1 block text-xs font-medium text-muted-foreground">Subject</label>
-              <Select className="w-full rounded-md border px-3 py-2 text-sm" value={form.subject_id} onChange={(e) => setForm((f) => ({ ...f, subject_id: e.target.value }))}>
+              <label htmlFor="question-paper-subject" className="mb-1 block text-sm font-medium text-sgvu-navy">Subject</label>
+              <Select id="question-paper-subject" className="w-full rounded-md border px-3 py-2 text-sm" value={form.subject_id} onChange={(e) => setForm((f) => ({ ...f, subject_id: e.target.value }))}>
                 <option value="">Select subject</option>
                 {subjects.map((s) => (
                   <option key={s.subject_id} value={s.subject_id}>{s.subject_code} — {s.subject_name}</option>
@@ -136,8 +149,8 @@ export default function ExamCellQuestionPapersPage() {
               </Select>
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-muted-foreground">Exam schedule (optional)</label>
-              <Select className="w-full rounded-md border px-3 py-2 text-sm" value={form.exam_schedule_id} onChange={(e) => setForm((f) => ({ ...f, exam_schedule_id: e.target.value }))}>
+              <label htmlFor="question-paper-schedule" className="mb-1 block text-sm font-medium text-sgvu-navy">Exam schedule (optional)</label>
+              <Select id="question-paper-schedule" className="w-full rounded-md border px-3 py-2 text-sm" value={form.exam_schedule_id} onChange={(e) => setForm((f) => ({ ...f, exam_schedule_id: e.target.value }))}>
                 <option value="">None</option>
                 {schedules.map((s) => (
                   <option key={s.exam_schedule_id} value={s.exam_schedule_id}>
@@ -146,9 +159,12 @@ export default function ExamCellQuestionPapersPage() {
                 ))}
               </Select>
             </div>
-            <Input placeholder="Notes (setter reference, moderation notes…)" value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} className="sm:col-span-2" />
+            <div className="sm:col-span-2">
+              <label htmlFor="question-paper-notes" className="mb-1 block text-sm font-medium text-sgvu-navy">Notes (optional)</label>
+              <Input id="question-paper-notes" placeholder="Setter reference, moderation notes…" value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} />
+            </div>
             <Button onClick={() => void createRecord()} disabled={busy} className="sm:col-span-2">
-              {busy ? 'Adding…' : 'Add record'}
+              {busy && !updatingId ? 'Adding…' : 'Add record'}
             </Button>
           </CardContent>
         </Card>

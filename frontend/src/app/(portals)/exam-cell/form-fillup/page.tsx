@@ -65,7 +65,6 @@ export default function ExamCellFormFillupPage() {
       ]);
       setWindows(w);
       setRegistrations(r);
-      if (!selectedWindow && w[0]) setSelectedWindow(w[0].window_id);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to load form fill-up desk');
     } finally {
@@ -73,7 +72,7 @@ export default function ExamCellFormFillupPage() {
     }
   }, [api, selectedWindow, statusFilter]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { void Promise.resolve().then(load); }, [load]);
 
   async function createWindow() {
     if (!form.title.trim() || !form.opens_at || !form.closes_at) {
@@ -197,8 +196,9 @@ export default function ExamCellFormFillupPage() {
           <CardContent className="space-y-4">
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="flex min-h-[4.5rem] flex-col gap-1.5 sm:col-span-2">
-                <label className="text-sm font-bold leading-5 text-sgvu-navy">Window title</label>
+                <label htmlFor="form-window-title" className="text-sm font-bold leading-5 text-sgvu-navy">Window title</label>
                 <Input
+                  id="form-window-title"
                   className="h-10"
                   placeholder="e.g. End Semester Form Fill-up — Sem 4"
                   value={form.title}
@@ -206,8 +206,9 @@ export default function ExamCellFormFillupPage() {
                 />
               </div>
               <div className="flex min-h-[4.5rem] flex-col gap-1.5">
-                <label className="text-sm font-bold leading-5 text-sgvu-navy">Semester</label>
+                <label htmlFor="form-window-semester" className="text-sm font-bold leading-5 text-sgvu-navy">Semester</label>
                 <Input
+                  id="form-window-semester"
                   className="h-10"
                   type="number"
                   placeholder="4"
@@ -216,8 +217,9 @@ export default function ExamCellFormFillupPage() {
                 />
               </div>
               <div className="flex min-h-[4.5rem] flex-col gap-1.5">
-                <label className="text-sm font-bold leading-5 text-sgvu-navy">Program</label>
+                <label htmlFor="form-window-program" className="text-sm font-bold leading-5 text-sgvu-navy">Program</label>
                 <Input
+                  id="form-window-program"
                   className="h-10"
                   placeholder="B.Tech"
                   value={form.program_label}
@@ -225,8 +227,9 @@ export default function ExamCellFormFillupPage() {
                 />
               </div>
               <div className="flex min-h-[4.5rem] flex-col gap-1.5">
-                <label className="text-sm font-bold leading-5 text-sgvu-navy">Opens at</label>
+                <label htmlFor="form-window-opens" className="text-sm font-bold leading-5 text-sgvu-navy">Opens at</label>
                 <Input
+                  id="form-window-opens"
                   className="h-10"
                   type="datetime-local"
                   value={form.opens_at}
@@ -234,8 +237,9 @@ export default function ExamCellFormFillupPage() {
                 />
               </div>
               <div className="flex min-h-[4.5rem] flex-col gap-1.5">
-                <label className="text-sm font-bold leading-5 text-sgvu-navy">Closes at</label>
+                <label htmlFor="form-window-closes" className="text-sm font-bold leading-5 text-sgvu-navy">Closes at</label>
                 <Input
+                  id="form-window-closes"
                   className="h-10"
                   type="datetime-local"
                   value={form.closes_at}
@@ -270,8 +274,8 @@ export default function ExamCellFormFillupPage() {
               </div>
               <div className="flex items-center gap-2">
                 <Badge>{w.status}</Badge>
-                {canManage && w.status === 'DRAFT' ? <Button size="sm" variant="outline" onClick={() => void setWindowStatus(w.window_id, 'OPEN')}>Open</Button> : null}
-                {canManage && w.status === 'OPEN' ? <Button size="sm" variant="outline" onClick={() => void setWindowStatus(w.window_id, 'CLOSED')}>Close</Button> : null}
+                {canManage && w.status === 'DRAFT' ? <Button size="sm" variant="outline" disabled={busy} onClick={() => void setWindowStatus(w.window_id, 'OPEN')}>Open</Button> : null}
+                {canManage && w.status === 'OPEN' ? <Button size="sm" variant="outline" disabled={busy} onClick={() => void setWindowStatus(w.window_id, 'CLOSED')}>Close</Button> : null}
               </div>
             </div>
           ))}
@@ -281,17 +285,23 @@ export default function ExamCellFormFillupPage() {
       <Card>
         <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
           <CardTitle className="text-base">Registration queue</CardTitle>
-          <div className="flex gap-2">
-            <Select className="rounded-md border px-2 py-1 text-sm" value={selectedWindow} onChange={(e) => setSelectedWindow(e.target.value)}>
+          <div className="grid w-full gap-3 sm:grid-cols-2 md:w-auto">
+            <div className="space-y-2">
+            <label htmlFor="registration-window-filter" className="text-sm font-medium text-sgvu-navy">Registration window</label>
+            <Select id="registration-window-filter" value={selectedWindow} onChange={(e) => setSelectedWindow(e.target.value)}>
               <option value="">All windows</option>
               {windows.map((w) => <option key={w.window_id} value={w.window_id}>{w.title}</option>)}
             </Select>
-            <Select className="rounded-md border px-2 py-1 text-sm" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+            </div>
+            <div className="space-y-2">
+            <label htmlFor="registration-status-filter" className="text-sm font-medium text-sgvu-navy">Registration status</label>
+            <Select id="registration-status-filter" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
               <option value="">All statuses</option>
               <option value="PENDING">Pending</option>
               <option value="APPROVED">Approved</option>
               <option value="REJECTED">Rejected</option>
             </Select>
+            </div>
           </div>
         </CardHeader>
         <CardContent>

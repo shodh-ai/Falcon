@@ -25,11 +25,26 @@ export class ExamApplication extends BaseSoftDeleteEntity {
   @PrimaryGeneratedColumn('uuid')
   exam_application_id: string;
 
+  // Historical migrations create applications before tenant ownership is
+  // backfilled by the hardening migration. Keep the bootstrap column nullable;
+  // the migration enforces NOT NULL after it resolves ownership.
+  @Column({ type: 'uuid', nullable: true })
+  tenant_id: string;
+
   @Column({ type: 'uuid' })
   student_user_id: string;
 
   @Column({ type: 'int' })
   subject_id: number;
+
+  @Column({ type: 'uuid', nullable: true })
+  source_result_id: string | null;
+
+  @Column({ type: 'uuid', nullable: true })
+  source_session_id: string | null;
+
+  @Column({ type: 'uuid', nullable: true })
+  source_mark_id: string | null;
 
   @Column({ length: 20 })
   application_type: ExamApplicationType;

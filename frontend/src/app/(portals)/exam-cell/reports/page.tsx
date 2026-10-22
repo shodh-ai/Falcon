@@ -1,11 +1,12 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { DataTable, type DataTableColumn } from '@/components/ui/DataTable';
 import { ExamCellPageHeader } from '@/components/exam-cell/ExamCellPageHeader';
@@ -15,30 +16,48 @@ type ReportSummary = {
   semester: number;
   pass_fail: { label: string; count: number }[];
   pass_percentage: number;
-  top_rankers: Array<{ name: string; enrollment_number: string | null; cgpa: number | null; sgpa: number | null }>;
+  top_rankers: Array<{ name: string; enrollment_number: string | null; cgpa: number | string | null; sgpa: number | string | null }>;
   department_enrollment: Array<{ department: string; students: number }>;
   pending_backlog: number;
 };
+
+function formatGradePoint(value: number | string | null | undefined): string {
+  if (value == null || (typeof value === 'string' && !value.trim())) return '—';
+  const numeric = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(numeric) ? numeric.toFixed(2) : '—';
+}
 
 export default function ExamCellReportsPage() {
   const api = useAuthedApi();
   const [semester, setSemester] = useState('4');
   const [summary, setSummary] = useState<ReportSummary | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const requestId = useRef(0);
 
   const load = useCallback(async () => {
+    const currentRequest = ++requestId.current;
     setLoading(true);
+    setError(null);
     try {
-      setSummary(await api.get<ReportSummary>(`/api/exam-cell/reports/summary?semester=${semester}`));
+      const response = await api.get<ReportSummary>(`/api/exam-cell/reports/summary?semester=${semester}`);
+      if (requestId.current === currentRequest) setSummary(response);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed to load reports');
-      setSummary(null);
+      if (requestId.current === currentRequest) {
+        const message = e instanceof Error ? e.message : 'Failed to load reports';
+        toast.error(message);
+        setError(message);
+        setSummary(null);
+      }
     } finally {
-      setLoading(false);
+      if (requestId.current === currentRequest) setLoading(false);
     }
   }, [api, semester]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    void Promise.resolve().then(load);
+    return () => { requestId.current += 1; };
+  }, [load]);
 
   const chartData = (summary?.pass_fail ?? []).map((r) => ({
     name: r.label.replace(/_/g, ' '),
@@ -49,8 +68,8 @@ export default function ExamCellReportsPage() {
     { key: 'rank', header: '#', render: (_r, i) => i + 1 },
     { key: 'name', header: 'Student', render: (r) => r.name },
     { key: 'enrollment', header: 'Enrollment', render: (r) => r.enrollment_number ?? '—' },
-    { key: 'cgpa', header: 'CGPA', render: (r) => r.cgpa?.toFixed(2) ?? '—' },
-    { key: 'sgpa', header: 'SGPA', render: (r) => r.sgpa?.toFixed(2) ?? '—' },
+    { key: 'cgpa', header: 'CGPA', render: (r) => formatGradePoint(r.cgpa) },
+    { key: 'sgpa', header: 'SGPA', render: (r) => formatGradePoint(r.sgpa) },
   ];
 
   return (
@@ -58,11 +77,11 @@ export default function ExamCellReportsPage() {
       <Card className="border-sgvu-navy/10 bg-white shadow-sm">
         <CardContent className="p-5 md:p-6">
           <ExamCellPageHeader pageId="reports" actions={
-            <Input type="number" className="w-24" value={semester} onChange={(e) => setSemester(e.target.value)} placeholder="Sem" />
+            <div className="space-y-1.5"><label htmlFor="reports-semester" className="block text-xs font-semibold text-sgvu-navy">Semester</label><Input id="reports-semester" type="number" min="1" className="w-24" value={semester} onChange={(e) => setSemester(e.target.value)} /></div>
           } />
         </CardContent>
       </Card>
-      {loading ? <Loader2 className="h-8 w-8 animate-spin" /> : summary ? (
+      {loading ? <div role="status" className="flex items-center gap-2 py-6 text-sm text-muted-foreground"><Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" />Loading examination reports…</div> : error ? <div role="alert" className="rounded-xl border border-destructive/20 bg-destructive/5 p-4 text-sm text-destructive"><p>{error}</p><Button variant="outline" size="sm" className="mt-3" onClick={() => void load()}>Retry</Button></div> : summary ? (
         <>
           <div className="grid gap-4 sm:grid-cols-3">
             <Card><CardHeader className="pb-2"><CardTitle className="text-xs uppercase text-muted-foreground">Pass percentage</CardTitle></CardHeader><CardContent><p className="text-3xl font-black text-sgvu-navy">{summary.pass_percentage}%</p></CardContent></Card>
@@ -95,7 +114,7 @@ export default function ExamCellReportsPage() {
                 {summary.department_enrollment.map((d) => (
                   <div key={d.department} className="flex items-center justify-between rounded border px-3 py-2 text-sm">
                     <span>{d.department}</span>
-                    <Badge>{d.students} students</Badge>
+                    <Badge>{d.students} {d.students === 1 ? 'student' : 'students'}</Badge>
                   </div>
                 ))}
               </CardContent>

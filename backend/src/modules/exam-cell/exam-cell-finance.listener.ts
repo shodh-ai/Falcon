@@ -22,21 +22,31 @@ export class ExamCellFinanceListener {
   }) {
     if (payload.feeHead !== 'RE_EVALUATION') return;
 
-    const rows = await this.db.query(
-      `UPDATE exam_applications a
+    const rows = await this.db.query<
+      Array<{
+        exam_application_id: string;
+        student_user_id: string;
+        student_name: string;
+        tenant_id: string;
+        subject_name: string;
+        subject_code: string;
+      }>
+    >(
+      `WITH unlocked AS (UPDATE exam_applications a
        SET fee_status = 'PAID', status = 'PENDING'
-       FROM users u, academic_subjects sub
+       FROM users u, academic_subjects sub, finance_fee_demands d
        WHERE a.finance_demand_id = $1
          AND a.application_type = 'RE_EVALUATION'
-         AND u.user_id = a.student_user_id
+         AND a.status = 'DRAFT' AND a.fee_status = 'PENDING'
+         AND d.demand_id = a.finance_demand_id AND d.status = 'PAID'
+         AND d.paid_amount >= d.total_amount
+         AND d.student_user_id = a.student_user_id AND d.tenant_id = a.tenant_id
+         AND u.user_id = a.student_user_id AND u.tenant_id = a.tenant_id
          AND sub.subject_id = a.subject_id
        RETURNING a.exam_application_id, a.student_user_id, u.name AS student_name,
-                 u.tenant_id, sub.subject_name, sub.subject_code`,
+                 u.tenant_id, sub.subject_name, sub.subject_code)
+       SELECT * FROM unlocked`,
       [payload.demandId],
-    );
-
-    this.logger.log(
-      `Re-evaluation application unlocked for demand ${payload.demandId}`,
     );
 
     const row = rows[0] as
@@ -51,8 +61,12 @@ export class ExamCellFinanceListener {
       | undefined;
 
     if (row) {
+      if (!row.tenant_id) return;
+      this.logger.log(
+        `Re-evaluation application unlocked for demand ${payload.demandId}`,
+      );
       this.notify.examRevaluationFeePaid({
-        tenantId: row.tenant_id ?? 'a0000000-0000-4000-8000-000000000001',
+        tenantId: row.tenant_id,
         userId: row.student_user_id,
         applicationId: row.exam_application_id,
         subjectName: row.subject_name,

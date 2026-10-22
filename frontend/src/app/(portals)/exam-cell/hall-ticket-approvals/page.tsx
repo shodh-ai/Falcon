@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Loader2 } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
@@ -26,42 +26,46 @@ type Approval = {
   coe_status: string;
   block_reasons: string[];
 };
+type ApprovalResult = { api: ReturnType<typeof useAuthedApi>; key: string; data: Approval[]; error: string | null };
 
 const STAGES = ['REGISTRATION', 'ELIGIBILITY', 'FINANCE', 'EXAM_OFFICE', 'COE', 'APPROVED', 'REJECTED'];
 
 export default function ExamCellHallTicketApprovalsPage() {
   const api = useAuthedApi();
   const { user } = useAuth();
-  const canApprove = canExamCellAction(user?.roles ?? user?.role, 'generate_admit_cards');
+  const canApprove = canExamCellAction([...(user?.roles ?? []), user?.primaryRole ?? '', user?.role ?? ''], 'generate_admit_cards');
   const [semester, setSemester] = useState('4');
   const [examType, setExamType] = useState<ExamType>('END_TERM');
   const [stageFilter, setStageFilter] = useState('ALL');
-  const [rows, setRows] = useState<Approval[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [result, setResult] = useState<ApprovalResult | null>(null);
+  const [revision, setRevision] = useState(0);
   const [busy, setBusy] = useState(false);
+  const mutationPending = useRef(false);
 
   const batchLabel = buildExamBatchLabel(semester, examType);
+  const requestKey = `${semester}:${examType}:${stageFilter}:${revision}`;
+  const currentResult = result?.api === api && result.key === requestKey ? result : null;
+  const rows = currentResult?.data ?? [];
+  const loading = !currentResult;
+  const error = currentResult?.error;
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const qs = new URLSearchParams({ semester, batch_label: batchLabel });
-      if (stageFilter && stageFilter !== 'ALL') qs.set('stage', stageFilter);
-      const res = await api.get<{ data: Approval[] } | Approval[]>(
+  useEffect(() => {
+    let current = true;
+    const qs = new URLSearchParams({ semester, batch_label: batchLabel });
+    if (stageFilter && stageFilter !== 'ALL') qs.set('stage', stageFilter);
+    void api.get<{ data: Approval[] } | Approval[]>(
         `/api/exam-cell/hall-ticket-approvals?${qs}`,
-      );
-      setRows(Array.isArray(res) ? res : (res?.data ?? []));
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed to load approvals');
-      setRows([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [api, semester, examType, batchLabel, stageFilter]);
-
-  useEffect(() => { void load(); }, [load]);
+      ).then((res) => {
+        if (current) setResult({ api, key: requestKey, data: Array.isArray(res) ? res : res?.data ?? [], error: null });
+      }).catch((e: unknown) => {
+        if (current) setResult({ api, key: requestKey, data: [], error: e instanceof Error ? e.message : 'Failed to load approvals' });
+      });
+    return () => { current = false; };
+  }, [api, semester, batchLabel, stageFilter, requestKey]);
 
   async function syncQueue() {
+    if (mutationPending.current || !canApprove) return;
+    mutationPending.current = true;
     setBusy(true);
     try {
       const res = await api.post<{ synced: number; total?: number }>('/api/exam-cell/hall-ticket-approvals/sync', {
@@ -69,28 +73,35 @@ export default function ExamCellHallTicketApprovalsPage() {
         batch_label: batchLabel,
       });
       toast.success(`Synced ${res.synced}${res.total != null ? ` of ${res.total}` : ''} students into approval queue`);
-      await load();
+      setRevision((current) => current + 1);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Sync failed');
     } finally {
+      mutationPending.current = false;
       setBusy(false);
     }
   }
 
   async function advance(id: string, action: 'APPROVE' | 'REJECT') {
+    const record = rows.find((row) => row.approval_id === id);
+    if (mutationPending.current || !canApprove || loading || error || !record || ['APPROVED', 'REJECTED'].includes(record.stage)) return;
+    mutationPending.current = true;
     setBusy(true);
     try {
       await api.post(`/api/exam-cell/hall-ticket-approvals/${id}/advance`, { action });
       toast.success(action === 'APPROVE' ? 'Advanced to next stage' : 'Rejected');
-      await load();
+      setRevision((current) => current + 1);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Action failed');
     } finally {
+      mutationPending.current = false;
       setBusy(false);
     }
   }
 
   async function bulkApprove() {
+    if (mutationPending.current || !canApprove || loading || error) return;
+    mutationPending.current = true;
     setBusy(true);
     try {
       const res = await api.post<{ approved: number }>('/api/exam-cell/hall-ticket-approvals/bulk-approve', {
@@ -99,10 +110,11 @@ export default function ExamCellHallTicketApprovalsPage() {
         target_stage: 'COE',
       });
       toast.success(`Bulk advanced ${res.approved} records to COE review`);
-      await load();
+      setRevision((current) => current + 1);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Bulk approve failed');
     } finally {
+      mutationPending.current = false;
       setBusy(false);
     }
   }
@@ -198,7 +210,7 @@ export default function ExamCellHallTicketApprovalsPage() {
             <div>
               <h2 className="text-lg font-bold text-sgvu-navy">Approval queue</h2>
               <p className="mt-0.5 text-sm text-muted-foreground">
-                {loading ? 'Loading records…' : `${rows.length} record${rows.length === 1 ? '' : 's'} · ${batchLabel}`}
+                {loading ? 'Loading records…' : error ? 'Approval queue unavailable' : `${rows.length} record${rows.length === 1 ? '' : 's'} · ${batchLabel}`}
               </p>
             </div>
             {canApprove ? (
@@ -206,7 +218,7 @@ export default function ExamCellHallTicketApprovalsPage() {
                 <Button size="sm" variant="outline" disabled={busy} className={actionBtnClass} onClick={() => void syncQueue()}>
                   {busy ? 'Working…' : 'Sync from eligibility'}
                 </Button>
-                <Button size="sm" disabled={busy} className={actionBtnClass} onClick={() => void bulkApprove()}>
+                <Button size="sm" disabled={busy || loading || Boolean(error)} className={actionBtnClass} onClick={() => void bulkApprove()}>
                   Bulk advance to COE
                 </Button>
               </div>
@@ -215,23 +227,23 @@ export default function ExamCellHallTicketApprovalsPage() {
 
           <div className="grid gap-4 sm:grid-cols-3">
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-bold uppercase tracking-wide text-sgvu-navy/60">Semester</label>
-              <Select className={filterSelectClass} value={semester} onChange={(e) => setSemester(e.target.value)}>
+              <label htmlFor="hall-approval-semester" className="text-xs font-bold uppercase tracking-wide text-sgvu-navy/60">Semester</label>
+              <Select id="hall-approval-semester" disabled={busy} className={filterSelectClass} value={semester} onChange={(e) => setSemester(e.target.value)}>
                 {[1, 2, 3, 4, 5, 6, 7, 8].map((s) => (
                   <option key={s} value={String(s)}>Semester {s}</option>
                 ))}
               </Select>
             </div>
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-bold uppercase tracking-wide text-sgvu-navy/60">Exam type</label>
-              <Select className={filterSelectClass} value={examType} onChange={(e) => setExamType(e.target.value as ExamType)}>
+              <label htmlFor="hall-approval-exam-type" className="text-xs font-bold uppercase tracking-wide text-sgvu-navy/60">Exam type</label>
+              <Select id="hall-approval-exam-type" disabled={busy} className={filterSelectClass} value={examType} onChange={(e) => setExamType(e.target.value as ExamType)}>
                 <option value="MID_TERM">Mid Term</option>
                 <option value="END_TERM">End Term</option>
               </Select>
             </div>
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-bold uppercase tracking-wide text-sgvu-navy/60">Stage</label>
-              <Select className={filterSelectClass} value={stageFilter} onChange={(e) => setStageFilter(e.target.value)}>
+              <label htmlFor="hall-approval-stage" className="text-xs font-bold uppercase tracking-wide text-sgvu-navy/60">Stage</label>
+              <Select id="hall-approval-stage" disabled={busy} className={filterSelectClass} value={stageFilter} onChange={(e) => setStageFilter(e.target.value)}>
                 <option value="ALL">All stages</option>
                 {STAGES.map((s) => (
                   <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>
@@ -241,8 +253,13 @@ export default function ExamCellHallTicketApprovalsPage() {
           </div>
 
           {loading ? (
-            <div className="flex justify-center py-12">
+            <div role="status" aria-label="Loading approvals" className="flex justify-center py-12">
               <Loader2 className="h-7 w-7 animate-spin text-sgvu-navy" />
+            </div>
+          ) : error ? (
+            <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-900">
+              <p>Could not load hall-ticket approvals: {error}</p>
+              <Button variant="outline" size="sm" className="mt-2" onClick={() => setRevision((current) => current + 1)}>Retry approvals</Button>
             </div>
           ) : (
             <DataTable

@@ -966,7 +966,7 @@ export class FacultyWorkspacesService {
         AND m.exam_type = $3
        WHERE e.tenant_id = $1
          AND e.course_id = $2
-         AND e.status = 'ENROLLED'
+         AND e.status IN ('ENROLLED', 'COMPLETED', 'FAILED')
        ORDER BY u.name`,
       [tenantId, courseId, examType],
     );
@@ -1077,7 +1077,10 @@ export class FacultyWorkspacesService {
       const locked = await this.dataSource.query(
         `SELECT 1 FROM academic_marks
          WHERE tenant_id = $1 AND course_id = $2 AND exam_type = $3
-           AND status IN ('PENDING_COE', 'PUBLISHED') LIMIT 1`,
+           AND status IN ('PENDING_COE', 'PUBLISHED')
+         UNION ALL SELECT 1 FROM academic_exam_results
+         WHERE tenant_id = $1 AND course_id = $2 AND exam_type = $3
+           AND status = 'PUBLISHED' LIMIT 1`,
         [tenantId, dto.course_id, examType],
       );
       if (locked[0]) {
@@ -1097,6 +1100,26 @@ export class FacultyWorkspacesService {
     }
 
     if (dto.entries.length > 0) {
+      const studentIds = dto.entries.map((entry) => entry.student_user_id);
+      if (new Set(studentIds).size !== studentIds.length) {
+        throw new BadRequestException(
+          'Duplicate student entries are not allowed',
+        );
+      }
+      const enrolled = await this.dataSource.query<
+        Array<{ student_user_id: string }>
+      >(
+        `SELECT DISTINCT e.student_user_id FROM student_course_enrollments e
+         JOIN users u ON u.user_id = e.student_user_id AND u.tenant_id = e.tenant_id
+         WHERE e.tenant_id = $1 AND e.course_id = $2 AND e.status IN ('ENROLLED', 'COMPLETED', 'FAILED')
+           AND e.student_user_id = ANY($3::uuid[])`,
+        [tenantId, dto.course_id, studentIds],
+      );
+      if (enrolled.length !== studentIds.length) {
+        throw new ForbiddenException(
+          'Marks may only be entered for students enrolled in this course and tenant',
+        );
+      }
       const valuePlaceholders: string[] = [];
       const params: unknown[] = [
         tenantId,
@@ -1225,50 +1248,108 @@ export class FacultyWorkspacesService {
   ) {
     await this.assertFacultyOwnsCourse(facultyUserId, tenantId, courseId);
 
-    // Mark all DRAFT and PENDING_COE marks for this course as PUBLISHED
-    const result = await this.dataSource.query(
-      `UPDATE academic_marks
-       SET status = 'PUBLISHED', published_at = NOW(), updated_at = NOW()
-       WHERE tenant_id = $1 AND course_id = $2 AND uploaded_by = $3
-         AND status IN ('DRAFT', 'PENDING_COE')
-       RETURNING mark_id, exam_type`,
-      [tenantId, courseId, facultyUserId],
-    );
-
-    const rows = Array.isArray(result)
-      ? ((Array.isArray(result[0]) ? result[0] : result) as Array<{
-          mark_id: string;
-          exam_type: string;
-        }>)
-      : [];
-    const publishedCount = rows.length;
-
+    // A bulk action follows the same publication boundary as individual submission.
+    // Preflight and update all draft components together; pending COE marks stay locked.
+    const counts = await this.dataSource.transaction(async (manager) => {
+      const drafts = await manager.query<
+        Array<{ mark_id: string; exam_type: string }>
+      >(
+        `SELECT mark_id, exam_type FROM academic_marks
+         WHERE tenant_id = $1 AND course_id = $2 AND uploaded_by = $3
+           AND status = 'DRAFT' FOR UPDATE`,
+        [tenantId, courseId, facultyUserId],
+      );
+      if (!drafts.length)
+        throw new BadRequestException('No draft marks are available to submit');
+      for (const examType of new Set(drafts.map((row) => row.exam_type))) {
+        if (!isKnownExamType(examType) || isAutoSyncedExamType(examType))
+          throw new BadRequestException(
+            'Auto-synced or unsupported components cannot be published manually',
+          );
+        if (examType === 'QUIZ') continue;
+        const published = await manager.query<Array<{ result_id: string }>>(
+          `SELECT result_id FROM academic_exam_results WHERE tenant_id = $1
+             AND course_id = $2 AND exam_type = $3 AND status = 'PUBLISHED' LIMIT 1`,
+          [tenantId, courseId, examType],
+        );
+        if (published[0])
+          throw new ForbiddenException(
+            'Published examination results are locked; use the authorized reassessment workflow',
+          );
+        if (!isFacultyDirectGradingType(examType)) {
+          const sessions = await manager.query<
+            Array<{
+              entry_status: string;
+              marks_locked: boolean;
+              declared_at: string | null;
+            }>
+          >(
+            `SELECT * FROM exam_result_sessions WHERE tenant_id = $1 AND course_id = $2
+               AND exam_type = $3 ORDER BY created_at DESC LIMIT 1 FOR UPDATE`,
+            [tenantId, courseId, examType],
+          );
+          this.assertFacultyEntryAllowed(sessions[0] ?? null);
+        }
+      }
+      const rows = await manager.query<Array<{ exam_type: string }>>(
+        `UPDATE academic_marks SET status = CASE WHEN exam_type = 'QUIZ' THEN 'PUBLISHED' ELSE 'PENDING_COE' END,
+           published_at = CASE WHEN exam_type = 'QUIZ' THEN NOW() ELSE published_at END, updated_at = NOW()
+         WHERE tenant_id = $1 AND course_id = $2 AND uploaded_by = $3 AND status = 'DRAFT'
+         RETURNING exam_type`,
+        [tenantId, courseId, facultyUserId],
+      );
+      const changed = Array.isArray(rows[0])
+        ? (rows[0] as Array<{ exam_type: string }>)
+        : rows;
+      const published = changed.filter(
+        (row) => row.exam_type === 'QUIZ',
+      ).length;
+      const submitted = changed.length - published;
+      await manager.query(
+        `INSERT INTO system_audit_logs (table_name, record_id, action, old_value, new_value, changed_by_user_id)
+         VALUES ('academic_marks', $1, 'UPDATE', $2::jsonb, $3::jsonb, $4)`,
+        [
+          courseId,
+          JSON.stringify({ status: 'DRAFT', tenant_id: tenantId }),
+          JSON.stringify({
+            action: 'FACULTY_BULK_MARKS_SUBMITTED',
+            tenant_id: tenantId,
+            published,
+            submitted,
+          }),
+          facultyUserId,
+        ],
+      );
+      return { published, submitted };
+    });
     const courseRows = await this.dataSource.query<
       Array<{ course_name: string }>
     >(
       `SELECT course_name FROM academic_courses WHERE course_id = $1 AND tenant_id = $2 LIMIT 1`,
       [courseId, tenantId],
     );
-    const courseName = courseRows[0]?.course_name ?? 'your course';
-    const examTypes = [
-      ...new Set(rows.map((r) => r.exam_type).filter(Boolean)),
-    ];
-
-    let notified_count = 0;
-    for (const examType of examTypes) {
-      notified_count += await this.notifyMarksPublishedToStudents(
-        tenantId,
-        courseId,
-        courseName,
-        examType,
-      );
-    }
-
+    const notified_count =
+      counts.published > 0
+        ? await this.notifyMarksPublishedToStudents(
+            tenantId,
+            courseId,
+            courseRows[0]?.course_name ?? 'your course',
+            'QUIZ',
+          )
+        : 0;
     return {
-      published: publishedCount,
-      status: 'PUBLISHED',
+      ...counts,
+      status:
+        counts.submitted > 0
+          ? counts.published > 0
+            ? 'MIXED'
+            : 'PENDING_COE'
+          : 'PUBLISHED',
       notified_count,
-      course_name: courseName,
+      message:
+        counts.submitted > 0
+          ? `${counts.submitted} marks submitted to Examination Cell for review; ${counts.published} quiz marks published.`
+          : `${counts.published} quiz marks published.`,
     };
   }
 
@@ -1297,7 +1378,7 @@ export class FacultyWorkspacesService {
         AND m.course_id = e.course_id
        WHERE e.tenant_id = $1
          AND e.course_id = $2
-         AND e.status = 'ENROLLED'
+         AND e.status IN ('ENROLLED', 'COMPLETED', 'FAILED')
        ORDER BY u.name`,
       [tenantId, courseId],
     );

@@ -15,14 +15,23 @@ export class ExamResult extends BaseSoftDeleteEntity {
   @PrimaryGeneratedColumn('uuid')
   result_id: string;
 
+  @Column({ type: 'uuid', nullable: true })
+  tenant_id: string | null;
+
   @Column({ type: 'uuid' })
   student_user_id: string;
 
-  @Column({ type: 'int' })
-  subject_id: number;
+  @Column({ type: 'int', nullable: true })
+  subject_id: number | null;
 
-  @Column({ length: 30 })
-  exam_session: string;
+  @Column({ type: 'uuid', nullable: true })
+  course_id: string | null;
+
+  @Column({ type: 'varchar', length: 30, nullable: true })
+  exam_session: string | null;
+
+  @Column({ type: 'varchar', length: 30, nullable: true })
+  exam_type: string | null;
 
   @Column({ type: 'numeric', precision: 6, scale: 2, nullable: true })
   marks_obtained: number;
@@ -44,4 +53,7 @@ export class ExamResult extends BaseSoftDeleteEntity {
 
   @UpdateDateColumn()
   updated_at: Date;
+
+  @Column({ type: 'timestamptz', default: () => 'NOW()' })
+  published_at: Date;
 }

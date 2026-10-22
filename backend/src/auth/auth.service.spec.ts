@@ -244,7 +244,9 @@ describe('AuthService.localLogin', () => {
     const auditCall = mockDataSource.query.mock.calls.find(([sql]) =>
       String(sql).includes('INSERT INTO admin_control_audit'),
     );
-    expect(auditCall?.[0]).toContain('$2::text');
+    expect(auditCall?.[0]).toContain("VALUES ($1::uuid, $2::uuid, 'LOGIN'");
+    expect(auditCall?.[0]).toContain('($2::uuid)::text');
+    expect(auditCall?.[1]).toEqual([TENANT.tenant_id, fixture.credential.user_id]);
   });
 
   it('falls back to sgvu when tenant subdomain header is empty', async () => {

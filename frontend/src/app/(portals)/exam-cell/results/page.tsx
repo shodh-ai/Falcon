@@ -129,6 +129,9 @@ export default function ExamCellResultsPage() {
   const [courses, setCourses] = useState<CourseOption[]>([]);
   const [policies, setPolicies] = useState<PolicyOption[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [detailError, setDetailError] = useState<string | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailAttempt, setDetailAttempt] = useState(0);
   const [preview, setPreview] = useState<PreviewRow[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [showSetup, setShowSetup] = useState(true);
@@ -173,21 +176,30 @@ export default function ExamCellResultsPage() {
   }, [api, selectedId]);
 
   useEffect(() => {
-    void load().catch(() => toast.error('Could not load result control data'));
+    void Promise.resolve().then(load).catch(() => toast.error('Could not load result control data'));
   }, [load]);
 
   useEffect(() => {
-    if (!selected) return;
-    setRulesForm({
-      pass_marks: selected.pass_marks != null ? String(selected.pass_marks) : '',
-      max_marks: String(selected.max_marks ?? ''),
-      grading_policy_id: selected.grading_policy_id != null ? String(selected.grading_policy_id) : '',
-    });
-    setPreview(null);
-    setAppliedGrace(null);
-    void (async () => {
+    if (!selectedId) return;
+    let active = true;
+    void Promise.resolve().then(async () => {
+      if (!active) return;
+      setDetailLoading(true);
+      setDetailError(null);
+      setPreview(null);
+      setAppliedGrace(null);
+      setRulesForm({ pass_marks: '', max_marks: '', grading_policy_id: '' });
+      setCoeAuditStatus('idle');
+      setDeanApproved(false);
+      setAnomalySubjects([]);
       try {
-        const detail = await api.get<ResultSession>(`/api/exam-cell/result-control/sessions/${selected.session_id}`);
+        const detail = await api.get<ResultSession>(`/api/exam-cell/result-control/sessions/${selectedId}`);
+        if (!active) return;
+        setRulesForm({
+          pass_marks: detail.pass_marks != null ? String(detail.pass_marks) : '',
+          max_marks: String(detail.max_marks ?? ''),
+          grading_policy_id: detail.grading_policy_id != null ? String(detail.grading_policy_id) : '',
+        });
         const status = detail.coe_audit_status ?? 'idle';
         setCoeAuditStatus(status);
         setDeanApproved(Boolean(detail.dean_approved));
@@ -196,13 +208,18 @@ export default function ExamCellResultsPage() {
         } else {
           setAnomalySubjects([]);
         }
-      } catch {
+      } catch (error) {
+        if (!active) return;
+        setDetailError(error instanceof Error ? error.message : 'Could not load result session details.');
         setCoeAuditStatus('idle');
         setDeanApproved(false);
         setAnomalySubjects([]);
+      } finally {
+        if (active) setDetailLoading(false);
       }
-    })();
-  }, [selected?.session_id, api]);
+    });
+    return () => { active = false; };
+  }, [selectedId, api, detailAttempt]);
 
   const pendingGroups = useMemo(() => {
     const map = new Map<string, PendingGroup>();
@@ -558,8 +575,9 @@ export default function ExamCellResultsPage() {
             <div className="space-y-5">
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 <div className="flex flex-col gap-1.5 sm:col-span-2">
-                  <label className={labelClass}>Course</label>
+                  <label htmlFor="result-course" className={labelClass}>Course</label>
                   <Select
+                    id="result-course"
                     className={fieldClass}
                     value={createForm.course_id || undefined}
                     placeholder="Select course"
@@ -574,8 +592,9 @@ export default function ExamCellResultsPage() {
                   </Select>
                 </div>
                 <div className="flex flex-col gap-1.5">
-                  <label className={labelClass}>Exam type</label>
+                  <label htmlFor="result-exam-type" className={labelClass}>Exam type</label>
                   <Select
+                    id="result-exam-type"
                     className={fieldClass}
                     value={createForm.exam_type}
                     onChange={(e) => setCreateForm({ ...createForm, exam_type: e.target.value })}
@@ -586,8 +605,9 @@ export default function ExamCellResultsPage() {
                   </Select>
                 </div>
                 <div className="flex flex-col gap-1.5">
-                  <label className={labelClass}>Semester</label>
+                  <label htmlFor="result-semester" className={labelClass}>Semester</label>
                   <Input
+                    id="result-semester"
                     className="h-10 rounded-lg border-sgvu-navy/20 focus-visible:ring-sgvu-gold/40"
                     placeholder="4"
                     value={createForm.semester}
@@ -595,8 +615,9 @@ export default function ExamCellResultsPage() {
                   />
                 </div>
                 <div className="flex flex-col gap-1.5">
-                  <label className={labelClass}>Max marks</label>
+                  <label htmlFor="result-max-marks" className={labelClass}>Max marks</label>
                   <Input
+                    id="result-max-marks"
                     className="h-10 rounded-lg border-sgvu-navy/20 focus-visible:ring-sgvu-gold/40"
                     placeholder="50"
                     value={createForm.max_marks}
@@ -604,8 +625,9 @@ export default function ExamCellResultsPage() {
                   />
                 </div>
                 <div className="flex flex-col gap-1.5">
-                  <label className={labelClass}>Pass marks</label>
+                  <label htmlFor="result-pass-marks" className={labelClass}>Pass marks</label>
                   <Input
+                    id="result-pass-marks"
                     className="h-10 rounded-lg border-sgvu-navy/20 focus-visible:ring-sgvu-gold/40"
                     placeholder="20"
                     value={createForm.pass_marks}
@@ -613,8 +635,9 @@ export default function ExamCellResultsPage() {
                   />
                 </div>
                 <div className="flex flex-col gap-1.5 sm:col-span-2 lg:col-span-3">
-                  <label className={labelClass}>Grading policy</label>
+                  <label htmlFor="result-grading-policy" className={labelClass}>Grading policy</label>
                   <Select
+                    id="result-grading-policy"
                     className={fieldClass}
                     value={createForm.grading_policy_id || 'DEFAULT'}
                     onChange={(e) =>
@@ -677,6 +700,8 @@ export default function ExamCellResultsPage() {
 
                 {selected ? (
                   <div className="space-y-4 rounded-xl border border-sgvu-navy/10 bg-sgvu-navy/[0.02] p-4 text-sm">
+                    {detailLoading ? <p role="status" className="text-muted-foreground">Loading session details…</p> : null}
+                    {detailError ? <div role="alert" className="rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-destructive"><p>{detailError}</p><Button variant="outline" size="sm" className="mt-2" onClick={() => setDetailAttempt((attempt) => attempt + 1)}>Retry session details</Button></div> : null}
                     <div>
                       <p className="font-bold text-sgvu-navy">Faculty entry window</p>
                       <p className="mt-0.5 text-xs text-muted-foreground">
@@ -688,7 +713,7 @@ export default function ExamCellResultsPage() {
                         size="sm"
                         variant="outline"
                         className={btnPrimary}
-                        disabled={busy || !!selected.declared_at}
+                        disabled={busy || detailLoading || !!detailError || !!selected.declared_at}
                         onClick={() => void runAction('open-entry', 'Marks entry opened for faculty')}
                       >
                         Open entry
@@ -697,7 +722,7 @@ export default function ExamCellResultsPage() {
                         size="sm"
                         variant="outline"
                         className={btnOutline}
-                        disabled={busy || !!selected.declared_at}
+                        disabled={busy || detailLoading || !!detailError || !!selected.declared_at}
                         onClick={() => void runAction('close-entry', 'Marks entry closed')}
                       >
                         Close entry
@@ -1115,7 +1140,11 @@ function PendingDeclarationCard({
   useEffect(() => {
     void api
       .get<Distribution[]>(`/api/exam-cell/results/distribution?course_id=${group.course_id}&exam_type=${group.exam_type}`)
-      .then((rows) => setDist(rows[0] ?? null));
+      .then((rows) => setDist(rows[0] ?? null))
+      .catch((error) => {
+        setDist(null);
+        toast.error(error instanceof Error ? error.message : 'Could not load marks distribution');
+      });
   }, [api, group.course_id, group.exam_type]);
 
   return (
@@ -1196,7 +1225,11 @@ function PendingMarksTable({
     if (compact) return;
     void api
       .get<Distribution[]>(`/api/exam-cell/results/distribution?course_id=${courseId}&exam_type=${examType}`)
-      .then((rows) => setDist(rows[0] ?? null));
+      .then((rows) => setDist(rows[0] ?? null))
+      .catch((error) => {
+        setDist(null);
+        toast.error(error instanceof Error ? error.message : 'Could not load marks distribution');
+      });
   }, [api, courseId, examType, compact]);
 
   return (

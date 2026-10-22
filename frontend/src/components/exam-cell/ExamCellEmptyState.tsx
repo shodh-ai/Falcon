@@ -4,6 +4,7 @@ import { Database } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAuthedApi } from '@/lib/api';
 import { toast } from '@/lib/notifications/falcon-toast';
+import { isExamCellDevFallbackEnabled } from '@/lib/exam-cell/dev-fallback';
 
 type Props = {
   title?: string;
@@ -14,11 +15,12 @@ type Props = {
 
 export function ExamCellEmptyState({
   title = 'No examination records found',
-  message = 'There are no records for the current filters. Create sample data to explore the module, or add a new record.',
+  message = 'There are no records for the current filters.',
   onRetry,
   showBootstrap = true,
 }: Props) {
   const api = useAuthedApi();
+  const bootstrapAllowed = showBootstrap && isExamCellDevFallbackEnabled();
 
   async function bootstrap() {
     try {
@@ -36,7 +38,7 @@ export function ExamCellEmptyState({
       <p className="text-base font-semibold text-sgvu-navy">{title}</p>
       <p className="max-w-md text-sm text-muted-foreground">{message}</p>
       <div className="flex flex-wrap justify-center gap-2">
-        {showBootstrap ? (
+        {bootstrapAllowed ? (
           <Button variant="outline" size="sm" onClick={() => void bootstrap()}>
             <Database className="mr-2 h-4 w-4" />
             Create sample data

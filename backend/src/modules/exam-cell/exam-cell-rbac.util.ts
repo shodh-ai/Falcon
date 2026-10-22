@@ -55,16 +55,24 @@ export function normalizeExamCellRole(role: string | undefined | null): string {
   return (role ?? '').trim().toLowerCase().replace(/\s+/g, '');
 }
 
+export type ExamCellRoleInput = string | string[] | undefined | null;
+
+function roleValues(role: ExamCellRoleInput): string[] {
+  return Array.isArray(role) ? role : [role ?? ''];
+}
+
 export function canExamCellAction(
-  role: string | undefined | null,
+  role: ExamCellRoleInput,
   action: ExamCellAction,
 ): boolean {
-  const key = normalizeExamCellRole(role);
-  return ROLE_ACTIONS[key]?.includes(action) ?? false;
+  return roleValues(role).some((value) => {
+    const key = normalizeExamCellRole(value);
+    return ROLE_ACTIONS[key]?.includes(action) ?? false;
+  });
 }
 
 export function assertExamCellAction(
-  role: string | undefined | null,
+  role: ExamCellRoleInput,
   action: ExamCellAction,
 ): void {
   if (!canExamCellAction(role, action)) {
@@ -77,6 +85,19 @@ export function assertExamCellAction(
 export function examCellRoleFromUser(user: {
   role?: string;
   primaryRole?: string;
+  roles?: string[];
 }): string {
-  return user.primaryRole ?? user.role ?? '';
+  return examCellRolesFromUser(user)[0] ?? '';
+}
+
+export function examCellRolesFromUser(user: {
+  role?: string;
+  primaryRole?: string;
+  roles?: string[];
+}): string[] {
+  return [
+    ...(user.roles ?? []),
+    user.primaryRole,
+    user.role,
+  ].filter((value): value is string => Boolean(value?.trim()));
 }

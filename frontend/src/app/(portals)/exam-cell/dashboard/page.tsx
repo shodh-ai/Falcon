@@ -14,11 +14,11 @@ import {
   Users,
 } from 'lucide-react';
 import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { toast } from '@/lib/notifications/falcon-toast';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useAuthedApi } from '@/lib/api';
+import { ExamCellPageHeader } from '@/components/exam-cell/ExamCellPageHeader';
 
 type DashboardStats = {
   upcoming_exams: number;
@@ -50,9 +50,11 @@ export default function ExamCellDashboardPage() {
   const api = useAuthedApi();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
       const data = await api.get<DashboardStats>('/api/exam-cell/dashboard');
       setStats(data);
@@ -61,30 +63,27 @@ export default function ExamCellDashboardPage() {
         console.warn('[dashboard]', e);
       }
       setStats(null);
+      setError(e instanceof Error ? e.message : 'Could not load examination dashboard.');
     } finally {
       setLoading(false);
     }
   }, [api]);
 
   useEffect(() => {
-    void load();
+    void Promise.resolve().then(load);
   }, [load]);
 
   const metricCards = useMemo(
     () => [
-      { label: 'Upcoming exams', value: stats?.upcoming_exams ?? 0, icon: CalendarDays, href: '/exam-cell/schedule' },
-      { label: "Today's exams", value: stats?.todays_exams ?? 0, icon: CalendarDays, href: '/exam-cell/schedule' },
+      { label: 'Upcoming exams', value: stats?.upcoming_exams ?? 0, detail: `Today's exams: ${stats?.todays_exams ?? 0}`, icon: CalendarDays, href: '/exam-cell/schedule' },
       { label: 'Active sessions', value: stats?.active_exam_sessions ?? 0, icon: GraduationCap, href: '/exam-cell/sessions' },
-      { label: 'Registered students', value: stats?.registered_students ?? 0, icon: Users, href: '/exam-cell/form-fillup' },
+      { label: 'Registered students', value: stats?.registered_students ?? 0, detail: `Form registrations: ${stats?.form_registrations ?? 0}`, icon: Users, href: '/exam-cell/form-fillup' },
       { label: 'Students eligible', value: stats?.students_eligible ?? 0, icon: Users, href: '/exam-cell/eligibility' },
-      { label: 'Hall tickets generated', value: stats?.hall_tickets_generated ?? 0, icon: Ticket, href: '/exam-cell/admit-cards' },
-      { label: 'Pending hall tickets', value: stats?.pending_hall_tickets ?? 0, icon: Ticket, href: '/exam-cell/admit-cards' },
+      { label: 'Hall tickets generated', value: stats?.hall_tickets_generated ?? 0, detail: `Pending hall tickets: ${stats?.pending_hall_tickets ?? 0}`, icon: Ticket, href: '/exam-cell/admit-cards' },
       { label: "Today's attendance", value: stats?.todays_attendance ?? 0, icon: ClipboardCheck, href: '/exam-cell/exam-day' },
-      { label: 'Form registrations', value: stats?.form_registrations ?? 0, icon: GraduationCap, href: '/exam-cell/form-fillup' },
-      { label: 'Pending results', value: stats?.pending_results ?? 0, icon: TrendingUp, href: '/exam-cell/results' },
-      { label: 'Pending COE review', value: stats?.pending_coe_marks ?? 0, icon: ClipboardCheck, href: '/exam-cell/results' },
+      { label: 'Pending results', value: stats?.pending_results ?? 0, detail: `Pending COE review: ${stats?.pending_coe_marks ?? 0}`, icon: TrendingUp, href: '/exam-cell/results' },
       { label: 'Revaluation queue', value: stats?.re_evaluations_queue ?? 0, icon: Ticket, href: '/exam-cell/re-evaluations' },
-      { label: 'Supplementary pending', value: stats?.pending_supplementary ?? 0, icon: GraduationCap, href: '/exam-cell/re-evaluations' },
+      { label: 'Supplementary pending', value: stats?.pending_supplementary ?? 0, icon: GraduationCap, href: '/exam-cell/backlog-exams' },
       { label: 'Invigilators today', value: stats?.invigilators_assigned_today ?? 0, icon: Eye, href: '/exam-cell/invigilation' },
       { label: 'Open UFM cases', value: stats?.open_ufm_cases ?? 0, icon: Shield, href: '/exam-cell/ufm-cases' },
     ],
@@ -98,42 +97,51 @@ export default function ExamCellDashboardPage() {
 
   return (
     <div className="mx-auto max-w-7xl space-y-6 p-4 md:p-6">
-      <div className="rounded-2xl bg-gradient-to-br from-sgvu-navy to-sgvu-navy/90 p-6 text-white shadow-xl md:p-8">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <p className="text-sm font-medium text-sgvu-gold">Falcon Exam OS</p>
-            <h1 className="mt-1 text-3xl font-black tracking-tight">Examination Command Center</h1>
-            <p className="mt-2 max-w-2xl text-sm text-white/75">
-              Enterprise examination operations — sessions, hall tickets, seating, results, and compliance in one workspace.
-            </p>
-          </div>
-          <Button variant="outline" size="sm" className="border-sgvu-gold bg-sgvu-gold text-sgvu-navy hover:bg-sgvu-gold/90 hover:text-sgvu-navy" onClick={() => void load()} disabled={loading}>
-            {loading ? 'Refreshing…' : 'Refresh'}
-          </Button>
-        </div>
-      </div>
+      <Card className="border-sgvu-navy/10 bg-white shadow-sm">
+        <CardContent className="p-5 md:p-6">
+          <ExamCellPageHeader
+            pageId="dashboard"
+            title="Examination Command Center"
+            subtitle="Enterprise examination operations — sessions, hall tickets, seating, results, and compliance in one workspace."
+            actions={
+              <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}>
+                {loading ? 'Refreshing…' : 'Refresh'}
+              </Button>
+            }
+          />
+        </CardContent>
+      </Card>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-        {metricCards.map(({ label, value, icon: Icon, href }) => (
+      {error && (
+        <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
+          <p className="font-semibold">Could not load dashboard data</p>
+          <p className="mt-1">{error}</p>
+          <Button variant="outline" size="sm" className="mt-3" onClick={() => void load()} disabled={loading}>Retry</Button>
+        </div>
+      )}
+
+      {!error && <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        {metricCards.map(({ label, value, detail, icon: Icon, href }) => (
           <Card key={label} className="border-border/70 transition hover:border-sgvu-gold/40">
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardHeader className="flex flex-row items-center justify-between p-4 pb-1">
               <CardTitle className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</CardTitle>
               <Icon className="h-4 w-4 text-sgvu-gold" />
             </CardHeader>
-            <CardContent>
+            <CardContent className="px-4 pb-4 pt-0">
               {loading ? <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /> : (
                 <p className={`text-2xl font-black tabular-nums ${value > 0 ? 'text-sgvu-navy' : 'text-muted-foreground'}`}>{value}</p>
               )}
-              <Button asChild variant="link" className="mt-1 h-auto p-0 text-xs text-sgvu-gold">
-                <Link href={href}>Open module →</Link>
+              <p className="mt-1 min-h-4 text-xs text-muted-foreground">{!loading && detail}</p>
+              <Button asChild variant="link" className="mt-2 h-auto p-0 text-xs text-sgvu-navy">
+                <Link href={href} aria-label={`Open ${label.toLowerCase()}`}>Open module →</Link>
               </Button>
             </CardContent>
           </Card>
         ))}
-      </div>
+      </div>}
 
       <div className="grid gap-4 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
+        {!error && <Card className="lg:col-span-2">
           <CardHeader>
             <CardTitle className="text-base">Result processing status</CardTitle>
           </CardHeader>
@@ -151,7 +159,7 @@ export default function ExamCellDashboardPage() {
               </ResponsiveContainer>
             )}
           </CardContent>
-        </Card>
+        </Card>}
 
         <Card>
           <CardHeader>
@@ -168,7 +176,7 @@ export default function ExamCellDashboardPage() {
         </Card>
       </div>
 
-      <Card>
+      {!error && <Card>
         <CardHeader>
           <CardTitle className="text-base">Recent audit activity</CardTitle>
         </CardHeader>
@@ -187,7 +195,7 @@ export default function ExamCellDashboardPage() {
             ))
           )}
         </CardContent>
-      </Card>
+      </Card>}
     </div>
   );
 }

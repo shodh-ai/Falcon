@@ -7,19 +7,20 @@ import { EXAM_CELL_PAGES } from '@/lib/exam-cell-guide';
 interface ExamCellPageHeaderProps {
   pageId: ExamCellPageId;
   actions?: ReactNode;
+  title?: string;
+  subtitle?: string;
 }
 
-export function ExamCellPageHeader({ pageId, actions }: ExamCellPageHeaderProps) {
+export function ExamCellPageHeader({ pageId, actions, title, subtitle }: ExamCellPageHeaderProps) {
   const page = EXAM_CELL_PAGES[pageId];
 
   return (
-    <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-      <div>
-        <p className="text-sm font-semibold text-sgvu-gold">Falcon Exam OS</p>
-        <h1 className="text-2xl font-bold text-sgvu-navy">{page.title}</h1>
-        <p className="mt-1 max-w-2xl text-sm text-muted-foreground">{page.subtitle}</p>
+    <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+      <div className="min-w-0 border-l-4 pl-4" style={{ borderLeftColor: 'var(--sgvu-gold)' }}>
+        <h1 className="text-xl font-bold leading-tight tracking-tight text-sgvu-navy sm:text-2xl">{title ?? page.title}</h1>
+        <p className="mt-1.5 max-w-3xl text-sm leading-6 text-muted-foreground">{subtitle ?? page.subtitle}</p>
       </div>
-      {actions ? <div className="flex shrink-0 flex-wrap gap-2">{actions}</div> : null}
+      {actions ? <div className="flex min-w-0 flex-wrap items-center gap-2 lg:justify-end">{actions}</div> : null}
     </div>
   );
 }

@@ -1,15 +1,15 @@
 'use client';
 
-import { useEffect, useMemo, useState, type ComponentType } from 'react';
+import { useEffect, useMemo, useRef, useState, type ComponentType } from 'react';
 import { useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 import { AlertTriangle, FileDown, ListChecks, Lock, RefreshCcw } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/context/AuthContext';
-import { academicsApi } from '@/lib/api/api.academics';
 import { API_URL, authHeaders } from '@/lib/api/client';
-import { examsApi, type ExamApplication, type ExamEligibilityResult, type ExamSchedule } from '@/lib/api/api.exams';
+import { examsApi, type ExamApplication, type ExamEligibilityResult, type ExamSchedule, type ReEvaluationSource } from '@/lib/api/api.exams';
 import { useAuthedApi } from '@/lib/api';
 import { StudentExemptionPanel } from '@/components/attendance/StudentExemptionPanel';
 import { StudentPageHeader } from '@/components/student/StudentPageHeader';
@@ -47,13 +47,14 @@ function formatTime(hhmmss: string) {
 }
 
 function formatExamDate(iso: string) {
-  const d = new Date(`${iso}T12:00:00`);
+  const d = new Date(/^\d{4}-\d{2}-\d{2}$/.test(iso) ? `${iso}T12:00:00+05:30` : iso);
   if (Number.isNaN(d.getTime())) return iso;
   return d.toLocaleDateString(undefined, {
     weekday: 'short',
     day: 'numeric',
     month: 'short',
     year: 'numeric',
+    timeZone: 'Asia/Kolkata',
   });
 }
 
@@ -106,17 +107,37 @@ export default function StudentExamsPage() {
   const { token, user } = useAuth();
   const api = useAuthedApi();
   const searchParams = useSearchParams();
-  const [tab, setTab] = useState<TabKey>(
-    searchParams.get('intent') === 'revaluation' ? 'reeval' : 'schedule',
-  );
+  const intent = searchParams.get('intent');
+  const [tabSelection, setTabSelection] = useState<{ intent: string | null; tab: TabKey } | null>(null);
+  const tab = tabSelection?.intent === intent ? tabSelection.tab : intent === 'revaluation' ? 'reeval' : 'schedule';
+  const setTab = (next: TabKey) => setTabSelection({ intent, tab: next });
   const [examDesk, setExamDesk] = useState<ExamDesk | null>(null);
   const [schedules, setSchedules] = useState<ExamSchedule[]>([]);
   const [eligibility, setEligibility] = useState<ExamEligibilityResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [applications, setApplications] = useState<ExamApplication[]>([]);
-  const [results, setResults] = useState<unknown[]>([]);
+  const [sourceRevision, setSourceRevision] = useState(0);
+  const [sourceResult, setSourceResult] = useState<{ api: typeof api; token: string; revision: number; rows: ReEvaluationSource[]; error: string | null } | null>(null);
   const [downloadingAdmit, setDownloadingAdmit] = useState(false);
+  const [applyingSubjectId, setApplyingSubjectId] = useState<number | null>(null);
+  const applicationPending = useRef(false);
+  const currentSources = sourceResult?.api === api && sourceResult.token === token && sourceResult.revision === sourceRevision ? sourceResult : null;
+  const sourceLoading = !currentSources;
+  const sources = currentSources?.rows ?? [];
+  const sourceError = currentSources?.error;
+
+  useEffect(() => {
+    if (!token) return;
+    let active = true;
+    void examsApi.reEvaluationSources(token).then((rows) => {
+      if (!Array.isArray(rows)) throw new Error('Could not load published examination choices');
+      if (active) setSourceResult({ api, token, revision: sourceRevision, rows, error: null });
+    }).catch((e: unknown) => {
+      if (active) setSourceResult({ api, token, revision: sourceRevision, rows: [], error: e instanceof Error ? e.message : 'Could not load published examination choices' });
+    });
+    return () => { active = false; };
+  }, [api, token, sourceRevision]);
 
   const ineligibleMessage = useMemo(() => {
     if (!eligibility || eligibility.eligible) return null;
@@ -127,8 +148,8 @@ export default function StudentExamsPage() {
     if (attendanceReason) {
       lines.push(`Attendance is ${eligibility.attendance_percent}% (minimum ${eligibility.min_required ?? 75}% required).`);
     }
-    if (duesReason && Array.isArray((duesReason as any).details)) {
-      const dues = (duesReason as any).details as Array<{ fee_head: string; outstanding: number }>;
+    if (duesReason && Array.isArray(duesReason.details)) {
+      const dues = duesReason.details as Array<{ fee_head: string; outstanding: number }>;
       if (dues.length > 0) {
         const parts = dues.map((d) => `${d.fee_head} of ₹${Math.round(Number(d.outstanding))}`).join(' and ');
         lines.push(`Please clear your ${parts} to unlock.`);
@@ -138,10 +159,6 @@ export default function StudentExamsPage() {
     }
     return lines.join(' ');
   }, [eligibility]);
-
-  useEffect(() => {
-    if (searchParams.get('intent') === 'revaluation') setTab('reeval');
-  }, [searchParams]);
 
   useEffect(() => {
     const load = async () => {
@@ -175,10 +192,6 @@ export default function StudentExamsPage() {
         setEligibility(elig);
         setApplications(apps);
 
-        if (user?.user_id) {
-          const studentResults = await academicsApi.studentResults(token, user.user_id);
-          setResults(studentResults);
-        }
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Failed to load examinations data');
         setSchedules(
@@ -268,15 +281,20 @@ export default function StudentExamsPage() {
     }
   };
 
-  const applyReevaluation = async (subjectId: number) => {
-    if (!token) return;
+  const applyReevaluation = async (source: ReEvaluationSource) => {
+    if (!token || applicationPending.current || sourceLoading || sourceError) return;
+    applicationPending.current = true;
+    setApplyingSubjectId(source.subject_id);
     setError(null);
     try {
-      await examsApi.apply(token, { subject_id: subjectId, application_type: 'RE_EVALUATION' });
+      await examsApi.apply(token, { subject_id: source.subject_id, application_type: 'RE_EVALUATION', source_result_id: source.result_id, source_session_id: source.session_id });
       const apps = await examsApi.myApplications(token);
       setApplications(apps);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to apply for re-evaluation');
+    } finally {
+      applicationPending.current = false;
+      setApplyingSubjectId(null);
     }
   };
 
@@ -307,7 +325,7 @@ export default function StudentExamsPage() {
             {examDesk.seating.map((s, i) => (
               <div key={i} className="rounded-xl border p-3">
                 <p className="font-semibold text-sgvu-navy">{s.exam_name}</p>
-                <p className="text-muted-foreground">{s.exam_date}</p>
+                <p className="text-muted-foreground">{formatExamDate(s.exam_date)}</p>
                 {s.seat_revealed ? (
                   <p className="mt-2">
                     Block {s.block}, Room {s.room}, Seat {s.seat}
@@ -510,24 +528,32 @@ export default function StudentExamsPage() {
             <CardDescription>Apply for re-evaluation; a fee demand will be created automatically</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border p-3 text-sm">
+              <p>Backlog and supplementary applications require an available examination offering.</p>
+              <Button asChild variant="outline"><Link href="/student/backlog">Backlog & supplementary applications</Link></Button>
+            </div>
             {loading ? (
               <p className="text-sm text-muted-foreground">Loading…</p>
             ) : (
               <>
                 <div className="space-y-2">
-                  <p className="text-sm font-semibold text-sgvu-navy">Eligible subjects (from results)</p>
-                  {results.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">No results found.</p>
+                  <p className="text-sm font-semibold text-sgvu-navy">Choose a published examination for re-evaluation</p>
+                  {sourceLoading ? <p role="status" className="text-sm text-muted-foreground">Loading published examinations…</p> : sourceError ? (
+                    <div role="alert" className="space-y-2 text-sm text-destructive"><p>{sourceError}</p><Button variant="outline" onClick={() => setSourceRevision((value) => value + 1)}>Retry examination choices</Button></div>
+                  ) : sources.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No published examinations available for re-evaluation.</p>
                   ) : (
                     <div className="space-y-2">
-                      {results.slice(0, 6).map((row: any, idx) => (
-                        <div key={String(row?.result_id ?? idx)} className="flex items-center justify-between rounded-xl border px-4 py-3">
+                      {sources.map((row) => (
+                        <div key={`${row.result_id}:${row.session_id ?? 'legacy'}`} className="flex items-center justify-between gap-3 rounded-xl border px-4 py-3">
                           <div className="min-w-0">
-                            <p className="truncate text-sm font-medium text-sgvu-navy">Subject #{row?.subject_id ?? '—'}</p>
-                            <p className="text-xs text-muted-foreground">Grade: {row?.grade ?? row?.grade_letter ?? '—'}</p>
+                            <p className="truncate text-sm font-medium text-sgvu-navy">{row.subject_name}</p>
+                            <p className="text-xs text-muted-foreground">{row.subject_code} · {formatExamType(row.exam_type ?? 'Examination')} · Semester {row.semester}</p>
+                            <p className="text-xs text-muted-foreground">Published marks: {row.marks_obtained}/{row.max_marks}</p>
+                            {row.published_at && <p className="text-xs text-muted-foreground">Published {formatExamDate(row.published_at)}</p>}
                           </div>
-                          <Button size="sm" onClick={() => applyReevaluation(Number(row?.subject_id ?? 0))} disabled={!row?.subject_id}>
-                            Apply
+                          <Button size="sm" aria-label={`Apply for ${row.subject_code} ${formatExamType(row.exam_type ?? 'Examination')} semester ${row.semester}`} onClick={() => void applyReevaluation(row)} disabled={!row.subject_id || applyingSubjectId !== null}>
+                            {applyingSubjectId === row.subject_id ? 'Applying…' : 'Apply'}
                           </Button>
                         </div>
                       ))}

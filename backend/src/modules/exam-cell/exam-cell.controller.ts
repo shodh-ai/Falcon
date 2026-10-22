@@ -9,7 +9,9 @@ import {
   Delete,
   Param,
   BadRequestException,
+  UnauthorizedException,
   ParseIntPipe,
+  ParseUUIDPipe,
   StreamableFile,
 } from '@nestjs/common';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -39,6 +41,7 @@ import { EXAM_CELL_ACCESS_ROLES } from './exam-cell.constants';
 import {
   assertExamCellAction,
   examCellRoleFromUser,
+  examCellRolesFromUser,
   type ExamCellAction,
 } from './exam-cell-rbac.util';
 
@@ -47,6 +50,7 @@ type AuthUser = {
   tenant_id?: string;
   role?: string;
   primaryRole?: string;
+  roles?: string[];
 };
 
 @Controller('api/exam-cell')
@@ -116,12 +120,6 @@ export class ExamCellController {
       dto,
       req.user.user_id,
     );
-    await this.audit.log(tenantId, req.user.user_id, {
-      action: 'ADMIT_CARDS_GENERATED',
-      resource_type: 'admit_card_run',
-      resource_id: result.run_id,
-      new_value: { generated: result.generated, blocked: result.blocked },
-    });
     return result;
   }
 
@@ -220,14 +218,17 @@ export class ExamCellController {
   }
 
   @Delete('seating-runs/:id')
-  deleteSeatingRun(@Req() req: { user: AuthUser }, @Param('id') id: string) {
+  deleteSeatingRun(
+    @Req() req: { user: AuthUser },
+    @Param('id', new ParseUUIDPipe()) id: string,
+  ) {
     this.requireAction(req, 'manage_seating');
     return this.examCell.deleteSeatingRun(this.tenant(req), id);
   }
 
   @Get('subjects')
-  scheduleSubjects() {
-    return this.examCell.listScheduleSubjects();
+  scheduleSubjects(@Req() req: { user: AuthUser }) {
+    return this.examCell.listScheduleSubjects(this.tenant(req));
   }
 
   @Get('seating-plans')
@@ -275,7 +276,7 @@ export class ExamCellController {
   @Post('invigilation-requests/:requestId/resolve')
   resolveInvigilationRequest(
     @Req() req: { user: AuthUser },
-    @Param('requestId') requestId: string,
+    @Param('requestId', new ParseUUIDPipe()) requestId: string,
     @Body() dto: { status: 'APPROVED' | 'REJECTED'; comment: string },
   ) {
     this.requireAction(req, 'manage_sessions');
@@ -297,7 +298,7 @@ export class ExamCellController {
   @Get('invigilation-swaps/:swapId/audits')
   listInvigilationDutySwapAudits(
     @Req() req: { user: AuthUser },
-    @Param('swapId') swapId: string,
+    @Param('swapId', new ParseUUIDPipe()) swapId: string,
   ) {
     return this.examCell.listInvigilationDutySwapAudits(
       this.tenant(req),
@@ -308,7 +309,7 @@ export class ExamCellController {
   @Post('invigilation-swaps/:swapId/resolve')
   resolveInvigilationDutySwap(
     @Req() req: { user: AuthUser },
-    @Param('swapId') swapId: string,
+    @Param('swapId', new ParseUUIDPipe()) swapId: string,
     @Body() dto: { status: 'APPROVED' | 'REJECTED'; comment: string },
   ) {
     this.requireAction(req, 'manage_sessions');
@@ -388,13 +389,47 @@ export class ExamCellController {
   }
 
   @Post('results/publish')
-  publishResults(
+  async publishResults(
     @Req() req: { user: AuthUser },
     @Body()
     dto: { course_id: string; exam_type: string; batch_semester?: number },
   ) {
     this.requireAction(req, 'publish_results');
-    return this.examCell.publishResults(this.tenant(req), dto);
+    if (
+      !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(
+        dto.course_id ?? '',
+      ) ||
+      typeof dto.exam_type !== 'string' ||
+      !dto.exam_type.trim()
+    ) {
+      throw new BadRequestException(
+        'A valid course and examination type are required',
+      );
+    }
+    const tenantId = this.tenant(req);
+    const session = await this.resultControl.getSessionForCourse(
+      tenantId,
+      dto.course_id,
+      dto.exam_type,
+    );
+    if (!session)
+      throw new BadRequestException(
+        'Create and approve a Result Control session before publication',
+      );
+    if (
+      dto.batch_semester !== undefined &&
+      dto.batch_semester !== Number(session.semester)
+    )
+      throw new BadRequestException(
+        'The examination session semester does not match',
+      );
+    const result = await this.resultControl.declareSession(
+      tenantId,
+      session.session_id,
+      req.user.user_id,
+      {},
+    );
+    return { ...result, published: result.declared };
   }
 
   @Get('re-evaluations')
@@ -405,7 +440,7 @@ export class ExamCellController {
   @Get('re-evaluations/:applicationId')
   reEvaluationDetail(
     @Req() req: { user: AuthUser },
-    @Param('applicationId') applicationId: string,
+    @Param('applicationId', new ParseUUIDPipe()) applicationId: string,
   ) {
     return this.examCell.getReEvaluation(this.tenant(req), applicationId);
   }
@@ -413,7 +448,7 @@ export class ExamCellController {
   @Post('re-evaluations/:applicationId/assign')
   assignReEvaluation(
     @Req() req: { user: AuthUser },
-    @Param('applicationId') applicationId: string,
+    @Param('applicationId', new ParseUUIDPipe()) applicationId: string,
     @Body() dto: AssignReEvaluationDto,
   ) {
     this.requireAction(req, 'publish_results');
@@ -428,7 +463,7 @@ export class ExamCellController {
   @Post('re-evaluations/:applicationId/publish')
   publishReEvaluation(
     @Req() req: { user: AuthUser },
-    @Param('applicationId') applicationId: string,
+    @Param('applicationId', new ParseUUIDPipe()) applicationId: string,
   ) {
     this.requireAction(req, 'publish_results');
     return this.examCell.publishReEvaluation(
@@ -441,7 +476,7 @@ export class ExamCellController {
   @Post('re-evaluations/:applicationId/reject')
   rejectReEvaluation(
     @Req() req: { user: AuthUser },
-    @Param('applicationId') applicationId: string,
+    @Param('applicationId', new ParseUUIDPipe()) applicationId: string,
     @Body() dto: RejectReEvaluationDto,
   ) {
     this.requireAction(req, 'publish_results');
@@ -511,8 +546,14 @@ export class ExamCellController {
     if (!Number.isInteger(parsedSemester) || parsedSemester < 1) {
       throw new BadRequestException('semester must be a positive integer');
     }
-    if (!Number.isInteger(parsedLimit) || parsedLimit < 1 || parsedLimit > 100) {
-      throw new BadRequestException('limit must be an integer between 1 and 100');
+    if (
+      !Number.isInteger(parsedLimit) ||
+      parsedLimit < 1 ||
+      parsedLimit > 100
+    ) {
+      throw new BadRequestException(
+        'limit must be an integer between 1 and 100',
+      );
     }
     return this.semesterResults.topStudents(
       this.tenant(req),
@@ -524,7 +565,7 @@ export class ExamCellController {
   @Get('grade-cards/:gradeCardId/export/pdf')
   async exportGradeCardPdf(
     @Req() req: { user: AuthUser },
-    @Param('gradeCardId') gradeCardId: string,
+    @Param('gradeCardId', new ParseUUIDPipe()) gradeCardId: string,
   ) {
     const file = await this.semesterResults.exportGradeCardPdf(
       this.tenant(req),
@@ -624,7 +665,7 @@ export class ExamCellController {
       ip?: string;
       headers?: Record<string, string | string[] | undefined>;
     },
-    @Param('id') id: string,
+    @Param('id', new ParseUUIDPipe()) id: string,
   ) {
     this.requireAction(req, 'publish_results');
     const forwarded = req.headers?.['x-forwarded-for'];
@@ -643,6 +684,34 @@ export class ExamCellController {
     });
   }
 
+  @Post('transcripts/:id/reissue')
+  reissueTranscript(
+    @Req() req: { user: AuthUser; ip?: string },
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: { reason?: string },
+  ) {
+    this.requireAction(req, 'publish_results');
+    if (
+      typeof dto?.reason !== 'string' ||
+      !dto.reason.trim() ||
+      dto.reason.trim().length > 500
+    ) {
+      throw new BadRequestException(
+        'A reissue reason of 1 to 500 characters is required',
+      );
+    }
+    return this.officialTranscripts.reissue(
+      this.tenant(req),
+      id,
+      {
+        userId: req.user.user_id,
+        role: examCellRoleFromUser(req.user),
+        ip: req.ip,
+      },
+      dto.reason,
+    );
+  }
+
   @Get('result-control/sessions')
   listResultSessions(@Req() req: { user: AuthUser }) {
     return this.resultControl.listSessions(this.tenant(req));
@@ -654,13 +723,17 @@ export class ExamCellController {
     @Body() dto: CreateResultSessionDto,
   ) {
     this.requireAction(req, 'manage_sessions');
-    return this.resultControl.createSession(this.tenant(req), dto);
+    return this.resultControl.createSession(
+      this.tenant(req),
+      dto,
+      req.user.user_id,
+    );
   }
 
   @Get('result-control/sessions/:sessionId')
   getResultSession(
     @Req() req: { user: AuthUser },
-    @Param('sessionId') sessionId: string,
+    @Param('sessionId', new ParseUUIDPipe()) sessionId: string,
   ) {
     return this.resultControl.getSession(this.tenant(req), sessionId);
   }
@@ -668,17 +741,22 @@ export class ExamCellController {
   @Post('result-control/sessions/:sessionId/open-entry')
   openResultEntry(
     @Req() req: { user: AuthUser },
-    @Param('sessionId') sessionId: string,
+    @Param('sessionId', new ParseUUIDPipe()) sessionId: string,
     @Body() dto: OpenResultEntryDto,
   ) {
     this.requireAction(req, 'manage_sessions');
-    return this.resultControl.openEntry(this.tenant(req), sessionId, dto);
+    return this.resultControl.openEntry(
+      this.tenant(req),
+      sessionId,
+      dto,
+      req.user.user_id,
+    );
   }
 
   @Post('result-control/sessions/:sessionId/close-entry')
   closeResultEntry(
     @Req() req: { user: AuthUser },
-    @Param('sessionId') sessionId: string,
+    @Param('sessionId', new ParseUUIDPipe()) sessionId: string,
   ) {
     this.requireAction(req, 'manage_sessions');
     return this.resultControl.closeEntry(this.tenant(req), sessionId);
@@ -687,7 +765,7 @@ export class ExamCellController {
   @Post('result-control/sessions/:sessionId/lock-marks')
   lockResultMarks(
     @Req() req: { user: AuthUser },
-    @Param('sessionId') sessionId: string,
+    @Param('sessionId', new ParseUUIDPipe()) sessionId: string,
   ) {
     this.requireAction(req, 'manage_sessions');
     return this.resultControl.lockMarks(
@@ -700,7 +778,7 @@ export class ExamCellController {
   @Post('result-control/sessions/:sessionId/prepare-declaration')
   prepareResultDeclaration(
     @Req() req: { user: AuthUser },
-    @Param('sessionId') sessionId: string,
+    @Param('sessionId', new ParseUUIDPipe()) sessionId: string,
   ) {
     this.requireAction(req, 'manage_sessions');
     return this.resultControl.prepareForDeclaration(
@@ -713,21 +791,31 @@ export class ExamCellController {
   @Post('result-control/sessions/:sessionId/reopen-entry')
   reopenResultEntry(
     @Req() req: { user: AuthUser },
-    @Param('sessionId') sessionId: string,
+    @Param('sessionId', new ParseUUIDPipe()) sessionId: string,
     @Body() dto: ReopenResultEntryDto,
   ) {
     this.requireAction(req, 'manage_sessions');
-    return this.resultControl.reopenEntry(this.tenant(req), sessionId, dto);
+    return this.resultControl.reopenEntry(
+      this.tenant(req),
+      sessionId,
+      dto,
+      req.user.user_id,
+    );
   }
 
   @Post('result-control/sessions/:sessionId/configure-rules')
   configureResultRules(
     @Req() req: { user: AuthUser },
-    @Param('sessionId') sessionId: string,
+    @Param('sessionId', new ParseUUIDPipe()) sessionId: string,
     @Body() dto: ConfigureSessionRulesDto,
   ) {
     this.requireAction(req, 'manage_sessions');
-    return this.resultControl.configureRules(this.tenant(req), sessionId, dto);
+    return this.resultControl.configureRules(
+      this.tenant(req),
+      sessionId,
+      dto,
+      req.user.user_id,
+    );
   }
 
   @Get('result-control/courses')
@@ -743,7 +831,7 @@ export class ExamCellController {
   @Post('result-control/sessions/:sessionId/formula-audit')
   formulaAudit(
     @Req() req: { user: AuthUser },
-    @Param('sessionId') sessionId: string,
+    @Param('sessionId', new ParseUUIDPipe()) sessionId: string,
   ) {
     this.requireAction(req, 'manage_sessions');
     return this.resultControl.runFormulaAudit(
@@ -756,7 +844,7 @@ export class ExamCellController {
   @Post('result-control/sessions/:sessionId/dean-approval')
   deanApproval(
     @Req() req: { user: AuthUser },
-    @Param('sessionId') sessionId: string,
+    @Param('sessionId', new ParseUUIDPipe()) sessionId: string,
   ) {
     this.requireAction(req, 'manage_sessions');
     return this.resultControl.recordDeanApproval(
@@ -769,7 +857,7 @@ export class ExamCellController {
   @Post('result-control/sessions/:sessionId/apply-grace')
   applySessionGraceMarks(
     @Req() req: { user: AuthUser },
-    @Param('sessionId') sessionId: string,
+    @Param('sessionId', new ParseUUIDPipe()) sessionId: string,
     @Body() dto: { grace_marks: number },
   ) {
     this.requireAction(req, 'publish_results');
@@ -784,7 +872,7 @@ export class ExamCellController {
   @Post('result-control/sessions/:sessionId/process')
   processResultSession(
     @Req() req: { user: AuthUser },
-    @Param('sessionId') sessionId: string,
+    @Param('sessionId', new ParseUUIDPipe()) sessionId: string,
   ) {
     this.requireAction(req, 'manage_sessions');
     return this.resultControl.processSession(
@@ -797,7 +885,7 @@ export class ExamCellController {
   @Post('result-control/sessions/:sessionId/declare')
   declareResultSession(
     @Req() req: { user: AuthUser },
-    @Param('sessionId') sessionId: string,
+    @Param('sessionId', new ParseUUIDPipe()) sessionId: string,
     @Body() dto: DeclareResultSessionDto,
   ) {
     this.requireAction(req, 'publish_results');
@@ -812,7 +900,7 @@ export class ExamCellController {
   @Get('result-control/sessions/:sessionId/reports')
   listSessionReports(
     @Req() req: { user: AuthUser },
-    @Param('sessionId') sessionId: string,
+    @Param('sessionId', new ParseUUIDPipe()) sessionId: string,
   ) {
     return this.resultControl.listSessionReports(this.tenant(req), sessionId);
   }
@@ -838,7 +926,7 @@ export class ExamCellController {
   @Post('sessions/:sessionId/status')
   updateExamSessionStatus(
     @Req() req: { user: AuthUser },
-    @Param('sessionId') sessionId: string,
+    @Param('sessionId', new ParseUUIDPipe()) sessionId: string,
     @Body() dto: { status: string },
   ) {
     this.requireAction(req, 'manage_sessions');
@@ -887,7 +975,7 @@ export class ExamCellController {
   @Post('calendar/events/:eventId/reschedule')
   rescheduleCalendarEvent(
     @Req() req: { user: AuthUser },
-    @Param('eventId') eventId: string,
+    @Param('eventId', new ParseUUIDPipe()) eventId: string,
     @Body() dto: { event_date: string },
   ) {
     this.requireAction(req, 'manage_schedules');
@@ -920,6 +1008,7 @@ export class ExamCellController {
       this.tenant(req),
       dto.semester,
       dto.batch_label,
+      req.user.user_id,
     );
   }
 
@@ -946,7 +1035,7 @@ export class ExamCellController {
   @Post('hall-ticket-approvals/:approvalId/advance')
   advanceHallTicketApproval(
     @Req() req: { user: AuthUser },
-    @Param('approvalId') approvalId: string,
+    @Param('approvalId', new ParseUUIDPipe()) approvalId: string,
     @Body() dto: { action: 'APPROVE' | 'REJECT'; stage?: string },
   ) {
     this.requireAction(req, 'generate_admit_cards');
@@ -1010,7 +1099,7 @@ export class ExamCellController {
   @Post('answer-sheets/:sheetId/status')
   updateAnswerSheetStatus(
     @Req() req: { user: AuthUser },
-    @Param('sheetId') sheetId: string,
+    @Param('sheetId', new ParseUUIDPipe()) sheetId: string,
     @Body() dto: { status: string; evaluator_user_id?: string },
   ) {
     this.requireAction(req, 'manage_sessions');
@@ -1024,15 +1113,52 @@ export class ExamCellController {
   }
 
   @Post('identity/verify')
-  verifyStudentIdentity(
+  async verifyStudentIdentity(
     @Req() req: { user: AuthUser },
     @Body() dto: { qr_payload?: string },
   ) {
     this.requireAction(req, 'manage_seating');
-    return this.enterprise.verifyStudentByQr(
+    const payload = String(dto?.qr_payload ?? '').trim();
+    if (payload.startsWith('FALCON-HALL-TICKET')) {
+      const ticket = await this.examCell.verifyHallTicket(
+        this.tenant(req),
+        req.user.user_id,
+        payload,
+      );
+      const identity = await this.enterprise.verifyStudentByQr(
+        this.tenant(req),
+        req.user.user_id,
+        `student:${ticket.student_user_id}`,
+      );
+      return {
+        ...identity,
+        hall_ticket_verified: true,
+        issue_id: ticket.issue_id,
+        schedule_ids: ticket.schedule_ids,
+      };
+    }
+    const identity = await this.enterprise.verifyStudentByQr(
       this.tenant(req),
       req.user.user_id,
-      dto?.qr_payload ?? '',
+      payload,
+    );
+    return { ...identity, hall_ticket_verified: false };
+  }
+
+  @Post('hall-ticket-issues/:id/revoke')
+  revokeHallTicket(
+    @Req() req: { user: AuthUser },
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: { reason?: string },
+  ) {
+    this.requireAction(req, 'publish_results');
+    if (typeof dto?.reason !== 'string')
+      throw new BadRequestException('A revocation reason is required');
+    return this.examCell.revokeHallTicket(
+      this.tenant(req),
+      id,
+      req.user.user_id,
+      dto.reason,
     );
   }
 
@@ -1058,7 +1184,7 @@ export class ExamCellController {
   @Post('degree-audit/:studentUserId')
   degreeEligibilityAudit(
     @Req() req: { user: AuthUser },
-    @Param('studentUserId') studentUserId: string,
+    @Param('studentUserId', new ParseUUIDPipe()) studentUserId: string,
   ) {
     this.requireAction(req, 'manage_sessions');
     return this.enterprise.runDegreeEligibilityAudit(
@@ -1071,7 +1197,7 @@ export class ExamCellController {
   @Get('students/:studentUserId/timeline')
   studentTimeline(
     @Req() req: { user: AuthUser },
-    @Param('studentUserId') studentUserId: string,
+    @Param('studentUserId', new ParseUUIDPipe()) studentUserId: string,
   ) {
     return this.enterprise.studentExamTimeline(this.tenant(req), studentUserId);
   }
@@ -1091,7 +1217,7 @@ export class ExamCellController {
   @Post('student-documents/:docId/verify')
   verifyStudentDocument(
     @Req() req: { user: AuthUser },
-    @Param('docId') docId: string,
+    @Param('docId', new ParseUUIDPipe()) docId: string,
     @Body() dto: { status: 'VERIFIED' | 'REJECTED' },
   ) {
     this.requireAction(req, 'manage_sessions');
@@ -1205,7 +1331,7 @@ export class ExamCellController {
   @Post('form-windows/:windowId/status')
   updateFormWindowStatus(
     @Req() req: { user: AuthUser },
-    @Param('windowId') windowId: string,
+    @Param('windowId', new ParseUUIDPipe()) windowId: string,
     @Body() dto: { status: 'OPEN' | 'CLOSED' | 'DRAFT' },
   ) {
     this.requireAction(req, 'manage_sessions');
@@ -1220,7 +1346,7 @@ export class ExamCellController {
   @Post('form-windows/:windowId/sync-registrations')
   syncRegistrations(
     @Req() req: { user: AuthUser },
-    @Param('windowId') windowId: string,
+    @Param('windowId', new ParseUUIDPipe()) windowId: string,
     @Body() dto: { semester: number },
   ) {
     this.requireAction(req, 'manage_sessions');
@@ -1248,7 +1374,7 @@ export class ExamCellController {
   @Post('registrations/:registrationId/review')
   reviewRegistration(
     @Req() req: { user: AuthUser },
-    @Param('registrationId') registrationId: string,
+    @Param('registrationId', new ParseUUIDPipe()) registrationId: string,
     @Body() dto: { status: 'APPROVED' | 'REJECTED' },
   ) {
     this.requireAction(req, 'manage_sessions');
@@ -1292,7 +1418,7 @@ export class ExamCellController {
   @Post('question-papers/:qpId/status')
   updateQuestionPaperStatus(
     @Req() req: { user: AuthUser },
-    @Param('qpId') qpId: string,
+    @Param('qpId', new ParseUUIDPipe()) qpId: string,
     @Body() dto: { status: string },
   ) {
     this.requireAction(req, 'manage_qp');
@@ -1389,25 +1515,35 @@ export class ExamCellController {
 
   @Get('dev/status')
   devStatus(@Req() req: { user: AuthUser }) {
-    if (process.env.NODE_ENV === 'production') {
-      throw new BadRequestException('Dev endpoints are disabled in production');
-    }
+    this.assertLocalDevMode();
     return this.dev.status(this.tenant(req));
   }
 
   @Post('dev/bootstrap')
   devBootstrap(@Req() req: { user: AuthUser }) {
-    if (process.env.NODE_ENV === 'production') {
-      throw new BadRequestException('Dev endpoints are disabled in production');
-    }
+    this.assertLocalDevMode();
     return this.dev.bootstrap(this.tenant(req), req.user.user_id);
   }
 
   private tenant(req: { user: AuthUser }) {
-    return req.user.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
+    const tenantId = req.user?.tenant_id?.trim();
+    if (!tenantId)
+      throw new UnauthorizedException('Tenant context is required');
+    return tenantId;
+  }
+
+  private assertLocalDevMode() {
+    if (
+      process.env.NODE_ENV !== 'development' ||
+      process.env.FALCON_EXAM_CELL_DEV_MODE !== 'true'
+    ) {
+      throw new BadRequestException(
+        'Development examination endpoints are disabled',
+      );
+    }
   }
 
   private requireAction(req: { user: AuthUser }, action: ExamCellAction) {
-    assertExamCellAction(examCellRoleFromUser(req.user), action);
+    assertExamCellAction(examCellRolesFromUser(req.user), action);
   }
 }

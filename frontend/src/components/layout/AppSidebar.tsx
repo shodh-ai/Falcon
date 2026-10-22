@@ -30,6 +30,7 @@ export function AppSidebar({
   const pathname = usePathname();
   const allHrefs = collectNavHrefs(navGroups);
   const isExecutivePortal = personaLabel === 'President / VC';
+  const isExamCellPortal = personaLabel === 'Falcon Exam OS';
   const navRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
@@ -110,19 +111,34 @@ export function AppSidebar({
           isExecutivePortal && 'pb-6',
         )}
       >
-        <div className={cn('space-y-4 pb-8', isExecutivePortal && 'space-y-5')}>
-          {navGroups.map((group, groupIndex) => (
-            <div key={group.title}>
-              {!collapsed && (
-                <p
-                  className={cn(
-                    'mb-2 px-3 text-[10px] font-bold uppercase tracking-widest text-sgvu-gold/80',
-                    isExecutivePortal && 'mb-2.5 tracking-[0.18em] text-sgvu-gold/75',
-                  )}
-                >
-                  {group.title}
-                </p>
-              )}
+        <div className={cn('space-y-4 pb-8', isExecutivePortal && 'space-y-5', isExamCellPortal && 'space-y-1.5')}>
+          {navGroups.map((group, groupIndex) => {
+            const groupActive = group.items.some((item) => isNavHrefActive(pathname, item.href, allHrefs));
+            if (isExamCellPortal) {
+              // Specialist workflows live in the section tabs and search. The
+              // landing must remain in the permission-filtered group.
+              const landing = group.items.find((item) => item.href === group.homeHref) ?? group.items[0];
+              if (!landing) return null;
+              const Icon = group.icon ?? landing.icon;
+              return (
+                <div key={group.title}>
+                  <Link
+                    href={landing.href}
+                    title={collapsed ? group.title : undefined}
+                    aria-current={groupActive ? 'location' : undefined}
+                    className={cn(
+                      'flex min-h-11 items-center gap-3 rounded-lg px-3 py-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sgvu-gold focus-visible:ring-offset-2 focus-visible:ring-offset-sgvu-navy',
+                      groupActive ? 'bg-sgvu-gold text-sgvu-navy shadow-sm' : 'text-blue-100 hover:bg-white/10 hover:text-white',
+                      collapsed && 'justify-center px-2',
+                    )}
+                  >
+                    <Icon className="h-5 w-5 shrink-0" aria-hidden />
+                    <span className={collapsed ? 'sr-only' : 'min-w-0 leading-snug'}>{group.title}</span>
+                  </Link>
+                </div>
+              );
+            }
+            const itemList = (
               <ul className={cn('space-y-1', isExecutivePortal && 'space-y-1.5')}>
                 {group.items.map((item) => {
                   const Icon = item.icon;
@@ -141,40 +157,36 @@ export function AppSidebar({
                             ? 'bg-sgvu-gold text-sgvu-navy shadow-md'
                             : cn(
                                 'text-blue-100 hover:bg-white/10 hover:text-white',
-                                isExecutivePortal &&
-                                  'text-blue-100/85 hover:translate-x-0.5 hover:bg-white/8',
+                                isExecutivePortal && 'text-blue-100/85 hover:translate-x-0.5 hover:bg-white/8',
                               ),
                           collapsed && 'justify-center px-2',
                         )}
                       >
-                        <Icon
-                          className={cn(
-                            'h-5 w-5 shrink-0',
-                            isExecutivePortal && 'text-white/90 transition-colors',
-                            active && isExecutivePortal && 'text-white',
-                          )}
-                          strokeWidth={isExecutivePortal ? 1.9 : 2}
-                        />
-                        {!collapsed && (
-                          <span
-                            className={cn(
-                              'min-w-0 flex-1 whitespace-normal break-words leading-snug',
-                              isExecutivePortal && 'tracking-[0.005em]',
-                            )}
-                          >
-                            {item.label}
-                          </span>
-                        )}
+                        <Icon className={cn('h-5 w-5 shrink-0', isExecutivePortal && 'text-white/90 transition-colors', active && isExecutivePortal && 'text-white')} strokeWidth={isExecutivePortal ? 1.9 : 2} />
+                        {!collapsed && <span className={cn('min-w-0 flex-1 whitespace-normal break-words leading-snug', isExecutivePortal && 'tracking-[0.005em]')}>{item.label}</span>}
                       </Link>
                     </li>
                   );
                 })}
               </ul>
+            );
+            return <div key={group.title}>
+              {!collapsed && (
+                <p
+                  className={cn(
+                    'mb-2 px-3 text-[10px] font-bold uppercase tracking-widest text-sgvu-gold/80',
+                    isExecutivePortal && 'mb-2.5 tracking-[0.18em] text-sgvu-gold/75',
+                  )}
+                >
+                  {group.title}
+                </p>
+              )}
+              {itemList}
               {!collapsed && groupIndex < navGroups.length - 1 && (
                 <Separator className={cn('mt-4 bg-white/10', isExecutivePortal && 'mt-5 bg-white/8')} />
               )}
-            </div>
-          ))}
+            </div>;
+          })}
         </div>
       </nav>
     </aside>

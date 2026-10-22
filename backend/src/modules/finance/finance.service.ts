@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { EntityManager, Repository } from 'typeorm';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { FeeDemand } from '../../entities/fee-demand.entity';
 import { Transaction } from '../../entities/transaction.entity';
@@ -31,8 +31,20 @@ export class FinanceService {
     return this.demands.find({ order: { due_date: 'ASC' } });
   }
 
-  async createDemand(dto: CreateFeeDemandDto, tenantId: string) {
-    const saved = await this.demands.save(this.demands.create(dto));
+  async createDemand(
+    dto: CreateFeeDemandDto,
+    tenantId: string,
+    options?: { manager?: EntityManager; notify?: boolean },
+  ) {
+    const demands = options?.manager?.getRepository(FeeDemand) ?? this.demands;
+    const saved = await demands.save(
+      demands.create({ ...dto, tenant_id: tenantId }),
+    );
+    if (options?.notify !== false) this.notifyDemandGenerated(saved, tenantId);
+    return saved;
+  }
+
+  notifyDemandGenerated(saved: FeeDemand, tenantId: string) {
     this.notify.feeGenerated({
       tenantId,
       userId: saved.student_user_id,
@@ -40,7 +52,6 @@ export class FinanceService {
       dueDate: String(saved.due_date),
       feeHead: saved.fee_head,
     });
-    return saved;
   }
 
   async getDashboard(tenantId: string) {
@@ -347,9 +358,12 @@ export class FinanceService {
     return this.demands.save(activeDemand);
   }
 
-  async getPendingDues(studentUserId: string): Promise<FeeDemand[]> {
+  async getPendingDues(
+    studentUserId: string,
+    tenantId: string,
+  ): Promise<FeeDemand[]> {
     const demands = await this.demands.find({
-      where: { student_user_id: studentUserId },
+      where: { student_user_id: studentUserId, tenant_id: tenantId },
       order: { due_date: 'ASC' },
     });
     return demands.filter((d) => {

@@ -1,7 +1,7 @@
 'use client';
 
 import { Select } from '@/components/ui/select';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Loader2, Save, Send, ChevronDown } from 'lucide-react';
 import {
@@ -82,6 +82,7 @@ export default function FacultyGradingPage() {
   const [rows, setRows] = useState<UnifiedMarkRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const submissionPending = useRef(false);
   const [rosterError, setRosterError] = useState<string | null>(null);
 
   const courseOptions = useMemo(() => {
@@ -252,8 +253,8 @@ export default function FacultyGradingPage() {
   async function saveDraft(options?: { silent?: boolean }): Promise<boolean> {
     if (!courseId) return false;
     if (isFacultyDemoEntityId(courseId) || rows.some((r) => isFacultyDemoEntityId(r.student_user_id))) {
-      if (!options?.silent) toast.success('Draft saved successfully (demo)');
-      return true;
+      toast.error('Demonstration marks cannot be saved to the database');
+      return false;
     }
 
     const manualColumns = activeColumns.filter((col) => !col.readOnly);
@@ -315,37 +316,34 @@ export default function FacultyGradingPage() {
   }
 
   async function publishAll() {
-    if (!courseId) return;
+    if (!courseId || submissionPending.current) return;
     if (isFacultyDemoEntityId(courseId) || rows.some((r) => isFacultyDemoEntityId(r.student_user_id))) {
-      toast.success('Marks published to students (demo)');
+      toast.error('Demonstration marks cannot be submitted to the database');
       return;
     }
+    submissionPending.current = true;
     setSaving(true);
     try {
-      await saveDraft({ silent: true });
-
+      if (!await saveDraft({ silent: true })) return;
+      setSaving(true);
       const result = await api.post<{
         published: number;
+        submitted?: number;
         notified_count?: number;
         status?: string;
         message?: string;
       }>(
         `/api/academics/faculty/workspaces/course/${encodeURIComponent(courseId)}/publish-all`,
       );
-
-      if ((result.published ?? 0) === 0) {
-        toast.warning('No marks were published.');
-      } else {
-        const notified = Number(result.notified_count ?? 0);
-        toast.success(
-          `Published marks for course successfully. Notifications sent to ${notified} student${notified === 1 ? '' : 's'}.`,
-        );
-      }
-
+      const published = Number(result.published ?? 0);
+      const submitted = Number(result.submitted ?? 0);
+      if (published + submitted === 0) toast.warning('No draft marks were submitted or published.');
+      else toast.success(result.message ?? `${submitted} marks submitted for Examination Cell review; ${published} quiz marks published.`);
       await reloadMarks();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Publish failed');
+      toast.error(e instanceof Error ? e.message : 'Submission failed');
     } finally {
+      submissionPending.current = false;
       setSaving(false);
     }
   }
@@ -353,7 +351,7 @@ export default function FacultyGradingPage() {
   const isPublishable = rows.some((r) =>
     activeColumns.some((col) => {
       const m = getMarkValue(r, col.id);
-      return m && m.obtained !== null && m.status !== 'PUBLISHED';
+      return !col.readOnly && m && m.obtained !== null && m.status !== 'PUBLISHED' && m.status !== 'PENDING_COE';
     }),
   );
 
@@ -361,7 +359,7 @@ export default function FacultyGradingPage() {
     <FacultyPageShell>
       <FacultyPageHeader
         title="Exams & Grades"
-        description="Conduct examinations and publish grades."
+        description="Enter component marks and submit them for Examination Cell review."
         meta={
           courseId ? (
             <>
@@ -469,7 +467,7 @@ export default function FacultyGradingPage() {
             onClick={() => void publishAll()}
           >
             <Send className="mr-1 h-4 w-4" />
-            Publish All Marks
+            Submit All Draft Marks
           </Button>
         </div>
 
@@ -521,7 +519,7 @@ export default function FacultyGradingPage() {
                               max={col.max}
                               className={`h-8 w-16 text-center ${isLocked || col.readOnly ? 'border-transparent bg-muted/50 text-muted-foreground' : ''}`}
                               value={m?.obtained ?? ''}
-                              disabled={col.readOnly || isLocked}
+                              disabled={saving || col.readOnly || isLocked}
                               onChange={(e) => updateMark(row.student_user_id, col, e.target.value)}
                             />
                             {m?.status && m.status !== 'DRAFT' && (

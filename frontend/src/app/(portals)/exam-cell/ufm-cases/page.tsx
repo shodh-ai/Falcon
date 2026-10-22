@@ -1,7 +1,7 @@
 'use client';
 
 import { Select } from '@/components/ui/select';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -9,6 +9,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { DataTable, type DataTableColumn } from '@/components/ui/DataTable';
 import { useAuthedApi } from '@/lib/api';
+import { ExamCellPageHeader } from '@/components/exam-cell/ExamCellPageHeader';
 
 type UfmCase = {
   case_id: string;
@@ -40,6 +41,9 @@ type CourseOption = {
 };
 
 type LookupType = 'ENROLLMENT' | 'EMAIL' | 'SID';
+type FormOptions = { students: StudentOption[]; courses: CourseOption[]; departments: string[] };
+type OptionsResult = { api: ReturnType<typeof useAuthedApi>; key: string; data: FormOptions; error: string | null };
+type CasesResult = { api: ReturnType<typeof useAuthedApi>; key: string; data: UfmCase[]; error: string | null };
 
 const MONTHS = [
   { value: '1', label: 'January' }, { value: '2', label: 'February' }, { value: '3', label: 'March' },
@@ -51,10 +55,10 @@ const MONTHS = [
 export default function ExamCellUfmPage() {
   const api = useAuthedApi();
   const now = new Date();
-  const [cases, setCases] = useState<UfmCase[]>([]);
-  const [students, setStudents] = useState<StudentOption[]>([]);
-  const [courses, setCourses] = useState<CourseOption[]>([]);
-  const [departments, setDepartments] = useState<string[]>([]);
+  const [optionsResult, setOptionsResult] = useState<OptionsResult | null>(null);
+  const [casesResult, setCasesResult] = useState<CasesResult | null>(null);
+  const [optionsRetry, setOptionsRetry] = useState(0);
+  const [casesRetry, setCasesRetry] = useState(0);
   const [semester, setSemester] = useState('4');
   const [department, setDepartment] = useState('');
   const [filterYear, setFilterYear] = useState(String(now.getFullYear()));
@@ -68,52 +72,51 @@ export default function ExamCellUfmPage() {
     course_id: '',
   });
   const [submitting, setSubmitting] = useState(false);
-  const [loadingCases, setLoadingCases] = useState(true);
-
-  const loadOptions = useCallback(async () => {
-    try {
-      const qs = new URLSearchParams({ semester });
-      if (department) qs.set('department', department);
-      const options = await api.get<{ students: StudentOption[]; courses: CourseOption[]; departments: string[] }>(
-        `/api/exam-cell/ufm-cases/form-options?${qs}`,
-      );
-      setStudents(options.students ?? []);
-      setCourses(options.courses ?? []);
-      setDepartments(options.departments ?? []);
-      setForm((f) => ({
-        ...f,
-        student_pick: options.students?.some((s) => s.user_id === f.student_pick) ? f.student_pick : '',
-        course_id: options.courses?.some((c) => c.course_id === f.course_id) ? f.course_id : '',
-      }));
-    } catch {
-      setStudents([]);
-      setCourses([]);
-      setDepartments([]);
-    }
-  }, [api, semester, department]);
-
-  const loadCases = useCallback(async () => {
-    setLoadingCases(true);
-    try {
-      const qs = new URLSearchParams();
-      if (filterYear) qs.set('year', filterYear);
-      if (filterMonth) qs.set('month', filterMonth);
-      const suffix = qs.toString() ? `?${qs}` : '';
-      setCases(await api.get<UfmCase[]>(`/api/exam-cell/ufm-cases${suffix}`));
-    } catch {
-      toast.error('Could not load UFM case history');
-    } finally {
-      setLoadingCases(false);
-    }
-  }, [api, filterYear, filterMonth]);
+  const submissionPending = useRef(false);
+  const optionsKey = `${semester}:${department}:${optionsRetry}`;
+  const casesKey = `${filterYear}:${filterMonth}:${casesRetry}`;
+  const currentOptions = optionsResult?.api === api && optionsResult.key === optionsKey ? optionsResult : null;
+  const currentCases = casesResult?.api === api && casesResult.key === casesKey ? casesResult : null;
+  const loadingOptions = !currentOptions;
+  const optionsError = currentOptions?.error;
+  const students = currentOptions?.data.students ?? [];
+  const courses = currentOptions?.data.courses ?? [];
+  const departments = currentOptions?.data.departments ?? [];
+  const cases = currentCases?.data ?? [];
+  const loadingCases = !currentCases;
+  const casesError = currentCases?.error;
+  const courseSelectionInvalid = Boolean(form.course_id) && !courses.some((course) => course.course_id === form.course_id);
+  const selectedStudent = students.some((student) => student.user_id === form.student_pick) ? form.student_pick : '';
 
   useEffect(() => {
-    void loadOptions().catch(() => toast.error('Could not load student list — restart backend after npm run build'));
-  }, [loadOptions]);
+    let current = true;
+    const qs = new URLSearchParams({ semester });
+    if (department) qs.set('department', department);
+    void api.get<FormOptions>(`/api/exam-cell/ufm-cases/form-options?${qs}`)
+      .then((options) => {
+        if (current) setOptionsResult({ api, key: optionsKey, data: { students: options.students ?? [], courses: options.courses ?? [], departments: options.departments ?? [] }, error: null });
+      })
+      .catch((error: unknown) => {
+        if (current) setOptionsResult({ api, key: optionsKey, data: { students: [], courses: [], departments: [] }, error: error instanceof Error ? error.message : 'Could not load student and course options' });
+      });
+    return () => { current = false; };
+  }, [api, semester, department, optionsKey]);
 
   useEffect(() => {
-    void loadCases();
-  }, [loadCases]);
+    let current = true;
+    const qs = new URLSearchParams();
+    if (filterYear) qs.set('year', filterYear);
+    if (filterMonth) qs.set('month', filterMonth);
+    const suffix = qs.toString() ? `?${qs}` : '';
+    void api.get<UfmCase[]>(`/api/exam-cell/ufm-cases${suffix}`)
+      .then((data) => {
+        if (current) setCasesResult({ api, key: casesKey, data, error: null });
+      })
+      .catch((error: unknown) => {
+        if (current) setCasesResult({ api, key: casesKey, data: [], error: error instanceof Error ? error.message : 'Could not load UFM case history' });
+      });
+    return () => { current = false; };
+  }, [api, filterYear, filterMonth, casesKey]);
 
   const lookupPlaceholder = useMemo(() => {
     if (lookupType === 'EMAIL') return 'student@sgvu.edu.in';
@@ -122,7 +125,8 @@ export default function ExamCellUfmPage() {
   }, [lookupType]);
 
   async function logCase() {
-    const studentRef = form.student_ref.trim() || form.student_pick.trim();
+    if (submissionPending.current || loadingOptions || optionsError || courseSelectionInvalid) return;
+    const studentRef = form.student_ref.trim() || selectedStudent;
     if (!studentRef) {
       toast.error('Select a student or enter their identifier');
       return;
@@ -132,6 +136,7 @@ export default function ExamCellUfmPage() {
       return;
     }
     const courseCode = courses.find((c) => c.course_id === form.course_id)?.course_code;
+    submissionPending.current = true;
     setSubmitting(true);
     try {
       await api.post('/api/exam-cell/ufm-cases', {
@@ -146,10 +151,11 @@ export default function ExamCellUfmPage() {
           : 'UFM logged — marks zeroed & grade card withheld',
       );
       setForm({ student_pick: '', student_ref: '', description: '', penalty_applied: 'Exam cancelled — UFM', course_id: '' });
-      await loadCases();
+      setCasesRetry((retry) => retry + 1);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to log UFM case');
     } finally {
+      submissionPending.current = false;
       setSubmitting(false);
     }
   }
@@ -209,11 +215,10 @@ export default function ExamCellUfmPage() {
     <div className="mx-auto max-w-6xl space-y-5 p-4 md:p-6">
       <Card className="border-sgvu-navy/10 bg-white shadow-sm">
         <CardContent className="p-5 md:p-6">
-          <p className="text-sm font-semibold text-sgvu-gold">Falcon Exam OS</p>
-          <h1 className="text-2xl font-bold text-sgvu-navy">UFM Malpractice Desk</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Step 1: Select semester → Step 2: Pick department & student → Step 3: Choose course scope → Log case.
-          </p>
+          <ExamCellPageHeader
+            pageId="ufm-cases"
+            subtitle="Step 1: Select semester → Step 2: Pick department & student → Step 3: Choose course scope → Log case."
+          />
         </CardContent>
       </Card>
 
@@ -226,10 +231,23 @@ export default function ExamCellUfmPage() {
             </p>
           </div>
 
+          {loadingOptions && <p role="status" className="text-sm text-muted-foreground">Loading student and course options…</p>}
+          {optionsError && (
+            <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-900">
+              <p>Could not load student and course options: {optionsError}</p>
+              <Button variant="outline" size="sm" className="mt-2" onClick={() => setOptionsRetry((retry) => retry + 1)}>Retry form options</Button>
+            </div>
+          )}
+          {!loadingOptions && courseSelectionInvalid && <p role="alert" className="text-sm text-red-900">The selected course is no longer available. Choose a course scope before logging a case.</p>}
+
           <div className="grid gap-4 sm:grid-cols-3">
             <div className="flex flex-col gap-1.5">
               <label className={labelClass}>1. Semester</label>
-              <Select className={fieldClass} value={semester} onChange={(e) => setSemester(e.target.value)}>
+              <Select aria-label="UFM semester" disabled={submitting} className={fieldClass} value={semester} onChange={(e) => {
+                setSemester(e.target.value);
+                setDepartment('');
+                setForm((current) => ({ ...current, student_pick: '', course_id: '' }));
+              }}>
                 {[1, 2, 3, 4, 5, 6, 7, 8].map((s) => (
                   <option key={s} value={String(s)}>
                     Semester {s}
@@ -240,9 +258,14 @@ export default function ExamCellUfmPage() {
             <div className="flex flex-col gap-1.5">
               <label className={labelClass}>2. Department</label>
               <Select
+                aria-label="UFM department"
+                disabled={submitting || loadingOptions || Boolean(optionsError)}
                 className={fieldClass}
                 value={department || 'ALL'}
-                onChange={(e) => setDepartment(e.target.value === 'ALL' ? '' : e.target.value)}
+                onChange={(e) => {
+                  setDepartment(e.target.value === 'ALL' ? '' : e.target.value);
+                  setForm((current) => ({ ...current, student_pick: '', course_id: '' }));
+                }}
               >
                 <option value="ALL">All departments</option>
                 {departments.map((d) => (
@@ -255,12 +278,15 @@ export default function ExamCellUfmPage() {
             <div className="flex flex-col gap-1.5">
               <label className={labelClass}>3. Course (optional)</label>
               <Select
+                aria-label="UFM course scope"
+                disabled={submitting || loadingOptions || Boolean(optionsError)}
                 className={fieldClass}
-                value={form.course_id || 'ALL'}
+                value={courseSelectionInvalid ? '' : form.course_id || 'ALL'}
                 onChange={(e) =>
                   setForm((f) => ({ ...f, course_id: e.target.value === 'ALL' ? '' : e.target.value }))
                 }
               >
+                {courseSelectionInvalid && <option value="">Choose course scope</option>}
                 <option value="ALL">All courses — zero all marks</option>
                 {courses.map((c) => (
                   <option key={c.course_id} value={c.course_id}>
@@ -275,8 +301,10 @@ export default function ExamCellUfmPage() {
             <div className="flex flex-col gap-1.5">
               <label className={labelClass}>Student (from filtered list)</label>
               <Select
+                aria-label="UFM student"
+                disabled={submitting || loadingOptions || Boolean(optionsError)}
                 className={fieldClass}
-                value={form.student_pick || undefined}
+                value={selectedStudent || undefined}
                 placeholder="Select student…"
                 onChange={(e) => setForm((f) => ({ ...f, student_pick: e.target.value, student_ref: '' }))}
               >
@@ -293,6 +321,8 @@ export default function ExamCellUfmPage() {
               <label className={labelClass}>Or look up by identifier</label>
               <div className="grid grid-cols-[9rem_1fr] gap-2">
                 <Select
+                  aria-label="UFM identifier type"
+                  disabled={submitting}
                   className={fieldClass}
                   value={lookupType}
                   onChange={(e) => setLookupType(e.target.value as LookupType)}
@@ -302,6 +332,8 @@ export default function ExamCellUfmPage() {
                   <option value="SID">Student ID</option>
                 </Select>
                 <Input
+                  aria-label="UFM student identifier"
+                  disabled={submitting}
                   className="h-10 rounded-lg border-sgvu-navy/20 focus-visible:ring-sgvu-gold/40"
                   placeholder={lookupPlaceholder}
                   value={form.student_ref}
@@ -315,6 +347,8 @@ export default function ExamCellUfmPage() {
             <div className="flex flex-col gap-1.5 md:col-span-2">
               <label className={labelClass}>Incident description</label>
               <textarea
+                aria-label="UFM incident description"
+                disabled={submitting}
                 className="min-h-[96px] w-full rounded-lg border border-sgvu-navy/20 bg-white px-3 py-2.5 text-sm text-sgvu-navy shadow-none transition-colors hover:border-sgvu-navy/40 focus:border-sgvu-gold focus:outline-none focus:ring-2 focus:ring-sgvu-gold/25"
                 placeholder="Describe what happened during the exam…"
                 value={form.description}
@@ -324,6 +358,8 @@ export default function ExamCellUfmPage() {
             <div className="flex flex-col gap-1.5 md:col-span-2">
               <label className={labelClass}>Penalty</label>
               <Input
+                aria-label="UFM penalty"
+                disabled={submitting}
                 className="h-10 rounded-lg border-sgvu-navy/20 focus-visible:ring-sgvu-gold/40"
                 placeholder="Exam cancelled — UFM"
                 value={form.penalty_applied}
@@ -337,7 +373,7 @@ export default function ExamCellUfmPage() {
               variant="outline"
               className={btnPrimary}
               onClick={() => void logCase()}
-              disabled={submitting}
+              disabled={submitting || loadingOptions || Boolean(optionsError) || courseSelectionInvalid}
             >
               {submitting ? 'Logging UFM…' : 'Log UFM & trigger auto-penalties'}
             </Button>
@@ -357,7 +393,7 @@ export default function ExamCellUfmPage() {
             <div className="flex flex-wrap gap-3">
               <div className="flex flex-col gap-1.5">
                 <label className={labelClass}>Year</label>
-                <Select className={`${fieldClass} w-[7.5rem]`} value={filterYear} onChange={(e) => setFilterYear(e.target.value)}>
+                <Select aria-label="UFM history year" className={`${fieldClass} w-[7.5rem]`} value={filterYear} onChange={(e) => setFilterYear(e.target.value)}>
                   {[now.getFullYear(), now.getFullYear() - 1].map((y) => (
                     <option key={y} value={String(y)}>
                       {y}
@@ -368,6 +404,7 @@ export default function ExamCellUfmPage() {
               <div className="flex flex-col gap-1.5">
                 <label className={labelClass}>Period</label>
                 <Select
+                  aria-label="UFM history period"
                   className={`${fieldClass} w-[11rem]`}
                   value={filterMonth || 'RECENT'}
                   onChange={(e) => setFilterMonth(e.target.value === 'RECENT' ? '' : e.target.value)}
@@ -384,8 +421,13 @@ export default function ExamCellUfmPage() {
           </div>
 
           {loadingCases ? (
-            <div className="rounded-xl border border-dashed border-sgvu-navy/20 px-4 py-10 text-center text-sm text-muted-foreground">
+            <div role="status" className="rounded-xl border border-dashed border-sgvu-navy/20 px-4 py-10 text-center text-sm text-muted-foreground">
               Loading case history…
+            </div>
+          ) : casesError ? (
+            <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-900">
+              <p>Could not load UFM case history: {casesError}</p>
+              <Button variant="outline" size="sm" className="mt-2" onClick={() => setCasesRetry((retry) => retry + 1)}>Retry case history</Button>
             </div>
           ) : cases.length === 0 ? (
             <div className="rounded-xl border border-dashed border-sgvu-navy/20 px-4 py-10 text-center text-sm text-muted-foreground">

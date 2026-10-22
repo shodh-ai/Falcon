@@ -1,3 +1,4 @@
+import { assertStudentResultsAvailable } from '../exam-cell/student-result-hold';
 import {
   BadRequestException,
   ForbiddenException,
@@ -15,6 +16,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { TransportService } from '../transport/transport.service';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
+import { StudentPortalService } from '../student-portal/student-portal.service';
 
 const DEFAULT_TENANT = 'a0000000-0000-4000-8000-000000000001';
 const UNIVERSITY_PAN = 'AAECS1234F';
@@ -27,6 +29,7 @@ export class ParentService {
     private readonly config: ConfigService,
     private readonly transport: TransportService,
     private readonly notify: NotificationEmitterService,
+    private readonly studentPortal: StudentPortalService,
   ) {}
 
   async requestOtp(mobile: string) {
@@ -120,18 +123,26 @@ export class ParentService {
     reqUser: { parent_mobile?: string; auth_type?: string },
     queryMobile?: string,
   ) {
-    if (reqUser?.auth_type === 'parent' && reqUser.parent_mobile)
-      return reqUser.parent_mobile;
-    return queryMobile ?? '';
+    if (reqUser?.auth_type !== 'parent' || !reqUser.parent_mobile) {
+      throw new ForbiddenException(
+        'An authenticated parent session is required',
+      );
+    }
+    // Query parameters never select another parent's mobile identity.
+    void queryMobile;
+    return reqUser.parent_mobile;
   }
 
   async assertChildLinked(parentMobile: string, studentUserId: string) {
-    const rows = await this.dataSource.query(
-      `SELECT 1 FROM parent_student_links WHERE parent_mobile = $1 AND student_user_id = $2`,
+    const rows = await this.dataSource.query<Array<{ tenant_id: string }>>(
+      `SELECT l.tenant_id FROM parent_student_links l
+       JOIN users u ON u.user_id = l.student_user_id AND u.tenant_id = l.tenant_id
+       WHERE l.parent_mobile = $1 AND l.student_user_id = $2`,
       [parentMobile, studentUserId],
     );
-    if (!rows[0])
+    if (!rows[0]?.tenant_id)
       throw new ForbiddenException('Not authorized to view this student');
+    return rows[0].tenant_id;
   }
 
   async getChildOverview(parentMobile: string) {
@@ -333,7 +344,8 @@ export class ParentService {
 
   async getMarksForParent(parentMobile: string, studentUserId?: string) {
     const id = await this.resolveStudentId(parentMobile, studentUserId);
-    return this.getMarks(id);
+    const tenantId = await this.assertChildLinked(parentMobile, id);
+    return this.getMarks(id, tenantId);
   }
 
   async getFeeDuesForParent(parentMobile: string, studentUserId?: string) {
@@ -356,31 +368,39 @@ export class ParentService {
   }
 
   async getAcademicsSummary(parentMobile: string, studentUserId: string) {
-    await this.assertChildLinked(parentMobile, studentUserId);
+    const tenantId = await this.assertChildLinked(parentMobile, studentUserId);
+    await assertStudentResultsAvailable(
+      this.dataSource,
+      tenantId,
+      studentUserId,
+    );
 
     const marksProgression = await this.query(
       `SELECT c.course_code, c.course_name,
-              MAX(m.marks_obtained) FILTER (WHERE m.exam_type IN ('MID_TERM', 'CAT1', 'INTERNAL')) AS mid_term,
-              MAX(m.max_marks) FILTER (WHERE m.exam_type IN ('MID_TERM', 'CAT1', 'INTERNAL')) AS mid_max,
-              MAX(m.marks_obtained) FILTER (WHERE m.exam_type IN ('END_TERM', 'CAT2')) AS end_term,
-              MAX(m.max_marks) FILTER (WHERE m.exam_type IN ('END_TERM', 'CAT2')) AS end_max
+              MAX(COALESCE(retake.marks_obtained, m.marks_obtained)) FILTER (WHERE m.exam_type IN ('MID_TERM', 'CAT1', 'INTERNAL')) AS mid_term,
+              MAX(COALESCE(retake.max_marks, m.max_marks)) FILTER (WHERE m.exam_type IN ('MID_TERM', 'CAT1', 'INTERNAL')) AS mid_max,
+              MAX(COALESCE(retake.marks_obtained, m.marks_obtained)) FILTER (WHERE m.exam_type IN ('END_TERM', 'CAT2')) AS end_term,
+              MAX(COALESCE(retake.max_marks, m.max_marks)) FILTER (WHERE m.exam_type IN ('END_TERM', 'CAT2')) AS end_max
        FROM academic_marks m
-       JOIN academic_courses c ON c.course_id = m.course_id
-       WHERE m.student_user_id = $1 AND m.status = 'PUBLISHED'
+       JOIN academic_courses c ON c.course_id = m.course_id AND c.tenant_id = m.tenant_id
+       LEFT JOIN exam_backlog_current_results retake ON retake.tenant_id = m.tenant_id
+         AND retake.student_user_id = m.student_user_id AND retake.course_id = m.course_id
+         AND retake.source_exam_type = m.exam_type
+       WHERE m.student_user_id = $1 AND m.tenant_id = $2 AND m.status = 'PUBLISHED'
        GROUP BY c.course_code, c.course_name
        ORDER BY c.course_code`,
-      [studentUserId],
+      [studentUserId, tenantId],
     );
 
     const sgpaRows = await this.query<{ sgpa: string | null }>(
       `SELECT ROUND(
-         SUM(e.grade_points * c.credits) FILTER (WHERE e.status = 'COMPLETED' AND e.grade_points IS NOT NULL)
-         / NULLIF(SUM(c.credits) FILTER (WHERE e.status = 'COMPLETED' AND e.grade_points IS NOT NULL), 0),
+         SUM(e.grade_points * c.credits) FILTER (WHERE e.status IN ('COMPLETED','FAILED') AND e.grade_points IS NOT NULL)
+         / NULLIF(SUM(c.credits) FILTER (WHERE e.status IN ('COMPLETED','FAILED') AND e.grade_points IS NOT NULL), 0),
        2)::text AS sgpa
        FROM student_course_enrollments e
-       JOIN academic_courses c ON c.course_id = e.course_id
-       WHERE e.student_user_id = $1`,
-      [studentUserId],
+       JOIN academic_courses c ON c.course_id = e.course_id AND c.tenant_id = e.tenant_id
+       WHERE e.student_user_id = $1 AND e.tenant_id = $2`,
+      [studentUserId, tenantId],
     );
 
     const attendance = await this.getAttendance(studentUserId);
@@ -396,10 +416,11 @@ export class ParentService {
        FROM exam_applications a
        JOIN academic_subjects sub ON sub.subject_id = a.subject_id
        WHERE a.student_user_id = $1
+         AND a.tenant_id = $2 AND a.published_at IS NOT NULL
          AND a.application_type = 'RE_EVALUATION'
          AND a.status = 'COMPLETED'
        ORDER BY a.published_at DESC NULLS LAST`,
-      [studentUserId],
+      [studentUserId, tenantId],
     );
 
     return {
@@ -408,13 +429,24 @@ export class ParentService {
       attendance_summary: attendance,
       revaluation_reports: revaluationReports,
       exam_reports: await this.query(
-        `SELECT r.report_id, r.exam_type, r.marks_obtained, r.max_marks, r.percent, r.grade,
-                r.result_status, r.report_summary, r.declared_at, c.course_code, c.course_name
+        `SELECT r.report_id, r.exam_type,
+                COALESCE(retake.marks_obtained, r.marks_obtained) AS marks_obtained,
+                COALESCE(retake.max_marks, r.max_marks) AS max_marks,
+                COALESCE(retake.percent, r.percent) AS percent,
+                COALESCE(retake.grade, r.grade) AS grade,
+                COALESCE(retake.result_status, r.result_status) AS result_status,
+                CASE WHEN retake.source_report_id IS NULL THEN r.report_summary ELSE
+                  c.course_name || ' ' || r.exam_type || ': ' || retake.marks_obtained::text || '/' || retake.max_marks::text || ' — Grade ' || retake.grade END AS report_summary,
+                COALESCE(retake.declared_at, r.declared_at) AS declared_at,
+                retake.selected_attempt_id, c.course_code, c.course_name
          FROM student_exam_reports r
-         JOIN academic_courses c ON c.course_id = r.course_id
-         WHERE r.student_user_id = $1
-         ORDER BY r.declared_at DESC`,
-        [studentUserId],
+         JOIN academic_courses c ON c.course_id = r.course_id AND c.tenant_id = r.tenant_id
+         JOIN exam_result_sessions session ON session.session_id = r.session_id AND session.tenant_id = r.tenant_id AND session.declared_at IS NOT NULL
+         LEFT JOIN exam_backlog_current_results retake ON retake.tenant_id = r.tenant_id
+           AND retake.student_user_id = r.student_user_id AND retake.source_report_id = r.report_id
+         WHERE r.student_user_id = $1 AND r.tenant_id = $2
+         ORDER BY COALESCE(retake.declared_at, r.declared_at) DESC`,
+        [studentUserId, tenantId],
       ),
     };
   }
@@ -578,40 +610,12 @@ export class ParentService {
     studentUserId: string,
     demandId: string,
   ) {
-    await this.assertChildLinked(parentMobile, studentUserId);
-
-    const rows = await this.query<{
-      demand_id: string;
-      fee_head: string;
-      total_amount: string;
-      paid_amount: string;
-      status: string;
-    }>(
-      `SELECT demand_id, fee_head, total_amount, paid_amount, status
-       FROM finance_fee_demands WHERE demand_id = $1 AND student_user_id = $2`,
-      [demandId, studentUserId],
+    const tenantId = await this.assertChildLinked(parentMobile, studentUserId);
+    return this.studentPortal.createPaymentOrder(
+      studentUserId,
+      demandId,
+      tenantId,
     );
-    const demand = rows[0];
-    if (!demand) throw new NotFoundException('Fee demand not found');
-    if (demand.status === 'PAID') throw new BadRequestException('Already paid');
-
-    const outstanding = Math.max(
-      0,
-      Number(demand.total_amount) - Number(demand.paid_amount ?? 0),
-    );
-    if (outstanding <= 0) throw new BadRequestException('Nothing due');
-
-    const orderId = `order_parent_${demandId.replace(/-/g, '').slice(0, 10)}_${Date.now()}`;
-    return {
-      order_id: orderId,
-      demand_id: demandId,
-      amount_inr: outstanding,
-      amount_paise: Math.round(outstanding * 100),
-      currency: 'INR',
-      fee_head: demand.fee_head,
-      razorpay_key: process.env.RAZORPAY_KEY_ID ?? 'rzp_test_FALCON_CAMPUS',
-      mock: true,
-    };
   }
 
   async confirmPayment(
@@ -619,55 +623,26 @@ export class ParentService {
     studentUserId: string,
     demandId: string,
     gatewayPaymentId?: string,
+    checkout?: { order_id?: string; signature?: string },
   ) {
-    await this.assertChildLinked(parentMobile, studentUserId);
-
-    const rows = await this.query<{
-      demand_id: string;
-      total_amount: string;
-      paid_amount: string;
-      status: string;
-    }>(
-      `SELECT * FROM finance_fee_demands WHERE demand_id = $1 AND student_user_id = $2`,
-      [demandId, studentUserId],
+    const tenantId = await this.assertChildLinked(parentMobile, studentUserId);
+    if (!gatewayPaymentId?.trim())
+      throw new BadRequestException('payment_id is required');
+    const result = await this.studentPortal.confirmVerifiedPayment(
+      studentUserId,
+      tenantId,
+      {
+        demand_id: demandId,
+        payment_id: gatewayPaymentId,
+        order_id: checkout?.order_id,
+        signature: checkout?.signature,
+      },
     );
-    const demand = rows[0];
-    if (!demand) throw new BadRequestException('Fee demand not found');
-    if (demand.status === 'PAID')
-      return { already_paid: true, demand_id: demandId };
-
-    const outstanding = Math.max(
-      0,
-      Number(demand.total_amount) - Number(demand.paid_amount ?? 0),
-    );
-    const paymentId = gatewayPaymentId ?? `pay_parent_${Date.now()}`;
-
-    await this.query(
-      `INSERT INTO finance_transactions (
-         student_user_id, demand_id, gateway, gateway_payment_id, gateway_reference,
-         amount, status, payment_mode, receipt_url
-       ) VALUES ($1, $2, 'RAZORPAY', $3, $3, $4, 'SUCCESS', 'UPI', $5)`,
-      [
-        studentUserId,
-        demandId,
-        paymentId,
-        outstanding,
-        `/receipts/${paymentId}.pdf`,
-      ],
-    );
-
-    await this.query(
-      `UPDATE finance_fee_demands
-       SET paid_amount = total_amount, status = 'PAID', updated_at = NOW()
-       WHERE demand_id = $1`,
-      [demandId],
-    );
-
     return {
-      paid: true,
+      ...result,
+      paid: result.success === true,
       demand_id: demandId,
-      payment_id: paymentId,
-      amount: outstanding,
+      payment_id: gatewayPaymentId,
     };
   }
 
@@ -815,13 +790,36 @@ export class ParentService {
     );
   }
 
-  getMarks(studentUserId: string) {
+  async getMarks(studentUserId: string, tenantId?: string) {
+    if (!tenantId) {
+      const students = await this.query<{ tenant_id: string }>(
+        'SELECT tenant_id FROM users WHERE user_id = $1',
+        [studentUserId],
+      );
+      tenantId = students[0]?.tenant_id;
+    }
+    if (!tenantId) throw new NotFoundException('Student not found');
+    await assertStudentResultsAvailable(
+      this.dataSource,
+      tenantId,
+      studentUserId,
+    );
     return this.query(
-      `SELECT c.course_code, c.course_name, e.semester, e.grade, e.grade_points
+      `SELECT c.course_code, c.course_name, e.semester, e.grade, e.grade_points,
+              COALESCE(retakes.attempts, '[]'::jsonb) AS published_retakes
        FROM student_course_enrollments e
-       JOIN academic_courses c ON c.course_id = e.course_id
-       WHERE e.student_user_id = $1 ORDER BY e.semester DESC, c.course_code`,
-      [studentUserId],
+       JOIN academic_courses c ON c.course_id = e.course_id AND c.tenant_id = e.tenant_id
+       LEFT JOIN LATERAL (
+         SELECT jsonb_agg(jsonb_build_object('source_exam_type', current_result.source_exam_type,
+           'selected_attempt_id', current_result.selected_attempt_id, 'marks_obtained', current_result.marks_obtained,
+           'max_marks', current_result.max_marks, 'grade', current_result.grade,
+           'result_status', current_result.result_status)) AS attempts
+         FROM exam_backlog_current_results current_result
+         WHERE current_result.tenant_id = e.tenant_id AND current_result.student_user_id = e.student_user_id
+           AND current_result.course_id = e.course_id AND current_result.semester = e.semester
+       ) retakes ON TRUE
+       WHERE e.student_user_id = $1 AND e.tenant_id = $2 ORDER BY e.semester DESC, c.course_code`,
+      [studentUserId, tenantId],
     );
   }
 

@@ -1,3 +1,4 @@
+import { assertStudentResultsAvailable } from '../exam-cell/student-result-hold';
 import {
   BadRequestException,
   ConflictException,
@@ -158,8 +159,42 @@ export class AcademicsService {
     return this.attendance.save(rows);
   }
 
-  listResultsForStudent(studentUserId: string) {
-    return this.results.find({ where: { student_user_id: studentUserId } });
+  listResultsForStudent(studentUserId: string, tenantId?: string) {
+    if (!tenantId) throw new ForbiddenException('Tenant context is required');
+    return assertStudentResultsAvailable(
+      this.results.manager,
+      tenantId,
+      studentUserId,
+    ).then(() =>
+      this.results.manager.query<Array<Record<string, unknown>>>(
+        `SELECT r.*, COALESCE(r.subject_id, mapped.subject_id) AS subject_id,
+              mapped.subject_name, mapped.subject_code,
+              COALESCE(br.marks_obtained, r.marks_obtained) AS marks_obtained,
+              COALESCE(br.max_marks, r.max_marks) AS max_marks,
+              COALESCE(br.grade, r.grade) AS grade,
+              COALESCE(br.grade_points, r.grade_points) AS grade_points,
+              br.result_status, br.selected_attempt_id
+       FROM academic_exam_results r
+       LEFT JOIN academic_courses c ON c.course_id = r.course_id AND c.tenant_id = r.tenant_id
+       LEFT JOIN exam_backlog_current_results br ON br.source_result_id = r.result_id
+         AND br.tenant_id = r.tenant_id AND br.student_user_id = r.student_user_id
+         AND br.selected_attempt_id IS NOT NULL
+       LEFT JOIN LATERAL (
+         SELECT MIN(sub.subject_id) AS subject_id,
+                MIN(sub.subject_name) AS subject_name, MIN(sub.subject_code) AS subject_code
+         FROM academic_subjects sub
+         WHERE sub.subject_id = r.subject_id
+           OR (r.subject_id IS NULL AND sub.subject_code = c.course_code
+           AND EXISTS (SELECT 1 FROM student_course_enrollments e
+             WHERE e.tenant_id = r.tenant_id AND e.student_user_id = r.student_user_id
+               AND e.course_id = r.course_id AND e.semester = sub.semester))
+         HAVING COUNT(DISTINCT sub.subject_id) = 1
+       ) mapped ON TRUE
+       WHERE r.student_user_id = $1 AND r.tenant_id = $2 AND r.status = 'PUBLISHED'
+       ORDER BY r.published_at DESC`,
+        [studentUserId, tenantId],
+      ),
+    );
   }
 
   listGradingPolicies() {
@@ -263,10 +298,12 @@ export class AcademicsService {
     const initialEnrollments = await this.courseEnrollments.find({
       where: { student_user_id: studentUserId, status: 'ENROLLED' },
     });
-    const student = initialEnrollments.length === 0
-      ? await this.users.findOne({ where: { user_id: studentUserId } })
-      : null;
-    const tenantId = initialEnrollments[0]?.tenant_id ?? student?.tenant_id ?? null;
+    const student =
+      initialEnrollments.length === 0
+        ? await this.users.findOne({ where: { user_id: studentUserId } })
+        : null;
+    const tenantId =
+      initialEnrollments[0]?.tenant_id ?? student?.tenant_id ?? null;
     const empty = {
       tenantId,
       courseIds: [] as string[],
@@ -278,7 +315,11 @@ export class AcademicsService {
 
     await this.enrollmentSync.syncStudent(tenantId, studentUserId);
     const enrolled = await this.courseEnrollments.find({
-      where: { tenant_id: tenantId, student_user_id: studentUserId, status: 'ENROLLED' },
+      where: {
+        tenant_id: tenantId,
+        student_user_id: studentUserId,
+        status: 'ENROLLED',
+      },
     });
     if (enrolled.length === 0) return empty;
 
@@ -316,7 +357,9 @@ export class AcademicsService {
       enrolled.map((row) => [row.course_id, row.section_code] as const),
     );
     const batchByCourse = new Map<string, string>();
-    const [batchTable] = await this.courseEnrollments.manager.query<Array<{ available: boolean }>>(
+    const [batchTable] = await this.courseEnrollments.manager.query<
+      Array<{ available: boolean }>
+    >(
       `SELECT to_regclass('public.academic_practical_batch_members') IS NOT NULL
          AND to_regclass('public.academic_practical_batches') IS NOT NULL AS available`,
     );
@@ -338,7 +381,11 @@ export class AcademicsService {
     }
 
     const { rows: resolvedRows, pendingPracticalBatches } =
-      selectStudentTimetableRows(rows, batchByCourse, enrollmentSectionByCourse);
+      selectStudentTimetableRows(
+        rows,
+        batchByCourse,
+        enrollmentSectionByCourse,
+      );
     const conflictCount = countStudentTimetableConflicts(resolvedRows);
     const liveByCourse = await this.fetchActiveLiveClasses(courseIds);
 
@@ -364,15 +411,26 @@ export class AcademicsService {
         live_join_url: liveJoinUrl,
       };
     });
-    return { tenantId, courseIds, slots, pendingPracticalBatches, conflictCount };
+    return {
+      tenantId,
+      courseIds,
+      slots,
+      pendingPracticalBatches,
+      conflictCount,
+    };
   }
 
   async getWeeklyTimetableCalendar(
     studentUserId: string,
     weekStartInput?: string,
   ) {
-    const { tenantId, courseIds, slots: baseSlots, pendingPracticalBatches, conflictCount } =
-      await this.resolveStudentWeeklyTimetable(studentUserId);
+    const {
+      tenantId,
+      courseIds,
+      slots: baseSlots,
+      pendingPracticalBatches,
+      conflictCount,
+    } = await this.resolveStudentWeeklyTimetable(studentUserId);
     const weekStart = this.resolveWeekStartMonday(weekStartInput);
     const weekDates = this.buildWeekDateRange(weekStart);
 
@@ -429,8 +487,9 @@ export class AcademicsService {
         const courseOnly = `${sessionDate}|${slot.course_id}|`;
         // A course-level attendance record must never mark the wrong
         // practical rotation as attended.
-        const raw = attendanceMap.get(withTimetable)
-          ?? (slot.section?.toUpperCase().startsWith('BATCH-')
+        const raw =
+          attendanceMap.get(withTimetable) ??
+          (slot.section?.toUpperCase().startsWith('BATCH-')
             ? undefined
             : attendanceMap.get(courseOnly));
         if (!raw) {
@@ -1038,13 +1097,20 @@ export class AcademicsService {
     }
 
     const { limit, offset, search } = parseListQuery(query);
-    const all = await this.listFacultyWorkloadForDepartments(tenantId, departmentIds);
+    const all = await this.listFacultyWorkloadForDepartments(
+      tenantId,
+      departmentIds,
+    );
     const needle = search.toLowerCase();
     const filtered = needle
       ? all.filter(
           (row) =>
-            String(row.name ?? '').toLowerCase().includes(needle) ||
-            String(row.dept_name ?? '').toLowerCase().includes(needle),
+            String(row.name ?? '')
+              .toLowerCase()
+              .includes(needle) ||
+            String(row.dept_name ?? '')
+              .toLowerCase()
+              .includes(needle),
         )
       : all;
     const data = filtered
@@ -1449,7 +1515,9 @@ export class AcademicsService {
       throw new BadRequestException('Invalid teaching-load status');
     }
     if (input.status === 'NO_TEACHING_LOAD' && !input.reason?.trim()) {
-      throw new BadRequestException('A reason is required for no teaching load');
+      throw new BadRequestException(
+        'A reason is required for no teaching load',
+      );
     }
 
     const requestHash = createHash('sha256')
@@ -1465,77 +1533,79 @@ export class AcademicsService {
 
     try {
       return await this.users.manager.transaction(async (manager) => {
-      const [retry] = await manager.query(
-        `SELECT h.request_hash, d.*
+        const [retry] = await manager.query(
+          `SELECT h.request_hash, d.*
          FROM academic_faculty_load_declaration_history h
          JOIN academic_faculty_load_declarations d
            ON d.declaration_id = h.declaration_id
          WHERE h.tenant_id = $1 AND h.changed_by = $2 AND h.idempotency_key = $3`,
-        [tenantId, actorUserId, input.idempotencyKey],
-      );
-      if (retry) {
-        if (retry.request_hash !== requestHash) {
-          throw new ConflictException({ code: 'IDEMPOTENCY_PAYLOAD_CHANGED' });
+          [tenantId, actorUserId, input.idempotencyKey],
+        );
+        if (retry) {
+          if (retry.request_hash !== requestHash) {
+            throw new ConflictException({
+              code: 'IDEMPOTENCY_PAYLOAD_CHANGED',
+            });
+          }
+          return retry;
         }
-        return retry;
-      }
 
-      const [faculty] = await manager.query(
-        `SELECT u.user_id, u.dept_id
+        const [faculty] = await manager.query(
+          `SELECT u.user_id, u.dept_id
          FROM users u
          JOIN roles r ON r.role_id = u.role_id
          WHERE u.tenant_id = $1 AND u.user_id = $2
            AND u.is_active = true AND u.deleted_at IS NULL
            AND r.role_name IN ('Faculty', 'HOD', 'Dean')
          FOR UPDATE`,
-        [tenantId, facultyUserId],
-      );
-      if (!faculty) throw new NotFoundException('Faculty member not found');
+          [tenantId, facultyUserId],
+        );
+        if (!faculty) throw new NotFoundException('Faculty member not found');
 
-      if ((actorRole ?? '').trim().toLowerCase() !== 'superadmin') {
-        const departmentIds = await this.resolveHodDepartmentIds(actorUserId);
-        if (!departmentIds.includes(Number(faculty.dept_id))) {
-          throw new ForbiddenException('Faculty member is outside HOD scope');
+        if ((actorRole ?? '').trim().toLowerCase() !== 'superadmin') {
+          const departmentIds = await this.resolveHodDepartmentIds(actorUserId);
+          if (!departmentIds.includes(Number(faculty.dept_id))) {
+            throw new ForbiddenException('Faculty member is outside HOD scope');
+          }
         }
-      }
 
-      const [current] = await manager.query(
-        `SELECT * FROM academic_faculty_load_declarations
+        const [current] = await manager.query(
+          `SELECT * FROM academic_faculty_load_declarations
          WHERE tenant_id = $1 AND faculty_user_id = $2 AND academic_year = $3
          FOR UPDATE`,
-        [tenantId, facultyUserId, input.academicYear],
-      );
-      const currentRevision = Number(current?.revision ?? 0);
-      if (currentRevision !== input.expectedRevision) {
-        throw new ConflictException({
-          code: 'STALE_TEACHING_LOAD_DECLARATION',
-          current_revision: currentRevision,
-        });
-      }
+          [tenantId, facultyUserId, input.academicYear],
+        );
+        const currentRevision = Number(current?.revision ?? 0);
+        if (currentRevision !== input.expectedRevision) {
+          throw new ConflictException({
+            code: 'STALE_TEACHING_LOAD_DECLARATION',
+            current_revision: currentRevision,
+          });
+        }
 
-      if (input.status === 'NO_TEACHING_LOAD') {
-        const affected = await manager.query(
-          `SELECT allocation_id, tenant_id, subject_id, program_name, semester,
+        if (input.status === 'NO_TEACHING_LOAD') {
+          const affected = await manager.query(
+            `SELECT allocation_id, tenant_id, subject_id, program_name, semester,
                   academic_year, course_id
            FROM academic_course_allocations
            WHERE tenant_id = $1 AND faculty_user_id = $2
              AND academic_year = $3 AND status = 'ACTIVE'
            FOR UPDATE`,
-          [tenantId, facultyUserId, input.academicYear],
-        );
-        if (affected.length) {
-          const allocationIds = affected.map(
-            (row: { allocation_id: string }) => row.allocation_id,
+            [tenantId, facultyUserId, input.academicYear],
           );
-          await manager.query(
-            `UPDATE academic_course_allocations
+          if (affected.length) {
+            const allocationIds = affected.map(
+              (row: { allocation_id: string }) => row.allocation_id,
+            );
+            await manager.query(
+              `UPDATE academic_course_allocations
              SET status = 'SUPERSEDED', updated_at = NOW()
              WHERE allocation_id = ANY($1::uuid[])`,
-            [allocationIds],
-          );
-          for (const row of affected) {
-            await manager.query(
-              `INSERT INTO academic_course_allocations(
+              [allocationIds],
+            );
+            for (const row of affected) {
+              await manager.query(
+                `INSERT INTO academic_course_allocations(
                  tenant_id, subject_id, program_name, semester, faculty_user_id,
                  academic_year, course_id, status
                )
@@ -1549,37 +1619,37 @@ export class AcademicsService {
                    AND academic_year = $5::varchar(20) AND faculty_user_id IS NULL
                    AND status = 'ACTIVE'
                )`,
-              [
-                row.tenant_id,
-                row.subject_id,
-                row.program_name,
-                row.semester,
-                row.academic_year,
-                row.course_id,
-              ],
-            );
-          }
-          const courseIds = [
-            ...new Set(
-              affected
-                .map((row: { course_id?: string | null }) => row.course_id)
-                .filter(Boolean),
-            ),
-          ];
-          if (courseIds.length) {
-            await manager.query(
-              `UPDATE academic_timetables SET deleted_at = NOW()
+                [
+                  row.tenant_id,
+                  row.subject_id,
+                  row.program_name,
+                  row.semester,
+                  row.academic_year,
+                  row.course_id,
+                ],
+              );
+            }
+            const courseIds = [
+              ...new Set(
+                affected
+                  .map((row: { course_id?: string | null }) => row.course_id)
+                  .filter(Boolean),
+              ),
+            ];
+            if (courseIds.length) {
+              await manager.query(
+                `UPDATE academic_timetables SET deleted_at = NOW()
                WHERE tenant_id = $1 AND faculty_user_id = $2
                  AND course_id = ANY($3::uuid[]) AND deleted_at IS NULL`,
-              [tenantId, facultyUserId, courseIds],
-            );
+                [tenantId, facultyUserId, courseIds],
+              );
+            }
           }
         }
-      }
 
-      const nextRevision = currentRevision + 1;
-      const [declaration] = await manager.query(
-        `INSERT INTO academic_faculty_load_declarations(
+        const nextRevision = currentRevision + 1;
+        const [declaration] = await manager.query(
+          `INSERT INTO academic_faculty_load_declarations(
            tenant_id, faculty_user_id, academic_year, status, reason,
            revision, declared_by
          ) VALUES($1,$2,$3,$4,$5,$6,$7)
@@ -1590,35 +1660,35 @@ export class AcademicsService {
            declared_by = EXCLUDED.declared_by,
            updated_at = NOW()
          RETURNING *`,
-        [
-          tenantId,
-          facultyUserId,
-          input.academicYear,
-          input.status,
-          input.reason?.trim() || null,
-          nextRevision,
-          actorUserId,
-        ],
-      );
-      await manager.query(
-        `INSERT INTO academic_faculty_load_declaration_history(
+          [
+            tenantId,
+            facultyUserId,
+            input.academicYear,
+            input.status,
+            input.reason?.trim() || null,
+            nextRevision,
+            actorUserId,
+          ],
+        );
+        await manager.query(
+          `INSERT INTO academic_faculty_load_declaration_history(
            declaration_id, tenant_id, faculty_user_id, academic_year, status,
            reason, revision, changed_by, idempotency_key, request_hash
          ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-        [
-          declaration.declaration_id,
-          tenantId,
-          facultyUserId,
-          input.academicYear,
-          input.status,
-          input.reason?.trim() || null,
-          nextRevision,
-          actorUserId,
-          input.idempotencyKey,
-          requestHash,
-        ],
-      );
-      return declaration;
+          [
+            declaration.declaration_id,
+            tenantId,
+            facultyUserId,
+            input.academicYear,
+            input.status,
+            input.reason?.trim() || null,
+            nextRevision,
+            actorUserId,
+            input.idempotencyKey,
+            requestHash,
+          ],
+        );
+        return declaration;
       });
     } catch (error) {
       const code = databaseErrorCode(error);
@@ -1724,7 +1794,9 @@ export class AcademicsService {
       hod_name: row.hod_name,
       hod_email: row.hod_email,
       hours_per_week: Number(row.hours_per_week ?? 0),
-      assigned_load_credits: Number(row.assigned_load_credits ?? row.assigned_load_hours ?? 0),
+      assigned_load_credits: Number(
+        row.assigned_load_credits ?? row.assigned_load_hours ?? 0,
+      ),
       assigned_load_hours: Number(row.assigned_load_hours ?? 0),
       scheduled_hours: Number(row.scheduled_hours ?? 0),
       scheduled_minutes: Number(row.scheduled_minutes ?? 0),
@@ -1739,14 +1811,15 @@ export class AcademicsService {
         row.load_declaration_status === 'NO_TEACHING_LOAD'
           ? 'NO_TEACHING_LOAD'
           : Number(row.unscheduled_course_count ?? 0) > 0
-          ? 'SCHEDULE_MISSING'
-          : Number(row.course_count ?? 0) === 0 && Number(row.hours_per_week ?? 0) === 0
-          ? 'NO_ACTIVE_ALLOCATION'
-          : Number(row.hours_per_week ?? 0) > 16
-          ? 'OVERLOADED'
-          : Number(row.hours_per_week ?? 0) < 6
-            ? 'UNDERUTILIZED'
-            : 'BALANCED',
+            ? 'SCHEDULE_MISSING'
+            : Number(row.course_count ?? 0) === 0 &&
+                Number(row.hours_per_week ?? 0) === 0
+              ? 'NO_ACTIVE_ALLOCATION'
+              : Number(row.hours_per_week ?? 0) > 16
+                ? 'OVERLOADED'
+                : Number(row.hours_per_week ?? 0) < 6
+                  ? 'UNDERUTILIZED'
+                  : 'BALANCED',
     }));
   }
 
@@ -1757,7 +1830,10 @@ export class AcademicsService {
 
   async listHodDepartmentTimetable(tenantId: string, hodUserId: string) {
     const deptIds = await this.resolveHodDepartmentIds(hodUserId);
-    const slots = await this.listDepartmentTimetableForDepartments(tenantId, deptIds);
+    const slots = await this.listDepartmentTimetableForDepartments(
+      tenantId,
+      deptIds,
+    );
     if (!deptIds.length) return { slots: [], unscheduled: [] };
 
     const academicYear = this.currentAcademicYear();
@@ -1919,16 +1995,22 @@ export class AcademicsService {
           'Each timetable slot must include a course and faculty member',
         );
       }
-      if (!Number.isInteger(Number(slot.day_of_week)) || slot.day_of_week < 1 || slot.day_of_week > 7) {
+      if (
+        !Number.isInteger(Number(slot.day_of_week)) ||
+        slot.day_of_week < 1 ||
+        slot.day_of_week > 7
+      ) {
         throw new BadRequestException('day_of_week must be between 1 and 7');
       }
       if (!timeRe.test(slot.start_time) || !timeRe.test(slot.end_time)) {
-        throw new BadRequestException('Timetable times must use HH:MM or HH:MM:SS');
+        throw new BadRequestException(
+          'Timetable times must use HH:MM or HH:MM:SS',
+        );
       }
-      if (
-        timeToMinutes(slot.start_time) >= timeToMinutes(slot.end_time)
-      ) {
-        throw new BadRequestException('Timetable end time must be after start time');
+      if (timeToMinutes(slot.start_time) >= timeToMinutes(slot.end_time)) {
+        throw new BadRequestException(
+          'Timetable end time must be after start time',
+        );
       }
       const key = `${slot.course_id}:${slot.day_of_week}:${slot.start_time}:${slot.end_time}`;
       if (seen.has(key)) {
@@ -1960,14 +2042,14 @@ export class AcademicsService {
 
     try {
       await this.users.manager.transaction(async (manager) => {
-      // Serialize schedule replacements within a tenant before reading existing
-      // slots. All batch timetable writers use this same transaction lock.
-      await manager.query(
-        `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
-        [`timetable:${tenantId}`],
-      );
-      const allocations = await manager.query(
-        `SELECT c.course_id, u.user_id as faculty_user_id
+        // Serialize schedule replacements within a tenant before reading existing
+        // slots. All batch timetable writers use this same transaction lock.
+        await manager.query(
+          `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
+          [`timetable:${tenantId}`],
+        );
+        const allocations = await manager.query(
+          `SELECT c.course_id, u.user_id as faculty_user_id
          FROM academic_course_allocations a
          INNER JOIN academic_courses c ON c.course_id = a.course_id
          INNER JOIN users u ON u.user_id = a.faculty_user_id
@@ -1976,25 +2058,25 @@ export class AcademicsService {
            AND a.semester = $3
            AND a.academic_year = $4
            AND a.status = 'ACTIVE'`,
-        [tenantId, deptIds, dto.semester, this.currentAcademicYear()],
-      );
-
-      const courseIds = allocations.map((a: any) => a.course_id);
-      const allowedPairs = new Set(
-        allocations.map((a: any) => `${a.course_id}:${a.faculty_user_id}`),
-      );
-      if (!courseIds.length && dto.slots.length) {
-        throw new BadRequestException(
-          'No active allocations found for the selected semester',
+          [tenantId, deptIds, dto.semester, this.currentAcademicYear()],
         );
-      }
 
-      const facultyIds = [
-        ...new Set(dto.slots.map((slot) => slot.faculty_user_id)),
-      ];
-      if (facultyIds.length) {
-        const existingSlots = await manager.query(
-          `SELECT t.timetable_id, t.course_id, t.faculty_user_id,
+        const courseIds = allocations.map((a: any) => a.course_id);
+        const allowedPairs = new Set(
+          allocations.map((a: any) => `${a.course_id}:${a.faculty_user_id}`),
+        );
+        if (!courseIds.length && dto.slots.length) {
+          throw new BadRequestException(
+            'No active allocations found for the selected semester',
+          );
+        }
+
+        const facultyIds = [
+          ...new Set(dto.slots.map((slot) => slot.faculty_user_id)),
+        ];
+        if (facultyIds.length) {
+          const existingSlots = await manager.query(
+            `SELECT t.timetable_id, t.course_id, t.faculty_user_id,
                   t.day_of_week, t.start_time, t.end_time
              FROM academic_timetables t
             WHERE t.tenant_id = $1
@@ -2010,29 +2092,24 @@ export class AcademicsService {
                    AND a.academic_year = $4
                    AND a.status = 'ACTIVE'
               )`,
-          [
-            tenantId,
-            facultyIds,
-            dto.semester,
-            this.currentAcademicYear(),
-          ],
-        );
-        for (const existing of existingSlots as TimetableRange[]) {
-          const conflicting = requestedRanges.find(
-            (requested) =>
-              requested.faculty_user_id === existing.faculty_user_id &&
-              timetableRangesOverlap(requested, existing),
+            [tenantId, facultyIds, dto.semester, this.currentAcademicYear()],
           );
-          if (conflicting) {
-            throw new BadRequestException(
-              'Timetable collision: the faculty member is already scheduled in that time range',
+          for (const existing of existingSlots as TimetableRange[]) {
+            const conflicting = requestedRanges.find(
+              (requested) =>
+                requested.faculty_user_id === existing.faculty_user_id &&
+                timetableRangesOverlap(requested, existing),
             );
+            if (conflicting) {
+              throw new BadRequestException(
+                'Timetable collision: the faculty member is already scheduled in that time range',
+              );
+            }
           }
         }
-      }
 
-      await manager.query(
-        `UPDATE academic_timetables t
+        await manager.query(
+          `UPDATE academic_timetables t
             SET deleted_at = NOW()
           WHERE t.tenant_id = $1
             AND t.deleted_at IS NULL
@@ -2048,35 +2125,35 @@ export class AcademicsService {
                  AND a.status = 'ACTIVE'
                  AND u.dept_id = ANY($4::int[])
             )`,
-        [tenantId, dto.semester, this.currentAcademicYear(), deptIds],
-      );
+          [tenantId, dto.semester, this.currentAcademicYear(), deptIds],
+        );
 
-      if (dto.slots && dto.slots.length > 0) {
-        for (const slot of dto.slots) {
-          const valid = allowedPairs.has(
-            `${slot.course_id}:${slot.faculty_user_id}`,
-          );
-          if (!valid) {
-            throw new BadRequestException(
-              'Timetable slot is outside your department allocation scope',
+        if (dto.slots && dto.slots.length > 0) {
+          for (const slot of dto.slots) {
+            const valid = allowedPairs.has(
+              `${slot.course_id}:${slot.faculty_user_id}`,
             );
-          }
-          if (valid) {
-            await manager.query(
-              `INSERT INTO academic_timetables (timetable_id, tenant_id, course_id, day_of_week, start_time, end_time, room, faculty_user_id)
+            if (!valid) {
+              throw new BadRequestException(
+                'Timetable slot is outside your department allocation scope',
+              );
+            }
+            if (valid) {
+              await manager.query(
+                `INSERT INTO academic_timetables (timetable_id, tenant_id, course_id, day_of_week, start_time, end_time, room, faculty_user_id)
                VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, NULL, $6)`,
-              [
-                tenantId,
-                slot.course_id,
-                slot.day_of_week,
-                slot.start_time,
-                slot.end_time,
-                slot.faculty_user_id,
-              ],
-            );
+                [
+                  tenantId,
+                  slot.course_id,
+                  slot.day_of_week,
+                  slot.start_time,
+                  slot.end_time,
+                  slot.faculty_user_id,
+                ],
+              );
+            }
           }
         }
-      }
       });
     } catch (error) {
       const code = databaseErrorCode(error);
@@ -3572,7 +3649,10 @@ export class AcademicsService {
     ) {
       throw new BadRequestException('Invalid timetable id');
     }
-    if (dto.day_of_week !== undefined && (dto.day_of_week < 1 || dto.day_of_week > 7)) {
+    if (
+      dto.day_of_week !== undefined &&
+      (dto.day_of_week < 1 || dto.day_of_week > 7)
+    ) {
       throw new BadRequestException('day_of_week must be between 1 and 7');
     }
     const hasStart = dto.start_time !== undefined;
@@ -3583,7 +3663,9 @@ export class AcademicsService {
       );
     }
     if (dto.start_time && dto.end_time && dto.start_time >= dto.end_time) {
-      throw new BadRequestException('Timetable end time must be after start time');
+      throw new BadRequestException(
+        'Timetable end time must be after start time',
+      );
     }
     if (
       dto.start_time &&
@@ -3591,7 +3673,9 @@ export class AcademicsService {
       (Number.isNaN(timeToMinutes(dto.start_time)) ||
         Number.isNaN(timeToMinutes(dto.end_time)))
     ) {
-      throw new BadRequestException('Timetable times must use HH:MM or HH:MM:SS');
+      throw new BadRequestException(
+        'Timetable times must use HH:MM or HH:MM:SS',
+      );
     }
 
     const updatePayload: any = { faculty_user_id: dto.faculty_user_id };
@@ -3609,7 +3693,9 @@ export class AcademicsService {
           !dto.start_time ||
           !dto.end_time
         ) {
-          throw new BadRequestException('Missing required fields for new timetable slot');
+          throw new BadRequestException(
+            'Missing required fields for new timetable slot',
+          );
         }
         const [allocation] = await this.users.manager.query(
           `SELECT 1
@@ -3620,10 +3706,18 @@ export class AcademicsService {
               AND u.dept_id = ANY($4::int[])
               AND a.academic_year = $5
             LIMIT 1`,
-          [tenantId, dto.course_id, dto.faculty_user_id, deptIds, this.currentAcademicYear()],
+          [
+            tenantId,
+            dto.course_id,
+            dto.faculty_user_id,
+            deptIds,
+            this.currentAcademicYear(),
+          ],
         );
         if (!allocation) {
-          throw new ForbiddenException('Course is outside this HOD department scope');
+          throw new ForbiddenException(
+            'Course is outside this HOD department scope',
+          );
         }
         await this.assertTimetableSlotAvailable(tenantId, {
           course_id: dto.course_id,
@@ -3656,7 +3750,8 @@ export class AcademicsService {
               AND t.deleted_at IS NULL AND u.dept_id = ANY($3::int[])`,
           [dto.timetable_id, tenantId, deptIds],
         );
-        if (!existing) throw new NotFoundException('Timetable slot not found in your scope');
+        if (!existing)
+          throw new NotFoundException('Timetable slot not found in your scope');
         await this.assertTimetableSlotAvailable(
           tenantId,
           {
@@ -3708,7 +3803,9 @@ export class AcademicsService {
         [tenantId, courseIdToUpdate, deptIds, this.currentAcademicYear()],
       );
       if (!allocation) {
-        throw new ForbiddenException('Course is outside this HOD department scope');
+        throw new ForbiddenException(
+          'Course is outside this HOD department scope',
+        );
       }
       await this.users.manager.query(
         `UPDATE academic_course_allocations
@@ -3767,7 +3864,9 @@ export class AcademicsService {
       Number.isNaN(timeToMinutes(nextEnd)) ||
       timeToMinutes(nextStart) >= timeToMinutes(nextEnd)
     ) {
-      throw new BadRequestException('Timetable times must use HH:MM or HH:MM:SS');
+      throw new BadRequestException(
+        'Timetable times must use HH:MM or HH:MM:SS',
+      );
     }
     if (slot.faculty_user_id) {
       await this.assertTimetableSlotAvailable(

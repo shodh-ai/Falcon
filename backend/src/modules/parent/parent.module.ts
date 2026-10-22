@@ -5,6 +5,7 @@ import { resolveJwtSecret } from '../../common/config/jwt-secret';
 import { ReadOnlyPortalGuard } from '../../common/guards/read-only-portal.guard';
 import { NotificationsModule } from '../../core/notifications/notifications.module';
 import { TransportModule } from '../transport/transport.module';
+import { StudentPortalModule } from '../student-portal/student-portal.module';
 import { ParentController } from './parent.controller';
 import { ParentService } from './parent.service';
 
@@ -12,6 +13,7 @@ import { ParentService } from './parent.service';
   imports: [
     NotificationsModule,
     TransportModule,
+    StudentPortalModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       useFactory: (config: ConfigService) => ({

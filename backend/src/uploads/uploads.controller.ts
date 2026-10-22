@@ -14,6 +14,8 @@ import {
   Req,
 } from '@nestjs/common';
 import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
+import { InjectDataSource } from '@nestjs/typeorm';
+import { DataSource } from 'typeorm';
 import { memoryStorage } from 'multer';
 import { extname } from 'path';
 import { v4 as uuidv4 } from 'uuid';
@@ -22,8 +24,14 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { ObjectStorageService } from '../storage/object-storage.service';
 import { createReadStream, existsSync, mkdirSync, writeFileSync } from 'fs';
-import { basename, resolve } from 'path';
+import { basename, relative, resolve, sep } from 'path';
 import type { Response } from 'express';
+import { EXAM_CELL_ACCESS_ROLES } from '../modules/exam-cell/exam-cell.constants';
+import { normalizeExamCellRole } from '../modules/exam-cell/exam-cell-rbac.util';
+import {
+  isCurrentTranscript,
+  TranscriptRevisionMetadata,
+} from '../modules/exam-cell/official-transcript-revisions';
 
 /** Authenticated campus roles that may upload files through the shared endpoint. */
 const UPLOAD_ROLES = [
@@ -75,13 +83,24 @@ const multerOptions = {
   },
 };
 
-type AuthRequest = { user?: { tenant_id?: string } };
+type AuthRequest = {
+  user?: {
+    user_id?: string;
+    tenant_id?: string;
+    role?: string;
+    primaryRole?: string;
+    roles?: string[];
+  };
+};
 
 @Controller(['uploads', 'api/uploads'])
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(...UPLOAD_ROLES)
 export class UploadsController {
-  constructor(private readonly objectStorage: ObjectStorageService) {}
+  constructor(
+    private readonly objectStorage: ObjectStorageService,
+    @InjectDataSource() private readonly db: DataSource,
+  ) {}
 
   @Post('single')
   @UseInterceptors(FileInterceptor('file', multerOptions))
@@ -109,10 +128,11 @@ export class UploadsController {
   }
 
   @Get('download')
+  @Roles(...UPLOAD_ROLES, ...EXAM_CELL_ACCESS_ROLES)
   async downloadFile(
     @Query('path') filePath: string,
     @Query('key') objectKey: string,
-    @Req() req: AuthRequest & { user?: { tenant_id?: string } },
+    @Req() req: AuthRequest,
     @Res() res: Response,
   ) {
     // Class-level JwtAuthGuard applies (Bearer, access_token query, or auth cookie).
@@ -122,12 +142,34 @@ export class UploadsController {
       );
     }
 
+    // Stored S3 URLs identify private objects, never public bearer URLs. Keep
+    // the configured bucket and normal tenant/document authorization in force.
+    if (filePath?.startsWith('s3://') && this.objectStorage.isEnabled()) {
+      let stored: URL;
+      try {
+        stored = new URL(filePath);
+      } catch {
+        throw new NotFoundException('File not found');
+      }
+      if (
+        stored.hostname !== this.objectStorage.getBucketName() ||
+        stored.username ||
+        stored.password ||
+        stored.search ||
+        stored.hash
+      )
+        throw new NotFoundException('File not found');
+      objectKey = stored.pathname.slice(1);
+    }
+
     if (objectKey && this.objectStorage.isEnabled()) {
       const tenantId = req.user.tenant_id;
       // Object keys are tenant-prefixed by ObjectStorageService.buildKey
       if (tenantId && !objectKey.startsWith(`${tenantId}/`)) {
         throw new NotFoundException('File not found');
       }
+      await this.assertTranscriptAccess(objectKey, req.user);
+      res.setHeader('Cache-Control', 'private, no-store');
       const stream = await this.objectStorage.getDownloadStream(objectKey);
       res.setHeader(
         'Content-Disposition',
@@ -150,17 +192,23 @@ export class UploadsController {
       resolvedPath = resolve(uploadRoot, filePath.replace(/^\/uploads\//, ''));
     }
 
-    if (!resolvedPath.startsWith(uploadRoot) || !existsSync(resolvedPath)) {
+    if (
+      !resolvedPath.startsWith(`${uploadRoot}${sep}`) ||
+      !existsSync(resolvedPath)
+    ) {
       throw new NotFoundException('File not found');
     }
 
     const tenantId = req.user.tenant_id;
     if (tenantId) {
       const tenantRoot = resolve(uploadRoot, tenantId);
-      if (!resolvedPath.startsWith(tenantRoot)) {
+      if (!resolvedPath.startsWith(`${tenantRoot}${sep}`)) {
         throw new NotFoundException('File not found');
       }
     }
+
+    await this.assertTranscriptAccess(resolvedPath, req.user);
+    res.setHeader('Cache-Control', 'private, no-store');
 
     res.setHeader(
       'Content-Disposition',
@@ -170,6 +218,76 @@ export class UploadsController {
       res.setHeader('Content-Type', 'application/pdf');
     }
     return createReadStream(resolvedPath).pipe(res);
+  }
+
+  private async assertTranscriptAccess(
+    path: string,
+    user: NonNullable<AuthRequest['user']>,
+  ) {
+    const transcriptFile = path.match(
+      /\/transcripts\/([0-9a-f-]{36})(?:-[0-9a-f]{32})?\.pdf$/i,
+    );
+    if (!transcriptFile) {
+      if (path.includes('/transcripts/'))
+        throw new NotFoundException('File not found');
+      return;
+    }
+
+    const transcriptId = transcriptFile[1];
+    if (
+      !user.tenant_id ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        transcriptId,
+      )
+    ) {
+      throw new NotFoundException('File not found');
+    }
+    const rows = await this.db.query<
+      Array<{
+        transcript_id: string;
+        tenant_id: string;
+        student_user_id: string;
+        semester: number;
+        status: string;
+        metadata: TranscriptRevisionMetadata;
+        pdf_url: string;
+        verification_code: string;
+      }>
+    >(
+      `SELECT transcript_id, tenant_id, student_user_id, semester, status, metadata, pdf_url, verification_code FROM official_transcripts
+       WHERE tenant_id = $1 AND transcript_id = $2 AND pdf_url IS NOT NULL`,
+      [user.tenant_id, transcriptId],
+    );
+    const roles = [...(user.roles ?? []), user.role, user.primaryRole];
+    const isExamStaff = roles.some((role) =>
+      EXAM_CELL_ACCESS_ROLES.some(
+        (staffRole) =>
+          normalizeExamCellRole(role) === normalizeExamCellRole(staffRole),
+      ),
+    );
+    if (
+      !rows[0] ||
+      (rows[0].student_user_id !== user.user_id && !isExamStaff)
+    ) {
+      throw new NotFoundException('File not found');
+    }
+    const record = rows[0];
+    let expectedKey: string;
+    if (!record.pdf_url) throw new NotFoundException('File not found');
+    if (record.pdf_url.startsWith('/uploads/'))
+      expectedKey = record.pdf_url.slice('/uploads/'.length);
+    else if (record.pdf_url.startsWith('s3://'))
+      expectedKey = new URL(record.pdf_url).pathname.slice(1);
+    else throw new NotFoundException('File not found');
+    const root = resolve(process.env.UPLOAD_PATH || './uploads');
+    const actualKey = path.startsWith(`${root}${sep}`)
+      ? relative(root, path).split(sep).join('/')
+      : path.replace(/^\/uploads\//, '');
+    if (
+      actualKey !== expectedKey ||
+      !(await isCurrentTranscript(this.db, record))
+    )
+      throw new NotFoundException('File not found');
   }
 
   private async persistFile(file: Express.Multer.File, tenantId: string) {

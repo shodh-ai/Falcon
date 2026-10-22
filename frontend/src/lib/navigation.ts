@@ -52,7 +52,6 @@ import {
   Calendar,
   CheckCircle,
   DollarSign,
-  Download,
   Network,
   Building2,
   Receipt,
@@ -97,7 +96,7 @@ import {
   FINANCE_DESK_ROLE_NAMES,
   getAccountSettingsHrefForPortal,
 } from '@/lib/auth-routing';
-import { rolesIncludeAny, rolesMatchForAccess } from '@/lib/campus-admin.roles';
+import { rolesMatchForAccess } from '@/lib/campus-admin.roles';
 import { selfServicePaths, type WorkspacePrefix } from '@/lib/workspace-self-service';
 
 export type HrModuleKey =
@@ -130,6 +129,9 @@ export interface NavItem {
 export interface NavGroup {
   title: string;
   items: NavItem[];
+  /** Optional landing and icon for portals that navigate by section. */
+  homeHref?: string;
+  icon?: LucideIcon;
 }
 
 export interface PortalConfig {
@@ -1543,58 +1545,101 @@ export const examCellPortal: PortalConfig = {
   homeHref: '/exam-cell/dashboard',
   navGroups: [
     {
-      title: 'Overview',
+      title: 'Dashboard',
+      homeHref: '/exam-cell/dashboard',
+      icon: LayoutDashboard,
       items: [
-        { label: 'Command Center', href: '/exam-cell/dashboard', icon: LayoutDashboard, keywords: ['coe', 'analytics'] },
+        { label: 'Command Center', href: '/exam-cell/dashboard', icon: LayoutDashboard, keywords: ['coe', 'analytics', 'dashboard'] },
         { label: 'Live Exam Dashboard', href: '/exam-cell/live-dashboard', icon: LineChart, keywords: ['realtime', 'exam day'] },
-        { label: 'Examination Calendar', href: '/exam-cell/calendar', icon: Calendar, keywords: ['month', 'week', 'holidays'] },
         { label: 'My Tasks', href: '/exam-cell/my-tasks', icon: ListTodo, keywords: ['inbox', 'pending'] },
         { label: 'Global Search', href: '/exam-cell/search', icon: Search, keywords: ['find', 'student', 'prn', 'qr'] },
         { label: 'Student Timeline', href: '/exam-cell/student-timeline', icon: History, keywords: ['journey', 'registration'] },
-        { label: 'Exam Sessions', href: '/exam-cell/sessions', icon: CalendarRange, keywords: ['academic year', 'semester cycle'] },
-        { label: 'Deadlines', href: '/exam-cell/deadlines', icon: Timer, keywords: ['countdown', 'reminder'] },
-        { label: 'Audit Log', href: '/exam-cell/audit-log', icon: Shield, keywords: ['compliance', 'trail'] },
       ],
     },
     {
-      title: 'Pre-Exam Operations',
+      title: 'Exam Planning',
+      homeHref: '/exam-cell/schedule',
+      icon: CalendarDays,
       items: [
+        { label: 'Examination Calendar', href: '/exam-cell/calendar', icon: Calendar, keywords: ['month', 'week', 'holidays'] },
+        { label: 'Exam Sessions', href: '/exam-cell/sessions', icon: CalendarRange, keywords: ['academic year', 'semester cycle'] },
         { label: 'Master Exam Schedule', href: '/exam-cell/schedule', icon: CalendarDays, keywords: ['mid term', 'end term', 'timetable'] },
+        { label: 'Deadlines', href: '/exam-cell/deadlines', icon: Timer, keywords: ['countdown', 'reminder'] },
         { label: 'Form Fill-up Desk', href: '/exam-cell/form-fillup', icon: FileCheck2, keywords: ['registration', 'eligibility'] },
+      ],
+    },
+    {
+      title: 'Students & Eligibility',
+      homeHref: '/exam-cell/eligibility',
+      icon: Users,
+      items: [
         { label: 'Eligibility Dashboard', href: '/exam-cell/eligibility', icon: ClipboardCheck, keywords: ['attendance', 'fee', 'debarred'] },
-        { label: 'Hall Ticket Approvals', href: '/exam-cell/hall-ticket-approvals', icon: FileCheck2, keywords: ['coe approval', 'workflow'] },
-        { label: 'Exam Centres & Rooms', href: '/exam-cell/exam-centres', icon: DoorOpen, keywords: ['building', 'hall', 'capacity'] },
-        { label: 'Admit Card Engine', href: '/exam-cell/admit-cards', icon: Ticket, keywords: ['hall ticket', 'admit'] },
         { label: 'Attendance Exemptions', href: '/exam-cell/attendance-exemptions', icon: ClipboardCheck, keywords: ['exemption', 'low attendance'] },
+        { label: 'Backlog & Supplementary', href: '/exam-cell/backlog-exams', icon: ArrowUpCircle, keywords: ['back paper', 'supplementary'] },
         { label: 'Product Viva Panel', href: '/exam-cell/product-viva', icon: Users, keywords: ['product viva', 'urop', 'industry', 'shodh'] },
+      ],
+    },
+    {
+      title: 'Admit Cards',
+      homeHref: '/exam-cell/admit-cards',
+      icon: Ticket,
+      items: [
+        { label: 'Hall Ticket Approvals', href: '/exam-cell/hall-ticket-approvals', icon: FileCheck2, keywords: ['coe approval', 'workflow'] },
+        { label: 'Admit Card Engine', href: '/exam-cell/admit-cards', icon: Ticket, keywords: ['hall ticket', 'admit'] },
         { label: 'Seating Planner', href: '/exam-cell/seating', icon: ClipboardList, keywords: ['seating', 'rooms', 'ai'] },
         { label: 'Published Seating Plans', href: '/exam-cell/seating-plans', icon: ClipboardList, keywords: ['published seating'] },
         { label: 'Resource Allocation', href: '/exam-cell/resource-allocation', icon: LayoutGrid, keywords: ['coordinator', 'room'] },
-        { label: 'Invigilation Roster', href: '/exam-cell/invigilation', icon: Eye, keywords: ['faculty', 'duty', 'auto assign'] },
         { label: 'Print & Export Hub', href: '/exam-cell/print-hub', icon: Printer, keywords: ['pdf', 'export', 'csv'] },
-        { label: 'Question Paper Control', href: '/exam-cell/question-papers', icon: FolderLock, keywords: ['qp', 'moderation'] },
-        { label: 'Exam Day Operations', href: '/exam-cell/exam-day', icon: Timer, keywords: ['attendance', 'qr verify'] },
-        { label: 'Answer Sheet Tracking', href: '/exam-cell/answer-sheets', icon: FileText, keywords: ['qr', 'barcode', 'evaluator'] },
-        { label: 'Document Repository', href: '/exam-cell/documents', icon: Archive, keywords: ['notices', 'circulars', 'verification'] },
       ],
     },
     {
-      title: 'Post-Exam Operations',
+      title: 'Exam Operations',
+      homeHref: '/exam-cell/exam-day',
+      icon: ClipboardList,
+      items: [
+        { label: 'Invigilation Roster', href: '/exam-cell/invigilation', icon: Eye, keywords: ['faculty', 'duty', 'auto assign'] },
+        { label: 'Question Paper Control', href: '/exam-cell/question-papers', icon: FolderLock, keywords: ['qp', 'moderation'] },
+        { label: 'Exam Day Operations', href: '/exam-cell/exam-day', icon: Timer, keywords: ['attendance', 'qr verify'] },
+        { label: 'Answer Sheet Tracking', href: '/exam-cell/answer-sheets', icon: FileText, keywords: ['qr', 'barcode', 'evaluator'] },
+      ],
+    },
+    {
+      title: 'Marks & Results',
+      homeHref: '/exam-cell/results',
+      icon: TrendingUp,
       items: [
         { label: 'Result Control Centre', href: '/exam-cell/results', icon: TrendingUp, keywords: ['publish', 'bell curve', 'declare', 'marks entry'] },
+        { label: 'Course Grades', href: '/exam-cell/course-grades', icon: GraduationCap, keywords: ['grades', 'aggregate'] },
         { label: 'Grade Cards & Merit', href: '/exam-cell/grade-cards', icon: Medal, keywords: ['marksheet', 'grade cards', 'cgpa', 'sgpa', 'top students', 'merit'] },
         { label: 'Grade Change DOFA', href: '/exam-cell/approvals/grade-change', icon: PenLine, keywords: ['dofa', 'grade change', 'coe approval', 'apply'] },
-        { label: 'DOFA Inbox (Universal)', href: '/exam-cell/approvals/dofa-inbox', icon: Inbox, keywords: ['nervous system', 'approvals'] },
-        { label: 'Course Grades', href: '/exam-cell/course-grades', icon: GraduationCap, keywords: ['grades', 'aggregate'] },
-        { label: 'Backlog & Supplementary', href: '/exam-cell/backlog-exams', icon: ArrowUpCircle, keywords: ['back paper', 'supplementary'] },
         { label: 'Re-evaluations', href: '/exam-cell/re-evaluations', icon: FileText, keywords: ['recheck', 'backlog'] },
+      ],
+    },
+    {
+      title: 'Reports & Compliance',
+      homeHref: '/exam-cell/reports',
+      icon: BarChart3,
+      items: [
+        { label: 'DOFA Inbox (Universal)', href: '/exam-cell/approvals/dofa-inbox', icon: Inbox, keywords: ['nervous system', 'approvals'] },
         { label: 'UFM Malpractice Desk', href: '/exam-cell/ufm-cases', icon: Shield, keywords: ['cheating', 'unfair means'] },
         { label: 'Degree & Transcripts', href: '/exam-cell/transcripts', icon: Award, keywords: ['digilocker', 'abc id'] },
         { label: 'Portfolio Transcripts', href: '/exam-cell/portfolio-transcripts', icon: Briefcase, keywords: ['github', 'patents', 'hardware', 'portfolio degree'] },
         { label: 'Degree Eligibility Audit', href: '/exam-cell/degree-audit', icon: FileCheck2, keywords: ['credits', 'cgpa', 'clearance'] },
         { label: 'Examination Reports', href: '/exam-cell/reports', icon: BarChart3, keywords: ['pass percentage', 'rankers'] },
         { label: 'Advanced Analytics', href: '/exam-cell/analytics', icon: PieChart, keywords: ['management', 'charts', 'export'] },
+        { label: 'Audit Log', href: '/exam-cell/audit-log', icon: Shield, keywords: ['compliance', 'trail'] },
+        { label: 'Document Repository', href: '/exam-cell/documents', icon: Archive, keywords: ['notices', 'circulars', 'verification'] },
         { label: 'Exam Notifications', href: '/exam-cell/notifications', icon: Bell, keywords: ['sms', 'email', 'alert'] },
+      ],
+    },
+    {
+      title: 'Master Data & Settings',
+      homeHref: '/exam-cell/exam-centres',
+      icon: Settings,
+      items: [
+        { label: 'Settings', href: '/exam-cell/settings', icon: Settings, keywords: ['configuration', 'preferences'] },
+        { label: 'Account Profile', href: '/exam-cell/profile', icon: UserCog, keywords: ['account', 'profile', 'security'] },
+        { label: 'Exam Centres & Rooms', href: '/exam-cell/exam-centres', icon: DoorOpen, keywords: ['building', 'hall', 'capacity', 'master data'] },
       ],
     },
   ],

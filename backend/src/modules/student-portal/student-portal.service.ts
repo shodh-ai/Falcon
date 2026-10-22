@@ -1,3 +1,4 @@
+import { assertStudentResultsAvailable } from '../exam-cell/student-result-hold';
 import {
   BadRequestException,
   ConflictException,
@@ -752,37 +753,40 @@ export class StudentPortalService {
   }
 
   async getMarks(tenantId: string, userId: string) {
-    const marks = await this.dataSource
-      .query(
-        `SELECT m.exam_type, m.marks_obtained, m.max_marks, m.status,
+    await assertStudentResultsAvailable(this.dataSource, tenantId, userId);
+    const marks = await this.dataSource.query(
+      `SELECT m.exam_type, COALESCE(retake.marks_obtained, m.marks_obtained) AS marks_obtained,
+              COALESCE(retake.max_marks, m.max_marks) AS max_marks, m.status,
+              retake.selected_attempt_id AS retake_attempt_id,
               c.course_code, c.course_name, e.semester
        FROM academic_marks m
-       JOIN academic_courses c ON c.course_id = m.course_id
+       JOIN academic_courses c ON c.course_id = m.course_id AND c.tenant_id = m.tenant_id
        LEFT JOIN student_course_enrollments e
-         ON e.course_id = m.course_id AND e.student_user_id = m.student_user_id
+         ON e.course_id = m.course_id AND e.student_user_id = m.student_user_id AND e.tenant_id=m.tenant_id
+       LEFT JOIN exam_backlog_current_results retake ON retake.tenant_id=m.tenant_id
+         AND retake.student_user_id=m.student_user_id AND retake.course_id=m.course_id
+         AND retake.semester=e.semester AND retake.source_exam_type=m.exam_type
+         AND retake.selected_attempt_id IS NOT NULL
        WHERE m.student_user_id = $1 AND m.tenant_id = $2 AND m.status = 'PUBLISHED'
        ORDER BY e.semester NULLS LAST, c.course_code, m.exam_type`,
-        [userId, tenantId],
-      )
-      .catch(() => []);
+      [userId, tenantId],
+    );
 
-    const gradeCards = await this.dataSource
-      .query(
-        `SELECT semester, cgpa, status, published_at
+    const gradeCards = await this.dataSource.query(
+      `SELECT semester, cgpa, payload, status, published_at
        FROM grade_cards
-       WHERE student_user_id = $1 AND tenant_id = $2
+       WHERE student_user_id = $1 AND tenant_id = $2 AND status = 'PUBLISHED'
        ORDER BY semester`,
-        [userId, tenantId],
-      )
-      .catch(() => []);
+      [userId, tenantId],
+    );
 
     const enrollments = await this.dataSource.query(
       `SELECT e.semester, e.grade, e.grade_points, e.status,
               c.course_code, c.course_name, c.credits
        FROM student_course_enrollments e
-       JOIN academic_courses c ON c.course_id = e.course_id
-       WHERE e.student_user_id = $1`,
-      [userId],
+       JOIN academic_courses c ON c.course_id = e.course_id AND c.tenant_id = e.tenant_id
+       WHERE e.student_user_id = $1 AND e.tenant_id = $2`,
+      [userId, tenantId],
     );
 
     const backlogs = enrollments.filter(
@@ -797,15 +801,28 @@ export class StudentPortalService {
     );
 
     const sgpaFromCards = gradeCards.map(
-      (g: { semester: number; cgpa: string | null }) => ({
+      (g: {
+        semester: number;
+        cgpa: string | null;
+        payload?: { sgpa?: number };
+      }) => ({
         semester: Number(g.semester),
-        sgpa: g.cgpa != null ? Number(g.cgpa) : 0,
+        sgpa:
+          g.payload?.sgpa != null
+            ? Number(g.payload.sgpa)
+            : g.cgpa != null
+              ? Number(g.cgpa)
+              : 0,
       }),
     );
 
     const semesterMap = new Map<number, { points: number; credits: number }>();
     for (const row of enrollments) {
-      if (row.status !== 'COMPLETED' || row.grade_points == null) continue;
+      if (
+        !['COMPLETED', 'FAILED'].includes(row.status) ||
+        row.grade_points == null
+      )
+        continue;
       const sem = Number(row.semester);
       const bucket = semesterMap.get(sem) ?? { points: 0, credits: 0 };
       bucket.points += Number(row.grade_points) * Number(row.credits);
@@ -847,6 +864,31 @@ export class StudentPortalService {
   async getExamDesk(tenantId: string, userId: string) {
     const examLabel = `COALESCE(sub.subject_name, sub.subject_code, es.exam_type::text, 'Exam')`;
 
+    // Match the student examination schedule's enrollment and date criteria.
+    const upcomingExams = await this.dataSource.query<
+      Array<Record<string, unknown>>
+    >(
+      `SELECT s.exam_schedule_id, s.exam_type, s.subject_id,
+              sub.subject_name AS subject, sub.subject_code,
+              s.exam_date::text AS exam_date, s.start_time, s.end_time,
+              s.venue AS hall, s.venue AS room
+       FROM exam_schedules s
+       LEFT JOIN academic_subjects sub ON sub.subject_id = s.subject_id
+       WHERE s.tenant_id = $1
+         AND EXISTS (
+           SELECT 1
+           FROM student_course_enrollments e
+           JOIN academic_courses c ON c.course_id = e.course_id AND c.tenant_id = e.tenant_id
+           JOIN academic_subjects enrolled_subject ON enrolled_subject.subject_code = c.course_code
+           WHERE e.tenant_id = s.tenant_id
+             AND e.student_user_id = $2
+             AND enrolled_subject.subject_id = s.subject_id
+         )
+         AND s.exam_date >= $3::date
+       ORDER BY s.exam_date ASC, s.start_time ASC`,
+      [tenantId, userId, new Date().toISOString().slice(0, 10)],
+    );
+
     const ufm = await this.dataSource
       .query(
         `SELECT c.case_id, c.description, c.penalty_applied, c.status, c.logged_at,
@@ -875,7 +917,7 @@ export class StudentPortalService {
         `SELECT sp.seating_plan_id, sp.room,
               seat.elem->>'block' AS block,
               seat.elem->>'seat_no' AS seat_no,
-              ${examLabel} AS exam_name, es.exam_date, es.start_time
+              ${examLabel} AS exam_name, es.exam_date::text AS exam_date, es.start_time
        FROM exam_seating_plans sp
        JOIN exam_schedules es ON es.exam_schedule_id = sp.exam_schedule_id
        LEFT JOIN academic_subjects sub ON sub.subject_id = es.subject_id
@@ -912,7 +954,11 @@ export class StudentPortalService {
       },
     );
 
-    return { ufm_cases: [...ufm, ...disciplineUfm], seating: mySeats };
+    return {
+      upcoming_exams: upcomingExams,
+      ufm_cases: [...ufm, ...disciplineUfm],
+      seating: mySeats,
+    };
   }
 
   async getExtracurriculars(tenantId: string, userId: string) {
@@ -1534,7 +1580,7 @@ export class StudentPortalService {
       `SELECT d.demand_id, d.fee_head, d.total_amount, d.paid_amount, d.status, u.tenant_id
        FROM finance_fee_demands d
        JOIN users u ON u.user_id = d.student_user_id
-       WHERE d.demand_id = $1 AND d.student_user_id = $2 AND u.tenant_id = $3`,
+       WHERE d.demand_id = $1 AND d.student_user_id = $2 AND d.tenant_id = $3 AND u.tenant_id = $3`,
       [demandId, userId, tenantId],
     );
     const demand = rows[0] as
@@ -1572,7 +1618,9 @@ export class StudentPortalService {
     });
 
     // Persist INITIATED intent — settlement happens only after gateway verification.
-    await this.dataSource.query(
+    const intents = await this.dataSource.query<
+      Array<{ transaction_id: string }>
+    >(
       `INSERT INTO finance_transactions (
          student_user_id, demand_id, gateway, gateway_order_id, gateway_reference,
          amount, status, payment_mode, direction, txn_kind, ledger_category, gateway_payload
@@ -1580,7 +1628,10 @@ export class StudentPortalService {
        ON CONFLICT (gateway_order_id) DO UPDATE SET
          amount = EXCLUDED.amount,
          status = 'INITIATED',
-         gateway_payload = EXCLUDED.gateway_payload`,
+         gateway_payload = EXCLUDED.gateway_payload
+       WHERE finance_transactions.student_user_id = $1 AND finance_transactions.demand_id = $2
+         AND finance_transactions.status = 'INITIATED'
+       RETURNING transaction_id`,
       [
         userId,
         demandId,
@@ -1596,6 +1647,10 @@ export class StudentPortalService {
         }),
       ],
     );
+    if (!intents[0])
+      throw new ConflictException(
+        'The checkout order is already bound to another payment',
+      );
 
     return {
       order_id: order.order_id,
@@ -1630,11 +1685,14 @@ export class StudentPortalService {
     }
 
     const existingSuccess = await this.dataSource.query(
-      `SELECT transaction_id, demand_id, receipt_url, amount
-       FROM finance_transactions
-       WHERE gateway_payment_id = $1 AND status = 'SUCCESS'
+      `SELECT t.transaction_id, t.demand_id, t.receipt_url, t.amount
+       FROM finance_transactions t
+       JOIN finance_fee_demands d ON d.demand_id = t.demand_id AND d.student_user_id = t.student_user_id
+       JOIN users u ON u.user_id = t.student_user_id AND u.tenant_id = d.tenant_id
+       WHERE t.gateway_payment_id = $1 AND t.status = 'SUCCESS'
+         AND t.student_user_id = $2 AND t.demand_id = $3 AND d.tenant_id = $4
        LIMIT 1`,
-      [paymentId],
+      [paymentId, userId, demandId, tenantId],
     );
     if (existingSuccess[0]) {
       const ledger = await this.getFinanceLedger(userId, tenantId);
@@ -1653,7 +1711,7 @@ export class StudentPortalService {
       `SELECT d.demand_id, d.fee_head, d.total_amount, d.paid_amount, d.status, u.tenant_id
        FROM finance_fee_demands d
        JOIN users u ON u.user_id = d.student_user_id
-       WHERE d.demand_id = $1 AND d.student_user_id = $2 AND u.tenant_id = $3`,
+       WHERE d.demand_id = $1 AND d.student_user_id = $2 AND d.tenant_id = $3 AND u.tenant_id = $3`,
       [demandId, userId, tenantId],
     );
     const demand = rows[0] as
@@ -1669,7 +1727,9 @@ export class StudentPortalService {
       throw new NotFoundException('Fee demand not found');
     }
     if (demand.status === 'PAID') {
-      return { already_paid: true, demand_id: demandId };
+      throw new ConflictException(
+        'This demand is already paid; refresh your payment history',
+      );
     }
 
     const outstanding = Math.max(
@@ -1680,15 +1740,25 @@ export class StudentPortalService {
       throw new BadRequestException('Nothing due on this demand');
     }
 
-    let pendingOrderId = input.order_id?.trim() || null;
-    if (!pendingOrderId) {
-      const pending = await this.dataSource.query(
-        `SELECT gateway_order_id FROM finance_transactions
-         WHERE student_user_id = $1 AND demand_id = $2 AND status = 'INITIATED'
-         ORDER BY created_at DESC LIMIT 1`,
-        [userId, demandId],
+    const requestedOrderId = input.order_id?.trim() || null;
+    const pending = await this.dataSource.query(
+      `SELECT t.gateway_order_id, t.amount FROM finance_transactions t
+       JOIN finance_fee_demands d ON d.demand_id = t.demand_id AND d.student_user_id = t.student_user_id
+       JOIN users u ON u.user_id = t.student_user_id AND u.tenant_id = d.tenant_id
+       WHERE t.student_user_id = $1 AND t.demand_id = $2 AND d.tenant_id = $3
+         AND t.status = 'INITIATED' AND ($4::text IS NULL OR t.gateway_order_id = $4)
+       ORDER BY t.created_at DESC LIMIT 1`,
+      [userId, demandId, tenantId, requestedOrderId],
+    );
+    const pendingOrderId = pending[0]?.gateway_order_id as string | undefined;
+    if (
+      !pendingOrderId ||
+      Math.round(Number(pending[0].amount) * 100) !==
+        Math.round(outstanding * 100)
+    ) {
+      throw new BadRequestException(
+        'No matching payment order is available; start checkout again',
       );
-      pendingOrderId = pending[0]?.gateway_order_id ?? null;
     }
 
     const verified = await this.gatewayPayments.verifyPayment({
@@ -1697,6 +1767,7 @@ export class StudentPortalService {
       expectedOrderId: pendingOrderId,
       expectedDemandId: demandId,
       expectedStudentUserId: userId,
+      expectedTenantId: tenantId,
       signature: input.signature,
     });
 
@@ -1704,17 +1775,29 @@ export class StudentPortalService {
     const receiptNumber = `RCP-${paymentId.replace(/\W/g, '').slice(-12).toUpperCase()}`;
     const paymentMode = verified.method ?? 'UPI';
 
-    return this.dataSource.transaction(async (manager) => {
+    const settled = await this.dataSource.transaction(async (manager) => {
       const locked = await manager.query(
         `SELECT demand_id, total_amount, paid_amount, status
          FROM finance_fee_demands
-         WHERE demand_id = $1 AND student_user_id = $2
+         WHERE demand_id = $1 AND student_user_id = $2 AND tenant_id = $3
          FOR UPDATE`,
-        [demandId, userId],
+        [demandId, userId, tenantId],
       );
       if (!locked[0]) throw new NotFoundException('Fee demand not found');
       if (locked[0].status === 'PAID') {
-        return { already_paid: true, demand_id: demandId };
+        throw new ConflictException(
+          'This demand is already paid; refresh your payment history',
+        );
+      }
+
+      const lockedOutstanding = Math.round(
+        (Number(locked[0].total_amount) - Number(locked[0].paid_amount ?? 0)) *
+          100,
+      );
+      if (lockedOutstanding !== verified.amount_paise) {
+        throw new ConflictException(
+          'The fee balance changed during checkout; contact Finance before retrying',
+        );
       }
 
       const dup = await manager.query(
@@ -1759,26 +1842,8 @@ export class StudentPortalService {
       }
 
       if (!txnRows[0]) {
-        txnRows = await manager.query(
-          `INSERT INTO finance_transactions (
-             student_user_id, demand_id, gateway, gateway_payment_id, gateway_order_id,
-             gateway_reference, amount, status, payment_mode, direction, txn_kind,
-             ledger_category, gateway_payload
-           ) VALUES ($1, $2, 'RAZORPAY', $3, $4, $3, $5, 'SUCCESS', $6, 'IN', $7, 'TUITION_GENERAL', $8::jsonb)
-           RETURNING *`,
-          [
-            userId,
-            demandId,
-            verified.payment_id,
-            verified.order_id,
-            outstanding,
-            paymentMode,
-            `FEE_${feeHead}`,
-            JSON.stringify({
-              verified_at: new Date().toISOString(),
-              mock: verified.mock,
-            }),
-          ],
+        throw new ConflictException(
+          'The payment order is no longer available for this demand',
         );
       }
 
@@ -1817,8 +1882,8 @@ export class StudentPortalService {
       await manager.query(
         `UPDATE finance_fee_demands
          SET paid_amount = total_amount, status = 'PAID', updated_at = NOW()
-         WHERE demand_id = $1 AND student_user_id = $2`,
-        [demandId, userId],
+         WHERE demand_id = $1 AND student_user_id = $2 AND tenant_id = $3`,
+        [demandId, userId, tenantId],
       );
 
       await manager
@@ -1841,25 +1906,23 @@ export class StudentPortalService {
         )
         .catch(() => undefined);
 
-      this.events.emit('finance.demand_paid', {
-        tenantId,
-        studentUserId: userId,
-        demandId,
-        amount: outstanding,
-        feeHead,
-      });
-
-      const ledger = await this.getFinanceLedger(userId, tenantId);
-
       return {
         success: true,
         transaction: txnRows[0],
         receipt_url: receiptUrl,
         document_vault_added: Boolean(receiptUrl),
         message: `Payment of ₹${outstanding} recorded successfully`,
-        gates: ledger.gates,
       };
     });
+    this.events.emit('finance.demand_paid', {
+      tenantId,
+      studentUserId: userId,
+      demandId,
+      amount: outstanding,
+      feeHead,
+    });
+    const ledger = await this.getFinanceLedger(userId, tenantId);
+    return { ...settled, gates: ledger.gates };
   }
 
   /** @deprecated Use confirmVerifiedPayment — retained name for internal callers */

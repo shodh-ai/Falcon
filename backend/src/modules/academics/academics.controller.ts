@@ -571,7 +571,7 @@ export class AcademicsController {
     if (!isSelf && !isStaff) {
       throw new ForbiddenException('You can only view your own results');
     }
-    return this.academics.listResultsForStudent(userId);
+    return this.academics.listResultsForStudent(userId, req.user.tenant_id);
   }
 
   @Get('student/dashboard-summary')

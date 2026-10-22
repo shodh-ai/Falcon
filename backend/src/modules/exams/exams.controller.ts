@@ -14,7 +14,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { ExamsService } from './exams.service';
 import { CreateExamApplicationDto } from './dto/create-exam-application.dto';
 
-type AuthUser = { user_id: string; role?: string };
+type AuthUser = { user_id: string; tenant_id?: string; role?: string };
 
 @Controller('api/academics/exams')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -24,19 +24,25 @@ export class ExamsController {
   @Get('schedule')
   @Roles('Student')
   schedule(@Req() req: { user: AuthUser }) {
-    return this.exams.listUpcomingSchedulesForStudent(req.user.user_id);
+    return this.exams.listUpcomingSchedulesForStudent(
+      req.user.tenant_id,
+      req.user.user_id,
+    );
   }
 
   @Get('eligibility')
   @Roles('Student')
   eligibility(@Req() req: { user: AuthUser }) {
-    return this.exams.checkEligibility(req.user.user_id);
+    return this.exams.checkEligibility(req.user.tenant_id, req.user.user_id);
   }
 
   @Get('admit-card')
   @Roles('Student')
   async admitCard(@Req() req: { user: AuthUser }, @Res() res: Response) {
-    const pdf = await this.exams.generateAdmitCardOrThrow(req.user.user_id);
+    const pdf = await this.exams.generateAdmitCardOrThrow(
+      req.user.tenant_id,
+      req.user.user_id,
+    );
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader(
       'Content-Disposition',
@@ -48,12 +54,25 @@ export class ExamsController {
   @Get('applications/my')
   @Roles('Student')
   myApplications(@Req() req: { user: AuthUser }) {
-    return this.exams.listMyApplications(req.user.user_id);
+    return this.exams.listMyApplications(req.user.tenant_id, req.user.user_id);
   }
 
   @Post('applications')
   @Roles('Student')
   apply(@Req() req: { user: AuthUser }, @Body() dto: CreateExamApplicationDto) {
-    return this.exams.createApplication(req.user.user_id, dto);
+    return this.exams.createApplication(
+      req.user.tenant_id,
+      req.user.user_id,
+      dto,
+    );
+  }
+
+  @Get('re-evaluation-sources')
+  @Roles('Student')
+  reEvaluationSources(@Req() req: { user: AuthUser }) {
+    return this.exams.listReEvaluationSources(
+      req.user.tenant_id,
+      req.user.user_id,
+    );
   }
 }

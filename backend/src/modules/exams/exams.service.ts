@@ -1,4 +1,10 @@
-import { Injectable, ForbiddenException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  ForbiddenException,
+  NotFoundException,
+  ConflictException,
+} from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { ExamSchedule } from '../../entities/exam-schedule.entity';
@@ -11,6 +17,13 @@ import {
   type AdmitCardExamRow,
 } from './pdf/admit-card-pdf.service';
 import { AttendanceEligibilityService } from '../attendance-policy/attendance-eligibility.service';
+import { ExamCellAuditService } from '../exam-cell/exam-cell-audit.service';
+import { FeeDemand } from '../../entities/fee-demand.entity';
+import {
+  listReEvaluationSources,
+  resolveReEvaluationSource,
+} from '../exam-cell/revaluation-source';
+import { HallTicketVerificationService } from '../exam-cell/hall-ticket-verification.service';
 
 export interface ExamEligibilityResult {
   eligible: boolean;
@@ -18,7 +31,7 @@ export interface ExamEligibilityResult {
   min_required: number;
   exempted: boolean;
   reasons: Array<{
-    code: 'ATTENDANCE_SHORTFALL' | 'PENDING_FEE_DUES';
+    code: 'ATTENDANCE_SHORTFALL' | 'PENDING_FEE_DUES' | 'OPEN_UFM_CASE';
     message: string;
     details?: unknown;
   }>;
@@ -38,66 +51,177 @@ export class ExamsService {
   ) {}
 
   async listUpcomingSchedulesForStudent(
+    tenantId: string | undefined,
     studentUserId: string,
   ): Promise<ExamSchedule[]> {
+    this.requireTenant(tenantId);
     const today = new Date().toISOString().slice(0, 10);
     return this.schedules
       .createQueryBuilder('s')
-      .where('s.exam_date >= :today', { today })
+      .where('s.tenant_id = :tenantId', { tenantId })
+      .andWhere(
+        `EXISTS (
+          SELECT 1
+          FROM student_course_enrollments e
+          JOIN academic_courses c ON c.course_id = e.course_id AND c.tenant_id = e.tenant_id
+          JOIN academic_subjects enrolled_subject ON enrolled_subject.subject_code = c.course_code
+          WHERE e.tenant_id = s.tenant_id
+            AND e.student_user_id = :studentUserId
+            AND enrolled_subject.subject_id = s.subject_id
+        )`,
+        { studentUserId },
+      )
+      .andWhere('s.exam_date >= :today', { today })
       .orderBy('s.exam_date', 'ASC')
       .addOrderBy('s.start_time', 'ASC')
       .getMany();
   }
 
-  async listMyApplications(studentUserId: string) {
-    return this.db.query(
+  async listMyApplications(
+    tenantId: string | undefined,
+    studentUserId: string,
+  ) {
+    this.requireTenant(tenantId);
+    return this.db.query<Array<Record<string, unknown>>>(
       `SELECT a.*,
+              CASE WHEN a.status = 'COMPLETED' THEN a.revised_marks ELSE NULL END AS revised_marks,
+              CASE WHEN a.status IN ('COMPLETED', 'REJECTED') THEN a.report_notes ELSE NULL END AS report_notes,
               sub.subject_name,
               sub.subject_code,
               f.name AS faculty_name
        FROM exam_applications a
        LEFT JOIN academic_subjects sub ON sub.subject_id = a.subject_id
        LEFT JOIN users f ON f.user_id = a.assigned_faculty_user_id
-       WHERE a.student_user_id = $1
+       WHERE a.tenant_id = $1 AND a.student_user_id = $2
        ORDER BY a.created_at DESC`,
-      [studentUserId],
+      [tenantId, studentUserId],
     );
   }
 
   async createApplication(
+    tenantId: string | undefined,
     studentUserId: string,
     dto: CreateExamApplicationDto,
   ): Promise<ExamApplication> {
-    const application = this.applications.create({
-      student_user_id: studentUserId,
-      subject_id: dto.subject_id,
-      application_type: dto.application_type,
-      fee_status: 'PENDING',
-      status: dto.application_type === 'RE_EVALUATION' ? 'DRAFT' : 'PENDING',
-    });
-
-    if (dto.application_type === 'RE_EVALUATION') {
-      const student = await this.users.findOne({
-        where: { user_id: studentUserId },
-      });
-      const tenantId =
-        student?.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
-      const academicYear = this.getAcademicYear();
-      const dueDate = this.addDays(new Date(), 3).toISOString().slice(0, 10);
-      const demand = await this.finance.createDemand(
-        {
-          student_user_id: studentUserId,
-          fee_head: 'RE_EVALUATION',
-          academic_year: academicYear,
-          total_amount: 500,
-          due_date: dueDate,
-        },
-        tenantId,
+    this.requireTenant(tenantId);
+    if (dto.application_type === 'BACKLOG') {
+      throw new BadRequestException(
+        'Apply through an available backlog or supplementary examination offering',
       );
-      application.finance_demand_id = demand.demand_id;
     }
+    const student = await this.users.findOne({
+      where: { user_id: studentUserId, tenant_id: tenantId },
+    });
+    if (!student)
+      throw new ForbiddenException('Student account is not in this tenant');
+    let demand: FeeDemand | undefined;
+    const application = await this.db.transaction(async (manager) => {
+      // Serialize repeated clicks for this student, including fee creation.
+      await manager.query(
+        `SELECT user_id FROM users WHERE user_id = $1 AND tenant_id = $2 FOR UPDATE`,
+        [studentUserId, tenantId],
+      );
+      const duplicate = await manager.query<
+        Array<{ exam_application_id: string }>
+      >(
+        `SELECT exam_application_id FROM exam_applications
+         WHERE tenant_id = $1 AND student_user_id = $2 AND subject_id = $3
+           AND application_type = $4 AND status NOT IN ('COMPLETED', 'REJECTED')
+         LIMIT 1`,
+        [tenantId, studentUserId, dto.subject_id, dto.application_type],
+      );
+      if (duplicate[0])
+        throw new ConflictException(
+          'An active application already exists for this subject',
+        );
+      const subject = await manager.query<Array<Record<string, unknown>>>(
+        `SELECT 1
+       FROM student_course_enrollments e
+       JOIN academic_courses c ON c.course_id = e.course_id AND c.tenant_id = e.tenant_id
+       JOIN academic_subjects s ON s.subject_code = c.course_code AND s.subject_id = $3
+         AND s.semester = e.semester
+       WHERE e.tenant_id = $1 AND e.student_user_id = $2
+       LIMIT 1`,
+        [tenantId, studentUserId, dto.subject_id],
+      );
+      if (!subject[0]) throw new NotFoundException('Subject not found');
+      const source =
+        dto.application_type === 'RE_EVALUATION'
+          ? await resolveReEvaluationSource(manager, tenantId, {
+              student_user_id: studentUserId,
+              subject_id: dto.subject_id,
+              source_result_id: dto.source_result_id,
+              source_session_id: dto.source_session_id,
+            })
+          : null;
+      if (dto.application_type === 'RE_EVALUATION' && !source) {
+        // Reject unsupported or ambiguous examinations before charging the student.
+        throw new BadRequestException('Select a published examination result');
+      }
+      const applications = manager.getRepository(ExamApplication);
+      const created = applications.create({
+        tenant_id: tenantId,
+        student_user_id: studentUserId,
+        subject_id: dto.subject_id,
+        application_type: dto.application_type,
+        fee_status: 'PENDING',
+        status: dto.application_type === 'RE_EVALUATION' ? 'DRAFT' : 'PENDING',
+        source_result_id: source?.result_id ?? null,
+        source_session_id: source?.session_id ?? null,
+        source_mark_id: source?.mark_id ?? null,
+      });
 
-    return this.applications.save(application);
+      if (dto.application_type === 'RE_EVALUATION') {
+        const academicYear = this.getAcademicYear();
+        const dueDate = this.addDays(new Date(), 3).toISOString().slice(0, 10);
+        demand = await this.finance.createDemand(
+          {
+            student_user_id: studentUserId,
+            fee_head: 'RE_EVALUATION',
+            academic_year: academicYear,
+            total_amount: 500,
+            due_date: dueDate,
+          },
+          tenantId,
+          { manager, notify: false },
+        );
+        created.finance_demand_id = demand.demand_id;
+      }
+      const saved = await applications.save(created);
+      await new ExamCellAuditService(this.db).log(
+        tenantId,
+        studentUserId,
+        {
+          action: 'EXAM_APPLICATION_CREATED',
+          resource_type: 'exam_application',
+          resource_id: saved.exam_application_id,
+          new_value: {
+            application_type: saved.application_type,
+            subject_id: saved.subject_id,
+            source_result_id: saved.source_result_id,
+            source_session_id: saved.source_session_id,
+            status: saved.status,
+          },
+        },
+        manager,
+      );
+      return saved;
+    });
+    if (demand) this.finance.notifyDemandGenerated(demand, tenantId);
+    return application;
+  }
+
+  async listReEvaluationSources(
+    tenantId: string | undefined,
+    studentUserId: string,
+  ) {
+    this.requireTenant(tenantId);
+    const student = await this.users.findOne({
+      where: { user_id: studentUserId, tenant_id: tenantId },
+    });
+    if (!student)
+      throw new ForbiddenException('Student account is not in this tenant');
+    return listReEvaluationSources(this.db, tenantId, studentUserId);
   }
 
   /**
@@ -105,32 +229,42 @@ export class ExamsService {
    * during local demos. Production stays strict unless the head is clearly smoke.
    */
   private isNonBlockingSmokeFee(feeHead: string): boolean {
-    return /^SMOKE([\s_-]|$)/i.test(String(feeHead ?? '').trim());
+    return (
+      this.isAdmitCardDemoBypassEnabled() &&
+      /^SMOKE([\s_-]|$)/i.test(String(feeHead ?? '').trim())
+    );
   }
 
   /** Local/demo: unlock admit card when smoke dues / seed attendance would otherwise lock it. */
   private isAdmitCardDemoBypassEnabled(): boolean {
-    if (process.env.STRICT_ADMIT_CARD_ELIGIBILITY === 'true') return false;
     return (
-      process.env.ADMIT_CARD_DEMO_BYPASS === 'true' ||
-      process.env.NODE_ENV !== 'production'
+      process.env.NODE_ENV === 'development' &&
+      process.env.FALCON_LOCAL_EXAM_DEMO === 'true' &&
+      process.env.STRICT_ADMIT_CARD_ELIGIBILITY !== 'true'
     );
   }
 
   async checkEligibility(
+    tenantId: string | undefined,
     studentUserId: string,
   ): Promise<ExamEligibilityResult> {
+    this.requireTenant(tenantId);
     const student = await this.users.findOne({
-      where: { user_id: studentUserId },
+      where: { user_id: studentUserId, tenant_id: tenantId },
     });
-    const tenantId =
-      student?.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
+    if (!student)
+      throw new ForbiddenException('Student account is not in this tenant');
 
-    const [attendance, pendingDues] = await Promise.all([
+    const [attendance, pendingDues, ufm] = await Promise.all([
       this.attendanceEligibility.evaluate(tenantId, studentUserId, {
         context: 'EXAM_DESK',
       }),
-      this.finance.getPendingDues(studentUserId),
+      this.finance.getPendingDues(studentUserId, tenantId),
+      this.db.query(
+        `SELECT COUNT(*)::int AS c FROM ufm_cases
+         WHERE tenant_id = $1 AND student_user_id = $2 AND status != 'CLOSED'`,
+        [tenantId, studentUserId],
+      ),
     ]);
 
     const blockingDues = pendingDues.filter(
@@ -138,6 +272,13 @@ export class ExamsService {
     );
 
     const reasons: ExamEligibilityResult['reasons'] = [];
+
+    if ((ufm[0]?.c ?? 0) > 0) {
+      reasons.push({
+        code: 'OPEN_UFM_CASE',
+        message: 'Blocked: Open UFM case',
+      });
+    }
 
     if (!attendance.eligible && attendance.reason) {
       reasons.push({
@@ -165,7 +306,9 @@ export class ExamsService {
     }
 
     const demoBypass =
-      this.isAdmitCardDemoBypassEnabled() && reasons.length > 0;
+      this.isAdmitCardDemoBypassEnabled() &&
+      reasons.length > 0 &&
+      (ufm[0]?.c ?? 0) === 0;
 
     return {
       eligible: reasons.length === 0 || demoBypass,
@@ -207,12 +350,12 @@ export class ExamsService {
 
   /** Full timetable rows for the hall ticket (subject + venue split). */
   private async listAdmitCardExams(
-    _studentUserId: string,
+    tenantId: string,
+    studentUserId: string,
   ): Promise<AdmitCardExamRow[]> {
     const today = new Date().toISOString().slice(0, 10);
-    const rows = await this.db
-      .query(
-        `SELECT es.exam_date::text AS exam_date,
+    const rows = await this.db.query(
+      `SELECT es.exam_schedule_id, es.exam_date::text AS exam_date,
                 es.start_time::text AS start_time,
                 es.end_time::text AS end_time,
                 es.exam_type,
@@ -222,16 +365,25 @@ export class ExamsService {
                 COALESCE(sub.subject_name, c.course_name, 'Examination') AS subject_name
          FROM exam_schedules es
          LEFT JOIN academic_subjects sub ON sub.subject_id = es.subject_id
-         LEFT JOIN academic_courses c ON c.course_code = sub.subject_code
-         WHERE es.exam_date >= $1::date
+         LEFT JOIN academic_courses c ON c.course_code = sub.subject_code AND c.tenant_id = es.tenant_id
+         WHERE es.tenant_id = $1 AND es.exam_date >= $2::date
+           AND EXISTS (
+             SELECT 1
+             FROM student_course_enrollments e
+             JOIN academic_courses c ON c.course_id = e.course_id AND c.tenant_id = e.tenant_id
+             JOIN academic_subjects enrolled_subject ON enrolled_subject.subject_code = c.course_code
+             WHERE e.tenant_id = es.tenant_id
+               AND e.student_user_id = $3
+               AND enrolled_subject.subject_id = es.subject_id
+           )
          ORDER BY es.exam_date ASC, es.start_time ASC`,
-        [today],
-      )
-      .catch(() => []);
+      [tenantId, today, studentUserId],
+    );
 
     if (Array.isArray(rows) && rows.length > 0) {
       return rows.map(
         (r: {
+          exam_schedule_id: string;
           exam_date: string;
           start_time: string;
           end_time: string;
@@ -243,6 +395,7 @@ export class ExamsService {
         }) => {
           const venue = this.parseVenue(r.venue);
           return {
+            exam_schedule_id: r.exam_schedule_id,
             exam_date: String(r.exam_date).slice(0, 10),
             start_time: String(r.start_time).slice(0, 8),
             end_time: String(r.end_time).slice(0, 8),
@@ -341,7 +494,7 @@ export class ExamsService {
     });
   }
 
-  private async loadAdmitCardStudent(studentUserId: string) {
+  private async loadAdmitCardStudent(tenantId: string, studentUserId: string) {
     const rows = await this.db
       .query(
         `SELECT u.user_id, u.name, u.official_email AS email,
@@ -351,9 +504,9 @@ export class ExamsService {
          FROM users u
          LEFT JOIN student_profiles sp ON sp.user_id = u.user_id
          LEFT JOIN departments d ON d.dept_id = u.dept_id
-         WHERE u.user_id = $1
+         WHERE u.user_id = $1 AND u.tenant_id = $2
          LIMIT 1`,
-        [studentUserId],
+        [studentUserId, tenantId],
       )
       .catch(() => []);
 
@@ -374,22 +527,7 @@ export class ExamsService {
       | undefined;
 
     if (!row) {
-      const user = await this.users.findOne({
-        where: { user_id: studentUserId },
-      });
-      return {
-        user_id: studentUserId,
-        name: user?.name ?? 'Student',
-        email: user?.email ?? '',
-        enrollment_no: null as string | null,
-        program: 'Undergraduate Program',
-        department: null as string | null,
-        semester: null as number | null,
-        section: null as string | null,
-        batch: null as string | null,
-        academic_year: this.getAcademicYear(),
-        profile_picture_url: null as string | null,
-      };
+      throw new NotFoundException('Student profile not found');
     }
 
     const enrollment =
@@ -398,50 +536,58 @@ export class ExamsService {
       row.admission_number ??
       null;
 
-    // Demo/local: fill missing profile fields so the PDF is complete.
-    const demoFill = this.isAdmitCardDemoBypassEnabled();
-
     return {
       user_id: studentUserId,
-      name: row.name || (demoFill ? 'Aarav Sharma' : 'Student'),
-      email: row.email || (demoFill ? 'aarav.sharma@mygyanvihar.com' : ''),
-      enrollment_no: enrollment || (demoFill ? 'SGVU/CSE/2023/0142' : null),
-      program:
-        row.department ||
-        (demoFill
-          ? 'B.Tech Computer Science & Engineering'
-          : 'Undergraduate Program'),
-      department:
-        row.department || (demoFill ? 'Computer Science & Engineering' : null),
+      name: row.name,
+      email: row.email,
+      enrollment_no: enrollment,
+      program: row.department || 'Undergraduate Program',
+      department: row.department || null,
       semester:
-        row.current_semester != null
-          ? Number(row.current_semester)
-          : demoFill
-            ? 5
-            : null,
-      section: row.section_code || (demoFill ? 'A' : null),
-      batch: row.batch || (demoFill ? '2023-27' : null),
+        row.current_semester != null ? Number(row.current_semester) : null,
+      section: row.section_code || null,
+      batch: row.batch || null,
       academic_year: this.getAcademicYear(),
       profile_picture_url: row.profile_photo_url ?? null,
     };
   }
 
-  async generateAdmitCardOrThrow(studentUserId: string): Promise<Buffer> {
-    const eligibility = await this.checkEligibility(studentUserId);
+  async generateAdmitCardOrThrow(
+    tenantId: string | undefined,
+    studentUserId?: string,
+  ): Promise<Buffer> {
+    this.requireTenant(tenantId);
+    if (!studentUserId) {
+      throw new ForbiddenException('Tenant and student identity are required');
+    }
+    const eligibility = await this.checkEligibility(tenantId, studentUserId);
     if (!eligibility.eligible) {
       const top = eligibility.reasons[0];
       throw new ForbiddenException(top?.message ?? 'Blocked');
     }
 
     const [student, exams] = await Promise.all([
-      this.loadAdmitCardStudent(studentUserId),
-      this.listAdmitCardExams(studentUserId),
+      this.loadAdmitCardStudent(tenantId, studentUserId),
+      this.listAdmitCardExams(tenantId, studentUserId),
     ]);
+
+    if (!exams.length)
+      throw new BadRequestException(
+        'No scheduled examinations found for your enrolled subjects',
+      );
+
+    const issue = await new HallTicketVerificationService(this.db).issue(
+      tenantId,
+      studentUserId,
+      exams
+        .map((exam) => exam.exam_schedule_id)
+        .filter((id): id is string => Boolean(id)),
+    );
 
     return this.pdf.generate({
       student,
       exams,
-      barcodePayload: `${student.enrollment_no || student.user_id}|${exams.map((e) => e.subject_code).join(',')}`,
+      barcodePayload: issue.payload,
     });
   }
 
@@ -456,5 +602,13 @@ export class ExamsService {
     const d = new Date(date);
     d.setDate(d.getDate() + days);
     return d;
+  }
+
+  private requireTenant(
+    tenantId: string | undefined,
+  ): asserts tenantId is string {
+    if (!tenantId?.trim()) {
+      throw new ForbiddenException('Tenant context is required');
+    }
   }
 }

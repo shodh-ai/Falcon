@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
+import { Button } from '@/components/ui/button';
 import { Loader2 } from 'lucide-react';
 import {
   HodMetricChip,
@@ -104,6 +106,8 @@ export default function DeanResultAnalyticsPage() {
           </>
         }
       />
+
+      <Button asChild variant="outline"><Link href="/dean/exams/backlog">Backlog & supplementary approvals</Link></Button>
 
       {loading ? (
         <div className="flex justify-center py-12">

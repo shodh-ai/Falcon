@@ -9,12 +9,23 @@ Falcon is the unified operating system for **Suresh Gyan Vihar University** — 
 ## Quick start (local)
 
 ```bash
-# Backend
-cd backend && npm install && cp .env.example .env && npm run db:migrate && npm run start:dev
+# From the repository root
+npm install --prefix backend
+cp backend/.env.example backend/.env
+docker compose up -d postgres redis
+npm run db:migrate
+npm run start:dev
 
 # Frontend
 cd frontend && npm install && npm run dev
 ```
+
+If Docker Desktop is unavailable, run PostgreSQL and Redis locally and set
+`DB_HOST`, `DB_PORT`, `DB_DATABASE`, `REDIS_HOST`, and `REDIS_PORT` in
+`backend/.env`. On macOS with Postgres.app and Redis installed, the included
+`npm run local:services` command starts isolated instances on ports 5434 and
+6380. The root `db:migrate` and `start:dev` scripts forward to the backend, so
+they work from either the repository root or `backend/`.
 
 Open `http://localhost:3000` · API at `http://localhost:4000`
 

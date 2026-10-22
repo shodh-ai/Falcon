@@ -2,6 +2,10 @@
   "name": "falcon",
   "private": true,
   "scripts": {
+    "start:dev": "npm --prefix backend run start:dev",
+    "db:migrate": "npm --prefix backend run db:migrate",
+    "db:sync": "npm --prefix backend run db:sync",
+    "local:services": "bash scripts/start-local-services.sh",
     "test": "npm --prefix tests test",
     "test:unit": "npm --prefix tests run test:unit",
     "test:integration": "npm --prefix tests run test:integration",

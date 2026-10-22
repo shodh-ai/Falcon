@@ -18,6 +18,10 @@ import { ExamCellEnterpriseService } from './exam-cell-enterprise.service';
 import { ExamCellDevService } from './exam-cell-dev.service';
 import { OfficialTranscriptService } from './official-transcript.service';
 import { OfficialTranscriptPdfService } from './official-transcript-pdf.service';
+import { GradeCardVerificationService } from './grade-card-verification.service';
+import { GradeCardVerifyController } from './grade-card-verify.controller';
+import { BacklogService } from './backlog.service';
+import { BacklogStaffController, BacklogStudentController, BacklogFacultyController } from './backlog.controller';
 
 @Module({
   imports: [
@@ -31,6 +35,10 @@ import { OfficialTranscriptPdfService } from './official-transcript-pdf.service'
     ExamCellController,
     FacultyReEvaluationsController,
     TranscriptVerifyController,
+    GradeCardVerifyController,
+    BacklogStaffController,
+    BacklogStudentController,
+    BacklogFacultyController,
   ],
   providers: [
     ExamCellService,
@@ -44,6 +52,8 @@ import { OfficialTranscriptPdfService } from './official-transcript-pdf.service'
     ExamCellDevService,
     OfficialTranscriptService,
     OfficialTranscriptPdfService,
+    GradeCardVerificationService,
+    BacklogService,
   ],
   exports: [
     ExamCellService,

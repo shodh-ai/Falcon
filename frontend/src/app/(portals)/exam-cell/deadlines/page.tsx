@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Loader2, Plus, Clock } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Button } from '@/components/ui/button';
@@ -10,6 +10,8 @@ import { Badge } from '@/components/ui/badge';
 import { Select } from '@/components/ui/select';
 import { ExamCellPageHeader } from '@/components/exam-cell/ExamCellPageHeader';
 import { useAuthedApi } from '@/lib/api';
+import { useAuth } from '@/context/AuthContext';
+import { canExamCellAction } from '@/lib/exam-cell-rbac';
 
 type Deadline = {
   deadline_id: string;
@@ -27,38 +29,47 @@ const DEADLINE_TYPES = [
 
 export default function ExamCellDeadlinesPage() {
   const api = useAuthedApi();
-  const [rows, setRows] = useState<Deadline[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { user } = useAuth();
+  const canManage = canExamCellAction([...(user?.roles ?? []), user?.primaryRole ?? '', user?.role ?? ''], 'manage_schedules');
+  const [revision, setRevision] = useState(0);
+  const [resource, setResource] = useState<{ api: typeof api | null; revision: number; rows: Deadline[]; error: string | null }>({ api: null, revision: -1, rows: [], error: null });
+  const loading = resource.api !== api || resource.revision !== revision;
+  const rows = loading ? [] : resource.rows;
+  const error = loading ? null : resource.error;
+  const [creating, setCreating] = useState(false);
+  const createPending = useRef(false);
   const [form, setForm] = useState({ title: '', deadline_type: 'EXAM_REGISTRATION', due_at: '', semester: '4' });
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      setRows(await api.get<Deadline[]>('/api/exam-cell/deadlines'));
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed to load deadlines');
-    } finally {
-      setLoading(false);
-    }
-  }, [api]);
-
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    let cancelled = false;
+    api.get<Deadline[]>('/api/exam-cell/deadlines').then(
+      (data) => { if (!cancelled) setResource({ api, revision, rows: data, error: null }); },
+      (cause) => { if (!cancelled) setResource({ api, revision, rows: [], error: cause instanceof Error ? cause.message : 'Failed to load deadlines' }); },
+    );
+    return () => { cancelled = true; };
+  }, [api, revision]);
 
   async function createDeadline() {
-    if (!form.title || !form.due_at) {
+    if (!canManage || createPending.current) return;
+    if (!form.title.trim() || !form.due_at) {
       toast.error('Title and due date required');
       return;
     }
+    createPending.current = true;
+    setCreating(true);
     try {
       await api.post('/api/exam-cell/deadlines', {
-        ...form,
+        ...form, title: form.title.trim(),
         semester: Number(form.semester),
       });
       toast.success('Deadline created');
       setForm((f) => ({ ...f, title: '' }));
-      await load();
+      setRevision((value) => value + 1);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Create failed');
+    } finally {
+      createPending.current = false;
+      setCreating(false);
     }
   }
 
@@ -76,22 +87,27 @@ export default function ExamCellDeadlinesPage() {
         </CardContent>
       </Card>
 
-      <Card>
+      {canManage && <Card>
         <CardHeader><CardTitle className="text-base">Add deadline</CardTitle></CardHeader>
         <CardContent className="grid gap-3 sm:grid-cols-2">
-          <Input placeholder="Title" value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))} className="sm:col-span-2" />
-          <Select className="rounded-md border px-3 py-2 text-sm" value={form.deadline_type} onChange={(e) => setForm((f) => ({ ...f, deadline_type: e.target.value }))}>
+          <label htmlFor="deadline-title" className="sr-only">Title</label>
+          <Input id="deadline-title" placeholder="Title" value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))} className="sm:col-span-2" />
+          <label htmlFor="deadline-type" className="sr-only">Deadline type</label>
+          <Select id="deadline-type" className="rounded-md border px-3 py-2 text-sm" value={form.deadline_type} onChange={(e) => setForm((f) => ({ ...f, deadline_type: e.target.value }))}>
             {DEADLINE_TYPES.map((t) => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}
           </Select>
-          <Input type="datetime-local" value={form.due_at} onChange={(e) => setForm((f) => ({ ...f, due_at: e.target.value }))} />
-          <Button onClick={() => void createDeadline()} className="sm:col-span-2"><Plus className="mr-2 h-4 w-4" />Add deadline</Button>
+          <label htmlFor="deadline-due-at" className="sr-only">Due at</label>
+          <Input id="deadline-due-at" type="datetime-local" value={form.due_at} onChange={(e) => setForm((f) => ({ ...f, due_at: e.target.value }))} />
+          <Button disabled={creating} onClick={() => void createDeadline()} className="sm:col-span-2"><Plus className="mr-2 h-4 w-4" />{creating ? 'Adding deadline…' : 'Add deadline'}</Button>
         </CardContent>
-      </Card>
+      </Card>}
 
       <Card>
         <CardHeader><CardTitle className="text-base">Active deadlines</CardTitle></CardHeader>
         <CardContent className="space-y-3">
-          {loading ? <Loader2 className="h-6 w-6 animate-spin" /> : rows.length === 0 ? (
+          {loading ? <Loader2 aria-label="Loading deadlines" className="h-6 w-6 animate-spin" /> : error ? (
+            <div role="alert" className="space-y-3 text-sm text-destructive"><p>{error}</p><Button variant="outline" onClick={() => setRevision((value) => value + 1)}>Retry</Button></div>
+          ) : rows.length === 0 ? (
             <p className="text-sm text-muted-foreground">No active deadlines configured.</p>
           ) : rows.map((d) => (
             <div key={d.deadline_id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border px-4 py-3">

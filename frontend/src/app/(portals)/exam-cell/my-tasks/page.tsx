@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { ExamCellPageHeader } from '@/components/exam-cell/ExamCellPageHeader';
 import { ExamCellEmptyState } from '@/components/exam-cell/ExamCellEmptyState';
 import { useAuthedApi } from '@/lib/api';
+import { toast } from '@/lib/notifications/falcon-toast';
 
 type Task = {
   id: string;
@@ -33,13 +34,18 @@ export default function ExamCellMyTasksPage() {
     try {
       setTasks(await api.get<Task[]>('/api/exam-cell/my-tasks'));
     } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to load pending tasks');
       if (process.env.NODE_ENV === 'development') console.warn('[my-tasks]', e);
     } finally {
       setLoading(false);
     }
   }, [api]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    // Start after the effect has completed so loading state changes occur in the
+    // asynchronous request lifecycle, rather than during effect setup.
+    void Promise.resolve().then(load);
+  }, [load]);
 
   return (
     <div className="mx-auto max-w-3xl space-y-6 p-4 md:p-6">
@@ -53,7 +59,7 @@ export default function ExamCellMyTasksPage() {
         <CardHeader><CardTitle className="text-base">Pending actions</CardTitle></CardHeader>
         <CardContent className="space-y-3">
           {loading ? <Loader2 className="h-6 w-6 animate-spin" /> : tasks.length === 0 ? (
-            <ExamCellEmptyState message="No pending tasks right now. Create sample examination data to explore workflows." onRetry={() => void load()} />
+            <ExamCellEmptyState message="No pending tasks right now." onRetry={() => void load()} />
           ) : tasks.map((t) => (
             <Link key={t.id} href={t.href} className="flex items-center justify-between rounded-lg border px-4 py-3 transition hover:border-sgvu-gold/40">
               <div>
