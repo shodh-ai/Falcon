@@ -197,6 +197,21 @@ jobs:
         working-directory: backend
         run: node scripts/test-staff-review-email-driver.cjs
 
+      - name: Test HR gate pass and profile correction regressions
+        working-directory: backend
+        run: |
+          npm test -- --runInBand --runTestsByPath \
+            src/modules/hr/hr-gate-pass-review.spec.ts \
+            src/modules/student-onboarding/staff-profile-review.service.spec.ts \
+            src/modules/student-onboarding/staff-profile-review-notification.service.spec.ts
+          node scripts/test-hr-gate-pass-queues.cjs
+
+      - name: Test HR gate pass page and unchecked-document correction flow
+        working-directory: frontend
+        run: >-
+          npm test -- src/components/hr/__tests__/HrGatePassesPage.test.tsx
+          src/components/onboarding/__tests__/StaffProfileVerificationsPage.test.tsx
+
       - name: Upload coverage (unit)
         if: always()
         uses: actions/upload-artifact@v4

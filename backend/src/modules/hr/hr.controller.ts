@@ -344,8 +344,33 @@ export class HrController {
 
   @Get('gate-passes/pending-hr')
   @Roles('HR', 'HRAdmin', 'SuperAdmin')
-  pendingHrGatePasses(@Req() req: { user: AuthUser }) {
-    return this.hr.listPendingHrGatePasses(this.resolveTenantId(req.user));
+  @HrPermission('leaves', 'read')
+  async pendingHrGatePasses(@Req() req: { user: AuthUser }, @Query('entity_id') entityId?: string) {
+    const rows = await this.hrGatePassReview(req, entityId);
+    return rows.filter((row) => row.status === 'PENDING_HR');
+  }
+
+  @Get('gate-passes/review')
+  @Roles('HR', 'HRAdmin', 'SuperAdmin')
+  @HrPermission('leaves', 'read')
+  async hrGatePassReview(@Req() req: { user: AuthUser }, @Query('entity_id') entityId?: string) {
+    const tenantId = this.resolveTenantId(req.user);
+    const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
+    return this.hr.listHrGatePassReviews(tenantId, entity, req.user.user_id);
+  }
+
+  @Patch('gate-passes/:passId/hr-action')
+  @Roles('HR', 'HRAdmin', 'SuperAdmin')
+  @HrPermission('leaves', 'write')
+  async hrGatePassAction(@Param('passId') passId: string, @Req() req: { user: AuthUser },
+    @Body('status') status: 'APPROVED' | 'REJECTED', @Query('entity_id') entityId?: string) {
+    const tenantId = this.resolveTenantId(req.user);
+    const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
+    const rows = await this.hr.listHrGatePassReviews(tenantId, entity, req.user.user_id);
+    if (!rows.some((row) => row.pass_id === passId && row.can_review)) {
+      throw new BadRequestException('Gate pass is not awaiting your final HR review in this scope');
+    }
+    return this.hr.actOnGatePass(passId, req.user.user_id, tenantId, status, this.resolveRoles(req.user));
   }
 
   @Patch('gate-passes/:passId/action')

@@ -69,6 +69,20 @@ describe('StaffProfileReviewService', () => {
     expect(notifications.deliverPending).not.toHaveBeenCalled();
   });
 
+  it('rejects corrections against a stale profile revision without changing status or notifying', async () => {
+    const qr = { connect: jest.fn(), startTransaction: jest.fn(), commitTransaction: jest.fn(),
+      rollbackTransaction: jest.fn(), release: jest.fn(), query: jest.fn().mockResolvedValue([
+        { review_id: 'review', tenant_id: 'tenant', user_id: 'staff', revision: 3, status: 'PENDING_HR' },
+      ]) };
+    const notifications = { enqueueCorrection: jest.fn(), deliverPending: jest.fn() };
+    const service = new StaffProfileReviewService({ createQueryRunner: () => qr } as never, {} as never, notifications as never);
+    await expect(service.returnForCorrection('tenant', 'review', 'hr', { reason: 'Wrong Aadhaar', documents: ['AADHAAR'], revision: 2 })).rejects.toThrow('changed since you opened');
+    expect(qr.query).toHaveBeenCalledTimes(1);
+    expect(qr.rollbackTransaction).toHaveBeenCalled();
+    expect(notifications.enqueueCorrection).not.toHaveBeenCalled();
+    expect(notifications.deliverPending).not.toHaveBeenCalled();
+  });
+
   it('requires an actual replacement upload when an initial pending document is returned', async () => {
     const qr = { connect: jest.fn(), startTransaction: jest.fn(), commitTransaction: jest.fn(),
       rollbackTransaction: jest.fn(), release: jest.fn(), query: jest.fn().mockResolvedValue([]) };

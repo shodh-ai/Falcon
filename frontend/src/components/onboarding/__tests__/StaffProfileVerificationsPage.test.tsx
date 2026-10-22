@@ -16,7 +16,7 @@ describe("Individual HR profile approval with deferred documents", () => {
   beforeEach(() => {
     vi.clearAllMocks(); mocks.user.role = "HRAdmin"; row = { ...pending, document_review_status: "NOT_REVIEWED", recovery_required: false };
     mocks.get.mockImplementation((url: string) => Promise.resolve(url.endsWith("/review-1") ? { review: { ...row, return_reason: null }, profile: { qualification: { degree_name: "MPharm" } }, documents: [], events: [] } : [row]));
-    mocks.post.mockResolvedValue({ document_review_status: "PENDING", email_status: "QUEUED" });
+    mocks.post.mockResolvedValue({ status: "RETURNED_FOR_CORRECTION", document_review_status: "PENDING", email_status: "QUEUED" });
   });
   it("requires reviewed details, with select-all and clear-all limited to one profile", async () => {
     const d = await open();
@@ -62,9 +62,53 @@ describe("Individual HR profile approval with deferred documents", () => {
     fireEvent.click(d.getByRole("button", { name: "Clear all documents" }));
     fireEvent.click(d.getByRole("checkbox", { name: "Request correction: Mobile number" }));
     fireEvent.change(d.getByRole("textbox", { name: /Correction note/ }), { target: { value: "Please correct your mobile number." } });
-    fireEvent.click(d.getByRole("button", { name: "Request corrections & email" }));
-    await waitFor(() => expect(mocks.post).toHaveBeenCalledWith("/api/hr/staff-profile-reviews/review-1/return", { fields: ["staff_mobile"], documents: [], reason: "Please correct your mobile number." }));
-    expect(await screen.findByRole("status")).toHaveTextContent(/email has been queued/i);
+    fireEvent.click(d.getByRole("button", { name: "Send correction request & email" }));
+    await waitFor(() => expect(mocks.post).toHaveBeenCalledWith("/api/hr/staff-profile-reviews/review-1/return", { fields: ["staff_mobile"], documents: [], reason: "Please correct your mobile number.", revision: 1 }));
+    expect(await screen.findByRole("status")).toHaveTextContent(/notification and correction email have been queued/i);
+  });
+  it("carries only deselected Aadhaar into corrections, preserves the draft, and moves the saved row to Corrections requested", async () => {
+    row.recovery_required = true;
+    mocks.post.mockImplementation(async () => { row.status = 'RETURNED_FOR_CORRECTION'; return { status: row.status, email_status: 'QUEUED' }; });
+    const d = await open();
+    fireEvent.click(d.getByRole('button', { name: 'Select all details' }));
+    fireEvent.click(d.getByRole('button', { name: 'Select all inspected documents' }));
+    fireEvent.click(d.getByRole('checkbox', { name: 'Inspected document: Aadhaar card' }));
+    fireEvent.click(d.getByRole('button', { name: 'Request corrections', exact: true }));
+    expect(d.getByRole('checkbox', { name: 'Request replacement: Aadhaar card' })).toBeChecked();
+    expect(d.getAllByRole('checkbox').filter((c) => (c as HTMLInputElement).checked)).toHaveLength(1);
+    const send = d.getByRole('button', { name: 'Send correction request & email' });
+    expect(send).toBeDisabled();
+    fireEvent.change(d.getByRole('textbox', { name: /Correction note/ }), { target: { value: 'Upload the correct Aadhaar card.' } });
+    fireEvent.click(d.getByRole('button', { name: 'Request corrections', exact: true }));
+    expect(d.getByRole('textbox', { name: /Correction note/ })).toHaveValue('Upload the correct Aadhaar card.');
+    fireEvent.click(d.getByRole('button', { name: 'Review for approval' }));
+    fireEvent.click(d.getByRole('button', { name: 'Request corrections', exact: true }));
+    expect(d.getByRole('checkbox', { name: 'Request replacement: Aadhaar card' })).toBeChecked();
+    fireEvent.click(d.getByRole('button', { name: 'Send correction request & email' }));
+    await waitFor(() => expect(mocks.post).toHaveBeenCalledWith('/api/hr/staff-profile-reviews/review-1/return', {
+      reason: 'Upload the correct Aadhaar card.', fields: [], documents: ['AADHAAR'], revision: 1,
+    }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(screen.getByRole('status')).toHaveTextContent('now in Corrections requested');
+    expect(screen.getByText('Faculty One')).toBeInTheDocument();
+  });
+  it("does not infer every unreviewed field as wrong on an untouched profile", async () => {
+    const d = await open();
+    fireEvent.click(d.getByRole('button', { name: 'Request corrections', exact: true }));
+    expect(d.getAllByRole('checkbox').some((c) => (c as HTMLInputElement).checked)).toBe(false);
+    expect(mocks.post).not.toHaveBeenCalled();
+  });
+  it("retains a failed correction draft and never claims it was sent", async () => {
+    mocks.post.mockRejectedValue(new Error('Correction could not be saved'));
+    const d = await open();
+    fireEvent.click(d.getByRole('button', { name: 'Request corrections', exact: true }));
+    fireEvent.click(d.getByRole('checkbox', { name: 'Request replacement: Aadhaar card' }));
+    fireEvent.change(d.getByRole('textbox', { name: /Correction note/ }), { target: { value: 'Wrong Aadhaar document.' } });
+    fireEvent.click(d.getByRole('button', { name: 'Send correction request & email' }));
+    expect(await d.findByRole('alert')).toHaveTextContent('Correction could not be saved');
+    expect(d.getByRole('checkbox', { name: 'Request replacement: Aadhaar card' })).toBeChecked();
+    expect(d.getByRole('textbox', { name: /Correction note/ })).toHaveValue('Wrong Aadhaar document.');
+    expect(screen.queryByText(/now in Corrections requested/)).not.toBeInTheDocument();
   });
   it("retains the profile and exposes failed approval without claiming success", async () => {
     mocks.post.mockRejectedValue(new Error("Review is no longer pending"));

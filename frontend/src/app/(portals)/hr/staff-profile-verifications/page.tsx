@@ -107,6 +107,7 @@ export default function StaffProfileVerificationsPage() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [previewDoc, setPreviewDoc] = useState("");
+  const [correctionPrepared, setCorrectionPrepared] = useState(false);
   const load = useCallback(() => api.get<Row[]>("/api/hr/staff-profile-reviews")
     .then((data) => { setRows(data); setError(""); })
     .catch((cause) => setError(cause instanceof Error ? cause.message : "Could not load staff profiles. Please retry."))
@@ -150,6 +151,7 @@ export default function StaffProfileVerificationsPage() {
       setReviewedDocs([]);
       setError("");
       setMessage("");
+      setCorrectionPrepared(false);
     } catch (cause) {
       setError(
         cause instanceof Error ? cause.message : "Could not open this profile.",
@@ -162,10 +164,10 @@ export default function StaffProfileVerificationsPage() {
     if (!selected) return;
     setBusy(true);
     try {
-      await api.post(
+      const result = await api.post<{ status?: string; email_status?: string }>(
         `/api/hr/staff-profile-reviews/${selected.review.review_id}/${action}`,
         action === "return"
-          ? { reason: reason.trim(), fields, documents }
+          ? { reason: reason.trim(), fields, documents, revision: selected.review.revision }
           : action === "verify-documents"
             ? { reviewed_documents: reviewedDocs }
             : selected.review.recovery_required
@@ -173,6 +175,14 @@ export default function StaffProfileVerificationsPage() {
             : { defer_documents: true, reviewed_fields: reviewedFields,
                 deferral_reason: "HR approved profile details; document verification deferred until original files are available for inspection." },
       );
+      if (action === "return" && result.status !== "RETURNED_FOR_CORRECTION") {
+        throw new Error("The correction request was not confirmed. Refresh the profile and retry.");
+      }
+      if (action === "return") {
+        setRows((current) => current.map((row) => row.review_id === selected.review.review_id
+          ? { ...row, status: "RETURNED_FOR_CORRECTION", revision: row.revision + 1 } : row));
+        setStatus("RETURNED_FOR_CORRECTION");
+      }
       setMessage(
         action === "approve"
           ? selected.review.recovery_required
@@ -180,9 +190,10 @@ export default function StaffProfileVerificationsPage() {
             : `${selected.review.name}’s profile details are approved and account access is restored. Document verification remains pending.`
           : action === "verify-documents"
             ? `${selected.review.name}’s documents are verified. The earlier profile approval is unchanged.`
-            : `Corrections requested from ${selected.review.name}. An email has been queued to ${selected.review.official_email}.`,
+            : `Corrections requested from ${selected.review.name}. The profile is now in Corrections requested. A notification and correction email have been queued for ${selected.review.official_email}; queued does not mean delivered.`,
       );
       setSelected(null);
+      window.dispatchEvent(new CustomEvent("falcon:notifications-refresh"));
       await load();
     } catch (cause) {
       setError(
@@ -214,7 +225,15 @@ export default function StaffProfileVerificationsPage() {
   const recoveryReview = reviewing && selected?.review.recovery_required && !correcting;
   const inspectingDocs = documentReview || recoveryReview;
   const changeMode = (mode: "CHECK" | "CORRECT") => {
-    setReviewMode(mode); setFields([]); setDocuments([]); setReviewedFields([]); setReviewedDocs([]); setReason("");
+    if (mode === reviewMode) return;
+    if (mode === "CORRECT" && !correctionPrepared) {
+      // Only infer gaps after HR actually started a checklist. Untouched
+      // profiles must never turn into a request to correct every field.
+      setFields(reviewedFields.length ? Object.keys(FIELDS).filter((key) => !reviewedFields.includes(key)) : []);
+      setDocuments(reviewedDocs.length ? Object.keys(DOCS).filter((key) => !reviewedDocs.includes(key)) : []);
+      setCorrectionPrepared(true);
+    }
+    setReviewMode(mode);
   };
 
   return (
@@ -391,9 +410,10 @@ export default function StaffProfileVerificationsPage() {
                 <div className="space-y-3 rounded-lg border bg-blue-50 p-3 text-sm">
                   <p>{selected.review.recovery_required ? "Recovery submission: inspect the saved details and all four documents before approval. Documents cannot be deferred for this recovery review." : "Profile details and documents are separate decisions. Approving details restores account access; documents stay pending and are not marked verified."}</p>
                   <div role="group" aria-label="Review action" className="flex flex-wrap gap-2">
-                    <Button size="sm" variant={reviewMode === "CHECK" ? "default" : "outline"} aria-pressed={reviewMode === "CHECK"} onClick={() => changeMode("CHECK")}>Review for approval</Button>
-                    <Button size="sm" variant={reviewMode === "CORRECT" ? "default" : "outline"} aria-pressed={reviewMode === "CORRECT"} onClick={() => changeMode("CORRECT")}>Request corrections</Button>
+                    <Button disabled={busy} size="sm" variant={reviewMode === "CHECK" ? "default" : "outline"} aria-pressed={reviewMode === "CHECK"} onClick={() => changeMode("CHECK")}>Review for approval</Button>
+                    <Button disabled={busy} size="sm" variant={reviewMode === "CORRECT" ? "default" : "outline"} aria-pressed={reviewMode === "CORRECT"} onClick={() => changeMode("CORRECT")}>Request corrections</Button>
                   </div>
+                  {correcting && <p role="status">Correction draft — not sent yet. Unchecked checklist items were carried over where a review had started. Confirm the targets, write a correction note, then click Send correction request &amp; email below.</p>}
                 </div>
               )}
               {selected.review.document_review_status === "PENDING" && (
@@ -563,7 +583,7 @@ export default function StaffProfileVerificationsPage() {
                       }
                       onClick={() => void decide("return")}
                     >
-                      Request corrections &amp; email
+                      {busy ? "Sending correction request…" : "Send correction request & email"}
                     </Button>
                     ) : (
                     <Button
