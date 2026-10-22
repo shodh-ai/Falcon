@@ -160,6 +160,8 @@ jobs:
 
       - name: Migrate test database
         working-directory: tests
+        env:
+          ALLOW_SCHEMA_BOOTSTRAP_SYNC: 'true'
         run: npm run db:migrate:test
 
       - name: HR QA workflow, scoped queues, reports and document storage regressions
