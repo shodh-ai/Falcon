@@ -263,6 +263,7 @@ async function main() {
       faculty_user_id uuid NOT NULL, title varchar(255) NOT NULL, file_path text NOT NULL,
       file_key text, module_id uuid REFERENCES ${quotedSchema}.course_modules ON DELETE SET NULL,
       study_group_id uuid, material_type varchar(50) NOT NULL DEFAULT 'NOTES',
+      external_url text,
       uploaded_at timestamp NOT NULL DEFAULT now(), deleted_at timestamptz
     );
     CREATE TABLE ${quotedSchema}.course_material_visibility (
