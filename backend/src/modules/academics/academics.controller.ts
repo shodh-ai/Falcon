@@ -445,6 +445,19 @@ export class AcademicsController {
     );
   }
 
+  @Delete('faculty/assignments/:assignmentId')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  deleteFacultyAssignment(
+    @Param('assignmentId') assignmentId: string,
+    @Req() req: { user: AuthUser },
+  ) {
+    return this.assignments.deleteFacultyAssignment(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      assignmentId,
+    );
+  }
+
   @Get('faculty/assignments/:assignmentId/submissions')
   @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
   listAssignmentSubmissions(
@@ -2922,6 +2935,21 @@ export class AcademicsController {
     );
   }
 
+  @Post('faculty/courses/modules/:moduleId/materials/link')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  addYouTubeMaterial(
+    @Param('moduleId') moduleId: string,
+    @Req() req: { user: AuthUser },
+    @Body() body: { title?: string; url?: string; allocation_ids?: string | string[] },
+  ) {
+    return this.courseLms.addYouTubeMaterial(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      moduleId,
+      body,
+    );
+  }
+
   @Post('faculty/courses/modules/:moduleId/complete')
   @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
   @UseInterceptors(courseMaterialInterceptor())
@@ -2972,9 +3000,17 @@ export class AcademicsController {
     );
     const file = await this.courseLms.streamMaterialDownload(material);
     res.setHeader('Content-Type', file.mimeType);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition');
+    const asciiFallback = `course-material${file.filename.match(/\.[a-z0-9]+$/i)?.[0] ?? ''}`;
+    const encodedFilename = encodeURIComponent(file.filename).replace(
+      /[!'()*]/g,
+      (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`,
+    );
     res.setHeader(
       'Content-Disposition',
-      `attachment; filename="${file.filename}"`,
+      `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encodedFilename}`,
     );
     return file.stream.pipe(res);
   }
