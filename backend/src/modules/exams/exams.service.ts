@@ -1,4 +1,10 @@
-import { Injectable, ForbiddenException } from '@nestjs/common';
+import {
+  Injectable,
+  ForbiddenException,
+  BadRequestException,
+} from '@nestjs/common';
+import { isUUID } from 'class-validator';
+import { validateReEvaluationSources } from '../exam-cell/re-evaluation-publication';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { ExamSchedule } from '../../entities/exam-schedule.entity';
@@ -11,6 +17,11 @@ import {
   type AdmitCardExamRow,
 } from './pdf/admit-card-pdf.service';
 import { AttendanceEligibilityService } from '../attendance-policy/attendance-eligibility.service';
+import {
+  listReEvaluationResultCandidates,
+  resolveReEvaluationResult,
+  reEvaluationResultMetadata,
+} from './re-evaluation-result';
 
 export interface ExamEligibilityResult {
   eligible: boolean;
@@ -50,7 +61,8 @@ export class ExamsService {
   }
 
   async listMyApplications(studentUserId: string) {
-    return this.db.query(
+    const student = await this.reEvaluationStudent(studentUserId);
+    const rows = await this.db.query(
       `SELECT a.*,
               sub.subject_name,
               sub.subject_code,
@@ -58,30 +70,117 @@ export class ExamsService {
        FROM exam_applications a
        LEFT JOIN academic_subjects sub ON sub.subject_id = a.subject_id
        LEFT JOIN users f ON f.user_id = a.assigned_faculty_user_id
-       WHERE a.student_user_id = $1
+       WHERE a.student_user_id = $1 AND a.deleted_at IS NULL
        ORDER BY a.created_at DESC`,
       [studentUserId],
     );
+    return Promise.all(
+      rows.map(async (row: ExamApplication) => {
+        if (row.application_type !== 'RE_EVALUATION') return row;
+        const resolution = await resolveReEvaluationResult(this.db, {
+          tenantId: student.tenant_id!,
+          studentUserId,
+          subjectId: row.subject_id,
+          examResultId: row.exam_result_id,
+        });
+        return {
+          ...row,
+          ...reEvaluationResultMetadata(resolution, row.exam_result_id),
+        };
+      }),
+    );
+  }
+
+  private async reEvaluationStudent(
+    studentUserId: string,
+    authTenantId?: string,
+  ) {
+    const student = await this.users.findOne({
+      where: { user_id: studentUserId },
+    });
+    if (
+      !student?.tenant_id ||
+      student.is_active === false ||
+      (authTenantId && authTenantId !== student.tenant_id)
+    ) {
+      throw new ForbiddenException(
+        'An active student account in this university is required',
+      );
+    }
+    return student;
+  }
+
+  async listReEvaluationResults(studentUserId: string, authTenantId?: string) {
+    const student = await this.reEvaluationStudent(studentUserId, authTenantId);
+    const rows = await listReEvaluationResultCandidates(this.db, {
+      tenantId: student.tenant_id!,
+      studentUserId,
+    });
+    return rows.filter((row) => row.is_valid);
   }
 
   async createApplication(
     studentUserId: string,
     dto: CreateExamApplicationDto,
+    authTenantId?: string,
   ): Promise<ExamApplication> {
+    let examResultId: string | null = null;
+    let originalMarks: number | null = null;
+    let tenantId: string | null = null;
+    if (dto.application_type === 'RE_EVALUATION') {
+      if (
+        !Number.isInteger(dto.subject_id) ||
+        dto.subject_id < 1 ||
+        !dto.exam_result_id ||
+        !isUUID(dto.exam_result_id)
+      ) {
+        throw new BadRequestException(
+          'Select the exact published exam result for re-evaluation',
+        );
+      }
+      const student = await this.reEvaluationStudent(
+        studentUserId,
+        authTenantId,
+      );
+      tenantId = student.tenant_id!;
+      const resolution = await resolveReEvaluationResult(this.db, {
+        tenantId,
+        studentUserId,
+        subjectId: dto.subject_id,
+        examResultId: dto.exam_result_id,
+        allowLegacyResolution: false,
+      });
+      if (!resolution.result)
+        throw new BadRequestException(
+          resolution.message ?? 'The selected exam result is unavailable',
+        );
+      if (!resolution.result.can_apply_for_re_evaluation) {
+        throw new BadRequestException(
+          resolution.result.re_evaluation_eligibility_message ??
+            'Exam Cell must verify this result’s official declaration source before requesting re-evaluation',
+        );
+      }
+      await validateReEvaluationSources(
+        this.db,
+        tenantId,
+        studentUserId,
+        resolution.result,
+        resolution.result.marks_obtained!,
+      );
+      examResultId = resolution.result.result_id;
+      originalMarks = resolution.result.marks_obtained;
+    }
     const application = this.applications.create({
       student_user_id: studentUserId,
       subject_id: dto.subject_id,
+      exam_result_id: examResultId,
+      original_marks: originalMarks,
       application_type: dto.application_type,
       fee_status: 'PENDING',
       status: dto.application_type === 'RE_EVALUATION' ? 'DRAFT' : 'PENDING',
     });
 
     if (dto.application_type === 'RE_EVALUATION') {
-      const student = await this.users.findOne({
-        where: { user_id: studentUserId },
-      });
-      const tenantId =
-        student?.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
       const academicYear = this.getAcademicYear();
       const dueDate = this.addDays(new Date(), 3).toISOString().slice(0, 10);
       const demand = await this.finance.createDemand(
@@ -92,7 +191,7 @@ export class ExamsService {
           total_amount: 500,
           due_date: dueDate,
         },
-        tenantId,
+        tenantId!,
       );
       application.finance_demand_id = demand.demand_id;
     }

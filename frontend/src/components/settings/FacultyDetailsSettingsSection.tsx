@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Phone, Save, UserRound } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
@@ -9,6 +9,7 @@ import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { SelfServiceLoadError } from '@/components/self-service/SelfServiceLoadError';
 
 type FacultyProfileSummary = {
   name: string;
@@ -45,10 +46,24 @@ function FormField({
 }
 
 export function FacultyDetailsSettingsSection({ profileHref }: { profileHref: string }) {
+  const { user } = useAuth();
   const api = useAuthedApi();
+  const [scope, setScope] = useState({ api, revision: 0 });
+  if (scope.api !== api) setScope({ api, revision: scope.revision + 1 });
+  return <FacultyDetailsWorkspace key={`${user?.tenant_id ?? ''}:${user?.user_id ?? ''}:${scope.revision}`} api={api} profileHref={profileHref} />;
+}
+
+function FacultyDetailsWorkspace({ api, profileHref }: { api: ReturnType<typeof useAuthedApi>; profileHref: string }) {
   const { refreshUser } = useAuth();
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [retry, setRetry] = useState(0);
   const [saving, setSaving] = useState(false);
+  const [refreshWarning, setRefreshWarning] = useState<string | null>(null);
+  const actionLock = useRef(false);
+  const alive = useRef(true);
+  const requestId = useRef(0);
+  const current = useCallback(() => alive.current, []);
   const [profile, setProfile] = useState<FacultyProfileSummary | null>(null);
   const [form, setForm] = useState({
     phone: '',
@@ -59,7 +74,9 @@ export function FacultyDetailsSettingsSection({ profileHref }: { profileHref: st
   });
 
   const loadProfile = useCallback(async () => {
+    const request = ++requestId.current;
     const data = await api.get<FacultyProfileSummary>('/api/academics/faculty/profile');
+    if (!current() || request !== requestId.current) return;
     setProfile(data);
     setForm({
       phone: data.phone ?? '',
@@ -69,18 +86,29 @@ export function FacultyDetailsSettingsSection({ profileHref }: { profileHref: st
       current_address: data.personal.current_address ?? '',
     });
     return data;
-  }, [api]);
+  }, [api, current]);
+
+  useLayoutEffect(() => {
+    alive.current = true;
+    return () => { alive.current = false; requestId.current += 1; };
+  }, []);
 
   useEffect(() => {
+    let cancelled = false;
     void loadProfile()
       .catch((err) => {
-        toast.error(err instanceof Error ? err.message : 'Could not load profile');
+        if (cancelled || !current()) return;
+        setError(err instanceof Error ? err.message : 'Could not load profile');
       })
-      .finally(() => setLoading(false));
-  }, [loadProfile]);
+      .finally(() => { if (!cancelled && current()) setLoading(false); });
+    return () => { cancelled = true; requestId.current += 1; };
+  }, [loadProfile, retry, current]);
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
+    if (actionLock.current || loading || error || !profile) return;
+    actionLock.current = true;
+    setRefreshWarning(null);
     setSaving(true);
     try {
       const updated = await api.patch<FacultyProfileSummary>('/api/academics/faculty/profile', {
@@ -90,13 +118,20 @@ export function FacultyDetailsSettingsSection({ profileHref }: { profileHref: st
         permanent_address: form.permanent_address.trim() || null,
         current_address: form.current_address.trim() || null,
       });
+      if (!current()) return;
+      requestId.current += 1;
       setProfile(updated);
-      await refreshUser();
       toast.success('Profile details updated');
+      try {
+        const refreshed = await refreshUser();
+        if (current() && !refreshed) setRefreshWarning('Your profile details were saved, but account details could not be refreshed. Refresh the page to update them.');
+      } catch {
+        if (current()) setRefreshWarning('Your profile details were saved, but account details could not be refreshed. Refresh the page to update them.');
+      }
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Could not save profile');
+      if (current()) toast.error(err instanceof Error ? err.message : 'Could not save profile');
     } finally {
-      setSaving(false);
+      if (current()) { actionLock.current = false; setSaving(false); }
     }
   }
 
@@ -108,6 +143,7 @@ export function FacultyDetailsSettingsSection({ profileHref }: { profileHref: st
     );
   }
 
+  if (error) return <SelfServiceLoadError message={error} onRetry={() => { setLoading(true); setError(null); setRetry((n) => n + 1); }} />;
   if (!profile) return null;
 
   return (
@@ -162,6 +198,7 @@ export function FacultyDetailsSettingsSection({ profileHref }: { profileHref: st
       </dl>
 
       <form className="space-y-4" onSubmit={(e) => void handleSave(e)}>
+        <fieldset disabled={saving} className="space-y-4">
         <FormField label="Mobile phone">
           <div className="relative">
             <Phone className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -226,7 +263,9 @@ export function FacultyDetailsSettingsSection({ profileHref }: { profileHref: st
             Qualifications, photo & KYC →
           </Link>
         </div>
+        </fieldset>
       </form>
+      {refreshWarning && <p role="status" className="mt-3 text-sm text-amber-800">{refreshWarning}</p>}
 
       <div className="mt-4 flex flex-wrap gap-2">
         <Badge variant="secondary">HR-managed: designation, department, joining date</Badge>

@@ -15,6 +15,7 @@ import {
 import { cn } from '@/lib/utils';
 import { useShowMoreList, ShowMoreButton } from '@/components/self-service/ShowMoreList';
 import { withFacultyDemoFallback } from '@/lib/faculty-demo-mode';
+import { SelfServiceLoadError } from './SelfServiceLoadError';
 import {
   facultyDemoHolidays,
   facultyDemoHrToday,
@@ -40,9 +41,16 @@ export function MyCalendarPanel() {
   const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
   const [data, setData] = useState<CalendarData | null>(null);
   const [metaLoading, setMetaLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [retry, setRetry] = useState(0);
 
   useEffect(() => {
+    let active = true;
+    // Clear the previous month's remote metadata while this request is in flight.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setMetaLoading(true);
+    setError(null);
+    setData(null);
     const demoCalendar = (): CalendarData => {
       const hr = facultyDemoHrToday() as {
         shift?: { shift_name?: string; start?: string; end?: string; start_time?: string; end_time?: string };
@@ -74,18 +82,25 @@ export function MyCalendarPanel() {
 
     void api
       .get<CalendarData>(`/api/hr/ess/calendar?month=${month}`)
-      .then((live) =>
+      .then((live) => {
+        if (!active) return;
         setData(
           withFacultyDemoFallback(
             live,
             demoCalendar(),
             (v) => !v || ((v.holidays?.length ?? 0) === 0 && (v.leaves?.length ?? 0) === 0),
           ),
-        ),
-      )
-      .catch(() => setData(withFacultyDemoFallback(null, demoCalendar())))
-      .finally(() => setMetaLoading(false));
-  }, [api, month]);
+        );
+      })
+      .catch((err) => {
+        if (!active) return;
+        const demo = withFacultyDemoFallback(null, demoCalendar());
+        setData(demo);
+        if (!demo) setError(err instanceof Error ? err.message : 'Could not load holidays and leave.');
+      })
+      .finally(() => { if (active) setMetaLoading(false); });
+    return () => { active = false; };
+  }, [api, month, retry]);
 
   const monthLabel = new Date(`${month}-01T12:00:00`).toLocaleDateString('en-IN', {
     month: 'long',
@@ -109,9 +124,10 @@ export function MyCalendarPanel() {
           <p className="text-sm font-medium text-sgvu-navy">{monthLabel}</p>
           <input
             type="month"
+            aria-label="Attendance month"
             className="rounded-lg border border-border/60 bg-background px-3 py-1.5 text-sm"
             value={month}
-            onChange={(e) => setMonth(e.target.value)}
+            onChange={(e) => { if (e.target.value) setMonth(e.target.value); }}
           />
         </div>
         <HrAttendanceCalendar mode="self" month={month} embedded holidays={data?.holidays} />
@@ -119,6 +135,8 @@ export function MyCalendarPanel() {
 
       {metaLoading ? (
         <FacultyInlineLoading label="Loading holidays and leave…" />
+      ) : error ? (
+        <SelfServiceLoadError message={error} onRetry={() => setRetry((n) => n + 1)} />
       ) : data ? (
         <div className="grid gap-4 md:grid-cols-2">
           <FacultyPanel title="Holidays this month" count={data.holidays.length}>

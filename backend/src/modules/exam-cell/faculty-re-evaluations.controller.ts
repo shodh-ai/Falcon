@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Param,
+  ParseUUIDPipe,
   Post,
   Req,
   UseGuards,
@@ -13,7 +14,7 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { ExamCellService } from './exam-cell.service';
 import { SubmitReEvaluationReportDto } from './dto/re-evaluations.dto';
 
-type AuthUser = { user_id: string };
+type AuthUser = { user_id: string; tenant_id?: string };
 
 @Controller('api/academics/faculty/re-evaluations')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -23,19 +24,20 @@ export class FacultyReEvaluationsController {
 
   @Get()
   list(@Req() req: { user: AuthUser }) {
-    return this.examCell.listFacultyReEvaluations(req.user.user_id);
+    return this.examCell.listFacultyReEvaluations(req.user.user_id, req.user.tenant_id);
   }
 
   @Post(':applicationId/report')
   submitReport(
     @Req() req: { user: AuthUser },
-    @Param('applicationId') applicationId: string,
+    @Param('applicationId', ParseUUIDPipe) applicationId: string,
     @Body() dto: SubmitReEvaluationReportDto,
   ) {
     return this.examCell.submitReEvaluationReport(
       req.user.user_id,
       applicationId,
       dto,
+      req.user.tenant_id,
     );
   }
 }

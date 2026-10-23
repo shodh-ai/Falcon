@@ -1,0 +1,20 @@
+{
+  "name": "@falcon/next-eslint-root-glob",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Private directory-glob adapter for @next/eslint-plugin-next 16.3.8 only",
+  "main": "index.cjs",
+  "types": "index.d.cts",
+  "exports": {
+    ".": {
+      "types": "./index.d.cts",
+      "require": "./index.cjs",
+      "default": "./index.cjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "dependencies": {
+    "picomatch": "4.0.7",
+    "tinyglobby": "0.2.17"
+  }
+}

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, usePathname, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft } from 'lucide-react';
@@ -10,6 +10,7 @@ import {
   FacultyPageLoading,
   FacultyMetricChip,
   FacultyTabBar,
+  FacultyErrorBanner,
 } from '@/components/faculty';
 import { FacultyMaterialsTab } from '@/components/lms/FacultyMaterialsTab';
 import { FacultyAssignmentsTab } from '@/components/lms/FacultyAssignmentsTab';
@@ -22,43 +23,68 @@ import { facultyDemoCourseWorkspace } from '@/lib/mock/faculty-portal-demo';
 
 type WorkspaceTab = 'materials' | 'assignments' | 'announcements' | 'live';
 
+function workspaceTabFromQuery(value: string | null): WorkspaceTab {
+  if (value === 'assignments' || value === 'da') return 'assignments';
+  if (value === 'announcements' || value === 'live') return value;
+  return 'materials';
+}
+
 export default function FacultyCourseWorkspacePage() {
   const { courseId } = useParams<{ courseId: string }>();
   const api = useAuthedApi();
   const pathname = usePathname();
   const workspacePrefix = pathname.startsWith('/hod/') ? '/hod/academics' : '/faculty';
   const [workspace, setWorkspace] = useState<FacultyWorkspace | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const requestId = useRef(0);
   const searchParams = useSearchParams();
-  const [tab, setTab] = useState<WorkspaceTab>('materials');
-
-  useEffect(() => {
-    const t = searchParams.get('tab');
-    if (t === 'materials') setTab('materials');
-    if (t === 'assignments' || t === 'da') setTab('assignments');
-    if (t === 'announcements') setTab('announcements');
-    if (t === 'live') setTab('live');
-  }, [searchParams]);
+  const requestedTab = searchParams.get('tab');
+  const initialTab = workspaceTabFromQuery(requestedTab);
 
   const load = useCallback(() => {
     if (!courseId) return;
+    const currentRequest = ++requestId.current;
+    setLoading(true);
+    setError(null);
     void api
       .get<FacultyWorkspace>(`/api/academics/faculty/courses/${courseId}/workspace`)
-      .then((data) =>
+      .then((data) => {
+        if (currentRequest !== requestId.current) return;
         setWorkspace(
           withFacultyDemoFallback(data, facultyDemoCourseWorkspace(courseId), (v) => !v?.modules?.length),
-        ),
-      )
-      .catch(() =>
-        setWorkspace(withFacultyDemoFallback(null, facultyDemoCourseWorkspace(courseId))),
-      );
+        );
+      })
+      .catch((err: unknown) => {
+        if (currentRequest !== requestId.current) return;
+        const fallback = withFacultyDemoFallback(null, facultyDemoCourseWorkspace(courseId));
+        setWorkspace(fallback);
+        if (!fallback) setError(err instanceof Error ? err.message : 'Failed to load course workspace');
+      })
+      .finally(() => {
+        if (currentRequest === requestId.current) setLoading(false);
+      });
   }, [api, courseId]);
 
   useEffect(() => {
+    // Clear the previous route's course while the new resource is being fetched.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setWorkspace(null);
     load();
+    return () => { requestId.current += 1; };
   }, [load]);
 
-  if (!workspace) {
+  if (loading && !workspace) {
     return <FacultyPageLoading label="Loading course workspace…" branded />;
+  }
+  if (!workspace) {
+    return (
+      <FacultyPageShell>
+        <FacultyErrorBanner message={error ?? 'Course workspace is unavailable.'} />
+        <button type="button" onClick={load} className="text-sm font-medium underline">Retry</button>
+        <Link href={`${workspacePrefix}/courses`} className="ml-4 text-sm font-medium underline">All courses</Link>
+      </FacultyPageShell>
+    );
   }
 
   const materialsCount = (workspace.modules ?? []).reduce(
@@ -90,6 +116,27 @@ export default function FacultyCourseWorkspacePage() {
         }
       />
 
+      <CourseWorkspaceTabs
+        key={`${courseId}:${requestedTab ?? ''}`}
+        courseId={courseId}
+        workspace={workspace}
+        onRefresh={load}
+        initialTab={initialTab}
+      />
+    </FacultyPageShell>
+  );
+}
+
+function CourseWorkspaceTabs({ courseId, workspace, onRefresh, initialTab }: {
+  courseId: string;
+  workspace: FacultyWorkspace;
+  onRefresh: () => void;
+  initialTab: WorkspaceTab;
+}) {
+  const [tab, setTab] = useState(initialTab);
+
+  return (
+    <>
       <FacultyTabBar
         active={tab}
         onChange={setTab}
@@ -102,14 +149,14 @@ export default function FacultyCourseWorkspacePage() {
       />
 
       {tab === 'materials' ? (
-        <FacultyMaterialsTab courseId={courseId!} workspace={workspace} onRefresh={load} />
+        <FacultyMaterialsTab courseId={courseId} workspace={workspace} onRefresh={onRefresh} />
       ) : tab === 'assignments' ? (
-        <FacultyAssignmentsTab courseId={courseId!} />
+        <FacultyAssignmentsTab courseId={courseId} />
       ) : tab === 'announcements' ? (
-        <FacultyAnnouncementsTab courseId={courseId!} />
+        <FacultyAnnouncementsTab courseId={courseId} />
       ) : (
-        <LmsExtendedTabs courseId={courseId!} mode="faculty" />
+        <LmsExtendedTabs courseId={courseId} mode="faculty" />
       )}
-    </FacultyPageShell>
+    </>
   );
 }

@@ -1,7 +1,7 @@
 /**
  * Faculty Portal demo fallbacks for visual smoke / QA.
  *
- * Local development: ON by default (so every Faculty screen can be visually smoke-tested).
+ * Local development: OFF by default so missing data and API failures stay visible.
  * Production builds: ALWAYS off — NEXT_PUBLIC_* is compile-time; never allow .env.local
  * demo flags to bake into a production bundle.
  * Explicit opt-in (dev/test only): NEXT_PUBLIC_FACULTY_DEMO_MODE=true|1|on
@@ -13,7 +13,7 @@ export function isFacultyDemoModeEnabled(): boolean {
   const flag = process.env.NEXT_PUBLIC_FACULTY_DEMO_MODE?.trim().toLowerCase();
   if (flag === 'false' || flag === '0' || flag === 'off') return false;
   if (flag === 'true' || flag === '1' || flag === 'on') return true;
-  return process.env.NODE_ENV === 'development';
+  return false;
 }
 
 /**

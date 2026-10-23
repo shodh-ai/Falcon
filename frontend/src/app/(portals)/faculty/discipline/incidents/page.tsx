@@ -30,7 +30,14 @@ type StudentOption = {
   user_id: string;
   name: string;
   enrollment_number: string | null;
+  official_email?: string | null;
 };
+
+function matchesStudentReference(student: StudentOption, reference: string) {
+  const normalized = reference.trim().toLowerCase();
+  return Boolean(normalized) && [student.user_id, student.enrollment_number, student.official_email]
+    .some((value) => value?.trim().toLowerCase() === normalized);
+}
 
 type CourseOption = {
   course_id: string;
@@ -67,13 +74,14 @@ function statusBadge(status: string) {
 
 export default function FacultyDisciplineIncidentsPage() {
   const api = useAuthedApi();
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [students, setStudents] = useState<StudentOption[]>([]);
   const [courses, setCourses] = useState<CourseOption[]>([]);
   const [history, setHistory] = useState<DemeritIncident[]>([]);
+  const [optionsError, setOptionsError] = useState('');
+  const [historyError, setHistoryError] = useState('');
   const [form, setForm] = useState({
     student_pick: '',
     student_ref: '',
@@ -87,6 +95,7 @@ export default function FacultyDisciplineIncidentsPage() {
   const refreshHistory = useCallback(async () => {
     try {
       const rows = await api.get<DemeritIncident[]>('/api/demerits/faculty/history');
+      setHistoryError('');
       setHistory(
         withFacultyDemoFallback(
           rows ?? [],
@@ -95,6 +104,7 @@ export default function FacultyDisciplineIncidentsPage() {
         ),
       );
     } catch {
+      setHistoryError('Could not load submitted incidents. Try again.');
       setHistory(
         withFacultyDemoFallback(
           [],
@@ -109,13 +119,17 @@ export default function FacultyDisciplineIncidentsPage() {
     let cancelled = false;
     (async () => {
       try {
-        const [options, rows] = await Promise.all([
+        const [optionsResult, historyResult] = await Promise.allSettled([
           api.get<{ students: StudentOption[]; courses: CourseOption[]; categories: string[] }>(
             '/api/demerits/form-options',
           ),
           api.get<DemeritIncident[]>('/api/demerits/faculty/history'),
         ]);
         if (cancelled) return;
+        const options = optionsResult.status === 'fulfilled' ? optionsResult.value : { students: [], courses: [] };
+        const rows = historyResult.status === 'fulfilled' ? historyResult.value : [];
+        setOptionsError(optionsResult.status === 'rejected' ? `Could not load students and courses. ${optionsResult.reason instanceof Error ? optionsResult.reason.message : 'Reload to try again.'}` : '');
+        setHistoryError(historyResult.status === 'rejected' ? `Could not load submitted incidents. ${historyResult.reason instanceof Error ? historyResult.reason.message : 'Try again.'}` : '');
         const demoOptions = facultyDemoDisciplineOptions();
         setStudents(
           withFacultyDemoFallback(options.students ?? [], demoOptions.students, isEmptyArray),
@@ -154,27 +168,42 @@ export default function FacultyDisciplineIncidentsPage() {
   }, [api]);
 
   const studentRef = useMemo(
-    () => form.student_ref.trim() || form.student_pick.trim(),
+    () => form.student_pick.trim() || form.student_ref.trim(),
     [form.student_pick, form.student_ref],
   );
+  const selectedStudent = students.find((student) => student.user_id === form.student_pick);
+  const studentReferenceMismatch = Boolean(
+    selectedStudent && form.student_ref.trim() && !matchesStudentReference(selectedStudent, form.student_ref),
+  );
+  const studentReferenceError = 'This enrollment or email does not match the selected student. Correct it or select another student.';
+
+  function selectStudent(userId: string) {
+    const student = students.find((option) => option.user_id === userId);
+    setForm((current) => ({
+      ...current,
+      student_pick: userId,
+      student_ref: student?.enrollment_number || student?.official_email || '',
+    }));
+  }
+
+  function updateStudentReference(reference: string) {
+    const matchingStudent = students.find((student) => matchesStudentReference(student, reference));
+    setForm((current) => ({
+      ...current,
+      student_ref: reference,
+      // Keep the selected name while an identifier is being edited. An exact
+      // match switches both fields together; conflicting values cannot submit.
+      student_pick: matchingStudent?.user_id ?? current.student_pick,
+    }));
+  }
 
   async function uploadEvidence(file: File) {
+    if (uploading || busy) return;
     setUploading(true);
     try {
-      const token = localStorage.getItem('token');
-      const tenant = localStorage.getItem('tenant_subdomain') ?? 'sgvu';
       const formData = new FormData();
       formData.append('file', file);
-      const res = await fetch(`${apiUrl}/uploads/single`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token ?? ''}`,
-          'x-tenant-subdomain': tenant,
-        },
-        body: formData,
-      });
-      if (!res.ok) throw new Error('Upload failed');
-      const uploaded = (await res.json()) as { url?: string; path?: string };
+      const uploaded = await api.post<{ url?: string; path?: string }>('/api/uploads/single', formData);
       const url = uploaded.url ?? uploaded.path ?? '';
       if (!url) throw new Error('No file URL returned');
       setForm((f) => ({ ...f, evidence_urls: [...f.evidence_urls, url] }));
@@ -187,11 +216,16 @@ export default function FacultyDisciplineIncidentsPage() {
   }
 
   async function submitIncident() {
+    if (busy || uploading || optionsError) return;
     if (!studentRef) {
       toast.error('Select a student');
       return;
     }
-    if (form.student_ref.trim()) {
+    if (studentReferenceMismatch) {
+      toast.error(studentReferenceError);
+      return;
+    }
+    if (!form.student_pick && form.student_ref.trim()) {
       const ref = form.student_ref.trim();
       const looksLikeEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(ref);
       const looksLikeUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(ref);
@@ -209,6 +243,10 @@ export default function FacultyDisciplineIncidentsPage() {
     }
     if (!form.description.trim()) {
       toast.error('Enter incident description');
+      return;
+    }
+    if (!Number.isInteger(Number(form.points)) || Number(form.points) < 1 || Number(form.points) > 6) {
+      toast.error('Points must be a whole number from 1 to 6');
       return;
     }
     if (isFacultyDemoSmokeId(studentRef) || isFacultyDemoSmokeId(form.subject_id)) {
@@ -276,13 +314,15 @@ export default function FacultyDisciplineIncidentsPage() {
           <CardTitle className="text-base">New incident report</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
+          {optionsError ? <p role="alert" className="text-sm text-destructive">{optionsError}</p> : null}
           <div className="grid gap-4 md:grid-cols-2">
             <div>
-              <label className="mb-1 block text-xs font-medium text-muted-foreground">Student</label>
+              <label htmlFor="incident-student" className="mb-1 block text-xs font-medium text-muted-foreground">Student</label>
               <Select
+                id="incident-student"
                 className="w-full rounded-md border px-3 py-2 text-sm"
                 value={form.student_pick}
-                onChange={(e) => setForm((f) => ({ ...f, student_pick: e.target.value, student_ref: '' }))}
+                onChange={(e) => selectStudent(e.target.value)}
               >
                 <option value="">Select student</option>
                 {students.map((s) => (
@@ -294,12 +334,24 @@ export default function FacultyDisciplineIncidentsPage() {
               </Select>
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-muted-foreground">Or enrollment / email</label>
+              <label htmlFor="incident-student-reference" className="mb-1 block text-xs font-medium text-muted-foreground">Enrollment / email</label>
               <Input
+                id="incident-student-reference"
                 placeholder="e.g. SGVU-2026-1004"
                 value={form.student_ref}
-                onChange={(e) => setForm((f) => ({ ...f, student_ref: e.target.value, student_pick: '' }))}
+                onChange={(e) => updateStudentReference(e.target.value)}
+                aria-invalid={studentReferenceMismatch}
+                aria-describedby="incident-student-reference-help"
               />
+              <p
+                id="incident-student-reference-help"
+                className={`mt-1 text-xs ${studentReferenceMismatch ? 'text-red-600' : 'text-muted-foreground'}`}
+                role={studentReferenceMismatch ? 'alert' : undefined}
+              >
+                {studentReferenceMismatch
+                  ? studentReferenceError
+                  : 'Choosing a student fills this field. A matching enrollment or email also selects their name.'}
+              </p>
             </div>
             <div>
               <label className="mb-1 block text-xs font-medium text-muted-foreground">Subject / course</label>
@@ -351,12 +403,13 @@ export default function FacultyDisciplineIncidentsPage() {
 
           <div>
             <label className="mb-2 block text-xs font-medium text-muted-foreground">Evidence (optional)</label>
-            <Button size="sm" variant="outline" disabled={uploading} asChild>
+            <Button size="sm" variant="outline" disabled={uploading || busy} asChild>
               <label className="cursor-pointer">
                 <Upload className="mr-2 h-4 w-4 inline" />
                 {uploading ? 'Uploading…' : 'Upload file'}
                 <input
                   type="file"
+                  disabled={uploading || busy}
                   className="hidden"
                   accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
                   onChange={(e) => {
@@ -398,7 +451,7 @@ export default function FacultyDisciplineIncidentsPage() {
             ) : null}
           </div>
 
-          <Button disabled={busy || uploading} onClick={() => void submitIncident()}>
+          <Button disabled={busy || uploading || Boolean(optionsError) || !studentRef || !form.subject_id || !form.description.trim() || studentReferenceMismatch} onClick={() => void submitIncident()}>
             Submit to Disciplinary Committee
           </Button>
         </CardContent>
@@ -409,7 +462,8 @@ export default function FacultyDisciplineIncidentsPage() {
           <CardTitle className="text-base">Your submitted incidents</CardTitle>
         </CardHeader>
         <CardContent>
-          {history.length === 0 ? (
+          {historyError ? <div role="alert" className="mb-3 text-sm text-destructive">{historyError} <Button variant="outline" size="sm" onClick={() => void refreshHistory()}>Retry history</Button></div> : null}
+          {history.length === 0 && !historyError ? (
             <FacultyEmptyState description="No incidents submitted yet." />
           ) : (
             <div className="space-y-3">

@@ -43,7 +43,13 @@ export function PhdReviewQueue({
 }) {
   const api = useAuthedApi();
   const [rows, setRows] = useState<PhdCandidate[]>(initialRows ?? []);
+  const [previousInitialRows, setPreviousInitialRows] = useState(initialRows);
+  if (previousInitialRows !== initialRows) {
+    setPreviousInitialRows(initialRows);
+    if (initialRows) setRows(initialRows);
+  }
   const [loading, setLoading] = useState(Boolean(listPath) && !initialRows?.length);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [remarks, setRemarks] = useState<Record<string, string>>({});
   const [guidePick, setGuidePick] = useState<Record<string, string>>({});
@@ -66,6 +72,7 @@ export function PhdReviewQueue({
   const load = useCallback(async () => {
     if (!listPath) return;
     setLoading(true);
+    setLoadError(null);
     try {
       const data = await api.get<PhdCandidate[]>(listPath);
       const live = Array.isArray(data) ? data : [];
@@ -74,24 +81,23 @@ export function PhdReviewQueue({
           ? withFacultyDemoFallback(live, facultyDemoPhdScholars() as PhdCandidate[], isEmptyArray)
           : live,
       );
-    } catch {
-      setRows(
+    } catch (error) {
+      const fallback =
         role === 'Faculty'
           ? withFacultyDemoFallback([], facultyDemoPhdScholars() as PhdCandidate[], isEmptyArray)
-          : [],
-      );
+          : [];
+      setRows(fallback);
+      if (!fallback.length) setLoadError(error instanceof Error ? error.message : 'Could not load PhD scholars');
     } finally {
       setLoading(false);
     }
   }, [api, listPath, role]);
 
   useEffect(() => {
+    // This subscribes to the remote candidate queue and exposes its loading state.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
   }, [load]);
-
-  useEffect(() => {
-    if (initialRows) setRows(initialRows);
-  }, [initialRows]);
 
   useEffect(() => {
     if (!['DRC_MEMBER', 'RAC_MEMBER'].includes(role)) return;
@@ -147,6 +153,8 @@ export function PhdReviewQueue({
         <p className="flex items-center gap-2 text-sm text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" /> Loading queue…
         </p>
+      ) : loadError ? (
+        <p role="alert" className="text-sm text-destructive">{loadError}</p>
       ) : visibleRows.length === 0 ? (
         <p className="text-sm text-muted-foreground">
           {rows.length === 0

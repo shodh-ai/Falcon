@@ -1,7 +1,7 @@
 'use client';
 
 import { Select } from '@/components/ui/select';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Loader2, Save, Send, ChevronDown } from 'lucide-react';
 import {
@@ -14,6 +14,7 @@ import {
   FacultyInlineLoading,
 } from '@/components/faculty';
 import { useFacultyCourses } from '@/components/faculty/useFacultyCourses';
+import { FacultyAccountScope } from '@/components/faculty/FacultyAccountScope';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -76,13 +77,27 @@ function storeComponents(courseId: string, componentIds: string[]) {
 
 export default function FacultyGradingPage() {
   const api = useAuthedApi();
-  const { courses, loading: coursesLoading } = useFacultyCourses();
+  return <FacultyAccountScope scope={api}><FacultyGradingContent api={api} /></FacultyAccountScope>;
+}
+
+function FacultyGradingContent({ api }: { api: ReturnType<typeof useAuthedApi> }) {
+  const { courses, loading: coursesLoading, error: coursesError } = useFacultyCourses();
   const [courseId, setCourseId] = useState('');
   const [selectedComponentIds, setSelectedComponentIds] = useState<string[]>([]);
-  const [rows, setRows] = useState<UnifiedMarkRow[]>([]);
+  const [sourceRows, setRows] = useState<UnifiedMarkRow[]>([]);
+  const [loadedCourseId, setLoadedCourseId] = useState('');
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [rosterError, setRosterError] = useState<string | null>(null);
+  const mounted = useRef(true);
+  const savingLock = useRef(false);
+  const rosterRequest = useRef(0);
+  const operationScope = useRef(0);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; rosterRequest.current += 1; operationScope.current += 1; };
+  }, []);
 
   const courseOptions = useMemo(() => {
     const unique = new Map<string, (typeof courses)[number]>();
@@ -94,7 +109,15 @@ export default function FacultyGradingPage() {
     return Array.from(unique.values());
   }, [courses]);
 
+  const courseLoadError = coursesError && coursesError !== 'No courses allocated to your timetable yet.'
+    ? coursesError
+    : null;
+  const coursesUnavailable = coursesLoading || Boolean(courseLoadError) || courseOptions.length === 0;
   const selectedCourse = courseOptions.find((c) => c.course_id === courseId);
+  const courseReady = !coursesUnavailable && Boolean(selectedCourse);
+  const rows = courseReady && loadedCourseId === courseId ? sourceRows : [];
+
+  useEffect(() => { operationScope.current += 1; }, [courseId, courseReady]);
 
   const activeColumns = useMemo(() => {
     const columns = selectedComponentIds
@@ -102,6 +125,8 @@ export default function FacultyGradingPage() {
       .filter((component): component is GradingComponent => Boolean(component));
     return sortGradingComponents(columns);
   }, [selectedComponentIds]);
+
+  const gradingUnavailable = !courseReady || loading || Boolean(rosterError) || rows.length === 0 || activeColumns.length === 0;
 
   const componentsByGroup = useMemo(() => {
     return GRADING_COMPONENT_GROUPS.map((group) => ({
@@ -130,19 +155,28 @@ export default function FacultyGradingPage() {
   }
 
   useEffect(() => {
-    if (!courseId) {
+    if (!courseReady) {
+      // Do not retain components from a course that is no longer available to this account.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSelectedComponentIds([]);
       return;
     }
+    // Restore the browser's per-course preference after hydration and course authorization.
     setSelectedComponentIds(loadStoredComponents(courseId));
-  }, [courseId]);
+  }, [courseId, courseReady]);
 
-  const reloadMarks = useCallback(async () => {
-    if (!courseId) return;
+  const reloadMarks = useCallback(async (savedMessage?: string) => {
+    if (!courseReady) return;
+    const requestId = ++rosterRequest.current;
+    setRosterError(null);
+    setLoading(true);
     try {
       const data = await api.get<UnifiedMarkRow[]>(
         `/api/academics/faculty/workspaces/course/${encodeURIComponent(courseId)}/unified-marks`,
       );
+      if (!mounted.current || requestId !== rosterRequest.current) return;
+      if (!Array.isArray(data)) throw new Error('Could not read the student marks roster');
+      setLoadedCourseId(courseId);
       setRows(
         withFacultyDemoFallback(
           data,
@@ -150,62 +184,38 @@ export default function FacultyGradingPage() {
           isEmptyArray,
         ),
       );
-    } catch {
-      setRows(
-        withFacultyDemoFallback(
+    } catch (error: unknown) {
+      if (!mounted.current || requestId !== rosterRequest.current) return;
+      const fallback = withFacultyDemoFallback(
           [],
           facultyDemoUnifiedMarks(courseId) as UnifiedMarkRow[],
           isEmptyArray,
-        ),
-      );
+        );
+      setLoadedCourseId(courseId);
+      if (!savedMessage || fallback.length) setRows(fallback);
+      if (fallback.length === 0) {
+        const message = error instanceof Error ? error.message : 'Failed to refresh marks';
+        setRosterError(savedMessage ? `${savedMessage} ${message}` : message);
+      }
+    } finally {
+      if (mounted.current && requestId === rosterRequest.current) setLoading(false);
     }
-  }, [api, courseId]);
+  }, [api, courseId, courseReady]);
 
   useEffect(() => {
-    if (!courseId) {
+    if (!courseReady) {
+      rosterRequest.current += 1;
+      // Invalidate the previous remote roster immediately when its course is unavailable.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setRows([]);
+      setLoadedCourseId('');
       setRosterError(null);
+      setLoading(false);
       return;
     }
-    let cancelled = false;
-    (async () => {
-      setLoading(true);
-      setRosterError(null);
-      try {
-        const data = await api.get<UnifiedMarkRow[]>(
-          `/api/academics/faculty/workspaces/course/${encodeURIComponent(courseId)}/unified-marks`,
-        );
-        if (!cancelled) {
-          setRows(
-            withFacultyDemoFallback(
-              data,
-              facultyDemoUnifiedMarks(courseId) as UnifiedMarkRow[],
-              isEmptyArray,
-            ),
-          );
-        }
-      } catch (e) {
-        if (!cancelled) {
-          const demo = withFacultyDemoFallback(
-            [],
-            facultyDemoUnifiedMarks(courseId) as UnifiedMarkRow[],
-            isEmptyArray,
-          );
-          setRows(demo);
-          if (demo.length === 0) {
-            const msg = e instanceof Error ? e.message : 'Failed to load marks';
-            setRosterError(msg);
-            toast.error(msg);
-          }
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [api, courseId]);
+    void reloadMarks();
+    return () => { rosterRequest.current += 1; };
+  }, [courseReady, reloadMarks]);
 
   function toggleComponent(componentId: string) {
     updateSelectedComponents((prev) =>
@@ -227,6 +237,10 @@ export default function FacultyGradingPage() {
 
   function updateMark(studentId: string, component: GradingComponent, value: string) {
     const num = value === '' ? null : Number(value);
+    if (num !== null && (!Number.isFinite(num) || num < 0 || num > component.max)) {
+      toast.error(`Enter marks between 0 and ${component.max} for ${component.label}`);
+      return;
+    }
 
     setRows((prev) =>
       prev.map((r) => {
@@ -250,7 +264,9 @@ export default function FacultyGradingPage() {
   }
 
   async function saveDraft(options?: { silent?: boolean }): Promise<boolean> {
-    if (!courseId) return false;
+    if (gradingUnavailable || (savingLock.current && !options?.silent)) return false;
+    const scope = operationScope.current;
+    const isCurrent = () => mounted.current && scope === operationScope.current;
     if (isFacultyDemoEntityId(courseId) || rows.some((r) => isFacultyDemoEntityId(r.student_user_id))) {
       if (!options?.silent) toast.success('Draft saved successfully (demo)');
       return true;
@@ -271,6 +287,10 @@ export default function FacultyGradingPage() {
           m.status !== 'PENDING_COE' &&
           m.status !== 'PUBLISHED'
         ) {
+          if (!Number.isFinite(m.obtained) || m.obtained < 0 || m.obtained > col.max) {
+            toast.error(`Enter marks between 0 and ${col.max} for ${col.label}`);
+            return false;
+          }
           if (!entriesByExamType[col.id]) {
             entriesByExamType[col.id] = [];
           }
@@ -287,12 +307,14 @@ export default function FacultyGradingPage() {
       if (!options?.silent) {
         toast.error('No new marks to save. Enter marks in the PE / GA / MTE / ETE columns first.');
       }
-      return false;
+      // Auto-synced marks can be published without any manual draft entries.
+      return options?.silent === true;
     }
 
-    setSaving(true);
+    if (!options?.silent) { savingLock.current = true; setSaving(true); }
     try {
       for (const examType of typesToSave) {
+        if (!isCurrent()) return false;
         const entries = entriesByExamType[examType];
         const col = getGradingComponent(examType);
         await api.post('/api/academics/faculty/workspaces/marks/draft', {
@@ -302,27 +324,33 @@ export default function FacultyGradingPage() {
           entries,
         });
       }
-
-      toast.success('Draft saved successfully');
-      await reloadMarks();
+      if (!isCurrent()) return false;
+      if (!options?.silent) {
+        toast.success('Draft saved successfully');
+        await reloadMarks('Draft saved, but marks could not be refreshed.');
+      }
       return true;
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Save failed');
+      if (isCurrent()) toast.error(e instanceof Error ? e.message : 'Save failed');
       return false;
     } finally {
-      setSaving(false);
+      if (!options?.silent) { savingLock.current = false; if (mounted.current) setSaving(false); }
     }
   }
 
   async function publishAll() {
-    if (!courseId) return;
+    if (gradingUnavailable || savingLock.current || !isPublishable) return;
+    const scope = operationScope.current;
+    const isCurrent = () => mounted.current && scope === operationScope.current;
     if (isFacultyDemoEntityId(courseId) || rows.some((r) => isFacultyDemoEntityId(r.student_user_id))) {
       toast.success('Marks published to students (demo)');
       return;
     }
+    savingLock.current = true;
     setSaving(true);
     try {
-      await saveDraft({ silent: true });
+      if (!(await saveDraft({ silent: true }))) return;
+      if (!isCurrent()) return;
 
       const result = await api.post<{
         published: number;
@@ -333,6 +361,7 @@ export default function FacultyGradingPage() {
         `/api/academics/faculty/workspaces/course/${encodeURIComponent(courseId)}/publish-all`,
       );
 
+      if (!isCurrent()) return;
       if ((result.published ?? 0) === 0) {
         toast.warning('No marks were published.');
       } else {
@@ -342,11 +371,12 @@ export default function FacultyGradingPage() {
         );
       }
 
-      await reloadMarks();
+      await reloadMarks('Marks published, but the roster could not be refreshed.');
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Publish failed');
+      if (isCurrent()) toast.error(e instanceof Error ? e.message : 'Publish failed');
     } finally {
-      setSaving(false);
+      savingLock.current = false;
+      if (mounted.current) setSaving(false);
     }
   }
 
@@ -363,7 +393,7 @@ export default function FacultyGradingPage() {
         title="Exams & Grades"
         description="Conduct examinations and publish grades."
         meta={
-          courseId ? (
+          courseReady ? (
             <>
               <FacultyMetricChip label="Course" value={selectedCourse?.course_code ?? '—'} emphasis />
               <FacultyMetricChip label="Students" value={rows.length} />
@@ -378,15 +408,18 @@ export default function FacultyGradingPage() {
         description="Choose a course and grading components from the dropdowns below."
       >
         <div className="grid gap-4 sm:grid-cols-2">
-          <label className="text-sm">
+          <label htmlFor="grading-course" className="text-sm">
             <span className="mb-1.5 block font-medium text-sgvu-navy">Course</span>
             <Select
+              id="grading-course"
               className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm"
-              value={courseId}
-              onChange={(e) => setCourseId(e.target.value)}
-              disabled={coursesLoading}
+              value={courseReady ? courseId : ''}
+              onChange={(e) => { if (!savingLock.current) setCourseId(e.target.value); }}
+              disabled={coursesUnavailable || saving}
             >
-              <option value="">Select course</option>
+              <option value="">
+                {coursesLoading ? 'Loading courses…' : courseLoadError ? 'Unable to load courses' : courseOptions.length === 0 ? 'No courses assigned' : 'Select course'}
+              </option>
               {courseOptions.map((c) => (
                 <option key={c.course_id} value={c.course_id}>
                   {c.course_code} — {c.course_name}
@@ -395,16 +428,18 @@ export default function FacultyGradingPage() {
             </Select>
           </label>
 
-          <label className="text-sm">
+          <label htmlFor="grading-components" className="text-sm">
             <span className="mb-1.5 block font-medium text-sgvu-navy">Components</span>
             <DropdownMenu>
-              <DropdownMenuTrigger asChild disabled={!courseId}>
+              <DropdownMenuTrigger asChild disabled={!courseReady || saving}>
                 <button
+                  id="grading-components"
+                  aria-label="Components"
                   type="button"
                   className="flex w-full items-center justify-between rounded-lg border border-border/60 bg-background px-3 py-2 text-sm text-left disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <span className={selectedComponentIds.length === 0 ? 'text-muted-foreground' : ''}>
-                    {courseId ? componentPickerLabel : 'Select course first'}
+                    {courseReady ? componentPickerLabel : 'Select course first'}
                   </span>
                   <ChevronDown className="h-4 w-4 shrink-0 opacity-60" />
                 </button>
@@ -441,7 +476,16 @@ export default function FacultyGradingPage() {
             </DropdownMenu>
           </label>
         </div>
-        {courseId ? (
+        {!coursesLoading && courseLoadError ? (
+          <div className="mt-3" role="alert">
+            <FacultyErrorBanner message={`${courseLoadError} Refresh the page to try again.`} />
+          </div>
+        ) : !coursesLoading && courseOptions.length === 0 ? (
+          <p className="mt-3 text-sm text-muted-foreground" role="status">
+            No teaching courses are assigned yet. Contact your HOD if you expected a teaching assignment.
+          </p>
+        ) : null}
+        {courseReady ? (
           <p className="mt-3 text-sm text-muted-foreground">
             WT1 and WT2 are auto-synced from weekly tests. All other components are entered manually.
           </p>
@@ -457,7 +501,7 @@ export default function FacultyGradingPage() {
           <Button
             variant="outline"
             size="sm"
-            disabled={!courseId || saving || loading || activeColumns.length === 0}
+            disabled={gradingUnavailable || saving}
             onClick={() => void saveDraft()}
           >
             {saving ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Save className="mr-1 h-4 w-4" />}
@@ -465,7 +509,7 @@ export default function FacultyGradingPage() {
           </Button>
           <Button
             size="sm"
-            disabled={!courseId || saving || loading || !isPublishable || activeColumns.length === 0}
+            disabled={gradingUnavailable || saving || !isPublishable}
             onClick={() => void publishAll()}
           >
             <Send className="mr-1 h-4 w-4" />
@@ -473,14 +517,20 @@ export default function FacultyGradingPage() {
           </Button>
         </div>
 
-        {loading ? (
+        {coursesLoading ? (
+          <FacultyInlineLoading label="Loading courses…" />
+        ) : !courseReady ? (
+          <FacultyEmptyState description={courseLoadError
+            ? 'The roster is unavailable until courses can be loaded.'
+            : courseOptions.length === 0
+              ? 'A teaching course must be assigned before its student roster is available.'
+              : 'Select a course to view the roster.'} />
+        ) : loading ? (
           <FacultyInlineLoading label="Loading roster…" />
-        ) : !courseId ? (
-          <FacultyEmptyState description="Select a course to view the roster." />
         ) : activeColumns.length === 0 ? (
           <FacultyEmptyState description="Select at least one grading component." />
         ) : rosterError ? (
-          <FacultyErrorBanner message={rosterError} />
+          <div role="alert" className="space-y-3"><FacultyErrorBanner message={rosterError} /><Button variant="outline" disabled={saving} onClick={() => void reloadMarks()}>Retry roster</Button></div>
         ) : rows.length === 0 ? (
           <FacultyEmptyState description="No enrolled students found for this course." />
         ) : (
@@ -521,7 +571,7 @@ export default function FacultyGradingPage() {
                               max={col.max}
                               className={`h-8 w-16 text-center ${isLocked || col.readOnly ? 'border-transparent bg-muted/50 text-muted-foreground' : ''}`}
                               value={m?.obtained ?? ''}
-                              disabled={col.readOnly || isLocked}
+                              disabled={saving || col.readOnly || isLocked}
                               onChange={(e) => updateMark(row.student_user_id, col, e.target.value)}
                             />
                             {m?.status && m.status !== 'DRAFT' && (

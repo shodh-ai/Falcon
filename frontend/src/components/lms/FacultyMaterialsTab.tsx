@@ -1,10 +1,10 @@
 'use client';
 
-import { DragEvent, FormEvent, useState } from 'react';
+import { DragEvent, FormEvent, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { BookOpen, FileText, Plus, Trash2, Upload, X } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { cn } from '@/lib/utils';
-import { FacultyPanel, FacultyEmptyState } from '@/components/faculty';
+import { FacultyPanel, FacultyEmptyState, FacultyErrorBanner } from '@/components/faculty';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -82,6 +82,11 @@ function MaterialRow({
 }
 
 export function FacultyMaterialsTab({ courseId, workspace, onRefresh }: Props) {
+  const { user, token } = useAuth();
+  return <MaterialsWorkspace key={`${courseId}:${user?.user_id ?? ''}:${token ?? ''}`} courseId={courseId} workspace={workspace} onRefresh={onRefresh} />;
+}
+
+function MaterialsWorkspace({ courseId, workspace, onRefresh }: Props) {
   const api = useAuthedApi();
   const { token } = useAuth();
   const [newModuleTitle, setNewModuleTitle] = useState('');
@@ -97,87 +102,126 @@ export function FacultyMaterialsTab({ courseId, workspace, onRefresh }: Props) {
   const [publishTargets, setPublishTargets] = useState<MaterialPublishTargetsResponse | null>(null);
   const [selectedAllocations, setSelectedAllocations] = useState<string[]>([]);
   const [loadingTargets, setLoadingTargets] = useState(false);
+  const [targetsError, setTargetsError] = useState<string | null>(null);
+  const alive = useRef(false);
+  const activeApi = useRef(api);
+  useLayoutEffect(() => { activeApi.current = api; }, [api]);
+  const actionLock = useRef(false);
+  const targetRequest = useRef(0);
+  const current = () => alive.current && activeApi.current === api;
+  const busy = addingModule || syllabusUploading || uploading || Boolean(deletingId) || Boolean(deletingModuleId);
+  useEffect(() => {
+    alive.current = true;
+    actionLock.current = false;
+    // Pending files and action state must never carry into another account/course.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setAddingModule(false); setSyllabusUploading(false); setUploading(false); setDeletingId(null); setDeletingModuleId(null);
+    setUploadModuleId(null); setPublishTargets(null); setTargetsError(null);
+    return () => { alive.current = false; targetRequest.current += 1; };
+  }, [api]);
+  function begin() {
+    if (actionLock.current || !current()) return false;
+    actionLock.current = true;
+    return true;
+  }
 
-  function closeUploadModal() {
+  function resetUploadModal() {
+    targetRequest.current += 1;
     setUploadModuleId(null);
     setUploadFiles([]);
     setUploadTitle('');
     setPublishTargets(null);
     setSelectedAllocations([]);
+    setTargetsError(null);
   }
+  function closeUploadModal() { if (!actionLock.current) resetUploadModal(); }
 
   async function openUploadModal(moduleId: string) {
+    if (actionLock.current || !current()) return;
+    const id = ++targetRequest.current;
     setUploadModuleId(moduleId);
-    setUploadFiles([]);
-    setUploadTitle('');
+    if (uploadModuleId !== moduleId) { setUploadFiles([]); setUploadTitle(''); }
     setPublishTargets(null);
     setSelectedAllocations([]);
     setLoadingTargets(true);
+    setTargetsError(null);
     try {
       const data = await api.get<MaterialPublishTargetsResponse>(
         `/api/academics/faculty/courses/${courseId}/material-publish-targets`,
       );
+      if (!current() || id !== targetRequest.current) return;
+      if (!Array.isArray(data?.targets)) throw new Error('Could not read publishing sections');
       setPublishTargets(data);
       setSelectedAllocations(data.targets.map((target) => target.allocation_id));
-    } catch {
+    } catch (err: unknown) {
+      if (!current() || id !== targetRequest.current) return;
       setPublishTargets(null);
+      if (!isFacultyDemoEntityId(courseId)) {
+        setTargetsError(err instanceof Error ? err.message : 'Failed to load publishing sections');
+      }
     } finally {
-      setLoadingTargets(false);
+      if (current() && id === targetRequest.current) setLoadingTargets(false);
     }
   }
 
   async function addModule(e: FormEvent) {
     e.preventDefault();
-    if (!newModuleTitle.trim()) return;
+    if (actionLock.current || !current() || !newModuleTitle.trim()) return;
     if (isFacultyDemoEntityId(courseId)) {
       toast.success('Module added (demo)');
       setNewModuleTitle('');
       return;
     }
+    if (!begin()) return;
     setAddingModule(true);
     try {
       await api.post(`/api/academics/faculty/courses/${courseId}/modules`, {
         title: newModuleTitle.trim(),
       });
+      if (!current()) return;
       setNewModuleTitle('');
       toast.success('Module added');
       onRefresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to add module');
+      if (current()) toast.error(err instanceof Error ? err.message : 'Failed to add module');
     } finally {
-      setAddingModule(false);
+      if (current()) { actionLock.current = false; setAddingModule(false); }
     }
   }
 
   async function deleteModule(moduleId: string, title: string, hasMaterials: boolean) {
+    if (actionLock.current || !current()) return;
     if (hasMaterials) {
       toast.error('Delete the files in this unit before deleting the unit.');
       return;
     }
     if (!window.confirm(`Delete “${title}”? This cannot be undone.`)) return;
-
+    if (!begin()) return;
     setDeletingModuleId(moduleId);
     try {
       if (!isFacultyDemoEntityId(moduleId)) {
         await api.del(`/api/academics/faculty/courses/modules/${moduleId}`);
       }
+      if (!current()) return;
       toast.success('Unit deleted');
       onRefresh();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to delete unit');
+      if (current()) toast.error(error instanceof Error ? error.message : 'Failed to delete unit');
     } finally {
-      setDeletingModuleId(null);
+      if (current()) { actionLock.current = false; setDeletingModuleId(null); }
     }
   }
 
   async function submitMaterial(e: FormEvent) {
     e.preventDefault();
-    if (!uploadModuleId || uploadFiles.length === 0 || !token) return;
+    if (actionLock.current || !current() || !uploadModuleId || uploadFiles.length === 0 || !token || loadingTargets || targetsError || uploading) return;
+    if (publishTargets?.cross_section_available && selectedAllocations.length === 0) return;
     if (isFacultyDemoSmokeId(uploadModuleId) || isFacultyDemoEntityId(courseId)) {
       toast.success(`${uploadFiles.length} material${uploadFiles.length === 1 ? '' : 's'} uploaded (demo)`);
       closeUploadModal();
       return;
     }
+    if (!begin()) return;
     const form = new FormData();
     uploadFiles.forEach((file) => form.append('files', file));
     if (uploadTitle.trim() && uploadFiles.length === 1) {
@@ -190,33 +234,37 @@ export function FacultyMaterialsTab({ courseId, workspace, onRefresh }: Props) {
     setUploading(true);
     try {
       await postMultipart(`/api/academics/faculty/courses/modules/${uploadModuleId}/materials`, token, form);
+      if (!current()) return;
       toast.success(
         `${uploadFiles.length} material${uploadFiles.length === 1 ? '' : 's'} uploaded — students notified`,
       );
-      closeUploadModal();
+      resetUploadModal();
       onRefresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Upload failed');
+      if (current()) toast.error(err instanceof Error ? err.message : 'Upload failed');
     } finally {
-      setUploading(false);
+      if (current()) { actionLock.current = false; setUploading(false); }
     }
   }
 
   async function deleteMaterial(materialId: string) {
+    if (actionLock.current || !current()) return;
     if (!confirm('Delete this file? Students will no longer be able to download it.')) return;
     if (isFacultyDemoSmokeId(materialId)) {
       toast.success('Material deleted (demo)');
       return;
     }
+    if (!begin()) return;
     setDeletingId(materialId);
     try {
       await api.del(`/api/academics/faculty/courses/materials/${materialId}`);
+      if (!current()) return;
       toast.success('Material deleted');
       onRefresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Delete failed');
+      if (current()) toast.error(err instanceof Error ? err.message : 'Delete failed');
     } finally {
-      setDeletingId(null);
+      if (current()) { actionLock.current = false; setDeletingId(null); }
     }
   }
 
@@ -224,6 +272,7 @@ export function FacultyMaterialsTab({ courseId, workspace, onRefresh }: Props) {
   const syllabusMaterials = workspace.syllabus_materials ?? [];
 
   function addUploadFiles(files: FileList | File[]) {
+    if (actionLock.current) return;
     const accepted = Array.from(files).filter((file) => /\.(pdf|ppt|pptx|doc|docx)$/i.test(file.name));
     setUploadFiles((prev) => [...prev, ...accepted]);
   }
@@ -234,30 +283,32 @@ export function FacultyMaterialsTab({ courseId, workspace, onRefresh }: Props) {
   }
 
   async function uploadSyllabus() {
-    if (!token || !syllabusFile) return;
+    if (actionLock.current || !current() || !token || !syllabusFile) return;
     if (isFacultyDemoEntityId(courseId)) {
       toast.success('Syllabus uploaded (demo)');
       setSyllabusFile(null);
       return;
     }
+    if (!begin()) return;
     const form = new FormData();
     form.append('file', syllabusFile);
     form.append('title', 'Course Syllabus & Lesson Plan');
     setSyllabusUploading(true);
     try {
       await postMultipart(`/api/academics/faculty/courses/${courseId}/syllabus-material`, token, form);
+      if (!current()) return;
       toast.success('Syllabus uploaded');
       setSyllabusFile(null);
       onRefresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Syllabus upload failed');
+      if (current()) toast.error(err instanceof Error ? err.message : 'Syllabus upload failed');
     } finally {
-      setSyllabusUploading(false);
+      if (current()) { actionLock.current = false; setSyllabusUploading(false); }
     }
   }
 
   return (
-    <div className="space-y-5">
+    <fieldset disabled={busy} className="min-w-0 space-y-5">
       <section className="overflow-hidden rounded-xl border border-sgvu-gold/35 bg-gradient-to-br from-sgvu-gold/12 via-sgvu-gold/5 to-background">
         <div className="border-b border-sgvu-gold/20 bg-sgvu-gold/10 px-4 py-3 sm:px-5">
           <div className="flex flex-wrap items-center gap-2">
@@ -478,6 +529,8 @@ export function FacultyMaterialsTab({ courseId, workspace, onRefresh }: Props) {
                   PDF, PPT, or Word doc · Max 10MB · Notifies enrolled students
                 </p>
               </div>
+              {loadingTargets ? <p className="text-xs text-muted-foreground">Loading sections…</p> : null}
+              {targetsError ? <><FacultyErrorBanner message={targetsError} /><Button type="button" variant="outline" onClick={() => { if (uploadModuleId) void openUploadModal(uploadModuleId); }}>Retry sections</Button></> : null}
               {publishTargets?.cross_section_available ? (
                 <div className="space-y-2 rounded-xl border border-sgvu-gold/30 bg-sgvu-gold/5 p-3">
                   <p className="text-xs font-semibold text-sgvu-navy">
@@ -526,6 +579,8 @@ export function FacultyMaterialsTab({ courseId, workspace, onRefresh }: Props) {
                   disabled={
                     uploadFiles.length === 0 ||
                     uploading ||
+                    loadingTargets ||
+                    Boolean(targetsError) ||
                     (publishTargets?.cross_section_available === true && selectedAllocations.length === 0)
                   }
                   className="gap-1.5"
@@ -541,6 +596,6 @@ export function FacultyMaterialsTab({ courseId, workspace, onRefresh }: Props) {
           </div>
         </div>
       )}
-    </div>
+    </fieldset>
   );
 }

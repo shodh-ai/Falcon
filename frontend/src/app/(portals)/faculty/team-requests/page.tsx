@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -46,7 +46,7 @@ export default function FacultyTeamRequestsPage() {
   const [rows, setRows] = useState<TeamRow[]>([]);
   const [loading, setLoading] = useState(true);
 
-  async function load(active: Tab) {
+  const load = useCallback(async (active: Tab) => {
     setLoading(true);
     try {
       const data = await api.get<TeamRow[]>(`/api/hr/workforce/team/pending?type=${active}`);
@@ -90,11 +90,13 @@ export default function FacultyTeamRequestsPage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [api]);
 
   useEffect(() => {
+    // Synchronize the remote approval queue with the currently selected request type/account.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void load(tab);
-  }, [api, tab]);
+  }, [load, tab]);
 
   async function act(leaveId: string, action: 'APPROVE' | 'REJECT') {
     const comment =

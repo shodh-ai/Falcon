@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useCallback, useContext, useMemo, useState, useEffect } from 'react';
+import React, { createContext, useCallback, useContext, useMemo, useState, useEffect, useRef } from 'react';
 import { getApiBaseUrl } from '@/lib/api-base-url';
 
 export type AllowedEntity = { id: number; name: string; code: string };
@@ -32,6 +32,7 @@ interface AuthContextType {
   token: string | null;
   login: (token: string, user: User, rememberMe?: boolean) => void;
   refreshUser: () => Promise<User | null>;
+  updateOnboardingStatus: (status: string) => boolean;
   logout: () => void;
   isAuthenticated: boolean;
   isLoading: boolean;
@@ -59,15 +60,37 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const activeTokenRef = useRef<string | null>(null);
+  const activeUserRef = useRef<User | null>(null);
+  const authGeneration = useRef(0);
+  const [authRevision, setAuthRevision] = useState(0);
+  const refreshGeneration = useRef(0);
+  const mounted = useRef(true);
 
   useEffect(() => {
+    mounted.current = true;
+    const generation = authGeneration.current;
+    const requestId = ++refreshGeneration.current;
     const load = async () => {
       const storedToken = localStorage.getItem('token');
       const storedUser = localStorage.getItem('user');
 
       if (storedToken && storedUser) {
+        let cachedUser: User;
+        try {
+          cachedUser = JSON.parse(storedUser);
+          if (!cachedUser || typeof cachedUser.user_id !== 'string') throw new Error('Invalid cached account');
+        } catch {
+          localStorage.removeItem('token');
+          localStorage.removeItem('user');
+          writeAuthCookie(null);
+          if (mounted.current) setIsLoading(false);
+          return;
+        }
+        activeTokenRef.current = storedToken;
+        activeUserRef.current = cachedUser;
         setToken(storedToken);
-        setUser(JSON.parse(storedUser));
+        setUser(cachedUser);
         writeAuthCookie(storedToken);
         try {
           const api = getApiBaseUrl();
@@ -94,19 +117,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               fresh.hr_capabilities = perms.hr_capabilities ?? fresh.hr_capabilities;
               fresh.allowed_entities = perms.allowed_entities ?? fresh.allowed_entities;
             }
-            setUser(fresh);
-            localStorage.setItem('user', JSON.stringify(fresh));
+            if (mounted.current && generation === authGeneration.current && requestId === refreshGeneration.current && activeTokenRef.current === storedToken && localStorage.getItem('token') === storedToken) {
+              activeUserRef.current = fresh;
+              setUser(fresh);
+              localStorage.setItem('user', JSON.stringify(fresh));
+            }
           }
         } catch {
           /* keep cached user if profile fetch fails */
         }
       }
-      setIsLoading(false);
+      if (mounted.current) setIsLoading(false);
     };
     void load();
+    return () => { mounted.current = false; refreshGeneration.current += 1; };
   }, []);
 
   const login = useCallback((newToken: string, newUser: User, rememberMe = false) => {
+    activeTokenRef.current = newToken;
+    activeUserRef.current = newUser;
+    authGeneration.current += 1;
+    setAuthRevision(authGeneration.current);
+    refreshGeneration.current += 1;
     setToken(newToken);
     setUser(newUser);
     localStorage.setItem('token', newToken);
@@ -115,6 +147,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const logout = useCallback(() => {
+    activeTokenRef.current = null;
+    activeUserRef.current = null;
+    authGeneration.current += 1;
+    setAuthRevision(authGeneration.current);
+    refreshGeneration.current += 1;
     setToken(null);
     setUser(null);
     localStorage.removeItem('token');
@@ -124,9 +161,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const refreshUser = useCallback(async () => {
     const activeToken = token || localStorage.getItem('token');
-    if (!activeToken) return null;
+    if (!activeToken || activeTokenRef.current !== activeToken || localStorage.getItem('token') !== activeToken) return null;
+    const generation = authGeneration.current;
+    const requestId = ++refreshGeneration.current;
+    const isCurrent = () => mounted.current && generation === authGeneration.current && requestId === refreshGeneration.current && activeTokenRef.current === activeToken && localStorage.getItem('token') === activeToken;
 
+    try {
     const { getSubdomainFromClient } = await import('@/lib/tenant');
+    if (!isCurrent()) return null;
     const tenantSubdomain = getSubdomainFromClient();
     const headers = {
       Authorization: `Bearer ${activeToken}`,
@@ -138,6 +180,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       fetch(`${api}/api/auth/me/permissions`, { headers }),
     ]);
 
+    if (!isCurrent()) return null;
     if (!response.ok) return null;
 
     const freshUser = await response.json();
@@ -148,10 +191,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       freshUser.hr_capabilities = perms.hr_capabilities ?? freshUser.hr_capabilities;
       freshUser.allowed_entities = perms.allowed_entities ?? freshUser.allowed_entities;
     }
+    if (!isCurrent()) return null;
+    activeUserRef.current = freshUser;
     setUser(freshUser);
     localStorage.setItem('user', JSON.stringify(freshUser));
     return freshUser;
+    } catch (error) {
+      if (!isCurrent()) return null;
+      throw error;
+    }
   }, [token]);
+
+  const updateOnboardingStatus = useCallback((status: string) => {
+    const activeUser = activeUserRef.current;
+    if (!mounted.current || !token || !activeUser || activeUser.user_id !== user?.user_id
+      || authGeneration.current !== authRevision || activeTokenRef.current !== token
+      || localStorage.getItem('token') !== token) return false;
+    const freshUser = { ...activeUser, onboarding_status: status };
+    refreshGeneration.current += 1;
+    activeUserRef.current = freshUser;
+    setUser(freshUser);
+    localStorage.setItem('user', JSON.stringify(freshUser));
+    return true;
+  }, [token, user?.user_id, authRevision]);
 
   const value = useMemo(
     () => ({
@@ -159,11 +221,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       token,
       login,
       refreshUser,
+      updateOnboardingStatus,
       logout,
       isAuthenticated: !!token,
       isLoading,
     }),
-    [user, token, login, refreshUser, logout, isLoading],
+    [user, token, login, refreshUser, updateOnboardingStatus, logout, isLoading],
   );
 
   return (

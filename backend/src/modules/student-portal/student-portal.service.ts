@@ -314,10 +314,14 @@ export class StudentPortalService {
     const filePath = await this.getProfilePhotoPath(tenantId, userId);
     if (!filePath) throw new NotFoundException('Profile photo not found');
 
-    const stream = await openDocumentReadStream(filePath, this.objectStorage);
+    const stream = await openDocumentReadStream(
+      filePath,
+      this.objectStorage,
+      tenantId,
+    );
     if (stream) return { stream, filePath };
 
-    const diskPath = resolveDocumentDiskPath(filePath);
+    const diskPath = resolveDocumentDiskPath(filePath, tenantId);
     if (!diskPath) throw new NotFoundException('Profile photo file missing');
     return { stream: createReadStream(diskPath), filePath: diskPath };
   }

@@ -57,6 +57,23 @@ export class FacultyTeachingDepartmentsService {
         AND a.status = 'ACTIVE'
         AND a.course_id IS NOT NULL
         AND ($${deptParamIndex}::int IS NULL OR COALESCE(p.dept_id, code_dept.dept_id, u.dept_id) = $${deptParamIndex})
+
+      UNION
+
+      -- A published timetable is also a valid teaching assignment. Some
+      -- locally provisioned faculty accounts have timetable rows before the
+      -- course-allocation workflow has created an allocation row.
+      SELECT DISTINCT t.course_id
+      FROM academic_timetables t
+      INNER JOIN users timetable_faculty ON timetable_faculty.user_id = t.faculty_user_id
+      INNER JOIN academic_courses timetable_course
+        ON timetable_course.course_id = t.course_id
+       AND timetable_course.tenant_id = t.tenant_id
+      WHERE t.tenant_id = $1
+        AND t.faculty_user_id = $2
+        AND t.deleted_at IS NULL
+        AND t.course_id IS NOT NULL
+        AND ($${deptParamIndex}::int IS NULL OR timetable_faculty.dept_id = $${deptParamIndex})
     )`;
   }
 

@@ -18,7 +18,10 @@ import {
 import { TenantService } from '../tenant/tenant.service';
 import { resolveTenantSubdomain } from '../tenant/resolve-tenant-subdomain';
 import { HrEntityContextService } from '../modules/hr/hr-entity-context.service';
-import { normalizeOnboardingStatusForWizard } from '../modules/student-onboarding/onboarding-portal.util';
+import {
+  normalizeOnboardingStatusForWizard,
+  requiresFirstLoginWizard,
+} from '../modules/student-onboarding/onboarding-portal.util';
 import { isStudentEnrollmentEmail } from './utils/student-enrollment-email.util';
 import { hasDirectReports } from '../modules/hr/utils/reporting-officer.util';
 
@@ -337,10 +340,11 @@ export class AuthService {
         [tenantId, userId, email.toLowerCase(), success],
       );
       if (success) {
+        // Both uses bind the actor as UUID before rendering the resource text.
         await this.dataSource.query(
           `INSERT INTO admin_control_audit
              (tenant_id, actor_user_id, action, resource_type, resource_id, details)
-           VALUES ($1, $2, 'LOGIN', 'session', $2::text, '{"source":"local-login"}'::jsonb)`,
+           VALUES ($1::uuid, $2::uuid, 'LOGIN', 'session', ($2::uuid)::text, '{"source":"local-login"}'::jsonb)`,
           [tenantId, userId],
         );
       }
@@ -392,20 +396,43 @@ export class AuthService {
     }
     const tokenHash = createHash('sha256').update(token).digest('hex');
     const [row] = await this.dataSource.query<
-      Array<{ token_id: string; user_id: string; tenant_id: string }>
+      Array<{
+        token_id: string;
+        user_id: string;
+        tenant_id: string;
+        onboarding_status: string | null;
+        role_name: string | null;
+      }>
     >(
-      `SELECT token_id, user_id, tenant_id
-       FROM admin_password_reset_tokens
-       WHERE token_hash = $1 AND used_at IS NULL AND expires_at > NOW()
+      `SELECT t.token_id, t.user_id, t.tenant_id, u.onboarding_status, r.role_name
+       FROM admin_password_reset_tokens t
+       JOIN users u ON u.user_id = t.user_id AND u.tenant_id = t.tenant_id
+       LEFT JOIN roles r ON r.role_id = u.role_id
+       WHERE t.token_hash = $1 AND t.used_at IS NULL AND t.expires_at > NOW()
        LIMIT 1`,
       [tokenHash],
     );
     if (!row) throw new BadRequestException('Reset link expired or invalid');
     const hash = await bcrypt.hash(newPassword, 10);
+    const status = (row.onboarding_status ?? '').trim().toUpperCase();
+    // Password recovery completes the password step only. Profile submission
+    // and administrator approval remain independent requirements.
+    const nextStatus = ['', 'PENDING_ONBOARDING', 'PENDING_PASSWORD_RESET'].includes(
+      status,
+    )
+      ? requiresFirstLoginWizard(row.role_name)
+        ? 'PENDING_DOCUMENTS'
+        : 'COMPLETED'
+      : row.onboarding_status;
     await this.dataSource.query(
-      `UPDATE users SET password_hash = $1, onboarding_status = 'COMPLETED', updated_at = NOW()
+      `UPDATE users SET password_hash = $1,
+         onboarding_status = CASE
+           WHEN onboarding_status IS NOT DISTINCT FROM $4 THEN $5
+           ELSE onboarding_status
+         END,
+         updated_at = NOW()
        WHERE user_id = $2 AND tenant_id = $3`,
-      [hash, row.user_id, row.tenant_id],
+      [hash, row.user_id, row.tenant_id, row.onboarding_status, nextStatus],
     );
     await this.dataSource.query(
       `UPDATE admin_password_reset_tokens SET used_at = NOW() WHERE token_id = $1`,

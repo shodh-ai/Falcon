@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Check, X } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Button } from '@/components/ui/button';
@@ -34,62 +34,74 @@ export default function FacultyEventApprovalsPage() {
   const [rejectId, setRejectId] = useState<string | null>(null);
   const [comment, setComment] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const activeApi = useRef(eventsApi);
+  useLayoutEffect(() => { activeApi.current = eventsApi; }, [eventsApi]);
+  const mounted = useRef(false);
+  const requestId = useRef(0);
+  const mutation = useRef<symbol | null>(null);
+  const handled = useRef(new Set<string>());
 
   const load = useCallback(async () => {
+    const id = ++requestId.current;
+    const current = () => mounted.current && activeApi.current === eventsApi && requestId.current === id;
+    setLoading(true);
+    setError(null);
     try {
       const rows = await eventsApi.facultyPending();
-      setPending(Array.isArray(rows) ? rows : []);
-    } catch {
-      setPending([]);
-      toast.error('Could not load approvals');
+      if (current()) setPending((Array.isArray(rows) ? rows : []).filter((row) => !handled.current.has(row.event_id)));
+    } catch (e) {
+      if (current()) setError(e instanceof Error ? e.message : 'Could not load approvals');
+    } finally {
+      if (current()) setLoading(false);
     }
   }, [eventsApi]);
 
   useEffect(() => {
-    void load().finally(() => setLoading(false));
+    mounted.current = true;
+    handled.current = new Set();
+    mutation.current = null;
+    // Account changes invalidate both the approval queue and any unfinished decision draft.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setBusy(null);
+    setPending([]);
+    setRejectId(null);
+    setComment('');
+    void load();
+    return () => { mounted.current = false; requestId.current += 1; };
   }, [load]);
 
-  async function approve(eventId: string) {
-    setBusy(eventId);
-    try {
-      if (isFacultyDemoSmokeId(eventId)) {
-        setPending((prev) => prev.filter((ev) => ev.event_id !== eventId));
-        toast.success('Approved — sent to HOD for review (demo)');
-        return;
-      }
-      await eventsApi.approveAdvisor(eventId);
-      toast.success('Approved — sent to HOD for review');
-      await load();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Approve failed');
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function reject(eventId: string) {
-    if (comment.trim().length < 3) {
-      toast.error('Rejection comment is required');
+  async function decide(eventId: string, decision: 'approve' | 'reject') {
+    if (mutation.current || loading || error || !pending.some((row) => row.event_id === eventId)) return;
+    const reason = comment.trim();
+    if (decision === 'reject' && (reason.length < 3 || reason.length > 500)) {
+      toast.error('Enter a rejection reason between 3 and 500 characters');
       return;
     }
+    const operation = Symbol();
+    mutation.current = operation;
+    const current = () => mounted.current && activeApi.current === eventsApi && mutation.current === operation;
     setBusy(eventId);
     try {
-      if (isFacultyDemoSmokeId(eventId)) {
-        setPending((prev) => prev.filter((ev) => ev.event_id !== eventId));
-        toast.success('Event rejected (demo)');
-        setRejectId(null);
-        setComment('');
-        return;
+      const demo = isFacultyDemoSmokeId(eventId);
+      if (!demo) {
+        if (decision === 'approve') await eventsApi.approveAdvisor(eventId);
+        else await eventsApi.rejectAdvisor(eventId, reason);
       }
-      await eventsApi.rejectAdvisor(eventId, comment.trim());
-      toast.success('Event rejected');
+      if (!current()) return;
+      handled.current.add(eventId);
+      setPending((prev) => prev.filter((ev) => ev.event_id !== eventId));
       setRejectId(null);
       setComment('');
-      await load();
+      toast.success(`${decision === 'approve' ? 'Approved — sent to HOD for review' : 'Event rejected'}${demo ? ' (demo)' : ''}`);
+      if (!demo) await load();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Reject failed');
+      if (current()) toast.error(e instanceof Error ? e.message : 'Could not save event decision');
     } finally {
-      setBusy(null);
+      if (current()) {
+        mutation.current = null;
+        setBusy(null);
+      }
     }
   }
 
@@ -104,7 +116,14 @@ export default function FacultyEventApprovalsPage() {
         description="Review club event proposals before HOD and Dean sign-off."
       />
 
-      {pending.length === 0 ? (
+      {error ? (
+        <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm">
+          <p>Could not refresh event approvals. {error}</p>
+          <Button variant="outline" onClick={() => void load()}>Retry</Button>
+        </div>
+      ) : null}
+
+      {!error && pending.length === 0 ? (
         <FacultyEmptyState description="No pending event proposals for your clubs." />
       ) : (
         pending.map((ev) => (
@@ -130,13 +149,13 @@ export default function FacultyEventApprovalsPage() {
                 <Button
                   size="sm"
                   className="bg-emerald-600 hover:bg-emerald-700"
-                  disabled={busy === ev.event_id}
-                  onClick={() => void approve(ev.event_id)}
+                  disabled={Boolean(busy) || Boolean(error)}
+                  onClick={() => void decide(ev.event_id, 'approve')}
                 >
                   <Check className="mr-1 h-4 w-4" />
                   Approve
                 </Button>
-                <Button size="sm" variant="outline" onClick={() => setRejectId(ev.event_id)}>
+                <Button size="sm" variant="outline" disabled={Boolean(busy) || Boolean(error)} onClick={() => { setRejectId(ev.event_id); setComment(''); }}>
                   <X className="mr-1 h-4 w-4" />
                   Reject
                 </Button>
@@ -145,17 +164,17 @@ export default function FacultyEventApprovalsPage() {
               {rejectId === ev.event_id ? (
                 <div className="space-y-2 rounded-lg border border-border/60 bg-muted/20 p-3">
                   <label className="text-sm font-medium">Rejection reason (required)</label>
-                  <Input value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Explain why…" />
+                  <Input aria-label="Rejection reason" maxLength={500} disabled={Boolean(busy) || Boolean(error)} value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Explain why…" />
                   <div className="flex gap-2">
                     <Button
                       size="sm"
                       variant="destructive"
-                      disabled={busy === ev.event_id}
-                      onClick={() => void reject(ev.event_id)}
+                      disabled={Boolean(busy) || Boolean(error) || comment.trim().length < 3}
+                      onClick={() => void decide(ev.event_id, 'reject')}
                     >
                       Confirm reject
                     </Button>
-                    <Button size="sm" variant="ghost" onClick={() => setRejectId(null)}>
+                    <Button size="sm" variant="ghost" disabled={Boolean(busy)} onClick={() => { setRejectId(null); setComment(''); }}>
                       Cancel
                     </Button>
                   </div>

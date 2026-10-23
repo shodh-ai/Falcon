@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react';
 import Link from 'next/link';
 import {
   AlertTriangle,
@@ -29,6 +29,7 @@ import {
 import { MultiDepartmentTeachingSummary } from '@/components/faculty/MultiDepartmentTeachingSummary';
 import { useTeachingDepartment } from '@/components/faculty/TeachingDepartmentContext';
 import { withTeachingDeptId } from '@/lib/faculty/teaching-departments';
+import { calendarDateKey, formatCalendarDate, localTodayKey } from '@/lib/faculty/calendar-date';
 import { createMeetingsApi, type PortalMeetingRecord } from '@/lib/api/api.meetings';
 import { notificationsApi, type FalconNotification } from '@/lib/api/notifications';
 import {
@@ -40,7 +41,6 @@ import {
   facultyDemoAtRisk,
   facultyDemoCourses,
   facultyDemoDuties,
-  facultyDemoLeaveBalances,
   facultyDemoMeetings,
   facultyDemoMentees,
   facultyDemoMissingAttendance,
@@ -87,8 +87,6 @@ type PendingApprovals = {
   leave_requests?: unknown[];
 };
 
-type LeaveBalance = { leave_type: string; entitled: string | number; used: string | number };
-
 type GatePassApproval = {
   pass_id: string;
   out_time: string;
@@ -121,12 +119,41 @@ type ResearchLog = {
   publication_type?: string;
   status?: string;
 };
-type Duty = { assignment_id: string; exam_name?: string; exam_date?: string; room?: string; status?: string };
+type Duty = {
+  assignment_id: string;
+  exam_name?: string;
+  exam_date?: string;
+  room?: string;
+  status?: string;
+  excuse_status?: 'PENDING' | 'APPROVED' | 'REJECTED' | null;
+};
 type WeeklyTest = { test_id?: string; is_active?: boolean; course_code?: string; test_type?: string };
 type CourseRow = { course_id: string; course_code: string; course_name: string; semester?: string | null; academic_year?: string | null };
 type Mentee = { user_id: string; name?: string; full_name?: string };
 
 const PROFILE_COMPLIANCE_KEY = 'faculty-profile-compliance-dismissed';
+const PROFILE_COMPLIANCE_EVENT = 'faculty-profile-compliance-changed';
+
+function subscribeProfileCompliance(onChange: () => void) {
+  window.addEventListener('storage', onChange);
+  window.addEventListener(PROFILE_COMPLIANCE_EVENT, onChange);
+  return () => {
+    window.removeEventListener('storage', onChange);
+    window.removeEventListener(PROFILE_COMPLIANCE_EVENT, onChange);
+  };
+}
+
+function profileComplianceDismissed() {
+  try {
+    return localStorage.getItem(PROFILE_COMPLIANCE_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function profileComplianceServerSnapshot() {
+  return false;
+}
 
 function greetingForNow(d = new Date()) {
   const h = d.getHours();
@@ -353,7 +380,7 @@ function buildPendingTasks(input: {
     id: 'exam-duty',
     label: 'Exam Paper / Duty Prep',
     context: dutiesOpen
-      ? `${input.dutiesCount} exam dut${input.dutiesCount === 1 ? 'y' : 'ies'} on your roster`
+      ? `${input.dutiesCount} upcoming exam dut${input.dutiesCount === 1 ? 'y' : 'ies'} on your roster`
       : 'No upcoming invigilation duties',
     due: input.nextDutyDate ?? 'Upcoming',
     priority: dutiesOpen ? 'High' : 'Low',
@@ -497,6 +524,15 @@ function PendingTaskRow({ task }: { task: PendingTask }) {
 export function FacultyDashboardWorkspace() {
   const api = useAuthedApi();
   const { user, token } = useAuth();
+  const [apiIdentity, setApiIdentity] = useState({ api, revision: 0 });
+  if (apiIdentity.api !== api) {
+    setApiIdentity({ api, revision: apiIdentity.revision + 1 });
+  }
+  return <FacultyDashboardContent key={`${user?.user_id ?? ''}:${token ?? ''}:${apiIdentity.revision}`} api={api} />;
+}
+
+function FacultyDashboardContent({ api }: { api: ReturnType<typeof useAuthedApi> }) {
+  const { user, token } = useAuth();
   const { activeDeptId, loading: deptLoading } = useTeachingDepartment();
   const canManageTeam = canSeeFacultyTeamApprovals(user);
 
@@ -505,13 +541,19 @@ export function FacultyDashboardWorkspace() {
   const [hrSummary, setHrSummary] = useState<HrSummary | null>(null);
   const [pendingApprovals, setPendingApprovals] = useState<PendingApprovals>({ certificates: [] });
   const [gatePassApprovals, setGatePassApprovals] = useState<GatePassApproval[]>([]);
-  const [leaveBalances, setLeaveBalances] = useState<LeaveBalance[]>([]);
   const [profile, setProfile] = useState<FacultyProfile | null>(null);
   const [profileCompliance, setProfileCompliance] = useState<{
     needs_academic_profile: boolean;
     message: string | null;
   } | null>(null);
-  const [complianceDismissed, setComplianceDismissed] = useState(false);
+  const [complianceDismissedLocally, setComplianceDismissedLocally] = useState(false);
+  const savedComplianceDismissal = useSyncExternalStore(
+    subscribeProfileCompliance,
+    profileComplianceDismissed,
+    profileComplianceServerSnapshot,
+  );
+  const complianceDismissed = savedComplianceDismissal || complianceDismissedLocally;
+  const [now, setNow] = useState(Date.now);
   const [atRisk, setAtRisk] = useState<AtRiskStudent[]>([]);
   const [research, setResearch] = useState<ResearchLog[]>([]);
   const [duties, setDuties] = useState<Duty[]>([]);
@@ -522,11 +564,12 @@ export function FacultyDashboardWorkspace() {
   const [notifications, setNotifications] = useState<FalconNotification[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const todayDateKey = localTodayKey(new Date(now));
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      setComplianceDismissed(localStorage.getItem(PROFILE_COMPLIANCE_KEY) === '1');
-    }
+    // Refresh the displayed day and upcoming-event window as real time passes.
+    const interval = window.setInterval(() => setNow(Date.now()), 60_000);
+    return () => window.clearInterval(interval);
   }, []);
 
   useEffect(() => {
@@ -538,13 +581,17 @@ export function FacultyDashboardWorkspace() {
       try {
         setLoading(true);
         setError(null);
+        const failedSections: string[] = [];
+        const fallback = <T,>(section: string, value: T) => () => {
+          failedSections.push(section);
+          return value;
+        };
         const [
           classData,
           missingAttendanceData,
           hrData,
           approvalData,
           gatePassData,
-          balanceData,
           complianceData,
           profileData,
           atRiskData,
@@ -555,36 +602,36 @@ export function FacultyDashboardWorkspace() {
           menteeData,
           meetingData,
         ] = await Promise.all([
-          api.get<FacultyClass[]>(withTeachingDeptId('/api/academics/faculty/timetable/today', activeDeptId)).catch(() => []),
-          api.get<MissingAttendanceAlert[]>(withTeachingDeptId('/api/academics/faculty/attendance/missing', activeDeptId)).catch(() => []),
+          api.get<FacultyClass[]>(withTeachingDeptId('/api/academics/faculty/timetable/today', activeDeptId)).catch(fallback('Teaching schedule', [])),
+          api.get<MissingAttendanceAlert[]>(withTeachingDeptId('/api/academics/faculty/attendance/missing', activeDeptId)).catch(fallback('Teaching schedule', [])),
           api.get<HrSummary>('/api/hr/workforce/today').catch(() =>
-            api.get<HrSummary>('/api/hr/attendance/my-summary').catch(() => null),
+            api.get<HrSummary>('/api/hr/attendance/my-summary').catch(fallback('My attendance', null)),
           ),
-          api.get<PendingApprovals>('/api/academics/proctor/pending-approvals').catch(() => ({ certificates: [] })),
+          api.get<PendingApprovals>('/api/academics/proctor/pending-approvals').catch(fallback('Mentorship approvals', { certificates: [] })),
           canManageTeam
-            ? api.get<GatePassApproval[]>('/api/hr/gate-passes/pending-approvals').catch(() => [])
+            ? api.get<GatePassApproval[]>('/api/hr/gate-passes/pending-approvals').catch(fallback('Gate passes', []))
             : Promise.resolve([] as GatePassApproval[]),
-          api.get<LeaveBalance[]>('/api/hr/leaves/my-balances').catch(() => []),
           api.get<{ needs_academic_profile: boolean; message: string | null }>(
             '/api/academics/faculty/profile/compliance',
-          ).catch(() => null),
-          api.get<FacultyProfile>('/api/academics/faculty/profile').catch(() => null),
-          api.get<AtRiskStudent[]>('/api/academics/early-warning/dashboard').catch(() => []),
-          api.get<ResearchLog[]>('/api/academics/faculty/workspaces/research').catch(() => []),
-          api.get<Duty[]>('/api/academics/faculty/workspaces/invigilation').catch(() => []),
-          api.get<WeeklyTest[]>('/api/weekly-tests/faculty').catch(() => []),
-          api.get<CourseRow[]>(withTeachingDeptId('/api/academics/faculty/workspaces/courses', activeDeptId)).catch(() => []),
-          api.get<Mentee[]>('/api/academics/proctor/my-students').catch(() => []),
-          meetingsApi.list().catch(() => [] as PortalMeetingRecord[]),
+          ).catch(fallback('Profile compliance', null)),
+          api.get<FacultyProfile>('/api/academics/faculty/profile').catch(fallback('Profile', null)),
+          api.get<AtRiskStudent[]>('/api/academics/early-warning/dashboard').catch(fallback('Student performance', [])),
+          api.get<ResearchLog[]>('/api/academics/faculty/workspaces/research').catch(fallback('Research', [])),
+          api.get<Duty[]>('/api/academics/faculty/workspaces/invigilation').catch(fallback('Exam duties', [])),
+          api.get<WeeklyTest[]>('/api/weekly-tests/faculty').catch(fallback('Tests', [])),
+          api.get<CourseRow[]>(withTeachingDeptId('/api/academics/faculty/workspaces/courses', activeDeptId)).catch(fallback('Teaching schedule', [])),
+          api.get<Mentee[]>('/api/academics/proctor/my-students').catch(fallback('Mentees', [])),
+          meetingsApi.list().catch(fallback('Meetings', [] as PortalMeetingRecord[])),
         ]);
 
         let notifData: FalconNotification[] = [];
         if (token) {
-          notifData = await notificationsApi.recent(token).catch(() => []);
+          notifData = await notificationsApi.recent(token).catch(fallback('Notifications', []));
         }
 
         if (cancelled) return;
 
+        if (failedSections.length) setError(`Dashboard incomplete: could not load ${[...new Set(failedSections)].join(', ')}. Counts for these sections are unavailable. Reload to try again.`);
         const demoClasses = facultyDemoTodayClasses();
         const classesResolved = withFacultyDemoFallback(classData, demoClasses, isEmptyArray);
         setClasses(classesResolved);
@@ -617,9 +664,6 @@ export function FacultyDashboardWorkspace() {
         );
         setPendingApprovals(approvalsResolved);
         setGatePassApprovals(gatePassData);
-        setLeaveBalances(
-          withFacultyDemoFallback(balanceData, facultyDemoLeaveBalances(), isEmptyArray),
-        );
         if (complianceData) setProfileCompliance(complianceData);
         setProfile(withFacultyDemoFallback(profileData, FACULTY_DEMO_PROFILE()));
         setAtRisk(
@@ -692,7 +736,7 @@ export function FacultyDashboardWorkspace() {
     return () => {
       cancelled = true;
     };
-  }, [api, canManageTeam, activeDeptId, deptLoading, token, user?.user_id]);
+  }, [api, canManageTeam, activeDeptId, deptLoading, token, user?.user_id, todayDateKey]);
 
   const attendanceHref = (c: FacultyClass) =>
     `/faculty/attendance?courseId=${encodeURIComponent(c.course_id)}`;
@@ -719,44 +763,36 @@ export function FacultyDashboardWorkspace() {
   const semester = courses.find((c) => c.semester)?.semester ?? '—';
   const academicYear = courses.find((c) => c.academic_year)?.academic_year ?? '—';
 
-  const meetingsToday = meetings.filter((m) => isSameDay(m.starts_at));
+  const currentDate = new Date(now);
+  const meetingsToday = meetings.filter((m) => isSameDay(m.starts_at, currentDate));
   const upcomingMeetings = [...meetings]
-    .filter((m) => new Date(m.starts_at).getTime() >= Date.now() - 60 * 60 * 1000)
+    .filter((m) => new Date(m.starts_at).getTime() >= now - 60 * 60 * 1000)
     .sort((a, b) => +new Date(a.starts_at) - +new Date(b.starts_at))
     .slice(0, 5);
 
-  const upcomingDuties = duties.slice(0, 5);
+  const allUpcomingDuties = duties
+    .filter((duty) => {
+      const dateKey = duty.exam_date ? calendarDateKey(duty.exam_date) : null;
+      return dateKey !== null && dateKey >= todayDateKey && duty.excuse_status !== 'APPROVED';
+    })
+    .sort((a, b) => calendarDateKey(a.exam_date!)!.localeCompare(calendarDateKey(b.exam_date!)!));
+  const upcomingDuties = allUpcomingDuties.slice(0, 5);
   const nextDutyDate = upcomingDuties[0]?.exam_date
-    ? String(upcomingDuties[0].exam_date).slice(0, 10)
+    ? formatCalendarDate(upcomingDuties[0].exam_date)
     : null;
   const activeTests = weeklyTests.filter((t) => t.is_active !== false).length;
-  const pendingTasks = useMemo(
-    () =>
-      buildPendingTasks({
-        missingAttendanceCount: missingAttendance.length,
-        pendingCerts,
-        pendingMeetings,
-        pendingLeaves,
-        activeTests,
-        dutiesCount: duties.length,
-        nextDutyDate,
-        gatePassCount: gatePassApprovals.length,
-        canManageTeam,
-        coursesCount: courses.length,
-      }),
-    [
-      missingAttendance.length,
-      pendingCerts,
-      pendingMeetings,
-      pendingLeaves,
-      activeTests,
-      duties.length,
-      nextDutyDate,
-      gatePassApprovals.length,
-      canManageTeam,
-      courses.length,
-    ],
-  );
+  const pendingTasks = buildPendingTasks({
+    missingAttendanceCount: missingAttendance.length,
+    pendingCerts,
+    pendingMeetings,
+    pendingLeaves,
+    activeTests,
+    dutiesCount: allUpcomingDuties.length,
+    nextDutyDate,
+    gatePassCount: gatePassApprovals.length,
+    canManageTeam,
+    coursesCount: courses.length,
+  });
   const openTaskCount = pendingTasks.filter((t) => t.kind === 'open').length;
   const clearedTaskCount = pendingTasks.filter((t) => t.kind === 'cleared').length;
   const actionableTaskCount = pendingTasks.filter((t) => t.kind !== 'recommended').length;
@@ -779,9 +815,9 @@ export function FacultyDashboardWorkspace() {
   const sortedClasses = [...classes].sort((a, b) => formatTime(a.start_time).localeCompare(formatTime(b.start_time)));
 
   const calendarDays = useMemo(() => {
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = now.getMonth();
+    const date = new Date(now);
+    const year = date.getFullYear();
+    const month = date.getMonth();
     const first = new Date(year, month, 1);
     const startPad = (first.getDay() + 6) % 7; // Mon-start
     const daysInMonth = new Date(year, month + 1, 0).getDate();
@@ -790,11 +826,11 @@ export function FacultyDashboardWorkspace() {
     for (let d = 1; d <= daysInMonth; d++) {
       cells.push({
         day: d,
-        isToday: d === now.getDate(),
+        isToday: d === date.getDate(),
       });
     }
     return cells;
-  }, []);
+  }, [now]);
 
   return (
     <FacultyPageShell className="space-y-5">
@@ -805,7 +841,7 @@ export function FacultyDashboardWorkspace() {
           <div>
             <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-sgvu-gold">Faculty Portal</p>
             <h1 className="mt-1 text-2xl font-black tracking-tight text-sgvu-navy sm:text-3xl">
-              {greetingForNow()}, {facultyName.split(' ')[0]}
+              {greetingForNow(currentDate)}, {facultyName}
             </h1>
             <p className="mt-2 text-sm text-muted-foreground">
               {department} · {designation}
@@ -813,7 +849,7 @@ export function FacultyDashboardWorkspace() {
             </p>
             <div className="mt-3 flex flex-wrap gap-2 text-[11px]">
               <span className="rounded-lg border border-border/60 bg-slate-50 px-2.5 py-1 font-medium text-sgvu-navy">
-                {formatLongDate()}
+                {formatLongDate(currentDate)}
               </span>
               <span className="rounded-lg border border-border/60 bg-slate-50 px-2.5 py-1 font-medium text-sgvu-navy">
                 Semester {semester}
@@ -869,8 +905,13 @@ export function FacultyDashboardWorkspace() {
             className="rounded-lg p-1 text-amber-800 hover:bg-amber-100"
             aria-label="Dismiss"
             onClick={() => {
-              localStorage.setItem(PROFILE_COMPLIANCE_KEY, '1');
-              setComplianceDismissed(true);
+              setComplianceDismissedLocally(true);
+              try {
+                localStorage.setItem(PROFILE_COMPLIANCE_KEY, '1');
+              } catch {
+                // Storage may be blocked; the current workspace still dismisses it.
+              }
+              window.dispatchEvent(new Event(PROFILE_COMPLIANCE_EVENT));
             }}
           >
             <X className="h-4 w-4" />
@@ -1013,7 +1054,7 @@ export function FacultyDashboardWorkspace() {
             </ul>
           </CardShell>
 
-          <CardShell title="Mini Calendar" description={new Date().toLocaleString(undefined, { month: 'long', year: 'numeric' })}>
+          <CardShell title="Mini Calendar" description={currentDate.toLocaleString(undefined, { month: 'long', year: 'numeric' })}>
             <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-semibold text-muted-foreground">
               {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d, i) => (
                 <span key={`${d}-${i}`}>{d}</span>
@@ -1049,7 +1090,7 @@ export function FacultyDashboardWorkspace() {
       <div className="grid gap-4 lg:grid-cols-2">
         <CardShell
           title="Student Performance"
-          description="Who needs mentoring — tap a student to open analytics"
+          description="Averages cover flagged students across your active teaching courses. Tap a student to open subject analysis."
           tone={highRisk.length > 0 ? 'alert' : 'default'}
           action={
             <Button asChild size="sm" className={dashActionClass}>
@@ -1060,12 +1101,12 @@ export function FacultyDashboardWorkspace() {
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             {[
               {
-                label: 'Avg attendance',
+                label: 'Avg recorded attendance',
                 value: avgAttendance != null ? `${avgAttendance}%` : '—',
                 warn: avgAttendance != null && avgAttendance < 75,
               },
               {
-                label: 'Avg marks',
+                label: 'Avg published marks',
                 value: avgMarks != null ? `${avgMarks}%` : '—',
                 warn: avgMarks != null && avgMarks < 40,
               },
@@ -1101,7 +1142,7 @@ export function FacultyDashboardWorkspace() {
                 <div className="min-w-0">
                   <p className="truncate font-medium text-sgvu-navy">{s.name}</p>
                   <p className="text-[11px] text-muted-foreground">
-                    Att {s.metrics.attendance_percent ?? '—'}% · Marks {s.metrics.grades_percent ?? '—'}%
+                    Att {s.metrics.attendance_percent == null ? 'N/A' : `${Math.round(s.metrics.attendance_percent)}%`} · Published marks {s.metrics.grades_percent == null ? 'Not graded' : `${Math.round(s.metrics.grades_percent)}%`}
                   </p>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
@@ -1193,7 +1234,7 @@ export function FacultyDashboardWorkspace() {
                 <div className="min-w-0">
                   <p className="text-sm font-semibold text-sgvu-navy">{d.exam_name ?? 'Exam duty'}</p>
                   <p className="text-[11px] text-muted-foreground">
-                    Exam · {d.exam_date ? String(d.exam_date).slice(0, 10) : 'Date TBA'} · Room {d.room ?? 'TBA'}
+                    Exam · {d.exam_date ? formatCalendarDate(d.exam_date) : 'Date TBA'} · Room {d.room ?? 'TBA'}
                   </p>
                 </div>
               </Link>

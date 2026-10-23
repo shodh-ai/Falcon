@@ -333,6 +333,16 @@ export class TasksService {
       );
     }
 
+    const submissionStatus = String(assignment.status).toUpperCase();
+    if (!['OPEN', 'PENDING', 'OVERDUE', 'CHANGES_REQUESTED'].includes(submissionStatus)) {
+      throw new BadRequestException('This task is closed or already under review. Submit evidence only for open tasks or requested changes.');
+    }
+    const user = await this.userRepository.findOne({ where: { user_id: userId } });
+    const expectedTenantId = tenantId ?? assignment.tenant_id;
+    if (!user?.tenant_id || !expectedTenantId || user.tenant_id !== expectedTenantId || user.is_active === false) {
+      throw new ForbiddenException('An active account in this university is required to submit evidence');
+    }
+
     const geminiConfigured = !!this.configService.get<string>('GEMINI_API_KEY');
     const shouldQueueAi =
       geminiConfigured && submissionIncludesPdf(createSubmissionDto);
@@ -367,11 +377,8 @@ export class TasksService {
     assignment.version += 1;
     await this.taskAssignmentRepository.save(assignment);
 
-    const user = await this.userRepository.findOne({
-      where: { user_id: userId },
-    });
     await this.enterpriseAudit.log({
-      tenantId: user?.tenant_id ?? 'a0000000-0000-4000-8000-000000000001',
+      tenantId: user.tenant_id,
       userId,
       module: 'governance_tasks',
       action: 'GOVERNANCE_SUBMISSION',

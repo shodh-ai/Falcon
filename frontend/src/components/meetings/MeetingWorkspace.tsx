@@ -1,7 +1,7 @@
 'use client';
 
 import { Select } from '@/components/ui/select';
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { CalendarClock, Check, FileText, Plus, Send, Users, X } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
@@ -118,9 +118,11 @@ export function MeetingWorkspace({
   /** When true, omit LeadershipPageHeader (parent portal already renders chrome). */
   hidePageHeader?: boolean;
 }) {
+  const { user } = useAuth();
   return (
     <Suspense fallback={<p className="p-6 text-sm text-muted-foreground">Loading meetings…</p>}>
       <MeetingWorkspaceInner
+        key={`${user?.tenant_id ?? ''}:${user?.user_id ?? ''}`}
         workspaceLabel={workspaceLabel}
         description={description}
         syncExecutiveActionItems={syncExecutiveActionItems}
@@ -155,6 +157,18 @@ function MeetingWorkspaceInner({
 
   const [meetings, setMeetings] = useState<PortalMeetingRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  const [meetingsError, setMeetingsError] = useState<string | null>(null);
+  const [scheduleEligibleLoading, setScheduleEligibleLoading] = useState(false);
+  const [requestEligibleLoading, setRequestEligibleLoading] = useState(false);
+  const [scheduleEligibleError, setScheduleEligibleError] = useState<string | null>(null);
+  const [requestEligibleError, setRequestEligibleError] = useState<string | null>(null);
+  const alive = useRef(true);
+  const activeApi = useRef(api);
+  useLayoutEffect(() => { activeApi.current = api; }, [api]);
+  const listRequest = useRef(0);
+  const eligibleRequest = useRef({ schedule: 0, request: 0 });
+  const busyLock = useRef(false);
+  const current = useCallback(() => alive.current && activeApi.current === api, [api]);
   const [tab, setTab] = useState<'list' | 'schedule' | 'request'>(
     composeFromQuery === 'schedule' || composeFromQuery === 'request' ? composeFromQuery : 'list',
   );
@@ -185,6 +199,8 @@ function MeetingWorkspaceInner({
   const [minutesDraft, setMinutesDraft] = useState({ notes: '', decisions: '', action_items: '' });
 
   const selected = meetings.find((m) => m.meeting_id === selectedId) ?? meetings[0] ?? null;
+  const selectedRecord = useRef(selected);
+  useLayoutEffect(() => { selectedRecord.current = selected; }, [selected]);
   const myParticipant = selected?.participants?.find((p) => p.user_id === user?.user_id) ?? null;
   const canManageSelected = !!selected && selected.organizer_user_id === user?.user_id;
   const canRespond =
@@ -194,111 +210,131 @@ function MeetingWorkspaceInner({
       (myParticipant.participant_role === 'ORGANIZER' && selected?.meeting_mode === 'REQUESTED'));
 
   const facultyDemo = workspaceLabel === 'Faculty Portal' && isFacultyDemoModeEnabled();
+  const userId = user?.user_id;
 
   const load = useCallback(async () => {
-    const rows = await meetingsApi.list();
-    const resolved = facultyDemo
-      ? withFacultyDemoFallback(rows, facultyDemoMeetings(user?.user_id), isEmptyArray)
-      : rows;
-    setMeetings(resolved);
-    return resolved;
-  }, [meetingsApi, facultyDemo, user?.user_id]);
+    const request = ++listRequest.current;
+    setLoading(true);
+    setMeetingsError(null);
+    try {
+      const rows = await meetingsApi.list();
+      if (!current() || request !== listRequest.current) return;
+      setMeetings(facultyDemo ? withFacultyDemoFallback(rows, facultyDemoMeetings(userId), isEmptyArray) : rows);
+    } catch (error) {
+      if (!current() || request !== listRequest.current) return;
+      if (facultyDemo) setMeetings(facultyDemoMeetings(userId));
+      else setMeetingsError(error instanceof Error ? error.message : 'Could not load meetings');
+    } finally {
+      if (current() && request === listRequest.current) setLoading(false);
+    }
+  }, [meetingsApi, facultyDemo, userId, current]);
 
   useEffect(() => {
-    // Fetching on mount intentionally populates meeting state asynchronously.
+    alive.current = true;
+    const participantRequests = eligibleRequest.current;
+    // Account changes invalidate every loaded meeting and private editor draft.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    void load()
-      .catch(() => {
-        if (facultyDemo) {
-          setMeetings(facultyDemoMeetings(user?.user_id));
-        } else {
-          toast.error('Could not load meetings');
-        }
-      })
-      .finally(() => setLoading(false));
-  }, [load, facultyDemo, user?.user_id]);
+    setMeetings([]);
+    setScheduleEligible([]);
+    setRequestEligible([]);
+    setScheduleEligibleError(null);
+    setRequestEligibleError(null);
+    setScheduleInvitees([]);
+    setScheduleForm({ title: '', venue: '', meeting_at: defaultMeetingTime(), agenda: '' });
+    setRequestForm({ title: '', venue: '', meeting_at: defaultMeetingTime(), agenda: '', recipient_user_id: '' });
+    setBusy(false);
+    busyLock.current = false;
+    hodCoordinatedRef.current = false;
+    void load();
+    return () => {
+      alive.current = false;
+      listRequest.current += 1;
+      participantRequests.schedule += 1;
+      participantRequests.request += 1;
+    };
+  }, [load]);
 
   useEffect(() => {
     // Draft editors mirror the newly selected record.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (selected?.agenda != null) setAgendaDraft(selected.agenda);
-    if (selected?.minutes) {
-      setMinutesDraft({
-        notes: selected.minutes.notes ?? '',
-        decisions: selected.minutes.decisions ?? '',
-        action_items: selected.minutes.action_items ?? '',
-      });
-    }
-  }, [selected?.meeting_id, selected?.agenda, selected?.minutes]);
+    const record = selectedRecord.current;
+    setAgendaDraft(record?.agenda ?? '');
+    setMinutesDraft({
+      notes: record?.minutes?.notes ?? '',
+      decisions: record?.minutes?.decisions ?? '',
+      action_items: record?.minutes?.action_items ?? '',
+    });
+  }, [selected?.meeting_id]);
 
-  useEffect(() => {
-    if (tab !== 'schedule') return;
-    void meetingsApi
-      .eligible('schedule')
-      .then((res) =>
-        setScheduleEligible(
-          facultyDemo
-            ? withFacultyDemoFallback(
-                res.participants,
-                facultyDemoEligibleParticipants(),
-                isEmptyArray,
-              )
-            : res.participants,
-        ),
-      )
-      .catch(() => {
-        if (facultyDemo) setScheduleEligible(facultyDemoEligibleParticipants());
-        else toast.error('Could not load invitees');
-      });
-  }, [tab, meetingsApi, facultyDemo]);
-
-  useEffect(() => {
-    if (tab !== 'request') return;
-    void meetingsApi
-      .eligible('request')
-      .then((res) => setRequestEligible(res.participants))
-      .catch(() => toast.error('Could not load recipients'));
-  }, [tab, meetingsApi]);
-
-  // Deep-link from Academic Excellence "Contact HOD": pre-select that department's HOD.
-  useEffect(() => {
-    if (tab !== 'schedule' || !departmentFromUrl || scheduleEligible.length === 0) return;
-    if (hodCoordinatedRef.current) return;
-
+  // Resolve Contact HOD defaults from the completed participant read, without a
+  // second effect that changes the form after the participant list has rendered.
+  const coordinateWithDepartment = useCallback((participants: EligibleParticipant[]) => {
+    if (!departmentFromUrl || participants.length === 0 || hodCoordinatedRef.current) return;
     const matches = preferHodFromUrl
-      ? findDepartmentHodMatches(scheduleEligible, departmentFromUrl)
-      : scheduleEligible.filter((p) => matchesDepartment(p, departmentFromUrl));
-
-    const preferred =
-      preferHodFromUrl && matches.some(isHodParticipant)
-        ? matches.filter(isHodParticipant)
-        : matches;
-
+      ? findDepartmentHodMatches(participants, departmentFromUrl)
+      : participants.filter((person) => matchesDepartment(person, departmentFromUrl));
+    const preferred = preferHodFromUrl && matches.some(isHodParticipant)
+      ? matches.filter(isHodParticipant)
+      : matches;
+    hodCoordinatedRef.current = true;
     if (preferred.length === 0) {
-      hodCoordinatedRef.current = true;
       toast.error(`No HOD found for ${departmentFromUrl}`);
       return;
     }
-
-    hodCoordinatedRef.current = true;
-    const ids = preferred.map((p) => p.user_id);
-    setScheduleInvitees((prev) => [...new Set([...prev, ...ids])]);
+    const ids = preferred.map((person) => person.user_id);
+    setScheduleInvitees((previous) => [...new Set([...previous, ...ids])]);
     setInviteSearch(departmentFromUrl);
-    setScheduleForm((prev) => ({
-      ...prev,
-      title: prev.title || `Academic coordination — ${departmentFromUrl}`,
-      agenda:
-        prev.agenda ||
-        `Discuss academic performance, attendance, and corrective actions for ${departmentFromUrl}.`,
+    setScheduleForm((previous) => ({
+      ...previous,
+      title: previous.title || `Academic coordination — ${departmentFromUrl}`,
+      agenda: previous.agenda || `Discuss academic performance, attendance, and corrective actions for ${departmentFromUrl}.`,
     }));
+    const names = preferred.map((person) => person.name).join(', ');
+    toast.success(preferred.length === 1
+      ? `Coordinating with ${names} (HOD, ${departmentFromUrl})`
+      : `Coordinating with ${preferred.length} contacts for ${departmentFromUrl}`);
+  }, [departmentFromUrl, preferHodFromUrl]);
 
-    const names = preferred.map((p) => p.name).join(', ');
-    toast.success(
-      preferred.length === 1
-        ? `Coordinating with ${names} (HOD, ${departmentFromUrl})`
-        : `Coordinating with ${preferred.length} contacts for ${departmentFromUrl}`,
-    );
-  }, [tab, departmentFromUrl, preferHodFromUrl, scheduleEligible]);
+  const loadEligible = useCallback(async (direction: 'schedule' | 'request') => {
+    const request = ++eligibleRequest.current[direction];
+    const setPending = direction === 'schedule' ? setScheduleEligibleLoading : setRequestEligibleLoading;
+    const setError = direction === 'schedule' ? setScheduleEligibleError : setRequestEligibleError;
+    const setParticipants = direction === 'schedule' ? setScheduleEligible : setRequestEligible;
+    setPending(true);
+    setError(null);
+    try {
+      const response = await meetingsApi.eligible(direction);
+      if (!current() || request !== eligibleRequest.current[direction]) return;
+      const participants = facultyDemo && direction === 'schedule'
+        ? withFacultyDemoFallback(response.participants, facultyDemoEligibleParticipants(), isEmptyArray)
+        : response.participants;
+      setParticipants(participants);
+      if (direction === 'schedule') {
+        setScheduleInvitees(previous => previous.filter(id => participants.some(person => person.user_id === id)));
+        coordinateWithDepartment(participants);
+      } else {
+        setRequestForm(previous => ({ ...previous, recipient_user_id: participants.some(person => person.user_id === previous.recipient_user_id) ? previous.recipient_user_id : '' }));
+      }
+    } catch (error) {
+      if (!current() || request !== eligibleRequest.current[direction]) return;
+      if (facultyDemo && direction === 'schedule') {
+        const participants = facultyDemoEligibleParticipants();
+        setParticipants(participants);
+        coordinateWithDepartment(participants);
+      }
+      else setError(error instanceof Error ? error.message : direction === 'schedule' ? 'Could not load invitees' : 'Could not load recipients');
+    } finally {
+      if (current() && request === eligibleRequest.current[direction]) setPending(false);
+    }
+  }, [meetingsApi, facultyDemo, current, coordinateWithDepartment]);
+
+  useEffect(() => {
+    if (tab === 'list') return;
+    const participantRequests = eligibleRequest.current;
+    // Loading state describes the remote participant subscription for this tab.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void loadEligible(tab);
+    return () => { participantRequests[tab] += 1; };
+  }, [tab, loadEligible]);
 
   const filteredScheduleEligible = useMemo(() => {
     const q = inviteSearch.trim().toLowerCase();
@@ -325,11 +361,12 @@ function MeetingWorkspaceInner({
 
   async function submitSchedule(e: React.FormEvent) {
     e.preventDefault();
-    if (!scheduleInvitees.length) {
+    if (busyLock.current || scheduleEligibleLoading || scheduleEligibleError) return;
+    if (!scheduleInvitees.length || scheduleInvitees.some(id => !scheduleEligible.some(person => person.user_id === id))) {
       toast.error('Select at least one invitee');
       return;
     }
-    if (new Date(scheduleForm.meeting_at).getTime() <= Date.now()) {
+    if (!Number.isFinite(new Date(scheduleForm.meeting_at).getTime()) || new Date(scheduleForm.meeting_at).getTime() <= Date.now()) {
       toast.error('Choose a future date and time');
       return;
     }
@@ -342,6 +379,8 @@ function MeetingWorkspaceInner({
       setScheduleInvitees([]);
       return;
     }
+    if (busyLock.current) return;
+    busyLock.current = true;
     setBusy(true);
     try {
       await meetingsApi.schedule({
@@ -351,25 +390,28 @@ function MeetingWorkspaceInner({
         agenda: scheduleForm.agenda || undefined,
         invitee_user_ids: scheduleInvitees,
       });
+      if (!current()) return;
+      listRequest.current += 1;
       toast.success('Meeting scheduled and invitations sent');
       setTab('list');
       setScheduleInvitees([]);
       await load();
-      window.dispatchEvent(new CustomEvent('falcon:notifications-refresh'));
+      if (current()) window.dispatchEvent(new CustomEvent('falcon:notifications-refresh'));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Could not schedule meeting');
+      if (current()) toast.error(err instanceof Error ? err.message : 'Could not schedule meeting');
     } finally {
-      setBusy(false);
+      if (current()) { busyLock.current = false; setBusy(false); }
     }
   }
 
   async function submitRequest(e: React.FormEvent) {
     e.preventDefault();
-    if (!requestForm.recipient_user_id) {
+    if (busyLock.current || requestEligibleLoading || requestEligibleError) return;
+    if (!requestEligible.some(person => person.user_id === requestForm.recipient_user_id)) {
       toast.error('Select a recipient');
       return;
     }
-    if (new Date(requestForm.meeting_at).getTime() <= Date.now()) {
+    if (!Number.isFinite(new Date(requestForm.meeting_at).getTime()) || new Date(requestForm.meeting_at).getTime() <= Date.now()) {
       toast.error('Choose a future date and time');
       return;
     }
@@ -378,6 +420,8 @@ function MeetingWorkspaceInner({
       setTab('list');
       return;
     }
+    if (busyLock.current) return;
+    busyLock.current = true;
     setBusy(true);
     try {
       await meetingsApi.request({
@@ -387,62 +431,77 @@ function MeetingWorkspaceInner({
         agenda: requestForm.agenda || undefined,
         recipient_user_id: requestForm.recipient_user_id,
       });
+      if (!current()) return;
+      listRequest.current += 1;
       toast.success('Meeting request sent');
       setTab('list');
       await load();
-      window.dispatchEvent(new CustomEvent('falcon:notifications-refresh'));
+      if (current()) window.dispatchEvent(new CustomEvent('falcon:notifications-refresh'));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Could not send request');
+      if (current()) toast.error(err instanceof Error ? err.message : 'Could not send request');
     } finally {
-      setBusy(false);
+      if (current()) { busyLock.current = false; setBusy(false); }
     }
   }
 
   async function respond(meetingId: string, response: 'ACCEPTED' | 'DECLINED') {
+    if (busyLock.current || meetingsError) return;
     if (isFacultyDemoSmokeId(meetingId)) {
       toast.success(response === 'ACCEPTED' ? 'Meeting accepted (demo)' : 'Meeting declined (demo)');
       return;
     }
+    if (busyLock.current) return;
+    busyLock.current = true;
     setBusy(true);
     try {
       await meetingsApi.respond(meetingId, { response });
+      if (!current()) return;
+      listRequest.current += 1;
       toast.success(response === 'ACCEPTED' ? 'Meeting accepted' : 'Meeting declined');
       await load();
-      window.dispatchEvent(new CustomEvent('falcon:notifications-refresh'));
+      if (current()) window.dispatchEvent(new CustomEvent('falcon:notifications-refresh'));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Could not update meeting');
+      if (current()) toast.error(err instanceof Error ? err.message : 'Could not update meeting');
     } finally {
-      setBusy(false);
+      if (current()) { busyLock.current = false; setBusy(false); }
     }
   }
 
   async function saveAgenda() {
-    if (!selected) return;
+    if (!selected || busyLock.current || meetingsError) return;
     if (isFacultyDemoSmokeId(selected.meeting_id)) {
       toast.success('Agenda updated (demo)');
       return;
     }
+    if (busyLock.current) return;
+    busyLock.current = true;
     setBusy(true);
     try {
       await meetingsApi.updateAgenda(selected.meeting_id, agendaDraft);
+      if (!current()) return;
+      listRequest.current += 1;
       toast.success('Agenda updated');
       await load();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Could not update agenda');
+      if (current()) toast.error(err instanceof Error ? err.message : 'Could not update agenda');
     } finally {
-      setBusy(false);
+      if (current()) { busyLock.current = false; setBusy(false); }
     }
   }
 
   async function publishMinutes() {
-    if (!selected) return;
+    if (!selected || busyLock.current || meetingsError || !minutesDraft.notes.trim()) return;
     if (isFacultyDemoSmokeId(selected.meeting_id)) {
       toast.success('Minutes published (demo)');
       return;
     }
+    if (busyLock.current) return;
+    busyLock.current = true;
     setBusy(true);
     try {
       await meetingsApi.publishMinutes(selected.meeting_id, minutesDraft);
+      if (!current()) return;
+      listRequest.current += 1;
       if (syncExecutiveActionItems && minutesDraft.action_items.trim()) {
         const organizer = selected.participants?.find((p) => p.participant_role === 'ORGANIZER');
         const fallbackAssignee = organizer?.user_id ?? user?.user_id ?? '';
@@ -459,21 +518,27 @@ function MeetingWorkspaceInner({
           })
           .filter((item) => item.assigned_to_user_id);
         if (items.length) {
-          await presidentApi.meetingActionItems(selected.meeting_id, items);
-          toast.success(`Created ${items.length} executive action item(s)`);
+          try {
+            await presidentApi.meetingActionItems(selected.meeting_id, items);
+            if (current()) toast.success(`Created ${items.length} executive action item(s)`);
+          } catch {
+            if (current()) toast.error('Minutes were published, but executive action items could not be created. Check the action items queue before retrying.');
+          }
+          if (!current()) return;
         }
       }
+      if (!current()) return;
       toast.success('Minutes published');
       await load();
-      window.dispatchEvent(new CustomEvent('falcon:notifications-refresh'));
+      if (current()) window.dispatchEvent(new CustomEvent('falcon:notifications-refresh'));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Could not publish minutes');
+      if (current()) toast.error(err instanceof Error ? err.message : 'Could not publish minutes');
     } finally {
-      setBusy(false);
+      if (current()) { busyLock.current = false; setBusy(false); }
     }
   }
 
-  if (loading) {
+  if (loading && tab === 'list' && meetings.length === 0) {
     return <FalconLoader label="Loading meetings…" />;
   }
 
@@ -484,6 +549,7 @@ function MeetingWorkspaceInner({
         size="sm"
         aria-pressed={tab === 'list'}
         className={tab === 'list' ? NAVY_BTN : OUTLINE_NAVY_BTN}
+        disabled={busy}
         onClick={() => setTab('list')}
       >
         My meetings
@@ -493,6 +559,7 @@ function MeetingWorkspaceInner({
         size="sm"
         aria-pressed={tab === 'schedule'}
         className={tab === 'schedule' ? NAVY_BTN : OUTLINE_NAVY_BTN}
+        disabled={busy}
         onClick={() => setTab('schedule')}
       >
         <Plus className="mr-1 h-4 w-4" />
@@ -503,6 +570,7 @@ function MeetingWorkspaceInner({
         size="sm"
         aria-pressed={tab === 'request'}
         className={tab === 'request' ? NAVY_BTN : OUTLINE_NAVY_BTN}
+        disabled={busy}
         onClick={() => setTab('request')}
       >
         <Send className="mr-1 h-4 w-4" />
@@ -524,6 +592,7 @@ function MeetingWorkspaceInner({
         />
       )}
 
+      {meetingsError && <div role="alert" className="rounded-xl border border-destructive/30 p-4 text-sm">{meetingsError} <Button variant="outline" size="sm" disabled={loading || busy} onClick={() => void load()}>Retry meetings</Button></div>}
       {tab === 'schedule' ? (
         <Card>
           <CardHeader>
@@ -531,6 +600,7 @@ function MeetingWorkspaceInner({
           </CardHeader>
           <CardContent>
             <form onSubmit={(e) => void submitSchedule(e)} className="space-y-4">
+              <fieldset disabled={busy} className="space-y-4">
               <Input aria-label="Meeting title" placeholder="Title" value={scheduleForm.title} onChange={(e) => setScheduleForm({ ...scheduleForm, title: e.target.value })} required />
               <Input aria-label="Meeting venue" placeholder="Venue" value={scheduleForm.venue} onChange={(e) => setScheduleForm({ ...scheduleForm, venue: e.target.value })} required />
               <Input
@@ -563,8 +633,10 @@ function MeetingWorkspaceInner({
                   onChange={(e) => setInviteSearch(e.target.value)}
                   className="mb-2"
                 />
+                {scheduleEligibleLoading && <p role="status" className="text-sm text-muted-foreground">Loading eligible invitees…</p>}
+                {scheduleEligibleError && <div role="alert" className="text-sm text-destructive">{scheduleEligibleError} <Button type="button" variant="outline" size="sm" disabled={scheduleEligibleLoading || busy} onClick={() => void loadEligible('schedule')}>Retry invitees</Button></div>}
                 <div className="max-h-48 space-y-2 overflow-y-auto rounded-lg border border-sgvu-navy/10 p-3">
-                  {filteredScheduleEligible.length === 0 ? (
+                  {!scheduleEligibleLoading && !scheduleEligibleError && filteredScheduleEligible.length === 0 ? (
                     <p className="text-sm text-muted-foreground">
                       {scheduleEligible.length === 0
                         ? 'No eligible participants in your scope.'
@@ -585,6 +657,7 @@ function MeetingWorkspaceInner({
                       >
                         <input
                           type="checkbox"
+                          disabled={busy || scheduleEligibleLoading || Boolean(scheduleEligibleError)}
                           checked={scheduleInvitees.includes(p.user_id)}
                           onChange={(e) =>
                             setScheduleInvitees((prev) =>
@@ -605,10 +678,11 @@ function MeetingWorkspaceInner({
                   )}
                 </div>
               </div>
-              <Button type="submit" disabled={busy} className={NAVY_BTN}>
+              <Button type="submit" disabled={busy || scheduleEligibleLoading || Boolean(scheduleEligibleError) || !scheduleEligible.length} className={NAVY_BTN}>
                 <Users className="mr-1 h-4 w-4" />
                 Send invitations
               </Button>
+              </fieldset>
             </form>
           </CardContent>
         </Card>
@@ -621,7 +695,12 @@ function MeetingWorkspaceInner({
           </CardHeader>
           <CardContent>
             <form onSubmit={(e) => void submitRequest(e)} className="space-y-4">
+              <fieldset disabled={busy} className="space-y-4">
+              {requestEligibleLoading && <p role="status" className="text-sm text-muted-foreground">Loading eligible recipients…</p>}
+              {requestEligibleError && <div role="alert" className="text-sm text-destructive">{requestEligibleError} <Button type="button" variant="outline" size="sm" disabled={requestEligibleLoading || busy} onClick={() => void loadEligible('request')}>Retry recipients</Button></div>}
+              {!requestEligibleLoading && !requestEligibleError && requestEligible.length === 0 && <p className="text-sm text-muted-foreground">No eligible recipients in your scope.</p>}
               <Select
+                disabled={busy || requestEligibleLoading || Boolean(requestEligibleError)}
                 aria-label="Meeting recipient"
                 className="w-full rounded-md border px-3 py-2 text-sm"
                 value={requestForm.recipient_user_id}
@@ -652,10 +731,11 @@ function MeetingWorkspaceInner({
                 value={requestForm.agenda}
                 onChange={(e) => setRequestForm({ ...requestForm, agenda: e.target.value })}
               />
-              <Button type="submit" disabled={busy} className={NAVY_BTN}>
+              <Button type="submit" disabled={busy || requestEligibleLoading || Boolean(requestEligibleError) || !requestEligible.length} className={NAVY_BTN}>
                 <Send className="mr-1 h-4 w-4" />
                 Send request
               </Button>
+              </fieldset>
             </form>
           </CardContent>
         </Card>
@@ -668,7 +748,7 @@ function MeetingWorkspaceInner({
               <CardTitle className="text-base text-sgvu-navy">Upcoming & recent</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2.5">
-              {meetings.length === 0 ? (
+              {!meetingsError && meetings.length === 0 ? (
                 <p className="py-6 text-center text-sm text-muted-foreground">No meetings yet.</p>
               ) : (
                 meetings.map((m) => {
@@ -677,6 +757,7 @@ function MeetingWorkspaceInner({
                     <button
                       key={m.meeting_id}
                       type="button"
+                      disabled={busy}
                       onClick={() => setSelectedId(m.meeting_id)}
                       className={`w-full rounded-xl border px-4 py-3.5 text-left transition ${
                         isActive
@@ -757,7 +838,7 @@ function MeetingWorkspaceInner({
                   <div className="flex flex-wrap gap-2">
                     <Button
                       size="sm"
-                      disabled={busy}
+                      disabled={busy || Boolean(meetingsError) || loading}
                       className={NAVY_BTN}
                       onClick={() => void respond(selected.meeting_id, 'ACCEPTED')}
                     >
@@ -767,7 +848,7 @@ function MeetingWorkspaceInner({
                     <Button
                       size="sm"
                       variant="outline"
-                      disabled={busy}
+                      disabled={busy || Boolean(meetingsError) || loading}
                       className={OUTLINE_NAVY_BTN}
                       onClick={() => void respond(selected.meeting_id, 'DECLINED')}
                     >
@@ -782,6 +863,7 @@ function MeetingWorkspaceInner({
                   {canManageSelected ? (
                     <>
                       <Textarea
+                        disabled={busy}
                         aria-label="Edit meeting agenda"
                         className="min-h-[100px] w-full"
                         value={agendaDraft}
@@ -790,7 +872,7 @@ function MeetingWorkspaceInner({
                       <Button
                         size="sm"
                         variant="outline"
-                        disabled={busy}
+                        disabled={busy || Boolean(meetingsError) || loading}
                         className={OUTLINE_NAVY_BTN}
                         onClick={() => void saveAgenda()}
                       >
@@ -817,6 +899,7 @@ function MeetingWorkspaceInner({
                         </label>
                         <Textarea
                           id="meeting-notes"
+                          disabled={busy}
                           aria-label="Meeting notes"
                           className="min-h-[100px] w-full"
                           placeholder="Meeting notes"
@@ -830,6 +913,7 @@ function MeetingWorkspaceInner({
                         </label>
                         <Textarea
                           id="meeting-decisions"
+                          disabled={busy}
                           aria-label="Meeting decisions"
                           className="min-h-[100px] w-full"
                           placeholder="Key decisions"
@@ -843,6 +927,7 @@ function MeetingWorkspaceInner({
                         </label>
                         <Textarea
                           id="meeting-actions"
+                          disabled={busy}
                           aria-label="Meeting action items"
                           className="min-h-[100px] w-full"
                           placeholder="Action items and owners"
@@ -853,7 +938,7 @@ function MeetingWorkspaceInner({
                       <Button
                         variant="default"
                         className={`w-full ${NAVY_BTN}`}
-                        disabled={busy || !minutesDraft.notes.trim()}
+                        disabled={busy || Boolean(meetingsError) || loading || !minutesDraft.notes.trim()}
                         onClick={() => void publishMinutes()}
                       >
                         Publish minutes

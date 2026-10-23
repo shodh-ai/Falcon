@@ -5,8 +5,10 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import * as crypto from 'crypto';
+import { isUUID } from 'class-validator';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { postgresQueryRows } from '../../common/postgres-query-rows';
 import { SaveMarksDraftDto } from './dto/save-marks-draft.dto';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 import { DeanAuditService } from './dean-audit.service';
@@ -24,6 +26,7 @@ import {
   ALLOCATION_WITH_DEPT_FROM,
   FacultyTeachingDepartmentsService,
 } from './faculty-teaching-departments.service';
+import { facultyAttendanceStatsCte } from './faculty-attendance-sql';
 
 const LEGACY_EXAM_TYPES = [
   'CAT1',
@@ -70,6 +73,33 @@ const ROLL_NUMBER_SQL = `COALESCE(
   NULLIF(BTRIM(sp.admission_number), ''),
   u.user_id::text
 )`;
+
+function publishedMarkStatsCte(tenantParam: string, courseParam?: string): string {
+  return `published_mark_stats AS (
+    SELECT m.tenant_id, m.course_id, m.student_user_id,
+           COUNT(*)::int AS published_assessment_count,
+           ROUND(
+             100.0 * SUM(m.marks_obtained)::numeric / NULLIF(SUM(m.max_marks), 0),
+             2
+           )::float AS internal_avg_percent
+    FROM academic_marks m
+    WHERE m.tenant_id = ${tenantParam}
+      ${courseParam ? `AND m.course_id = ${courseParam}` : ''}
+      AND m.status = 'PUBLISHED'
+      AND (to_jsonb(m)->>'deleted_at') IS NULL
+      AND m.max_marks > 0
+      AND m.marks_obtained BETWEEN 0 AND m.max_marks
+      AND EXISTS (
+        SELECT 1 FROM student_course_enrollments enrolled
+        WHERE enrolled.tenant_id = m.tenant_id
+          AND enrolled.course_id = m.course_id
+          AND enrolled.student_user_id = m.student_user_id
+          AND enrolled.status = 'ENROLLED'
+          AND (to_jsonb(enrolled)->>'deleted_at') IS NULL
+      )
+    GROUP BY m.tenant_id, m.course_id, m.student_user_id
+  )`;
+}
 
 @Injectable()
 export class FacultyWorkspacesService {
@@ -1086,7 +1116,23 @@ export class FacultyWorkspacesService {
       }
     }
     const maxMarks = getGradingComponentMax(examType) ?? dto.max_marks;
+    if (!Number.isFinite(maxMarks) || maxMarks <= 0 || !dto.entries.length) {
+      throw new BadRequestException(
+        'Provide a valid maximum and at least one student mark',
+      );
+    }
+    const studentIds = dto.entries.map((entry) =>
+      entry.student_user_id.toLowerCase(),
+    );
+    if (new Set(studentIds).size !== studentIds.length) {
+      throw new BadRequestException(
+        'Each student can appear only once in a marks draft',
+      );
+    }
     for (const entry of dto.entries) {
+      if (!Number.isFinite(entry.marks_obtained)) {
+        throw new BadRequestException('Marks must be a finite number');
+      }
       if (entry.marks_obtained > maxMarks) {
         throw new BadRequestException(`Marks cannot exceed ${maxMarks}`);
       }
@@ -1115,8 +1161,22 @@ export class FacultyWorkspacesService {
           entry.co_mapped ?? null,
         );
       }
-      await this.dataSource.query(
-        `INSERT INTO academic_marks (
+      await this.dataSource.transaction(async (manager) => {
+        const enrolled = await manager.query<Array<{ student_user_id: string }>>(
+          `SELECT student_user_id FROM student_course_enrollments
+           WHERE tenant_id = $1 AND course_id = $2 AND status = 'ENROLLED'
+             AND (to_jsonb(student_course_enrollments)->>'deleted_at') IS NULL
+             AND student_user_id = ANY($3::uuid[]) FOR SHARE`,
+          [tenantId, dto.course_id, studentIds],
+        );
+        const enrolledIds = new Set(enrolled.map((row) => row.student_user_id));
+        if (studentIds.some((id) => !enrolledIds.has(id))) {
+          throw new ForbiddenException(
+            'Marks can be saved only for students currently enrolled in this course',
+          );
+        }
+        const result = await manager.query(
+          `INSERT INTO academic_marks (
            tenant_id, student_user_id, course_id, exam_type, marks_obtained, max_marks,
            co_mapped, status, uploaded_by, updated_at
          ) VALUES ${valuePlaceholders.join(', ')}
@@ -1136,9 +1196,20 @@ export class FacultyWorkspacesService {
              ELSE 'DRAFT'
            END,
            uploaded_by = EXCLUDED.uploaded_by,
-           updated_at = NOW()`,
-        params,
-      );
+           updated_at = NOW()
+         WHERE ${isDirectPublish ? "academic_marks.exam_type = 'QUIZ'" : "academic_marks.status NOT IN ('PENDING_COE', 'PUBLISHED')"}
+         RETURNING student_user_id`,
+          params,
+        );
+        if (
+          postgresQueryRows<{ student_user_id: string }>(result).length !==
+          studentIds.length
+        ) {
+          throw new ForbiddenException(
+            'Submitted marks are locked. Reload the roster before saving again.',
+          );
+        }
+      });
     }
     return { saved: dto.entries.length, status: 'DRAFT' };
   }
@@ -1648,9 +1719,11 @@ export class FacultyWorkspacesService {
 
   async listResearchLogs(facultyUserId: string, tenantId: string) {
     return this.dataSource.query(
-      `SELECT * FROM faculty_research_logs
-       WHERE tenant_id = $1 AND faculty_user_id = $2
-       ORDER BY published_date DESC NULLS LAST, created_at DESC`,
+      `SELECT r.*, r.published_date::text AS published_date FROM faculty_research_logs r
+       JOIN users u ON u.user_id = r.faculty_user_id AND u.tenant_id = r.tenant_id
+       WHERE r.tenant_id = $1 AND r.faculty_user_id = $2
+         AND u.is_active = true AND u.deleted_at IS NULL
+       ORDER BY r.published_date DESC NULLS LAST, r.created_at DESC`,
       [tenantId, facultyUserId],
     );
   }
@@ -1667,31 +1740,72 @@ export class FacultyWorkspacesService {
       proof_file_path?: string;
     },
   ) {
+    const title = typeof dto?.publication_title === 'string' ? dto.publication_title.trim() : '';
+    if (!title) throw new BadRequestException('Publication title is required');
+    const optionalText = (value: unknown, label: string) => {
+      if (value == null) return null;
+      if (typeof value !== 'string') throw new BadRequestException(`${label} must be text`);
+      return value.trim() || null;
+    };
+    const journal = optionalText(dto.journal_name, 'Journal or conference');
+    if (journal && journal.length > 255) throw new BadRequestException('Journal or conference must be at most 255 characters');
+    const indexing = optionalText(dto.indexing_type, 'Indexing type');
+    if (indexing && !['SCOPUS', 'WOS', 'UGC_CARE', 'OTHER'].includes(indexing)) {
+      throw new BadRequestException('Select a valid indexing type');
+    }
+    const publicationType = dto.publication_type == null ? 'JOURNAL' : optionalText(dto.publication_type, 'Publication type');
+    if (!publicationType || !['JOURNAL', 'CONFERENCE', 'PATENT', 'BOOK', 'BOOK_CHAPTER'].includes(publicationType)) {
+      throw new BadRequestException('Select a valid publication type');
+    }
+    const publishedDate = optionalText(dto.published_date, 'Publication date');
+    if (publishedDate) {
+      const parsed = new Date(`${publishedDate}T00:00:00Z`);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(publishedDate) || publishedDate.startsWith('0000')
+        || !Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== publishedDate) {
+        throw new BadRequestException('Enter a valid publication date in YYYY-MM-DD format');
+      }
+    }
+    const proof = optionalText(dto.proof_file_path, 'Proof file');
+    if (proof) {
+      // These are the two references returned by the shared upload endpoint.
+      const key = proof.startsWith('/uploads/') ? proof.slice('/uploads/'.length)
+        : /^s3:\/\/[^/]+\//.test(proof) ? proof.replace(/^s3:\/\/[^/]+\//, '') : '';
+      let decoded = '';
+      try { decoded = decodeURIComponent(key); } catch { /* rejected below */ }
+      if (!decoded.startsWith(`${tenantId}/`) || /[\\\u0000-\u001f?#]/.test(decoded)
+        || decoded.split('/').some(part => !part || part === '.' || part === '..')) {
+        throw new BadRequestException('Use a proof file uploaded in this university');
+      }
+    }
     const rows = await this.dataSource.query(
       `INSERT INTO faculty_research_logs (
          tenant_id, faculty_user_id, publication_title, journal_name, indexing_type,
          publication_type, published_date, proof_file_path
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-       RETURNING *`,
+       ) SELECT $1,$2,$3,$4,$5,$6,$7,$8 FROM users u
+         WHERE u.user_id = $2 AND u.tenant_id = $1 AND u.is_active = true AND u.deleted_at IS NULL
+       RETURNING *, published_date::text AS published_date`,
       [
         tenantId,
         facultyUserId,
-        dto.publication_title,
-        dto.journal_name ?? null,
-        dto.indexing_type ?? null,
-        dto.publication_type ?? 'JOURNAL',
-        dto.published_date ?? null,
-        dto.proof_file_path ?? null,
+        title,
+        journal,
+        indexing,
+        publicationType,
+        publishedDate,
+        proof,
       ],
     );
+    if (!rows[0]) throw new ForbiddenException('An active account in this university is required');
     return rows[0];
   }
 
   async listInvigilation(facultyUserId: string, tenantId: string) {
     return this.dataSource.query(
-      `SELECT a.*, r.status AS excuse_status, r.reason AS excuse_reason, r.exam_cell_comment
+      `SELECT a.*, a.exam_date::text AS exam_date,
+              r.status AS excuse_status, r.reason AS excuse_reason, r.exam_cell_comment
        FROM faculty_invigilation_assignments a
-       LEFT JOIN invigilation_unavailability_requests r ON r.assignment_id = a.assignment_id
+       LEFT JOIN invigilation_unavailability_requests r
+         ON r.assignment_id = a.assignment_id AND r.tenant_id = a.tenant_id
        WHERE a.tenant_id = $1 AND a.faculty_user_id = $2
        ORDER BY a.exam_date ASC`,
       [tenantId, facultyUserId],
@@ -1749,7 +1863,7 @@ export class FacultyWorkspacesService {
     assignment_id: string;
     requester_name?: string;
     target_name?: string;
-    exam_date: string | Date;
+    exam_date: string;
     room: string;
     session_label?: string | null;
   }) {
@@ -1758,7 +1872,7 @@ export class FacultyWorkspacesService {
       assignmentId: row.assignment_id,
       requesterName: row.requester_name ?? 'Faculty',
       targetName: row.target_name,
-      examDate: String(row.exam_date).slice(0, 10),
+      examDate: row.exam_date,
       room: row.room,
       sessionLabel: row.session_label ?? null,
     };
@@ -1770,8 +1884,9 @@ export class FacultyWorkspacesService {
     assignmentId: string,
   ) {
     const assignmentRows = await this.dataSource.query(
-      `SELECT * FROM faculty_invigilation_assignments
-       WHERE assignment_id = $1 AND faculty_user_id = $2 AND tenant_id = $3`,
+      `SELECT a.*, a.exam_date::text AS exam_date
+       FROM faculty_invigilation_assignments a
+       WHERE a.assignment_id = $1 AND a.faculty_user_id = $2 AND a.tenant_id = $3`,
       [assignmentId, facultyUserId, tenantId],
     );
     if (!assignmentRows[0]) throw new NotFoundException('Assignment not found');
@@ -1807,13 +1922,13 @@ export class FacultyWorkspacesService {
   async listInvigilationSwaps(facultyUserId: string, tenantId: string) {
     return this.dataSource.query(
       `SELECT s.*,
-              a.exam_date, a.room, a.session_label, a.block_name,
+              a.exam_date::text AS exam_date, a.room, a.session_label, a.block_name,
               req.name AS requester_name,
               tgt.name AS target_name
        FROM invigilation_duty_swaps s
-       JOIN faculty_invigilation_assignments a ON a.assignment_id = s.assignment_id
-       JOIN users req ON req.user_id = s.requester_faculty_user_id
-       JOIN users tgt ON tgt.user_id = s.target_faculty_user_id
+       JOIN faculty_invigilation_assignments a ON a.assignment_id = s.assignment_id AND a.tenant_id = s.tenant_id
+       JOIN users req ON req.user_id = s.requester_faculty_user_id AND req.tenant_id = s.tenant_id
+       JOIN users tgt ON tgt.user_id = s.target_faculty_user_id AND tgt.tenant_id = s.tenant_id
        WHERE s.tenant_id = $1
          AND s.deleted_at IS NULL
          AND (s.requester_faculty_user_id = $2 OR s.target_faculty_user_id = $2)
@@ -1837,9 +1952,9 @@ export class FacultyWorkspacesService {
     }
 
     const assignmentRows = await this.dataSource.query(
-      `SELECT a.*, u.name AS requester_name
+      `SELECT a.*, a.exam_date::text AS exam_date, u.name AS requester_name
        FROM faculty_invigilation_assignments a
-       JOIN users u ON u.user_id = a.faculty_user_id
+       JOIN users u ON u.user_id = a.faculty_user_id AND u.tenant_id = a.tenant_id
        WHERE a.assignment_id = $1 AND a.faculty_user_id = $2 AND a.tenant_id = $3`,
       [assignmentId, facultyUserId, tenantId],
     );
@@ -1948,13 +2063,13 @@ export class FacultyWorkspacesService {
   ) {
     const rows = await this.dataSource.query(
       `SELECT s.*,
-              a.exam_date, a.room, a.session_label,
+              a.exam_date::text AS exam_date, a.room, a.session_label,
               req.name AS requester_name,
               tgt.name AS target_name
        FROM invigilation_duty_swaps s
-       JOIN faculty_invigilation_assignments a ON a.assignment_id = s.assignment_id
-       JOIN users req ON req.user_id = s.requester_faculty_user_id
-       JOIN users tgt ON tgt.user_id = s.target_faculty_user_id
+       JOIN faculty_invigilation_assignments a ON a.assignment_id = s.assignment_id AND a.tenant_id = s.tenant_id
+       JOIN users req ON req.user_id = s.requester_faculty_user_id AND req.tenant_id = s.tenant_id
+       JOIN users tgt ON tgt.user_id = s.target_faculty_user_id AND tgt.tenant_id = s.tenant_id
        WHERE s.swap_id = $1 AND s.tenant_id = $2 AND s.deleted_at IS NULL`,
       [swapId, tenantId],
     );
@@ -1968,16 +2083,18 @@ export class FacultyWorkspacesService {
     }
 
     const nextStatus = accept ? 'PENDING_EXAM_CELL' : 'REJECTED_BY_TARGET';
-    const updated = await this.dataSource.query(
+    const updated = postgresQueryRows(await this.dataSource.query(
       `UPDATE invigilation_duty_swaps
        SET status = $1,
            target_comment = $2,
            target_responded_at = NOW(),
            updated_at = NOW()
-       WHERE swap_id = $3
+       WHERE swap_id = $3 AND tenant_id = $4 AND target_faculty_user_id = $5
+         AND status = 'PENDING_TARGET' AND deleted_at IS NULL
        RETURNING *`,
-      [nextStatus, comment?.trim() || null, swapId],
-    );
+      [nextStatus, comment?.trim() || null, swapId, tenantId, facultyUserId],
+    ));
+    if (!updated[0]) throw new NotFoundException('Swap request changed or is no longer available');
 
     await this.writeDutySwapAudit(
       tenantId,
@@ -2025,7 +2142,7 @@ export class FacultyWorkspacesService {
       });
     }
 
-    return { ...updated[0], ...base, target_name: swap.target_name };
+    return { ...updated[0], ...base, exam_date: swap.exam_date, target_name: swap.target_name };
   }
 
   async cancelInvigilationDutySwap(
@@ -2047,13 +2164,15 @@ export class FacultyWorkspacesService {
       throw new BadRequestException('Swap request cannot be cancelled');
     }
 
-    const updated = await this.dataSource.query(
+    const updated = postgresQueryRows(await this.dataSource.query(
       `UPDATE invigilation_duty_swaps
        SET status = 'CANCELLED', updated_at = NOW()
-       WHERE swap_id = $1
+       WHERE swap_id = $1 AND tenant_id = $2 AND requester_faculty_user_id = $3
+         AND status IN ('PENDING_TARGET', 'PENDING_EXAM_CELL') AND deleted_at IS NULL
        RETURNING *`,
-      [swapId],
-    );
+      [swapId, tenantId, facultyUserId],
+    ));
+    if (!updated[0]) throw new NotFoundException('Swap request changed or is no longer available');
     await this.writeDutySwapAudit(
       tenantId,
       swapId,
@@ -2077,6 +2196,18 @@ export class FacultyWorkspacesService {
       student_ids: string[];
     },
   ) {
+    if (typeof data.project_title !== 'string' || !data.project_title.trim()) {
+      throw new BadRequestException('Project title is required');
+    }
+    if (!isUUID(facultyUserId)) throw new BadRequestException('Invalid faculty identifier');
+    const guide = await this.dataSource.query(
+      `SELECT u.user_id FROM users u JOIN roles r ON r.role_id = u.role_id
+       WHERE u.user_id = $1 AND u.tenant_id = $2 AND u.is_active = true
+         AND u.deleted_at IS NULL AND r.role_name IN ('Faculty', 'HOD', 'Dean', 'SuperAdmin')`,
+      [facultyUserId, tenantId],
+    );
+    if (!guide.length) throw new BadRequestException('Select an active faculty member in this university');
+    await this.validateProjectStudents(data.student_ids, tenantId);
     // Validate max 4 active projects
     const countRes = await this.dataSource.query(
       `SELECT COUNT(*) AS active_count FROM faculty_project_guides 
@@ -2105,7 +2236,7 @@ export class FacultyWorkspacesService {
           guideId,
           tenantId,
           facultyUserId,
-          data.project_title,
+          data.project_title.trim(),
           data.program,
           data.start_date,
           data.end_date,
@@ -2169,6 +2300,8 @@ export class FacultyWorkspacesService {
     students: { student_user_id: string; grade?: string }[],
   ) {
     await this.assertOwnsGuide(guideId, facultyUserId, tenantId);
+    if (!Array.isArray(students)) throw new BadRequestException('Students must be an array');
+    await this.validateProjectStudents(students.map((student) => student?.student_user_id), tenantId);
 
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
@@ -2215,23 +2348,38 @@ export class FacultyWorkspacesService {
     amount: number,
     purpose: string,
   ) {
-    await this.assertOwnsGuide(guideId, facultyUserId, tenantId);
-    // Check if there's already a pending request
-    const existing = await this.dataSource.query(
-      `SELECT 1 FROM project_funding_requests WHERE guide_id = $1 AND status IN ('PENDING_HOD', 'APPROVED_HOD')`,
-      [guideId],
-    );
-    if (existing.length > 0) {
-      throw new BadRequestException(
-        'A funding request is already pending or approved and awaiting transfer.',
-      );
+    if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) {
+      throw new BadRequestException('Funding amount must be a positive number');
     }
-
-    const rows = await this.dataSource.query(
-      `INSERT INTO project_funding_requests (tenant_id, guide_id, requested_by, amount, purpose)
-       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-      [tenantId, guideId, facultyUserId, amount, purpose],
-    );
+    if (typeof purpose !== 'string' || !purpose.trim()) {
+      throw new BadRequestException('Funding purpose is required');
+    }
+    const request = await this.dataSource.transaction(async (manager) => {
+      const guides = await manager.query(
+        `SELECT g.guide_id FROM faculty_project_guides g
+         JOIN users owner ON owner.user_id = g.faculty_user_id AND owner.tenant_id = g.tenant_id
+         WHERE g.guide_id = $1 AND g.faculty_user_id = $2 AND g.tenant_id = $3
+           AND g.status = 'ACTIVE' AND (to_jsonb(g)->>'deleted_at') IS NULL
+           AND owner.is_active = true AND owner.deleted_at IS NULL
+         FOR UPDATE OF g`,
+        [guideId, facultyUserId, tenantId],
+      );
+      if (!guides.length) throw new NotFoundException('Active project guide not found');
+      // Lock the owning project before checking, so simultaneous requests cannot
+      // both observe an empty pending queue and insert a funding demand.
+      const existing = await manager.query(
+        `SELECT 1 FROM project_funding_requests
+         WHERE guide_id = $1 AND tenant_id = $2 AND status IN ('PENDING_HOD', 'APPROVED_HOD')`,
+        [guideId, tenantId],
+      );
+      if (existing.length) throw new BadRequestException('A funding request is already pending or approved and awaiting transfer.');
+      const rows = await manager.query(
+        `INSERT INTO project_funding_requests (tenant_id, guide_id, requested_by, amount, purpose)
+         VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+        [tenantId, guideId, facultyUserId, amount, purpose.trim()],
+      );
+      return rows[0];
+    });
 
     const hodRows = await this.dataSource.query(
       `SELECT d.hod_user_id, u.name as faculty_name
@@ -2254,7 +2402,7 @@ export class FacultyWorkspacesService {
       });
     }
 
-    return rows[0];
+    return request;
   }
 
   async listHodFundingRequests(hodUserId: string, tenantId: string) {
@@ -2262,8 +2410,8 @@ export class FacultyWorkspacesService {
     return this.dataSource.query(
       `SELECT fr.*, g.project_title, u.name AS faculty_name, d.dept_name
        FROM project_funding_requests fr
-       INNER JOIN faculty_project_guides g ON g.guide_id = fr.guide_id
-       INNER JOIN users u ON u.user_id = fr.requested_by
+       INNER JOIN faculty_project_guides g ON g.guide_id = fr.guide_id AND g.tenant_id = fr.tenant_id
+       INNER JOIN users u ON u.user_id = fr.requested_by AND u.tenant_id = fr.tenant_id
        INNER JOIN departments d ON d.dept_id = u.dept_id
        WHERE fr.tenant_id = $1 AND d.hod_user_id = $2
        ORDER BY fr.created_at DESC`,
@@ -2300,8 +2448,8 @@ export class FacultyWorkspacesService {
     return this.dataSource.query(
       `SELECT fr.*, g.project_title, u.name AS faculty_name, d.dept_name
        FROM project_funding_requests fr
-       INNER JOIN faculty_project_guides g ON g.guide_id = fr.guide_id
-       INNER JOIN users u ON u.user_id = fr.requested_by
+       INNER JOIN faculty_project_guides g ON g.guide_id = fr.guide_id AND g.tenant_id = fr.tenant_id
+       INNER JOIN users u ON u.user_id = fr.requested_by AND u.tenant_id = fr.tenant_id
        INNER JOIN departments d ON d.dept_id = u.dept_id
        WHERE fr.tenant_id = $1
          AND u.dept_id = ANY($2::int[])
@@ -2318,6 +2466,16 @@ export class FacultyWorkspacesService {
     hodUserId: string,
     tenantId: string,
   ) {
+    if (!['APPROVED_HOD', 'REJECTED_HOD'].includes(status)) {
+      throw new BadRequestException('Select a valid HOD funding decision');
+    }
+    if (commitMessage != null && typeof commitMessage !== 'string') {
+      throw new BadRequestException('Funding decision message must be text');
+    }
+    const message = (commitMessage ?? '').trim();
+    if (status === 'REJECTED_HOD' && !message) {
+      throw new BadRequestException('A reason is required to reject funding');
+    }
     const deptRows = await this.dataSource.query<Array<{ dept_id: number }>>(
       `SELECT dept_id FROM departments WHERE hod_user_id = $1`,
       [hodUserId],
@@ -2329,7 +2487,7 @@ export class FacultyWorkspacesService {
       );
     }
 
-    const rows = await this.dataSource.query(
+    const rows = postgresQueryRows(await this.dataSource.query(
       `UPDATE project_funding_requests fr
        SET status = $1, hod_commit_message = $2, hod_user_id = $3, updated_at = NOW()
        FROM users u
@@ -2337,10 +2495,11 @@ export class FacultyWorkspacesService {
          AND fr.tenant_id = $5
          AND fr.status = 'PENDING_HOD'
          AND u.user_id = fr.requested_by
+         AND u.tenant_id = fr.tenant_id
          AND u.dept_id = ANY($6::int[])
        RETURNING fr.*`,
-      [status, commitMessage, hodUserId, requestId, tenantId, deptIds],
-    );
+      [status, message, hodUserId, requestId, tenantId, deptIds],
+    ));
     if (!rows.length) {
       throw new NotFoundException(
         'Pending funding request not found or unauthorized',
@@ -2379,6 +2538,16 @@ export class FacultyWorkspacesService {
     deanUserId: string,
     tenantId: string,
   ) {
+    if (!['APPROVED_DEAN', 'REJECTED_DEAN'].includes(status)) {
+      throw new BadRequestException('Select a valid Dean funding decision');
+    }
+    if (commitMessage != null && typeof commitMessage !== 'string') {
+      throw new BadRequestException('Funding decision message must be text');
+    }
+    const message = (commitMessage ?? '').trim();
+    if (status === 'REJECTED_DEAN' && !message) {
+      throw new BadRequestException('A reason is required to reject funding');
+    }
     const deptRows = await this.dataSource.query<Array<{ dept_id: number }>>(
       `SELECT DISTINCT dept_id
        FROM (
@@ -2409,7 +2578,7 @@ export class FacultyWorkspacesService {
       );
     }
 
-    const rows = await this.dataSource.query(
+    const rows = postgresQueryRows(await this.dataSource.query(
       `UPDATE project_funding_requests fr
        SET status = $1, dean_commit_message = $2, dean_user_id = $3, updated_at = NOW()
        FROM users u
@@ -2417,10 +2586,11 @@ export class FacultyWorkspacesService {
          AND fr.tenant_id = $5
          AND fr.status = 'APPROVED_HOD'
          AND fr.requested_by = u.user_id
+         AND u.tenant_id = fr.tenant_id
          AND u.dept_id = ANY($6::int[])
        RETURNING fr.*`,
-      [status, commitMessage, deanUserId, requestId, tenantId, deptIds],
-    );
+      [status, message, deanUserId, requestId, tenantId, deptIds],
+    ));
     if (!rows.length) {
       throw new NotFoundException(
         'Pending funding request not found or unauthorized',
@@ -2440,7 +2610,7 @@ export class FacultyWorkspacesService {
       previousValue: { status: 'APPROVED_HOD' },
       newValue: {
         status,
-        commit_message: commitMessage,
+        commit_message: message,
         amount: updatedRequest.amount,
       },
     });
@@ -2496,13 +2666,14 @@ export class FacultyWorkspacesService {
     if (!report[0] || report[0].faculty_user_id !== facultyUserId) {
       throw new ForbiddenException();
     }
-    const rows = await this.dataSource.query(
+    const rows = postgresQueryRows(await this.dataSource.query(
       `UPDATE project_weekly_reports
        SET status = $2, ce_marks = $3, faculty_remarks = $4, reviewed_at = NOW()
        WHERE report_id = $1
        RETURNING *`,
       [reportId, dto.status, dto.ce_marks ?? null, dto.faculty_remarks ?? null],
-    );
+    ));
+    if (!rows[0]) throw new NotFoundException('Project report is no longer available');
     return rows[0];
   }
 
@@ -2519,20 +2690,25 @@ export class FacultyWorkspacesService {
       await this.assertFacultyOwnsCourse(facultyUserId, tenantId, courseId);
     }
     return this.dataSource.query(
-      `SELECT u.user_id AS student_user_id, u.name, c.course_id, c.course_code, c.course_name,
-              e.attendance_percent,
-              COALESCE((
-                SELECT AVG(m.marks_obtained::float / NULLIF(m.max_marks, 0) * 100)
-                FROM academic_marks m
-                WHERE m.student_user_id = u.user_id AND m.course_id = e.course_id AND m.tenant_id = e.tenant_id
-              ), 0) AS internal_avg_percent
+      `WITH ${facultyAttendanceStatsCte('$1', courseId ? '$3' : undefined)},
+       ${publishedMarkStatsCte('$1', courseId ? '$3' : undefined)}
+       SELECT u.user_id AS student_user_id, u.name, c.course_id, c.course_code, c.course_name,
+              COALESCE(att.attendance_record_count, 0)::int AS attendance_record_count,
+              att.attendance_percent::float AS attendance_percent,
+              COALESCE(pm.published_assessment_count, 0)::int AS published_assessment_count,
+              pm.internal_avg_percent
        FROM student_course_enrollments e
-       INNER JOIN users u ON u.user_id = e.student_user_id
-       INNER JOIN academic_courses c ON c.course_id = e.course_id
+       INNER JOIN users u ON u.user_id = e.student_user_id AND u.tenant_id = e.tenant_id
+       INNER JOIN academic_courses c ON c.course_id = e.course_id AND c.tenant_id = e.tenant_id
+       LEFT JOIN attendance_stats att
+         ON att.tenant_id = e.tenant_id AND att.course_id = e.course_id AND att.student_user_id = e.student_user_id::text
+       LEFT JOIN published_mark_stats pm
+         ON pm.tenant_id = e.tenant_id AND pm.course_id = e.course_id AND pm.student_user_id = e.student_user_id
        WHERE e.tenant_id = $1 AND e.status = 'ENROLLED'
+         AND (to_jsonb(e)->>'deleted_at') IS NULL
          AND ${FACULTY_COURSE_ACCESS_SQL}
          ${courseFilter}
-       ORDER BY e.attendance_percent ASC, internal_avg_percent ASC`,
+       ORDER BY attendance_percent ASC NULLS LAST, internal_avg_percent ASC NULLS LAST`,
       params,
     );
   }
@@ -2572,7 +2748,9 @@ export class FacultyWorkspacesService {
     params.push(Math.min(Math.max(limit, 1), 50));
 
     return this.dataSource.query(
-      `SELECT DISTINCT
+      `WITH ${facultyAttendanceStatsCte('$1', '$3')},
+       ${publishedMarkStatsCte('$1', '$3')}
+       SELECT DISTINCT
          u.user_id AS student_user_id,
          u.name,
          u.official_email,
@@ -2581,15 +2759,10 @@ export class FacultyWorkspacesService {
          c.course_id,
          c.course_code,
          c.course_name,
-         e.attendance_percent,
-         COALESCE((
-           SELECT ROUND(AVG(m.marks_obtained::numeric / NULLIF(m.max_marks, 0) * 100), 2)
-           FROM academic_marks m
-           WHERE m.tenant_id = e.tenant_id
-             AND m.student_user_id = e.student_user_id
-             AND m.course_id = e.course_id
-             AND m.status = 'PUBLISHED'
-         ), 0) AS internal_avg_percent,
+         COALESCE(att.attendance_record_count, 0)::int AS attendance_record_count,
+         att.attendance_percent::float AS attendance_percent,
+         COALESCE(pm.published_assessment_count, 0)::int AS published_assessment_count,
+         pm.internal_avg_percent,
          (
            SELECT COUNT(*)::int
            FROM assignment_submissions sub
@@ -2599,13 +2772,18 @@ export class FacultyWorkspacesService {
              AND sub.student_user_id = e.student_user_id
          ) AS assignments_submitted
        FROM student_course_enrollments e
-       INNER JOIN users u ON u.user_id = e.student_user_id
-       INNER JOIN academic_courses c ON c.course_id = e.course_id
+       INNER JOIN users u ON u.user_id = e.student_user_id AND u.tenant_id = e.tenant_id
+       INNER JOIN academic_courses c ON c.course_id = e.course_id AND c.tenant_id = e.tenant_id
        LEFT JOIN student_profiles sp ON sp.user_id = u.user_id
        LEFT JOIN departments d ON d.dept_id = u.dept_id
+       LEFT JOIN attendance_stats att
+         ON att.tenant_id = e.tenant_id AND att.course_id = e.course_id AND att.student_user_id = e.student_user_id::text
+       LEFT JOIN published_mark_stats pm
+         ON pm.tenant_id = e.tenant_id AND pm.course_id = e.course_id AND pm.student_user_id = e.student_user_id
        WHERE e.tenant_id = $1
          AND e.status = 'ENROLLED'
          AND e.course_id = $3
+         AND (to_jsonb(e)->>'deleted_at') IS NULL
          AND ${FACULTY_COURSE_ACCESS_SQL}
          ${searchFilter}
        ORDER BY u.name ASC
@@ -2641,7 +2819,9 @@ export class FacultyWorkspacesService {
     }
 
     return this.dataSource.query(
-      `SELECT DISTINCT
+      `WITH ${facultyAttendanceStatsCte('$1')},
+       ${publishedMarkStatsCte('$1')}
+       SELECT DISTINCT
          u.user_id AS student_user_id,
          u.name,
          u.official_email,
@@ -2650,15 +2830,10 @@ export class FacultyWorkspacesService {
          c.course_id,
          c.course_code,
          c.course_name,
-         e.attendance_percent,
-         COALESCE((
-           SELECT ROUND(AVG(m.marks_obtained::numeric / NULLIF(m.max_marks, 0) * 100), 2)
-           FROM academic_marks m
-           WHERE m.tenant_id = e.tenant_id
-             AND m.student_user_id = e.student_user_id
-             AND m.course_id = e.course_id
-             AND m.status = 'PUBLISHED'
-         ), 0) AS internal_avg_percent,
+         COALESCE(att.attendance_record_count, 0)::int AS attendance_record_count,
+         att.attendance_percent::float AS attendance_percent,
+         COALESCE(pm.published_assessment_count, 0)::int AS published_assessment_count,
+         pm.internal_avg_percent,
          (
            SELECT COUNT(*)::int
            FROM assignment_submissions sub
@@ -2672,9 +2847,14 @@ export class FacultyWorkspacesService {
        INNER JOIN academic_courses c ON c.course_id = e.course_id AND c.tenant_id = e.tenant_id
        LEFT JOIN student_profiles sp ON sp.user_id = u.user_id
        LEFT JOIN departments d ON d.dept_id = u.dept_id
+       LEFT JOIN attendance_stats att
+         ON att.tenant_id = e.tenant_id AND att.course_id = e.course_id AND att.student_user_id = e.student_user_id::text
+       LEFT JOIN published_mark_stats pm
+         ON pm.tenant_id = e.tenant_id AND pm.course_id = e.course_id AND pm.student_user_id = e.student_user_id
        WHERE e.tenant_id = $1
          AND e.status = 'ENROLLED'
          AND u.dept_id = $2
+         AND (to_jsonb(e)->>'deleted_at') IS NULL
          AND (
            lower(u.name) LIKE $3
            OR lower(COALESCE(u.official_email, '')) LIKE $3
@@ -2742,6 +2922,7 @@ export class FacultyWorkspacesService {
         AND e.student_user_id = student.user_id
         AND e.course_id = $4
         AND e.status = 'ENROLLED'
+        AND (to_jsonb(e)->>'deleted_at') IS NULL
        WHERE faculty.tenant_id = $1
          AND faculty.user_id = $2
          AND faculty.dept_id IS NOT NULL
@@ -2784,48 +2965,50 @@ export class FacultyWorkspacesService {
              AND e.course_id = $2
              AND e.student_user_id = $3
              AND e.status = 'ENROLLED'
+             AND (to_jsonb(e)->>'deleted_at') IS NULL
            LIMIT 1`,
         [tenantId, courseId, studentUserId],
       ),
       this.dataSource.query(
-        `WITH scores AS (
+        `WITH ${facultyAttendanceStatsCte('$1', '$2')},
+           ${publishedMarkStatsCte('$1', '$2')},
+           scores AS (
              SELECT e.student_user_id,
-                    COALESCE(
-                      ROUND(AVG(m.marks_obtained::numeric / NULLIF(m.max_marks, 0) * 100), 2),
-                      0
-                    ) AS score
+                    pm.internal_avg_percent AS score,
+                    COALESCE(pm.published_assessment_count, 0)::int AS published_assessment_count
              FROM student_course_enrollments e
-             LEFT JOIN academic_marks m
-               ON m.tenant_id = e.tenant_id
-              AND m.course_id = e.course_id
-              AND m.student_user_id = e.student_user_id
-              AND m.status = 'PUBLISHED'
+             LEFT JOIN published_mark_stats pm
+               ON pm.tenant_id = e.tenant_id
+              AND pm.course_id = e.course_id
+              AND pm.student_user_id = e.student_user_id
              WHERE e.tenant_id = $1
                AND e.course_id = $2
                AND e.status = 'ENROLLED'
-             GROUP BY e.student_user_id
+               AND (to_jsonb(e)->>'deleted_at') IS NULL
+           ),
+           measured_ranks AS (
+             SELECT student_user_id,
+                    RANK() OVER (ORDER BY score DESC)::int AS class_rank
+             FROM scores
+             WHERE score IS NOT NULL
            ),
            ranked AS (
-             SELECT student_user_id, score,
-                    RANK() OVER (ORDER BY score DESC, student_user_id) AS class_rank,
+             SELECT s.*, mr.class_rank,
                     COUNT(*) OVER () AS class_size,
-                    ROUND(AVG(score) OVER (), 2) AS class_average_percent
-             FROM scores
+                    COUNT(s.score) OVER () AS graded_student_count,
+                    ROUND(AVG(s.score::numeric) OVER (), 2)::float AS class_average_percent
+             FROM scores s
+             LEFT JOIN measured_ranks mr ON mr.student_user_id = s.student_user_id
            )
            SELECT c.course_id, c.course_code, c.course_name,
                   r.score AS internal_avg_percent,
-                  (
-                    SELECT e.attendance_percent
-                    FROM student_course_enrollments e
-                    WHERE e.tenant_id = $1
-                      AND e.course_id = $2
-                      AND e.student_user_id = $3
-                      AND e.status = 'ENROLLED'
-                    LIMIT 1
-                  ) AS attendance_percent,
+                  r.published_assessment_count,
+                  att.attendance_percent::float AS attendance_percent,
+                  COALESCE(att.attendance_record_count, 0)::int AS attendance_record_count,
                   r.class_average_percent,
                   r.class_rank::int,
                   r.class_size::int,
+                  r.graded_student_count::int,
                   (
                     SELECT COALESCE(json_agg(
                       json_build_object(
@@ -2840,6 +3023,9 @@ export class FacultyWorkspacesService {
                       AND m.course_id = $2
                       AND m.student_user_id = $3
                       AND m.status = 'PUBLISHED'
+                      AND (to_jsonb(m)->>'deleted_at') IS NULL
+                      AND m.max_marks > 0
+                      AND m.marks_obtained BETWEEN 0 AND m.max_marks
                   ) AS marks,
                   (
                     SELECT COUNT(*)::int
@@ -2859,22 +3045,25 @@ export class FacultyWorkspacesService {
                     WHERE aa.tenant_id = $1
                       AND aa.course_id = $2
                       AND sub.student_user_id = $3
-                      AND sub.marks_awarded IS NOT NULL
+                      AND aa.max_marks > 0
+                      AND sub.marks_awarded BETWEEN 0 AND aa.max_marks
                   ) AS assignments_graded,
                   (
-                    SELECT COALESCE(
-                      ROUND(AVG(sub.marks_awarded::numeric / NULLIF(aa.max_marks, 0) * 100), 2),
-                      0
-                    )
+                    SELECT ROUND(
+                      100.0 * SUM(sub.marks_awarded)::numeric / NULLIF(SUM(aa.max_marks), 0), 2
+                    )::float
                     FROM assignment_submissions sub
                     INNER JOIN academic_assignments aa ON aa.assignment_id = sub.assignment_id
                     WHERE aa.tenant_id = $1
                       AND aa.course_id = $2
                       AND sub.student_user_id = $3
-                      AND sub.marks_awarded IS NOT NULL
+                      AND aa.max_marks > 0
+                      AND sub.marks_awarded BETWEEN 0 AND aa.max_marks
                   ) AS graded_assignment_avg_percent
            FROM academic_courses c
            INNER JOIN ranked r ON r.student_user_id = $3
+           LEFT JOIN attendance_stats att
+             ON att.tenant_id = c.tenant_id AND att.course_id = c.course_id AND att.student_user_id = r.student_user_id::text
            WHERE c.tenant_id = $1 AND c.course_id = $2
            LIMIT 1`,
         [tenantId, courseId, studentUserId],
@@ -2943,12 +3132,18 @@ export class FacultyWorkspacesService {
       assignmentsTotal - assignmentsSubmitted,
       0,
     );
-    const internalAvg = Number(stats.internal_avg_percent ?? 0);
+    const publishedAssessmentCount = Number(stats.published_assessment_count ?? 0);
+    const attendanceRecordCount = Number(stats.attendance_record_count ?? 0);
+    const internalAvg = publishedAssessmentCount > 0 && stats.internal_avg_percent != null
+      ? Number(stats.internal_avg_percent)
+      : null;
     const attendancePercent =
-      stats.attendance_percent == null
+      attendanceRecordCount === 0 || stats.attendance_percent == null
         ? null
         : Number(stats.attendance_percent);
-    const classAverage = Number(stats.class_average_percent ?? 0);
+    const classAverage = stats.class_average_percent == null
+      ? null
+      : Number(stats.class_average_percent);
     const demeritPoints = (demeritRows as Array<{ points: number }>).reduce(
       (sum, row) => sum + Number(row.points ?? 0),
       0,
@@ -2961,8 +3156,8 @@ export class FacultyWorkspacesService {
         ? gpaHistory
         : academicRows.map((row) => ({
             semester: Number(row.semester),
-            sgpa: Number(row.sgpa ?? 0),
-            cgpa: Number(row.cgpa ?? 0),
+            sgpa: row.sgpa == null ? null : Number(row.sgpa),
+            cgpa: row.cgpa == null ? null : Number(row.cgpa),
             status: row.progression_status ?? 'RECORD',
             academic_year: row.academic_year ?? null,
             source: 'academic_record',
@@ -2974,11 +3169,11 @@ export class FacultyWorkspacesService {
       detail: string;
     }> = [];
 
-    if (internalAvg < 40) {
+    if (internalAvg !== null && internalAvg < 40) {
       flags.push({
-        label: 'Weak internals',
+        label: 'Low published marks',
         severity: 'HIGH',
-        detail: 'Internal score is below the 40% academic concern threshold.',
+        detail: 'The published marks average is below the 40% academic concern threshold.',
       });
     }
     if (attendancePercent !== null && attendancePercent < 75) {
@@ -2994,7 +3189,7 @@ export class FacultyWorkspacesService {
         detail: `Attendance is ${Math.round(attendancePercent)}%.`,
       });
     }
-    if (classAverage > 0 && internalAvg + 10 < classAverage) {
+    if (classAverage !== null && internalAvg !== null && internalAvg + 10 < classAverage) {
       flags.push({
         label: 'Below class average',
         severity: 'MEDIUM',
@@ -3031,12 +3226,14 @@ export class FacultyWorkspacesService {
         course_name: stats.course_name,
       },
       summary: {
-        internal_avg_percent: Math.round(internalAvg),
-        attendance_percent:
-          attendancePercent === null ? null : Math.round(attendancePercent),
-        class_average_percent: Math.round(classAverage),
-        class_rank: Number(stats.class_rank ?? 0),
+        internal_avg_percent: internalAvg,
+        published_assessment_count: publishedAssessmentCount,
+        attendance_percent: attendancePercent,
+        attendance_record_count: attendanceRecordCount,
+        class_average_percent: classAverage,
+        class_rank: stats.class_rank == null ? null : Number(stats.class_rank),
         class_size: Number(stats.class_size ?? 0),
+        graded_student_count: Number(stats.graded_student_count ?? 0),
         assignments_total: assignmentsTotal,
         assignments_submitted: assignmentsSubmitted,
         assignments_graded: Number(stats.assignments_graded ?? 0),
@@ -3045,9 +3242,9 @@ export class FacultyWorkspacesService {
           assignmentsTotal > 0
             ? Math.round((assignmentsSubmitted / assignmentsTotal) * 100)
             : 0,
-        graded_assignment_avg_percent: Math.round(
-          Number(stats.graded_assignment_avg_percent ?? 0),
-        ),
+        graded_assignment_avg_percent: stats.graded_assignment_avg_percent == null
+          ? null
+          : Number(stats.graded_assignment_avg_percent),
         course_demerit_points: demeritPoints,
         cumulative_demerit_points: Number(
           academicSummary?.cumulative_demerit_points ?? demeritPoints,
@@ -3060,8 +3257,8 @@ export class FacultyWorkspacesService {
         ? {
             academic_year: academic.academic_year,
             semester: academic.semester,
-            sgpa: Number(academic.sgpa ?? 0),
-            cgpa: Number(academic.cgpa ?? 0),
+            sgpa: academic.sgpa == null ? null : Number(academic.sgpa),
+            cgpa: academic.cgpa == null ? null : Number(academic.cgpa),
             backlog_count: Number(academic.backlog_count ?? 0),
             progression_status: academic.progression_status,
             remarks: academic.remarks,
@@ -3089,8 +3286,8 @@ export class FacultyWorkspacesService {
       >(
         `SELECT
            g.semester,
-           COALESCE((g.payload->>'sgpa')::numeric, g.cgpa, 0) AS sgpa,
-           COALESCE((g.payload->>'cgpa')::numeric, g.cgpa, 0) AS cgpa,
+           COALESCE((g.payload->>'sgpa')::numeric, g.cgpa) AS sgpa,
+           COALESCE((g.payload->>'cgpa')::numeric, g.cgpa) AS cgpa,
            g.status,
            g.payload->>'academic_year' AS academic_year,
            'grade_card' AS source
@@ -3104,8 +3301,8 @@ export class FacultyWorkspacesService {
     if (gradeCards.length) {
       return gradeCards.map((row) => ({
         semester: Number(row.semester),
-        sgpa: Number(row.sgpa ?? 0),
-        cgpa: Number(row.cgpa ?? 0),
+        sgpa: row.sgpa == null ? null : Number(row.sgpa),
+        cgpa: row.cgpa == null ? null : Number(row.cgpa),
         status: row.status ?? 'PUBLISHED',
         academic_year: row.academic_year,
         source: row.source,
@@ -3133,8 +3330,8 @@ export class FacultyWorkspacesService {
     if (academicRecords.length) {
       return academicRecords.map((row) => ({
         semester: Number(row.semester),
-        sgpa: Number(row.sgpa ?? 0),
-        cgpa: Number(row.cgpa ?? 0),
+        sgpa: row.sgpa == null ? null : Number(row.sgpa),
+        cgpa: row.cgpa == null ? null : Number(row.cgpa),
         status: row.progression_status ?? 'RECORD',
         academic_year: row.academic_year,
         source: 'academic_record',
@@ -3155,6 +3352,7 @@ export class FacultyWorkspacesService {
          AND e.student_user_id = $2
          AND e.status = 'COMPLETED'
          AND e.grade_points IS NOT NULL
+         AND (to_jsonb(e)->>'deleted_at') IS NULL
        ORDER BY e.semester ASC`,
       [tenantId, studentUserId],
     );
@@ -3177,11 +3375,11 @@ export class FacultyWorkspacesService {
         cumulativeCredits += credits;
         return {
           semester,
-          sgpa: credits > 0 ? Number((points / credits).toFixed(2)) : 0,
+          sgpa: credits > 0 ? Number((points / credits).toFixed(2)) : null,
           cgpa:
             cumulativeCredits > 0
               ? Number((cumulativePoints / cumulativeCredits).toFixed(2))
-              : 0,
+              : null,
           status: 'COMPUTED',
           academic_year: null,
           source: 'enrollment',
@@ -3197,13 +3395,16 @@ export class FacultyWorkspacesService {
     const params: unknown[] = [tenantId, facultyUserId];
     let filter = '';
     if (courseId) {
-      filter = ' AND course_id = $3';
+      if (typeof courseId !== 'string' || !isUUID(courseId)) {
+        throw new BadRequestException('Select a valid course');
+      }
+      filter = ' AND l.course_id = $3';
       params.push(courseId);
     }
     return this.dataSource.query(
-      `SELECT l.*, c.course_code, c.course_name
+      `SELECT l.*, l.class_date::text AS class_date, c.course_code, c.course_name
        FROM faculty_class_logbook l
-       INNER JOIN academic_courses c ON c.course_id = l.course_id
+       INNER JOIN academic_courses c ON c.course_id = l.course_id AND c.tenant_id = l.tenant_id
        WHERE l.tenant_id = $1 AND l.faculty_user_id = $2 ${filter}
        ORDER BY l.class_date DESC`,
       params,
@@ -3215,19 +3416,37 @@ export class FacultyWorkspacesService {
     tenantId: string,
     dto: { course_id: string; class_date: string; topic_summary: string },
   ) {
-    await this.assertFacultyOwnsCourse(facultyUserId, tenantId, dto.course_id);
+    const courseId = typeof dto?.course_id === 'string' ? dto.course_id.trim() : '';
+    const classDate = typeof dto?.class_date === 'string' ? dto.class_date.trim() : '';
+    const topicSummary = typeof dto?.topic_summary === 'string' ? dto.topic_summary.trim() : '';
+    if (!isUUID(courseId)) {
+      throw new BadRequestException('Select a valid course');
+    }
+    const parsedDate = new Date(`${classDate}T00:00:00Z`);
+    if (
+      !/^\d{4}-\d{2}-\d{2}$/.test(classDate) ||
+      classDate.startsWith('0000') ||
+      !Number.isFinite(parsedDate.getTime()) ||
+      parsedDate.toISOString().slice(0, 10) !== classDate
+    ) {
+      throw new BadRequestException('Enter a valid class date in YYYY-MM-DD format');
+    }
+    if (!topicSummary) {
+      throw new BadRequestException('Enter a topic summary');
+    }
+    await this.assertFacultyOwnsCourse(facultyUserId, tenantId, courseId);
     const rows = await this.dataSource.query(
       `INSERT INTO faculty_class_logbook (tenant_id, course_id, faculty_user_id, class_date, topic_summary)
        VALUES ($1,$2,$3,$4,$5)
        ON CONFLICT (tenant_id, course_id, faculty_user_id, class_date) DO UPDATE SET
          topic_summary = EXCLUDED.topic_summary
-       RETURNING *`,
+       RETURNING *, class_date::text AS class_date`,
       [
         tenantId,
-        dto.course_id,
+        courseId,
         facultyUserId,
-        dto.class_date,
-        dto.topic_summary,
+        classDate,
+        topicSummary,
       ],
     );
     return rows[0];
@@ -3447,6 +3666,25 @@ export class FacultyWorkspacesService {
       new Date(session.entry_close_at).getTime() < now
     ) {
       throw new BadRequestException('Marks entry window has closed.');
+    }
+  }
+
+  private async validateProjectStudents(studentIds: string[], tenantId: string) {
+    if (!Array.isArray(studentIds) || studentIds.some((id) => typeof id !== 'string' || !isUUID(id))) {
+      throw new BadRequestException('Select valid student identifiers');
+    }
+    if (new Set(studentIds).size !== studentIds.length) {
+      throw new BadRequestException('A student can only be assigned once to a project');
+    }
+    if (!studentIds.length) return;
+    const students = await this.dataSource.query(
+      `SELECT u.user_id FROM users u JOIN roles r ON r.role_id = u.role_id
+       WHERE u.tenant_id = $1 AND u.user_id = ANY($2::uuid[])
+         AND u.is_active = true AND u.deleted_at IS NULL AND r.role_name = 'Student'`,
+      [tenantId, studentIds],
+    );
+    if (students.length !== studentIds.length) {
+      throw new BadRequestException('All project members must be active students in this university');
     }
   }
 

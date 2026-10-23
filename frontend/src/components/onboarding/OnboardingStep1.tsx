@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Eye, EyeOff, KeyRound } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
@@ -13,7 +13,11 @@ import {
   OnboardingPanel,
   onboardingInputClass,
 } from '@/components/onboarding/onboarding-ui';
-import type { PortalOnboardingConfig } from '@/lib/onboarding/portal-onboarding';
+import {
+  getOnboardingStepPath,
+  isFirstLoginOnboardingComplete,
+  type PortalOnboardingConfig,
+} from '@/lib/onboarding/portal-onboarding';
 import { cn } from '@/lib/utils';
 
 const MAX_PASSWORD_LENGTH = 128;
@@ -115,6 +119,7 @@ function PasswordInput({
         type="button"
         className="absolute right-2 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-sgvu-navy/5 hover:text-sgvu-navy focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sgvu-gold/40"
         onClick={() => setVisible((v) => !v)}
+        disabled={disabled}
         aria-label={visible ? 'Hide password' : 'Show password'}
       >
         {visible ? <EyeOff className="h-4 w-4" aria-hidden /> : <Eye className="h-4 w-4" aria-hidden />}
@@ -124,14 +129,25 @@ function PasswordInput({
 }
 
 export function OnboardingStep1({ config }: { config: PortalOnboardingConfig }) {
+  const { token, user } = useAuth();
+  return <OnboardingStep1Form key={`${user?.user_id ?? ''}:${token ?? ''}:${config.portalPrefix}`} config={config} />;
+}
+
+function OnboardingStep1Form({ config }: { config: PortalOnboardingConfig }) {
   const api = useAuthedApi();
   const router = useRouter();
-  const { refreshUser } = useAuth();
+  const { updateOnboardingStatus } = useAuth();
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const mounted = useRef(false);
+  const saving = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
 
   const strength = useMemo(() => passwordStrength(newPassword), [newPassword]);
   const mismatchHint = useMemo(() => {
@@ -147,6 +163,7 @@ export function OnboardingStep1({ config }: { config: PortalOnboardingConfig }) 
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
+    if (!mounted.current || saving.current) return;
     const validationError = validatePasswordForm(
       currentPassword,
       newPassword,
@@ -158,23 +175,76 @@ export function OnboardingStep1({ config }: { config: PortalOnboardingConfig }) 
       return;
     }
 
+    saving.current = true;
     setFormError(null);
     setLoading(true);
     try {
-      await api.post(`${config.apiPrefix}/reset-password`, {
-        current_password: currentPassword,
-        new_password: newPassword,
-        confirm_password: confirmPassword,
-      });
-      await refreshUser();
-      toast.success('Password updated. Continue to profile setup.');
-      router.replace(`${config.portalPrefix}/onboarding/step-2`);
+      const result = await api.post<{ onboarding_status: string | null; password_changed?: boolean }>(
+        `${config.apiPrefix}/reset-password`,
+        {
+          current_password: currentPassword,
+          new_password: newPassword,
+          confirm_password: confirmPassword,
+        },
+      );
+      if (!mounted.current) return;
+      const nextStep = getOnboardingStepPath(
+        config.portalPrefix,
+        result.onboarding_status,
+        config.portalLabel.toLowerCase(),
+      );
+      if (
+        !result.onboarding_status ||
+        nextStep === `${config.portalPrefix}/onboarding/step-1` ||
+        (!nextStep && !isFirstLoginOnboardingComplete(result.onboarding_status, config.portalLabel.toLowerCase()))
+      ) {
+        throw new Error('Your password setup has not completed. Please try saving again.');
+      }
+      if (updateOnboardingStatus(result.onboarding_status) === false) return;
+      toast.success(result.password_changed === false
+        ? 'Password setup is already complete. Continuing onboarding.'
+        : 'Password updated. Continue to profile setup.');
+      router.replace(nextStep ?? config.dashboardPath);
     } catch (err) {
+      if (!mounted.current) return;
       const message = parseApiError(err);
+      // A previous save may have advanced the account while this tab still
+      // shows the password step. Read the onboarding endpoint's own status so
+      // stale auth profile data cannot keep the user on a step the API rejects.
+      const needsStatusReconciliation =
+        err instanceof Error &&
+        /400|password reset is not required/i.test(`${err.message} ${message}`);
+      if (needsStatusReconciliation) {
+        try {
+          const status = await api.get<{ onboarding_status?: string }>(
+            `${config.apiPrefix}/status`,
+          );
+          if (!mounted.current) return;
+          if (
+            status.onboarding_status &&
+            (['PENDING_DOCUMENTS', 'PENDING_ADMIN_APPROVAL'].includes(status.onboarding_status) ||
+              isFirstLoginOnboardingComplete(status.onboarding_status, config.portalLabel))
+          ) {
+            // The portal guard also reads AuthContext. Synchronize it from
+            // this authoritative onboarding status before routing.
+            if (updateOnboardingStatus(status.onboarding_status) === false) return;
+            const nextStep = getOnboardingStepPath(
+              config.portalPrefix,
+              status.onboarding_status,
+              config.portalLabel.toLowerCase(),
+            );
+            router.replace(nextStep ?? config.dashboardPath);
+            return;
+          }
+        } catch {
+          // Keep the original API message visible if status cannot be loaded.
+        }
+      }
+      if (!mounted.current) return;
       setFormError(message);
       toast.error(message);
     } finally {
-      setLoading(false);
+      if (mounted.current) { saving.current = false; setLoading(false); }
     }
   };
 

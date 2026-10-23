@@ -17,6 +17,7 @@ import {
   type CalculatedAttendanceStatus,
 } from '@/lib/hr-attendance-status';
 import { cn } from '@/lib/utils';
+import { SelfServiceLoadError } from '@/components/self-service/SelfServiceLoadError';
 
 export type CalendarDay = {
   date: string;
@@ -77,22 +78,31 @@ export function HrAttendanceCalendar(props: Props) {
   const [loading, setLoading] = useState(true);
   const [selfData, setSelfData] = useState<CalendarPayload | null>(null);
   const [matrixData, setMatrixData] = useState<MatrixPayload | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [retry, setRetry] = useState(0);
 
   useEffect(() => {
+    let active = true;
+    // A new remote calendar scope must hide the previous account/month while loading.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
-    if (props.mode === 'self') {
-      void authedApi
-        .get<CalendarPayload>(`/api/hr/attendance/calendar?month=${month}`)
-        .then(setSelfData)
-        .finally(() => setLoading(false));
-      return;
-    }
-    if (!entityReady) return;
-    void matrixApi
-      .get(`/api/hr/attendance/matrix?month=${month}`)
-      .then((data) => setMatrixData(data as MatrixPayload))
-      .finally(() => setLoading(false));
-  }, [authedApi, entityId, entityReady, matrixApi, month, props.mode]);
+    setError(null);
+    setSelfData(null);
+    setMatrixData(null);
+    if (props.mode === 'matrix' && !entityReady) return;
+    const request = props.mode === 'self'
+      ? authedApi.get<CalendarPayload>(`/api/hr/attendance/calendar?month=${month}`)
+      : matrixApi.get(`/api/hr/attendance/matrix?month=${month}`);
+    void request
+      .then((data) => {
+        if (!active) return;
+        if (props.mode === 'self') setSelfData(data as CalendarPayload);
+        else setMatrixData(data as MatrixPayload);
+      })
+      .catch((err) => { if (active) setError(err instanceof Error ? err.message : 'Could not load attendance.'); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [authedApi, entityId, entityReady, matrixApi, month, props.mode, retry]);
 
   const { year, monthNum, daysInMonth, leading } = monthMeta(month);
   const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -121,6 +131,8 @@ export function HrAttendanceCalendar(props: Props) {
           <Loader2 className="h-6 w-6 animate-spin text-sgvu-navy" />
         </div>
       )}
+
+      {!loading && error && <SelfServiceLoadError message={error} onRetry={() => setRetry((n) => n + 1)} />}
 
       {!loading && props.mode === 'self' && selfData && (
         <div className="grid grid-cols-7 gap-px bg-slate-100 rounded-lg overflow-hidden border border-slate-100">

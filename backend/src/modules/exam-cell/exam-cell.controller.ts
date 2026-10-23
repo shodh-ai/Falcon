@@ -10,6 +10,7 @@ import {
   Param,
   BadRequestException,
   ParseIntPipe,
+  ParseUUIDPipe,
   StreamableFile,
 } from '@nestjs/common';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -18,6 +19,7 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { ExamCellService } from './exam-cell.service';
 import {
   AssignReEvaluationDto,
+  LinkReEvaluationExamResultDto,
   RejectReEvaluationDto,
 } from './dto/re-evaluations.dto';
 import {
@@ -425,6 +427,25 @@ export class ExamCellController {
     );
   }
 
+  @Get('re-evaluations/:applicationId/exam-results')
+  reEvaluationExamResults(
+    @Req() req: { user: AuthUser },
+    @Param('applicationId', ParseUUIDPipe) applicationId: string,
+  ) {
+    this.requireAction(req, 'publish_results');
+    return this.examCell.listReEvaluationExamResults(this.tenant(req), applicationId);
+  }
+
+  @Post('re-evaluations/:applicationId/exam-result')
+  linkReEvaluationExamResult(
+    @Req() req: { user: AuthUser },
+    @Param('applicationId', ParseUUIDPipe) applicationId: string,
+    @Body() dto: LinkReEvaluationExamResultDto,
+  ) {
+    this.requireAction(req, 'publish_results');
+    return this.examCell.linkReEvaluationExamResult(this.tenant(req), req.user.user_id, applicationId, dto.exam_result_id);
+  }
+
   @Post('re-evaluations/:applicationId/publish')
   publishReEvaluation(
     @Req() req: { user: AuthUser },
@@ -812,7 +833,7 @@ export class ExamCellController {
   @Get('result-control/sessions/:sessionId/reports')
   listSessionReports(
     @Req() req: { user: AuthUser },
-    @Param('sessionId') sessionId: string,
+    @Param('sessionId', ParseUUIDPipe) sessionId: string,
   ) {
     return this.resultControl.listSessionReports(this.tenant(req), sessionId);
   }

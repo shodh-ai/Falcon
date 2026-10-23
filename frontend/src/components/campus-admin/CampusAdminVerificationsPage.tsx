@@ -1,7 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { CheckCircle2, Loader2, Search, XCircle } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { CheckCircle2, Loader2, RefreshCw, Search, XCircle } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -137,9 +137,23 @@ export function mergeVerificationQueueResults(
 
 export function CampusAdminVerificationsPage() {
   const api = useAuthedApi();
+  const { user, token } = useAuth();
+  const [apiIdentity, setApiIdentity] = useState({ api, revision: 0 });
+  if (apiIdentity.api !== api) {
+    setApiIdentity({ api, revision: apiIdentity.revision + 1 });
+  }
+  return <VerificationWorkspace key={`${user?.user_id ?? ''}:${token ?? ''}:${apiIdentity.revision}`} api={api} />;
+}
+
+function VerificationWorkspace({ api }: { api: ReturnType<typeof useAuthedApi> }) {
   const { token } = useAuth();
+  const alive = useRef(false);
+  const detailRequest = useRef(0);
+  const decisionLock = useRef(false);
   const [rows, setRows] = useState<QueueRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const inFlight = useRef<Promise<void> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [q, setQ] = useState('');
   const [kind, setKind] = useState('');
@@ -150,23 +164,65 @@ export function CampusAdminVerificationsPage() {
   const [rejectReason, setRejectReason] = useState('');
   const [acting, setActing] = useState(false);
   const [previewDoc, setPreviewDoc] = useState<string | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [preview, setPreview] = useState<{
+    userId: string;
+    kind: string;
+    document: VerificationDetail['documents'][number];
+    token: string;
+    url: string;
+  } | null>(null);
+  const selectedDocument = detail?.person.user_id === selectedId
+    ? detail.documents.find((doc) => doc.file_path === previewDoc)
+    : undefined;
+  const previewUrl = selectedDocument && token
+    ? selectedDocument.file_path.startsWith('http')
+      ? selectedDocument.file_path
+      : preview?.userId === selectedId && preview.kind === selectedKind &&
+          preview.document === selectedDocument && preview.token === token
+        ? preview.url
+        : null
+    : null;
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    const results = await Promise.allSettled([
-      api.get<QueueRow[]>('/api/admin/student-verifications/queue'),
-      api.get<QueueRow[]>('/api/staff/verifications/queue'),
-    ] as const);
-    const merged = mergeVerificationQueueResults(results);
-    setRows(merged.rows);
-    setError(merged.error);
-    setLoading(false);
+  const load = useCallback(() => {
+    if (inFlight.current) return inFlight.current;
+    setRefreshing(true);
+    // Keep the current rows and any open review visible during refreshes.
+    const request = (async () => {
+      const results = await Promise.allSettled([
+        api.get<QueueRow[]>('/api/admin/student-verifications/queue'),
+        api.get<QueueRow[]>('/api/staff/verifications/queue'),
+      ] as const);
+      if (!alive.current) return;
+      const merged = mergeVerificationQueueResults(results);
+      setRows(merged.rows);
+      setError(merged.error);
+    })().finally(() => {
+      inFlight.current = null;
+      if (!alive.current) return;
+      setLoading(false);
+      setRefreshing(false);
+    });
+    inFlight.current = request;
+    return request;
   }, [api]);
 
   useEffect(() => {
+    alive.current = true;
+    // Start the queue subscription with its loading indicator before remote reads finish.
     void load();
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') void load();
+    };
+    const timer = window.setInterval(refreshWhenVisible, 30_000);
+    window.addEventListener('focus', refreshWhenVisible);
+    document.addEventListener('visibilitychange', refreshWhenVisible);
+    return () => {
+      alive.current = false;
+      detailRequest.current += 1;
+      window.clearInterval(timer);
+      window.removeEventListener('focus', refreshWhenVisible);
+      document.removeEventListener('visibilitychange', refreshWhenVisible);
+    };
   }, [load]);
 
   const filtered = useMemo(() => {
@@ -184,45 +240,59 @@ export function CampusAdminVerificationsPage() {
   }, [kind, q, rows]);
 
   const openReview = async (row: QueueRow) => {
+    if (!alive.current || decisionLock.current) return;
+    const request = ++detailRequest.current;
+    const ownsRequest = () => alive.current && request === detailRequest.current;
     setSelectedId(row.user_id);
     setSelectedKind(row.portal_kind);
     setRejectReason('');
     setPreviewDoc(null);
-    setPreviewUrl(null);
+    setPreview(null);
+    setDetail(null);
     setDetailLoading(true);
     try {
       const data = await api.get<VerificationDetail>(
         `${verificationBase(row.portal_kind)}/${row.user_id}`,
       );
+      if (!ownsRequest()) return;
+      if (data.person.user_id !== row.user_id || data.portal_kind !== row.portal_kind) {
+        throw new Error('Verification details do not match the selected person. Please reopen the review.');
+      }
       setDetail(data);
       if (data.documents[0]) setPreviewDoc(data.documents[0].file_path);
     } catch (err) {
+      if (!ownsRequest()) return;
       toast.error(parseApiError(err));
       setSelectedId(null);
       setDetail(null);
     } finally {
-      setDetailLoading(false);
+      if (ownsRequest()) setDetailLoading(false);
     }
   };
 
-  useEffect(() => {
-    if (!selectedId || !previewDoc || !token) {
-      setPreviewUrl(null);
-      return;
-    }
-    const doc = detail?.documents.find((item) => item.file_path === previewDoc);
-    if (!doc) return;
+  const closeReview = () => {
+    if (decisionLock.current) return;
+    detailRequest.current += 1;
+    setSelectedId(null);
+    setDetail(null);
+    setDetailLoading(false);
+    setPreviewDoc(null);
+    setPreview(null);
+    setRejectReason('');
+  };
 
+  useEffect(() => {
+    if (!selectedId || !selectedDocument || !token || selectedDocument.file_path.startsWith('http')) return;
+
+    let active = true;
     let revoked: string | null = null;
+    const controller = new AbortController();
     const loadPreview = async () => {
       try {
-        if (previewDoc.startsWith('http')) {
-          setPreviewUrl(previewDoc);
-          return;
-        }
         const response = await fetch(
-          buildPreviewUrl(selectedId, doc.doc_type, selectedKind),
+          buildPreviewUrl(selectedId, selectedDocument.doc_type, selectedKind),
           {
+            signal: controller.signal,
             headers: {
               Authorization: `Bearer ${token}`,
               'x-tenant-subdomain': getSubdomainFromClient(),
@@ -231,56 +301,71 @@ export function CampusAdminVerificationsPage() {
         );
         if (!response.ok) throw new Error('Preview failed');
         const blob = await response.blob();
+        if (!active) return;
         revoked = URL.createObjectURL(blob);
-        setPreviewUrl(revoked);
+        setPreview({ userId: selectedId, kind: selectedKind, document: selectedDocument, token, url: revoked });
       } catch {
-        setPreviewUrl(null);
+        if (active) setPreview(null);
       }
     };
     void loadPreview();
     return () => {
+      active = false;
+      controller.abort();
       if (revoked) URL.revokeObjectURL(revoked);
     };
-  }, [detail?.documents, previewDoc, selectedId, selectedKind, token]);
+  }, [selectedDocument, selectedId, selectedKind, token]);
 
-  const canReview = detail?.person.onboarding_status === 'PENDING_ADMIN_APPROVAL';
+  const canReview = !detailLoading && detail?.person.user_id === selectedId &&
+    detail?.portal_kind === selectedKind && detail.person.onboarding_status === 'PENDING_ADMIN_APPROVAL';
 
   const approve = async () => {
-    if (!selectedId) return;
+    if (!alive.current || decisionLock.current || !selectedId || !canReview) return;
+    decisionLock.current = true;
     setActing(true);
     try {
       await api.post(`${verificationBase(selectedKind)}/${selectedId}/approve`);
+      if (!alive.current) return;
       toast.success('Approved — portal unlocked');
       setSelectedId(null);
       setDetail(null);
+      await inFlight.current;
+      if (!alive.current) return;
       await load();
+      if (!alive.current) return;
       window.dispatchEvent(new Event('falcon:notifications-refresh'));
     } catch (err) {
-      toast.error(parseApiError(err));
+      if (alive.current) toast.error(parseApiError(err));
     } finally {
-      setActing(false);
+      if (alive.current) { decisionLock.current = false; setActing(false); }
     }
   };
 
   const reject = async () => {
+    if (!alive.current || decisionLock.current || !canReview) return;
     if (!selectedId || !rejectReason.trim()) {
       toast.error('Enter a rejection reason');
       return;
     }
+    decisionLock.current = true;
     setActing(true);
     try {
       await api.post(`${verificationBase(selectedKind)}/${selectedId}/reject`, {
         remarks: rejectReason.trim(),
       });
+      if (!alive.current) return;
       toast.success('Sent back for corrections');
       setSelectedId(null);
       setDetail(null);
+      await inFlight.current;
+      if (!alive.current) return;
       await load();
+      if (!alive.current) return;
       window.dispatchEvent(new Event('falcon:notifications-refresh'));
     } catch (err) {
-      toast.error(parseApiError(err));
+      if (alive.current) toast.error(parseApiError(err));
     } finally {
-      setActing(false);
+      if (alive.current) { decisionLock.current = false; setActing(false); }
     }
   };
 
@@ -297,9 +382,15 @@ export function CampusAdminVerificationsPage() {
       </Card>
 
       <Card className="border-sgvu-navy/10 bg-white shadow-sm">
-        <CardContent className="p-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Pending</p>
-          <p className="mt-1 text-2xl font-bold text-sgvu-navy">{loading ? '—' : rows.length}</p>
+        <CardContent className="flex items-center justify-between gap-3 p-4">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Pending</p>
+            <p className="mt-1 text-2xl font-bold text-sgvu-navy">{loading ? '—' : rows.length}</p>
+          </div>
+          <Button variant="outline" disabled={refreshing} onClick={() => void load()}>
+            <RefreshCw className={`mr-2 h-4 w-4${refreshing ? ' animate-spin' : ''}`} aria-hidden />
+            {refreshing ? 'Refreshing…' : 'Refresh'}
+          </Button>
         </CardContent>
       </Card>
 
@@ -376,6 +467,7 @@ export function CampusAdminVerificationsPage() {
                           <td className="p-3 text-right">
                             <button
                               type="button"
+                              disabled={acting}
                               className="text-sm font-semibold text-sgvu-navy hover:underline"
                               onClick={() => void openReview(row)}
                             >
@@ -392,7 +484,7 @@ export function CampusAdminVerificationsPage() {
         </CardContent>
       </Card>
 
-      <Sheet open={Boolean(selectedId)} onOpenChange={(open) => !open && setSelectedId(null)}>
+      <Sheet open={Boolean(selectedId)} onOpenChange={(open) => { if (!open) closeReview(); }}>
         <SheetContent
           side="right"
           className="w-[min(100vw,44rem)] overflow-y-auto bg-white p-0 text-sgvu-navy"

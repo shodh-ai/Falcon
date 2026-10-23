@@ -1,13 +1,13 @@
 'use client';
 
 import { Select } from '@/components/ui/select';
-import { useEffect, useState } from 'react';
-import { FacultyPageHeader, FacultyPageShell, FacultyEmptyState } from '@/components/faculty';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { FacultyPageHeader, FacultyPageShell, FacultyEmptyState, FacultyErrorBanner } from '@/components/faculty';
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { useAuthedApi } from '@/lib/api';
 import { ChevronDown, ChevronUp, Calendar, DollarSign, Users, Plus, CheckCircle, Search, Clock, ArrowRight } from 'lucide-react';
 import { toast } from 'sonner';
@@ -64,6 +64,14 @@ export default function FacultyProjectsPage() {
   const api = useAuthedApi();
   const [guides, setGuides] = useState<Guide[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [directoryLoading, setDirectoryLoading] = useState(true);
+  const [directoryError, setDirectoryError] = useState<string | null>(null);
+  const [busyAction, setBusyAction] = useState<string | null>(null);
+  const busyLock = useRef(false);
+  const scope = useRef(0);
+  const guidesRequest = useRef(0);
+  const directoryRequest = useRef(0);
   const [expandedCard, setExpandedCard] = useState<string | null>(null);
   
   // Modals state
@@ -78,133 +86,169 @@ export default function FacultyProjectsPage() {
   const [filterBatch, setFilterBatch] = useState('ALL');
 
   // Form states
-  const [newProject, setNewProject] = useState({ title: '', program: 'B.Tech CSE', amount: '' });
+  const [newProject, setNewProject] = useState({ title: '', program: '', amount: '' });
   const [selectedStudents, setSelectedStudents] = useState<{ id: string; name: string; grade?: string }[]>([]);
   const [newFunding, setNewFunding] = useState({ amount: '', purpose: '' });
 
-  const fetchGuides = () => {
+  const fetchGuides = useCallback(async (version = scope.current) => {
+    const requestId = ++guidesRequest.current;
+    const current = () => version === scope.current && requestId === guidesRequest.current;
     setLoading(true);
-    api.get<Guide[]>('/api/academics/faculty/workspaces/projects')
-      .then((res) =>
-        setGuides(
-          withFacultyDemoFallback(res || [], facultyDemoProjects() as Guide[], isEmptyArray),
-        ),
-      )
-      .catch((err) => {
-        const demo = withFacultyDemoFallback([], facultyDemoProjects() as Guide[], isEmptyArray);
-        setGuides(demo);
-        if (demo.length === 0) toast.error(err.message);
-      })
-      .finally(() => setLoading(false));
-  };
-
-  const fetchDirectory = () => {
-    api.get<{ items?: DirectoryUser[] }>('/api/search/directory?role=Student&limit=1000')
-      .then((res) =>
-        setDirectory(
-          withFacultyDemoFallback(
-            res?.items || [],
-            facultyDemoDirectoryStudents().items,
-            isEmptyArray,
-          ),
-        ),
-      )
-      .catch(() =>
-        setDirectory(
-          withFacultyDemoFallback([], facultyDemoDirectoryStudents().items, isEmptyArray),
-        ),
-      );
-  };
-
-  useEffect(() => {
-    fetchGuides();
-    fetchDirectory();
+    setLoadError(null);
+    try {
+      const rows = await api.get<Guide[]>('/api/academics/faculty/workspaces/projects');
+      if (!current()) return;
+      if (!Array.isArray(rows)) throw new Error('Could not read guided projects. Please retry.');
+      setGuides(withFacultyDemoFallback(rows, facultyDemoProjects() as Guide[], isEmptyArray));
+    } catch (error) {
+      if (!current()) return;
+      const demo = withFacultyDemoFallback([], facultyDemoProjects() as Guide[], isEmptyArray);
+      if (demo.length) setGuides(demo);
+      else setLoadError(error instanceof Error ? error.message : 'Could not load guided projects');
+    } finally {
+      if (current()) setLoading(false);
+    }
   }, [api]);
 
+  const fetchDirectory = useCallback(async (version = scope.current) => {
+    const requestId = ++directoryRequest.current;
+    const current = () => version === scope.current && requestId === directoryRequest.current;
+    setDirectoryLoading(true);
+    setDirectoryError(null);
+    try {
+      const response = await api.get<{ items?: DirectoryUser[] }>('/api/search/directory?role=Student&limit=1000');
+      if (!current()) return;
+      if (!Array.isArray(response?.items)) throw new Error('Could not read the student directory. Please retry.');
+      setDirectory(withFacultyDemoFallback(response.items, facultyDemoDirectoryStudents().items, isEmptyArray));
+    } catch (error) {
+      if (!current()) return;
+      const demo = withFacultyDemoFallback([], facultyDemoDirectoryStudents().items, isEmptyArray);
+      if (demo.length) setDirectory(demo);
+      else setDirectoryError(error instanceof Error ? error.message : 'Could not load the student directory');
+    } finally {
+      if (current()) setDirectoryLoading(false);
+    }
+  }, [api]);
+
+  useEffect(() => {
+    const version = ++scope.current;
+    // Account-scoped directory/project loads must not reuse another account's open drafts or selections.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setGuides([]);
+    setDirectory([]);
+    setCreateModalOpen(false);
+    setStudentModalOpen(null);
+    setFundingModalOpen(null);
+    setSelectedStudents([]);
+    setNewProject({ title: '', program: '', amount: '' });
+    setNewFunding({ amount: '', purpose: '' });
+    setSearchQuery('');
+    setFilterDept('ALL');
+    setFilterBatch('ALL');
+    busyLock.current = false;
+    setBusyAction(null);
+    void fetchGuides(version);
+    void fetchDirectory(version);
+    return () => { scope.current += 1; };
+  }, [fetchGuides, fetchDirectory]);
+
+  async function saveProjectAction(action: string, save: () => Promise<unknown>, message: string, onSuccess: () => void) {
+    if (busyLock.current || loading || loadError) return;
+    const version = scope.current;
+    busyLock.current = true;
+    setBusyAction(action);
+    try {
+      await save();
+      if (version !== scope.current) return;
+      toast.success(message);
+      onSuccess();
+      await fetchGuides(version);
+    } catch (error) {
+      if (version === scope.current) toast.error(error instanceof Error ? error.message : 'Could not save project changes');
+    } finally {
+      if (version === scope.current) {
+        busyLock.current = false;
+        setBusyAction(null);
+      }
+    }
+  }
+
   const handleCreateProject = async () => {
-    if (!newProject.title) return toast.error('Title is required');
+    if (busyLock.current) return;
+    if (!newProject.title.trim()) return toast.error('Title is required');
     if (selectedStudents.some((s) => isFacultyDemoEntityId(s.id))) {
       toast.success('Project created successfully (demo)');
       setCreateModalOpen(false);
-      setNewProject({ title: '', program: 'B.Tech CSE', amount: '' });
+      setNewProject({ title: '', program: '', amount: '' });
       setSelectedStudents([]);
       return;
     }
-    try {
-      await api.post('/api/academics/faculty/workspaces/projects/assign', {
-        project_title: newProject.title,
+    await saveProjectAction('create', () => api.post('/api/academics/faculty/workspaces/projects/assign', {
+        project_title: newProject.title.trim(),
         program: newProject.program,
         start_date: new Date().toISOString(),
         student_ids: selectedStudents.map(s => s.id)
-      });
-      toast.success('Project created successfully');
+      }), 'Project created successfully', () => {
       setCreateModalOpen(false);
-      setNewProject({ title: '', program: 'B.Tech CSE', amount: '' });
+      setNewProject({ title: '', program: '', amount: '' });
       setSelectedStudents([]);
-      fetchGuides();
-    } catch (err: any) {
-      toast.error(err.message);
-    }
+      });
   };
 
   const handleUpdateStudents = async (guideId: string) => {
+    if (busyLock.current) return;
     if (isFacultyDemoSmokeId(guideId)) {
       toast.success('Students and grades updated successfully (demo)');
       setStudentModalOpen(null);
       setSelectedStudents([]);
       return;
     }
-    try {
-      await api.patch(`/api/academics/faculty/workspaces/projects/${guideId}/students`, {
+    await saveProjectAction(`students:${guideId}`, () => api.patch(`/api/academics/faculty/workspaces/projects/${guideId}/students`, {
         students: selectedStudents.map(s => ({ student_user_id: s.id, grade: s.grade || undefined }))
-      });
-      toast.success('Students and grades updated successfully');
+      }), 'Students and grades updated successfully', () => {
       setStudentModalOpen(null);
       setSelectedStudents([]);
-      fetchGuides();
-    } catch (err: any) {
-      toast.error(err.message);
-    }
+      });
   };
 
   const handleRequestFunding = async (guideId: string) => {
-    if (!newFunding.amount || !newFunding.purpose) return toast.error('All fields are required');
+    if (busyLock.current) return;
+    const amount = Number(newFunding.amount);
+    if (!newFunding.amount.trim() || !Number.isFinite(amount) || amount <= 0) {
+      return toast.error('Enter a positive funding amount');
+    }
+    if (!newFunding.purpose.trim()) return toast.error('Enter a funding purpose');
     if (isFacultyDemoSmokeId(guideId)) {
       toast.success('Funding requested successfully (demo)');
       setFundingModalOpen(null);
       setNewFunding({ amount: '', purpose: '' });
       return;
     }
-    try {
-      await api.post(`/api/academics/faculty/workspaces/projects/${guideId}/funding`, {
-        amount: Number(newFunding.amount),
-        purpose: newFunding.purpose
-      });
-      toast.success('Funding requested successfully');
+    await saveProjectAction(`funding:${guideId}`, () => api.post(`/api/academics/faculty/workspaces/projects/${guideId}/funding`, {
+        amount,
+        purpose: newFunding.purpose.trim()
+      }), 'Funding requested successfully', () => {
       setFundingModalOpen(null);
       setNewFunding({ amount: '', purpose: '' });
-      fetchGuides();
-    } catch (err: any) {
-      toast.error(err.message);
-    }
+      });
   };
 
   const handleMarkComplete = async (guideId: string) => {
+    if (busyLock.current) return;
     if (isFacultyDemoSmokeId(guideId)) {
       toast.success('Project marked as completed (demo)');
       return;
     }
-    try {
-      await api.patch(`/api/academics/faculty/workspaces/projects/${guideId}/complete`);
-      toast.success('Project marked as completed');
-      fetchGuides();
-    } catch (err: any) {
-      toast.error(err.message);
-    }
+    await saveProjectAction(`complete:${guideId}`, () => api.patch(`/api/academics/faculty/workspaces/projects/${guideId}/complete`), 'Project marked as completed', () => {
+      setGuides((current) => current.map((guide) => guide.guide_id === guideId ? { ...guide, status: 'COMPLETED' } : guide));
+    });
   };
 
   const ongoingProjects = guides.filter(g => g.status === 'ACTIVE');
   const completedProjects = guides.filter(g => g.status === 'COMPLETED');
+  const mutationDisabled = Boolean(busyAction) || Boolean(loadError);
+  const directoryDepartments = [...new Set(directory.map((user) => user.department_name).filter(Boolean))].sort();
+  const directoryBatches = [...new Set(directory.map((user) => user.batch).filter(Boolean))].sort();
 
   const filteredDirectory = directory.filter(u => 
     (filterDept === 'ALL' || u.department_name === filterDept) &&
@@ -246,7 +290,7 @@ export default function FacultyProjectsPage() {
               Request Rejected by HOD
             </p>
             {req.hod_commit_message && (
-              <p className="text-xs text-red-600 mt-1 pl-4">"{req.hod_commit_message}"</p>
+              <p className="text-xs text-red-600 mt-1 pl-4">&quot;{req.hod_commit_message}&quot;</p>
             )}
           </div>
         ) : (
@@ -294,8 +338,8 @@ export default function FacultyProjectsPage() {
         description="Supervise final-year projects and lab work — track progress, students, and funding."
         actions={
           <Button
-            onClick={() => setCreateModalOpen(true)}
-            disabled={ongoingProjects.length >= 4}
+            onClick={() => { setSelectedStudents([]); setNewProject({ title: '', program: '', amount: '' }); setCreateModalOpen(true); }}
+            disabled={mutationDisabled || ongoingProjects.length >= 4}
             className="bg-sgvu-navy hover:bg-sgvu-navy/90 text-white shadow-lg shadow-sgvu-navy/20 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Plus className="w-4 h-4 mr-2" />
@@ -304,7 +348,10 @@ export default function FacultyProjectsPage() {
         }
       />
 
-      {guides.length === 0 ? (
+      {loadError && <><FacultyErrorBanner message={loadError} /><Button variant="outline" onClick={() => void fetchGuides()}>Retry projects</Button></>}
+      {directoryError && <><FacultyErrorBanner message={directoryError} /><Button variant="outline" onClick={() => void fetchDirectory()}>Retry student directory</Button></>}
+
+      {guides.length === 0 ? !loadError && (
         <FacultyEmptyState description="No guided projects assigned currently." />
       ) : (
         <div className="w-full space-y-10">
@@ -402,17 +449,17 @@ export default function FacultyProjectsPage() {
                     </CardContent>
 
                     <CardFooter className="bg-slate-50 border-t border-slate-100 p-4 gap-2 flex-wrap">
-                      <Button size="sm" variant="outline" className="text-indigo-600 border-indigo-200 hover:bg-indigo-50" onClick={() => {
+                      <Button disabled={mutationDisabled} size="sm" variant="outline" className="text-indigo-600 border-indigo-200 hover:bg-indigo-50" onClick={() => {
                         setSelectedStudents(g.students.map(s => ({ id: s.student_user_id, name: s.name, grade: s.grade ?? undefined })));
                         setStudentModalOpen(g.guide_id);
                       }}>
                         <Users className="w-4 h-4 mr-2" /> Edit Students & Grades
                       </Button>
-                      <Button size="sm" variant="outline" className="text-amber-600 border-amber-200 hover:bg-amber-50" onClick={() => setFundingModalOpen(g.guide_id)}>
+                      <Button disabled={mutationDisabled} size="sm" variant="outline" className="text-amber-600 border-amber-200 hover:bg-amber-50" onClick={() => { setNewFunding({ amount: '', purpose: '' }); setFundingModalOpen(g.guide_id); }}>
                         <DollarSign className="w-4 h-4 mr-2" /> Request Funding
                       </Button>
                       {g.status === 'ACTIVE' && (
-                        <Button size="sm" variant="outline" className="text-emerald-600 border-emerald-200 hover:bg-emerald-50 ml-auto" onClick={() => handleMarkComplete(g.guide_id)}>
+                        <Button disabled={mutationDisabled} size="sm" variant="outline" className="text-emerald-600 border-emerald-200 hover:bg-emerald-50 ml-auto" onClick={() => handleMarkComplete(g.guide_id)}>
                           <CheckCircle className="w-4 h-4 mr-2" /> Mark Completed
                         </Button>
                       )}
@@ -466,7 +513,7 @@ export default function FacultyProjectsPage() {
       )}
 
       {/* Create Project Modal */}
-      <Dialog open={createModalOpen} onOpenChange={setCreateModalOpen}>
+      <Dialog open={createModalOpen} onOpenChange={(open) => { if (!busyLock.current) setCreateModalOpen(open); }}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Create New Project</DialogTitle>
@@ -474,25 +521,18 @@ export default function FacultyProjectsPage() {
           <div className="space-y-4 py-4">
             <div className="space-y-2">
               <label className="text-sm font-medium">Project Title</label>
-              <Input value={newProject.title} onChange={e => setNewProject({...newProject, title: e.target.value})} placeholder="e.g. AI Based Surveillance System" />
+              <Input disabled={Boolean(busyAction)} value={newProject.title} onChange={e => setNewProject({...newProject, title: e.target.value})} placeholder="e.g. AI Based Surveillance System" />
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium">Program</label>
-              <Select 
-                className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                value={newProject.program} 
+              <Input aria-label="Project program" disabled={Boolean(busyAction)} value={newProject.program}
                 onChange={e => setNewProject({...newProject, program: e.target.value})}
-              >
-                <option value="B.Tech CSE">B.Tech CSE</option>
-                <option value="M.Tech">M.Tech</option>
-                <option value="MBA">MBA</option>
-                <option value="BCA">BCA</option>
-              </Select>
+                placeholder="e.g. B.Pharm, B.Tech CSE, MBA (optional)" />
             </div>
             <div className="pt-4 border-t">
-              <Button variant="outline" className="w-full justify-between" onClick={() => {
+              <Button disabled={Boolean(busyAction)} variant="outline" className="w-full justify-between" onClick={() => {
                 setCreateModalOpen(false);
-                setTimeout(() => setStudentModalOpen('new'), 100);
+                setStudentModalOpen('new');
               }}>
                 <span>Selected Students: {selectedStudents.length}</span>
                 <ArrowRight className="w-4 h-4" />
@@ -500,14 +540,14 @@ export default function FacultyProjectsPage() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setCreateModalOpen(false)}>Cancel</Button>
-            <Button className="bg-sgvu-navy" onClick={handleCreateProject}>Create Project</Button>
+            <Button disabled={Boolean(busyAction)} variant="outline" onClick={() => setCreateModalOpen(false)}>Cancel</Button>
+            <Button disabled={mutationDisabled} className="bg-sgvu-navy" onClick={handleCreateProject}>{busyAction === 'create' ? 'Creating…' : 'Create Project'}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       {/* Request Funding Modal */}
-      <Dialog open={!!fundingModalOpen} onOpenChange={(open) => !open && setFundingModalOpen(null)}>
+      <Dialog open={!!fundingModalOpen} onOpenChange={(open) => { if (!open && !busyLock.current) setFundingModalOpen(null); }}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Request Project Funding</DialogTitle>
@@ -515,11 +555,12 @@ export default function FacultyProjectsPage() {
           <div className="space-y-4 py-4">
             <div className="space-y-2">
               <label className="text-sm font-medium">Amount (₹)</label>
-              <Input type="number" value={newFunding.amount} onChange={e => setNewFunding({...newFunding, amount: e.target.value})} placeholder="e.g. 5000" />
+              <Input disabled={Boolean(busyAction)} type="number" value={newFunding.amount} onChange={e => setNewFunding({...newFunding, amount: e.target.value})} placeholder="e.g. 5000" />
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium">Purpose of Funding</label>
               <textarea 
+                disabled={Boolean(busyAction)}
                 className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                 value={newFunding.purpose} 
                 onChange={e => setNewFunding({...newFunding, purpose: e.target.value})} 
@@ -529,16 +570,17 @@ export default function FacultyProjectsPage() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setFundingModalOpen(null)}>Cancel</Button>
-            <Button className="bg-amber-600 hover:bg-amber-700 text-white" onClick={() => handleRequestFunding(fundingModalOpen!)}>Submit Request</Button>
+            <Button disabled={Boolean(busyAction)} variant="outline" onClick={() => setFundingModalOpen(null)}>Cancel</Button>
+            <Button disabled={mutationDisabled} className="bg-amber-600 hover:bg-amber-700 text-white" onClick={() => handleRequestFunding(fundingModalOpen!)}>{busyAction?.startsWith('funding:') ? 'Submitting…' : 'Submit Request'}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       {/* Student Selection Modal (Integrated) */}
       <Dialog open={studentModalOpen !== null} onOpenChange={(open) => {
+        if (busyLock.current) return;
         if (!open) {
-          if (studentModalOpen === 'new') setTimeout(() => setCreateModalOpen(true), 100);
+          if (studentModalOpen === 'new') setCreateModalOpen(true);
           setStudentModalOpen(null);
         }
       }}>
@@ -551,6 +593,7 @@ export default function FacultyProjectsPage() {
               <div className="relative flex-1">
                 <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
                 <Input 
+                  disabled={Boolean(busyAction) || directoryLoading}
                   placeholder="Search students by name or email..." 
                   className="pl-9"
                   value={searchQuery}
@@ -558,31 +601,29 @@ export default function FacultyProjectsPage() {
                 />
               </div>
               <Select 
+                disabled={Boolean(busyAction) || directoryLoading}
+                aria-label="Filter students by year"
                 className="flex h-10 w-[140px] items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                 value={filterBatch} 
                 onChange={(e) => setFilterBatch(e.target.value)}
               >
                 <option value="ALL">All Years</option>
-                <option value="2022">2022</option>
-                <option value="2023">2023</option>
-                <option value="2024">2024</option>
-                <option value="2025">2025</option>
+                {directoryBatches.map((batch) => <option key={batch} value={batch}>{batch}</option>)}
               </Select>
               <Select 
+                disabled={Boolean(busyAction) || directoryLoading}
+                aria-label="Filter students by department"
                 className="flex h-10 w-[180px] items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                 value={filterDept} 
                 onChange={(e) => setFilterDept(e.target.value)}
               >
                 <option value="ALL">All Departments</option>
-                <option value="Computer Science">Computer Science</option>
-                <option value="Information Technology">Information Tech</option>
-                <option value="Mechanical Engineering">Mechanical</option>
-                <option value="Electrical Engineering">Electrical</option>
+                {directoryDepartments.map((department) => <option key={department} value={department}>{department}</option>)}
               </Select>
             </div>
 
             <div className="border rounded-md max-h-60 overflow-y-auto">
-              {filteredDirectory.length === 0 ? (
+              {directoryLoading ? <p role="status" className="p-4 text-sm">Loading student directory…</p> : directoryError && directory.length === 0 ? <p className="p-4 text-sm">The student directory is unavailable. Retry to select students.</p> : filteredDirectory.length === 0 ? (
                 <div className="p-4 text-center text-sm text-muted-foreground">No students found</div>
               ) : (
                 <div className="divide-y">
@@ -595,6 +636,7 @@ export default function FacultyProjectsPage() {
                           <p className="text-xs text-slate-500">{u.official_email} • {u.department_name || 'No Dept'} • {u.batch || 'Unknown Year'}</p>
                         </div>
                         <Button
+                          disabled={Boolean(busyAction) || Boolean(directoryError)}
                           size="sm"
                           variant={isSelected ? "secondary" : "outline"}
                           onClick={() => {
@@ -621,6 +663,7 @@ export default function FacultyProjectsPage() {
                       <div className="flex items-center gap-2">
                         {studentModalOpen !== 'new' && (
                           <Select
+                            disabled={Boolean(busyAction)}
                             className="h-8 rounded-md border border-slate-300 px-2 text-xs focus:outline-none focus:ring-1 focus:ring-sgvu-navy bg-white"
                             value={s.grade || ''}
                             onChange={(e) => setSelectedStudents(prev => prev.map(x => x.id === s.id ? { ...x, grade: e.target.value } : x))}
@@ -636,6 +679,7 @@ export default function FacultyProjectsPage() {
                           </Select>
                         )}
                         <button 
+                          disabled={Boolean(busyAction)}
                           onClick={() => setSelectedStudents(prev => prev.filter(x => x.id !== s.id))}
                           className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-md transition-colors focus:outline-none"
                         >×</button>
@@ -647,11 +691,11 @@ export default function FacultyProjectsPage() {
             )}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => {
-              if (studentModalOpen === 'new') setTimeout(() => setCreateModalOpen(true), 100);
+            <Button disabled={Boolean(busyAction)} variant="outline" onClick={() => {
+              if (studentModalOpen === 'new') setCreateModalOpen(true);
               setStudentModalOpen(null);
             }}>Cancel</Button>
-            <Button onClick={handleSaveSelection} className="bg-sgvu-navy hover:bg-sgvu-navy/90 text-white">Save Selection</Button>
+            <Button disabled={mutationDisabled} onClick={handleSaveSelection} className="bg-sgvu-navy hover:bg-sgvu-navy/90 text-white">{busyAction?.startsWith('students:') ? 'Saving…' : 'Save Selection'}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

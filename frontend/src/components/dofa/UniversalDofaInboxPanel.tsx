@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
   CheckCircle2,
@@ -46,18 +46,27 @@ export function UniversalDofaInboxPanel() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [decidingId, setDecidingId] = useState<string | null>(null);
+  const decisionLock = useRef(false);
+  const scope = useRef(0);
+  const request = useRef(0);
 
-  const reload = useCallback(async () => {
+  const reload = useCallback(async (version = scope.current) => {
+    const requestId = ++request.current;
+    const current = () => version === scope.current && requestId === request.current;
     setLoading(true);
+    setLoadError(null);
     try {
       const d = await api.get<{ cases: DofaCase[]; p2p_projections: P2pProjection[] }>(
         '/api/dofa/inbox',
       );
+      if (!current()) return;
+      if (!Array.isArray(d?.cases) || !Array.isArray(d?.p2p_projections)) throw new Error('Could not read DOFA requests. Please retry.');
       const roleName = String(role).toLowerCase();
       if (roleName === 'faculty') {
         const { isEmptyArray, withFacultyDemoFallback } = await import('@/lib/faculty-demo-mode');
         const { facultyDemoDofaInbox } = await import('@/lib/mock/faculty-portal-demo');
         const demo = facultyDemoDofaInbox();
+        if (!current()) return;
         setCases(withFacultyDemoFallback(d.cases || [], demo.cases, isEmptyArray));
         setP2p(withFacultyDemoFallback(d.p2p_projections || [], demo.p2p_projections, isEmptyArray));
       } else {
@@ -66,17 +75,21 @@ export function UniversalDofaInboxPanel() {
       }
       setLoadError(null);
     } catch (e: unknown) {
+      if (!current()) return;
       const roleName = String(role).toLowerCase();
       if (roleName === 'faculty') {
         const { isEmptyArray, withFacultyDemoFallback } = await import('@/lib/faculty-demo-mode');
         const { facultyDemoDofaInbox } = await import('@/lib/mock/faculty-portal-demo');
         const demo = facultyDemoDofaInbox();
-        setCases(withFacultyDemoFallback([], demo.cases, isEmptyArray));
-        setP2p(withFacultyDemoFallback([], demo.p2p_projections, isEmptyArray));
-        setLoadError(null);
+        const fallbackCases = withFacultyDemoFallback([], demo.cases, isEmptyArray);
+        const fallbackP2p = withFacultyDemoFallback([], demo.p2p_projections, isEmptyArray);
+        if (!current()) return;
+        if (fallbackCases.length || fallbackP2p.length) {
+          setCases(fallbackCases);
+          setP2p(fallbackP2p);
+        }
+        setLoadError(fallbackCases.length || fallbackP2p.length ? null : String((e as Error)?.message ?? e));
       } else {
-        setCases([]);
-        setP2p([]);
         const msg = String((e as Error)?.message ?? e);
         setLoadError(msg);
         if (!/forbidden/i.test(msg)) {
@@ -84,20 +97,30 @@ export function UniversalDofaInboxPanel() {
         }
       }
     } finally {
-      setLoading(false);
+      if (current()) setLoading(false);
     }
   }, [api, role]);
 
   useEffect(() => {
-    void reload();
+    const version = ++scope.current;
+    // Do not expose the previous role/account's decisions while its replacement loads.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setCases([]);
+    setP2p([]);
+    setDecidingId(null);
+    decisionLock.current = false;
+    void reload(version);
+    return () => { scope.current += 1; };
   }, [reload]);
 
   const decide = async (caseId: string, decision: 'APPROVED' | 'REJECTED') => {
+    if (decisionLock.current || loading || loadError || !cases.some((row) => row.case_id === caseId)) return;
+    const version = scope.current;
+    decisionLock.current = true;
     setDecidingId(caseId);
-    const previous = cases;
-    setCases((current) => current.filter((c) => c.case_id !== caseId));
     try {
       if (isFacultyDemoSmokeId(caseId)) {
+        setCases((current) => current.filter((c) => c.case_id !== caseId));
         toast.success(
           decision === 'REJECTED'
             ? 'Rejected (demo)'
@@ -109,6 +132,8 @@ export function UniversalDofaInboxPanel() {
         status?: string;
         steps?: Array<{ required_role: string; decision: string | null }>;
       }>(`/api/dofa/cases/${caseId}/decide`, { decision });
+      if (version !== scope.current) return;
+      setCases((current) => current.filter((c) => c.case_id !== caseId));
       if (decision === 'REJECTED') {
         toast.success('Rejected');
       } else if (res?.status === 'APPROVED') {
@@ -119,12 +144,14 @@ export function UniversalDofaInboxPanel() {
           next ? `Approved — now awaiting ${next.required_role}` : 'Approved — advanced to next step',
         );
       }
-      await reload();
+      await reload(version);
     } catch (e) {
-      setCases(previous);
-      toast.error(String((e as Error)?.message ?? e));
+      if (version === scope.current) toast.error(String((e as Error)?.message ?? e));
     } finally {
-      setDecidingId(null);
+      if (version === scope.current) {
+        decisionLock.current = false;
+        setDecidingId(null);
+      }
     }
   };
 
@@ -200,7 +227,7 @@ export function UniversalDofaInboxPanel() {
       </header>
 
       {loadError ? (
-        <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+        <div role="alert" className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">
           {/forbidden/i.test(loadError) ? (
             <>
               Your role cannot open the universal DOFA inbox. For purchase requisitions use{' '}
@@ -212,6 +239,7 @@ export function UniversalDofaInboxPanel() {
           ) : (
             loadError
           )}
+          <Button size="sm" variant="outline" className="ml-3" disabled={loading || Boolean(decidingId)} onClick={() => void reload()}>Retry DOFA inbox</Button>
         </div>
       ) : null}
 
@@ -291,7 +319,7 @@ export function UniversalDofaInboxPanel() {
                     <Button
                       size="sm"
                       className="h-10 w-full justify-center"
-                      disabled={busy}
+                      disabled={Boolean(decidingId) || loading || Boolean(loadError)}
                       onClick={() => void decide(c.case_id, 'APPROVED')}
                     >
                       {busy ? (
@@ -307,7 +335,7 @@ export function UniversalDofaInboxPanel() {
                       size="sm"
                       variant="outline"
                       className="h-10 w-full justify-center"
-                      disabled={busy}
+                      disabled={Boolean(decidingId) || loading || Boolean(loadError)}
                       onClick={() => void decide(c.case_id, 'REJECTED')}
                     >
                       <XCircle className="mr-1.5 h-4 w-4" />

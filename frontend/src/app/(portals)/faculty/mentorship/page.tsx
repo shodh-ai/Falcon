@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { CheckCircle2, Eye, XCircle } from 'lucide-react';
@@ -17,7 +17,6 @@ import {
 import { toast } from '@/lib/notifications/falcon-toast';
 import { useAuthedApi } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
-import { getSubdomainFromClient } from '@/lib/tenant';
 import { MentorshipChatMessenger } from '@/components/mentorship/MentorshipChatMessenger';
 import { EcellMentorInbox } from '@/components/ecell/EcellMentorInbox';
 import { isEmptyArray, isFacultyDemoSmokeId, withFacultyDemoFallback } from '@/lib/faculty-demo-mode';
@@ -52,81 +51,119 @@ interface PendingApprovals {
 }
 
 export default function FacultyMentorshipPage() {
+  const { user } = useAuth();
+  return <MentorshipWorkspace key={`${user?.tenant_id ?? ''}:${user?.user_id ?? ''}`} />;
+}
+
+function MentorshipWorkspace() {
   const api = useAuthedApi();
-  const { token } = useAuth();
   const [students, setStudents] = useState<StudentInfo[]>([]);
   const [pendingCertificates, setPendingCertificates] = useState<PendingCertificate[]>([]);
   const [pendingMeetings, setPendingMeetings] = useState<PendingMeeting[]>([]);
   const [pendingLeaveRequests, setPendingLeaveRequests] = useState<PendingLeaveRequest[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [studentsLoading, setStudentsLoading] = useState(true);
+  const [approvalsLoading, setApprovalsLoading] = useState(true);
+  const [studentsError, setStudentsError] = useState<string | null>(null);
+  const [approvalsError, setApprovalsError] = useState<string | null>(null);
+  const [certificateBusy, setCertificateBusy] = useState<string | null>(null);
+  const activeApi = useRef(api);
+  useLayoutEffect(() => { activeApi.current = api; }, [api]);
+  const alive = useRef(true);
+  const studentsRequest = useRef(0);
+  const approvalsRequest = useRef(0);
+  const decisionLock = useRef<string | null>(null);
+  const current = useCallback(() => alive.current && activeApi.current === api, [api]);
 
-  function loadWorkspace() {
-    setLoading(true);
-    Promise.all([
-      api.get<StudentInfo[]>('/api/academics/proctor/my-students'),
-      api.get<PendingApprovals>('/api/academics/proctor/pending-approvals'),
-    ])
-      .then(([studentsData, approvals]) => {
-        const mentees = withFacultyDemoFallback(studentsData, facultyDemoMentees(), isEmptyArray);
-        const demoApprovals = facultyDemoPendingApprovals();
-        const approvalsResolved = withFacultyDemoFallback(
-          approvals,
-          demoApprovals,
-          (v) =>
-            !v ||
-            ((v.certificates?.length ?? 0) === 0 &&
-              (v.meetings?.length ?? 0) === 0 &&
-              (v.leave_requests?.length ?? 0) === 0),
-        );
-        setStudents(mentees);
-        setPendingCertificates(approvalsResolved.certificates);
-        setPendingMeetings(approvalsResolved.meetings ?? []);
-        setPendingLeaveRequests(approvalsResolved.leave_requests ?? []);
-        setLoading(false);
-      })
-      .catch((err) => {
-        const mentees = withFacultyDemoFallback([], facultyDemoMentees(), isEmptyArray);
-        const approvals = facultyDemoPendingApprovals();
-        if (mentees.length === 0) {
-          toast.error(err.message || 'Failed to load mentorship workspace');
-        }
-        setStudents(mentees);
-        setPendingCertificates(approvals.certificates);
-        setPendingMeetings(approvals.meetings ?? []);
-        setPendingLeaveRequests(approvals.leave_requests ?? []);
-        setLoading(false);
-      });
-  }
+  const loadStudents = useCallback(async () => {
+    const request = ++studentsRequest.current;
+    setStudentsLoading(true);
+    setStudentsError(null);
+    try {
+      const rows = await api.get<StudentInfo[]>('/api/academics/proctor/my-students');
+      if (!current() || request !== studentsRequest.current) return;
+      setStudents(withFacultyDemoFallback(rows, facultyDemoMentees(), isEmptyArray));
+    } catch (error) {
+      if (!current() || request !== studentsRequest.current) return;
+      const fallback = withFacultyDemoFallback([], facultyDemoMentees(), isEmptyArray);
+      if (fallback.length) setStudents(fallback);
+      else setStudentsError(error instanceof Error ? error.message : 'Could not load mentees');
+    } finally {
+      if (current() && request === studentsRequest.current) setStudentsLoading(false);
+    }
+  }, [api, current]);
+
+  const loadApprovals = useCallback(async () => {
+    const request = ++approvalsRequest.current;
+    setApprovalsLoading(true);
+    setApprovalsError(null);
+    const apply = (data: PendingApprovals) => {
+      setPendingCertificates(data.certificates ?? []);
+      setPendingMeetings(data.meetings ?? []);
+      setPendingLeaveRequests(data.leave_requests ?? []);
+    };
+    try {
+      const rows = await api.get<PendingApprovals>('/api/academics/proctor/pending-approvals');
+      if (!current() || request !== approvalsRequest.current) return;
+      apply(withFacultyDemoFallback(rows, facultyDemoPendingApprovals(), (value) => !value ||
+        !(value.certificates?.length || value.meetings?.length || value.leave_requests?.length)));
+    } catch (error) {
+      if (!current() || request !== approvalsRequest.current) return;
+      const fallback = withFacultyDemoFallback<PendingApprovals>(
+        { certificates: [], meetings: [], leave_requests: [] }, facultyDemoPendingApprovals(), () => true,
+      );
+      if (fallback.certificates.length || fallback.meetings?.length || fallback.leave_requests?.length) apply(fallback);
+      else setApprovalsError(error instanceof Error ? error.message : 'Could not load mentorship approvals');
+    } finally {
+      if (current() && request === approvalsRequest.current) setApprovalsLoading(false);
+    }
+  }, [api, current]);
+
+  const loadWorkspace = useCallback(async () => {
+    await Promise.all([loadStudents(), loadApprovals()]);
+  }, [loadStudents, loadApprovals]);
 
   useEffect(() => {
-    loadWorkspace();
-  }, [api]);
+    alive.current = true;
+    // Refreshing the authenticated API must invalidate the prior roster and pending decision state.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setStudents([]);
+    setPendingCertificates([]);
+    setPendingMeetings([]);
+    setPendingLeaveRequests([]);
+    setCertificateBusy(null);
+    decisionLock.current = null;
+    void loadWorkspace();
+    return () => {
+      alive.current = false;
+      studentsRequest.current += 1;
+      approvalsRequest.current += 1;
+    };
+  }, [loadWorkspace]);
 
   async function openCertificate(certificateId: string) {
-    if (!token) return;
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
-      const response = await fetch(`${apiUrl}/api/academics/certificates/${certificateId}/download`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'x-tenant-subdomain': getSubdomainFromClient(),
-        },
-      });
-      if (!response.ok) throw new Error('Unable to open certificate');
-      const blob = await response.blob();
+      const blob = await api.getBlob(`/api/academics/certificates/${certificateId}/download`);
+      if (!current()) return;
       const url = URL.createObjectURL(blob);
       window.open(url, '_blank', 'noopener,noreferrer');
       window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Unable to open certificate');
+      if (current()) toast.error(error instanceof Error ? error.message : 'Unable to open certificate');
     }
   }
 
   async function verifyCertificate(certificateId: string, status: 'VERIFIED' | 'REJECTED') {
-    const rejection_reason = status === 'REJECTED'
-      ? window.prompt('Reason for rejection?') ?? undefined
-      : undefined;
+    if (decisionLock.current || approvalsLoading || approvalsError) return;
+    const reason = status === 'REJECTED' ? window.prompt('Reason for rejection?') : undefined;
+    if (reason === null) return;
+    const rejection_reason = reason?.trim();
+    if (status === 'REJECTED' && !rejection_reason) {
+      toast.error('Enter a reason for rejection');
+      return;
+    }
 
+    decisionLock.current = certificateId;
+    setCertificateBusy(certificateId);
     try {
       if (isFacultyDemoSmokeId(certificateId)) {
         setPendingCertificates((prev) => prev.filter((item) => item.certificate_id !== certificateId));
@@ -138,10 +175,14 @@ export default function FacultyMentorshipPage() {
         status,
         rejection_reason,
       });
+      if (!current()) return;
+      approvalsRequest.current += 1;
       setPendingCertificates((prev) => prev.filter((item) => item.certificate_id !== certificateId));
       toast.success(status === 'VERIFIED' ? 'Certificate approved' : 'Certificate rejected');
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Unable to update certificate');
+      if (current()) toast.error(error instanceof Error ? error.message : 'Unable to update certificate');
+    } finally {
+      if (current()) { decisionLock.current = null; setCertificateBusy(null); }
     }
   }
 
@@ -152,31 +193,34 @@ export default function FacultyMentorshipPage() {
         description="View and manage mentees assigned to you for mentorship."
         meta={
           <>
-            <FacultyMetricChip label="Mentees" value={students.length} />
+            <FacultyMetricChip label="Mentees" value={studentsLoading ? '…' : studentsError ? '—' : students.length} />
             <FacultyMetricChip
               label="Pending certs"
-              value={pendingCertificates.length}
+              value={approvalsLoading ? '…' : approvalsError ? '—' : pendingCertificates.length}
               emphasis={pendingCertificates.length > 0}
             />
           </>
         }
       />
 
-      {loading && <FalconLoader label="Loading mentorship roster…" />}
+      {studentsLoading && <FalconLoader label="Loading mentorship roster…" />}
+      {approvalsLoading && <FalconLoader label="Loading mentorship approvals…" />}
+      {studentsError && <div role="alert" className="rounded-xl border border-destructive/30 p-4 text-sm">{studentsError} <Button variant="outline" size="sm" disabled={studentsLoading} onClick={() => void loadStudents()}>Retry mentees</Button></div>}
+      {approvalsError && <div role="alert" className="rounded-xl border border-destructive/30 p-4 text-sm">{approvalsError} <Button variant="outline" size="sm" disabled={approvalsLoading || Boolean(certificateBusy)} onClick={() => void loadApprovals()}>Retry approvals</Button></div>}
 
-      {!loading && <MentorshipChatMessenger />}
+      {!studentsLoading && !studentsError && <MentorshipChatMessenger />}
 
-      {!loading && (
+      {!approvalsLoading && !approvalsError && (
         <PendingMeetingRequests meetings={pendingMeetings} onUpdated={loadWorkspace} />
       )}
 
-      {!loading && <EcellMentorInbox />}
+      {!studentsLoading && !studentsError && <EcellMentorInbox />}
 
-      {!loading && (
+      {!approvalsLoading && !approvalsError && (
         <PendingLeaveRequests requests={pendingLeaveRequests} onUpdated={loadWorkspace} />
       )}
 
-      {!loading && (
+      {!approvalsLoading && !approvalsError && (
         <FacultyPanel
           title="Pending certificates"
           count={pendingCertificates.length}
@@ -201,17 +245,18 @@ export default function FacultyMentorshipPage() {
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <Button variant="outline" size="sm" onClick={() => openCertificate(certificate.certificate_id)}>
+                  <Button variant="outline" size="sm" disabled={Boolean(certificateBusy)} onClick={() => openCertificate(certificate.certificate_id)}>
                     <Eye className="h-4 w-4" />
                     View
                   </Button>
-                  <Button size="sm" onClick={() => verifyCertificate(certificate.certificate_id, 'VERIFIED')}>
+                  <Button size="sm" disabled={Boolean(certificateBusy)} onClick={() => verifyCertificate(certificate.certificate_id, 'VERIFIED')}>
                     <CheckCircle2 className="h-4 w-4" />
                     Approve
                   </Button>
                   <Button
                     variant="destructive"
                     size="sm"
+                    disabled={Boolean(certificateBusy)}
                     onClick={() => verifyCertificate(certificate.certificate_id, 'REJECTED')}
                   >
                     <XCircle className="h-4 w-4" />
@@ -224,11 +269,11 @@ export default function FacultyMentorshipPage() {
         </FacultyPanel>
       )}
 
-      {!loading && students.length === 0 && (
+      {!studentsLoading && !studentsError && students.length === 0 && (
         <FacultyEmptyState title="No mentees yet" description="No mentees have been assigned to you." />
       )}
 
-      {!loading && students.length > 0 && (
+      {!studentsLoading && students.length > 0 && (
         <FacultyPanel title="Mentee profiles" count={students.length}>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {students.map((item) => (

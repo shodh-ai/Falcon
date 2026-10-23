@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { ArrowRight, Loader2, Send } from 'lucide-react';
 import { useAuthedApi } from '@/lib/api';
@@ -10,11 +10,12 @@ import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { toast } from '@/lib/notifications/falcon-toast';
-import { FacultyEmptyState, FacultyPageHeader, FacultyPageShell, FacultyPanel } from '@/components/faculty';
+import { FacultyEmptyState, FacultyErrorBanner, FacultyPageHeader, FacultyPageShell, FacultyPanel } from '@/components/faculty';
 import { isEmptyArray, isFacultyDemoSmokeId, withFacultyDemoFallback } from '@/lib/faculty-demo-mode';
 import { facultyDemoGradeChanges } from '@/lib/mock/faculty-portal-demo';
 import { cn } from '@/lib/utils';
 import { uniqueFacultyCoursesByCourseId, useFacultyCourses } from '@/components/faculty/useFacultyCourses';
+import { FacultyAccountScope } from '@/components/faculty/FacultyAccountScope';
 
 type GradeChangeRow = {
   change_id?: string;
@@ -66,10 +67,25 @@ export default function GradeChangePage() {
   const api = useAuthedApi();
   const pathname = usePathname();
   const isHod = pathname.startsWith('/hod/');
-  const { courses } = useFacultyCourses();
+  const scope = useMemo(() => ({ api, isHod }), [api, isHod]);
+  return <FacultyAccountScope scope={scope}><GradeChangeContent api={api} isHod={isHod} /></FacultyAccountScope>;
+}
+
+function GradeChangeContent({ api, isHod }: { api: ReturnType<typeof useAuthedApi>; isHod: boolean }) {
+  const {
+    courses,
+    loading: coursesLoading,
+    error: coursesError,
+  } = useFacultyCourses();
   const courseOptions = uniqueFacultyCoursesByCourseId(courses);
+  const courseLoadError = coursesError && coursesError !== 'No courses allocated to your timetable yet.'
+    ? coursesError
+    : null;
+  const coursesUnavailable = coursesLoading || Boolean(courseLoadError) || courseOptions.length === 0;
   const [departmentStudents, setDepartmentStudents] = useState<DepartmentStudent[]>([]);
   const [studentsLoading, setStudentsLoading] = useState(false);
+  const [studentsError, setStudentsError] = useState<string | null>(null);
+  const [studentRetry, setStudentRetry] = useState(0);
   const [rows, setRows] = useState<GradeChangeRow[]>([]);
   const [studentId, setStudentId] = useState('');
   const [fromG, setFromG] = useState('');
@@ -78,15 +94,39 @@ export default function GradeChangePage() {
   const [reason, setReason] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const mounted = useRef(true);
+  const reading = useRef(0);
+  const submittingLock = useRef(false);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; reading.current += 1; };
+  }, []);
 
   const reload = useCallback(
-    () =>
-      api
+    (afterSubmit = false) => {
+      const requestId = ++reading.current;
+      return api
         .get<GradeChangeRow[]>('/api/uos/sis/grade-changes')
-        .then((data) => setRows(withFacultyDemoFallback(data, facultyDemoGradeChanges(), isEmptyArray)))
-        .catch(() => setRows(withFacultyDemoFallback([], facultyDemoGradeChanges(), isEmptyArray)))
-        .finally(() => setLoading(false)),
-    [api],
+        .then((data) => {
+          if (!mounted.current || requestId !== reading.current) return;
+          if (!Array.isArray(data)) throw new Error('Could not read grade change requests');
+          setError(null);
+          setRows(withFacultyDemoFallback(data, facultyDemoGradeChanges(), isEmptyArray));
+        })
+        .catch((err: unknown) => {
+          if (!mounted.current || requestId !== reading.current) return;
+          const fallback = withFacultyDemoFallback([], facultyDemoGradeChanges(), isEmptyArray);
+          if (!afterSubmit || fallback.length) setRows(fallback);
+          if (fallback.length === 0) {
+            const message = err instanceof Error ? err.message : 'Failed to load grade change requests';
+            setError(afterSubmit ? `Request submitted, but the list could not be refreshed. ${message}` : message);
+          }
+        })
+        .finally(() => { if (mounted.current && requestId === reading.current) setLoading(false); });
+    },
+    [api, setLoading],
   );
 
   useEffect(() => {
@@ -96,14 +136,20 @@ export default function GradeChangePage() {
   useEffect(() => {
     if (!isHod) return;
     let cancelled = false;
+    // The HOD roster is an external request; block student selection until this account's load finishes.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setStudentsLoading(true);
+    setStudentsError(null);
     api
       .get<DepartmentStudent[]>('/api/academics/hod/student-monitor')
       .then((data) => {
         if (!cancelled) setDepartmentStudents(Array.isArray(data) ? data : []);
       })
-      .catch(() => {
-        if (!cancelled) setDepartmentStudents([]);
+      .catch((failure: unknown) => {
+        if (!cancelled) {
+          setDepartmentStudents([]);
+          setStudentsError(failure instanceof Error ? failure.message : 'Could not load department students');
+        }
       })
       .finally(() => {
         if (!cancelled) setStudentsLoading(false);
@@ -111,15 +157,20 @@ export default function GradeChangePage() {
     return () => {
       cancelled = true;
     };
-  }, [api, isHod]);
+  }, [api, isHod, studentRetry]);
 
   async function handleSubmit() {
+    if (submittingLock.current || coursesUnavailable || (isHod && (studentsLoading || studentsError))) return;
     if (!studentId.trim()) {
       toast.error('Enter the student user ID');
       return;
     }
-    if (!course.trim()) {
-      toast.error('Enter the course code');
+    if (!courseOptions.some((item) => item.course_code === course)) {
+      toast.error('Select a subject you teach');
+      return;
+    }
+    if (isHod && !departmentStudents.some((student) => student.user_id === studentId)) {
+      toast.error('Select a student in your department');
       return;
     }
     if (!fromG.trim() || !toG.trim()) {
@@ -153,6 +204,7 @@ export default function GradeChangePage() {
       setReason('');
       return;
     }
+    submittingLock.current = true;
     setSubmitting(true);
     try {
       await api.post('/api/uos/sis/grade-changes', {
@@ -162,17 +214,20 @@ export default function GradeChangePage() {
         to_grade: toG.trim().toUpperCase(),
         reason: reason.trim(),
       });
+      if (!mounted.current) return;
       toast.success('Submitted — awaiting HOD approval');
       setStudentId('');
       setCourse('');
       setFromG('');
       setToG('');
       setReason('');
-      await reload();
+      setLoading(true);
+      await reload(true);
     } catch (error: unknown) {
-      toast.error(error instanceof Error ? error.message : String(error));
+      if (mounted.current) toast.error(error instanceof Error ? error.message : String(error));
     } finally {
-      setSubmitting(false);
+      submittingLock.current = false;
+      if (mounted.current) setSubmitting(false);
     }
   }
 
@@ -206,14 +261,15 @@ export default function GradeChangePage() {
         >
           <div className="grid gap-5">
             <div className="grid gap-4 sm:grid-cols-2">
-              <label className="text-sm">
-                <span className="mb-1.5 block font-medium text-sgvu-navy">{isHod ? 'Department student' : 'Student user ID'}</span>
+              <div className="text-sm">
+                <label htmlFor="grade-request-student" className="mb-1.5 block font-medium text-sgvu-navy">{isHod ? 'Department student' : 'Student user ID'}</label>
                 {isHod ? (
                   <Select
+                    id="grade-request-student"
                     className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm"
                     value={studentId}
                     onChange={(e) => setStudentId(e.target.value)}
-                    disabled={studentsLoading}
+                    disabled={studentsLoading || submitting || Boolean(studentsError)}
                   >
                     <option value="">{studentsLoading ? 'Loading students…' : 'Select a student'}</option>
                     {departmentStudents.map((student) => (
@@ -224,32 +280,57 @@ export default function GradeChangePage() {
                   </Select>
                 ) : (
                   <Input
-                    placeholder="e.g. student UUID or enrollment ID"
+                    id="grade-request-student"
+                    disabled={submitting}
+                    placeholder="Student user UUID"
                     value={studentId}
                     onChange={(e) => setStudentId(e.target.value)}
                   />
                 )}
-              </label>
+                {isHod && studentsError ? <div role="alert" className="mt-2 space-y-2 text-destructive"><p>{studentsError}</p><Button variant="outline" disabled={submitting} onClick={() => setStudentRetry((value) => value + 1)}>Retry department students</Button></div> : null}
+              </div>
 
-              <label className="text-sm">
+              <label className="text-sm" htmlFor="grade-change-course">
                 <span className="mb-1.5 block font-medium text-sgvu-navy">{isHod ? 'Department subject' : 'Your teaching subject'}</span>
                 <Select
+                  id="grade-change-course"
                   className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm"
                   value={course}
                   onChange={(e) => setCourse(e.target.value)}
+                  disabled={coursesUnavailable || submitting}
                 >
-                  <option value="">Select a subject you teach</option>
+                  <option value="">
+                    {coursesLoading
+                      ? 'Loading subjects…'
+                      : courseLoadError
+                        ? 'Unable to load subjects'
+                        : courseOptions.length === 0
+                          ? 'No subjects assigned'
+                          : isHod ? 'Select a department subject' : 'Select a subject you teach'}
+                  </option>
                   {courseOptions.map((item) => (
                     <option key={item.course_id} value={item.course_code}>
                       {item.course_code} · {item.course_name}
                     </option>
                   ))}
                 </Select>
+                {!coursesLoading && courseLoadError ? (
+                  <p role="alert" className="mt-1.5 text-sm text-destructive">
+                    {courseLoadError} Refresh the page to try again.
+                  </p>
+                ) : !coursesLoading && courseOptions.length === 0 ? (
+                  <p role="status" className="mt-1.5 text-xs text-muted-foreground">
+                    {isHod
+                      ? 'No subjects are available in your department.'
+                      : 'No teaching subjects are assigned yet. Contact your HOD if you expected a teaching assignment.'}
+                  </p>
+                ) : null}
               </label>
 
               <label className="text-sm">
                 <span className="mb-1.5 block font-medium text-sgvu-navy">From grade</span>
                 <Input
+                  disabled={submitting}
                   placeholder="e.g. C"
                   value={fromG}
                   onChange={(e) => setFromG(e.target.value)}
@@ -260,6 +341,7 @@ export default function GradeChangePage() {
               <label className="text-sm">
                 <span className="mb-1.5 block font-medium text-sgvu-navy">To grade</span>
                 <Input
+                  disabled={submitting}
                   placeholder="e.g. B"
                   value={toG}
                   onChange={(e) => setToG(e.target.value)}
@@ -271,6 +353,7 @@ export default function GradeChangePage() {
             <label className="text-sm">
               <span className="mb-1.5 block font-medium text-sgvu-navy">Reason for change</span>
               <Textarea
+                disabled={submitting}
                 value={reason}
                 onChange={(e) => setReason(e.target.value)}
                 placeholder="e.g. Post-final correction after recheck — explain why the grade must change"
@@ -279,7 +362,10 @@ export default function GradeChangePage() {
             </label>
 
             <div className="flex justify-end border-t border-border/40 pt-4">
-              <Button onClick={() => void handleSubmit()} disabled={submitting}>
+              <Button
+                onClick={() => void handleSubmit()}
+                disabled={submitting || coursesUnavailable || !studentId.trim() || !fromG.trim() || !toG.trim() || !reason.trim() || !courseOptions.some((item) => item.course_code === course) || (isHod && (studentsLoading || Boolean(studentsError) || !departmentStudents.some((student) => student.user_id === studentId)))}
+              >
                 {submitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
                 Request grade change
               </Button>
@@ -297,7 +383,7 @@ export default function GradeChangePage() {
             <div className="flex justify-center py-8">
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
             </div>
-          ) : rows.length === 0 ? (
+          ) : error ? <div role="alert" className="space-y-3"><FacultyErrorBanner message={error} /><Button variant="outline" disabled={submitting} onClick={() => { setLoading(true); void reload(); }}>Retry requests</Button></div> : rows.length === 0 ? (
             <FacultyEmptyState
               title="No requests yet"
               description="Submitted grade change requests will appear here."

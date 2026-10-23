@@ -18,6 +18,7 @@ import { ObjectStorageService } from '../../storage/object-storage.service';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 import { BulkAttendanceDto } from './dto/bulk-attendance.dto';
 import { FacultyTeachingDepartmentsService } from './faculty-teaching-departments.service';
+import { facultyAttendanceStatsCte } from './faculty-attendance-sql';
 
 export interface FacultyTodayClassDto {
   classId: number;
@@ -305,26 +306,53 @@ export class AcademicsFacultyService {
       order: { student_user_id: 'ASC' },
     });
 
-    const rollById = new Map<string, string>();
+    const detailsById = new Map<
+      string,
+      { roll_number: string; attendance_record_count: number; attendance_percent: number | null }
+    >();
     if (rows.length) {
       const profileRows = await this.dataSource.query<
-        Array<{ user_id: string; roll_number: string }>
+        Array<{
+          user_id: string;
+          roll_number: string;
+          attendance_record_count: number | string;
+          attendance_percent: number | string | null;
+        }>
       >(
-        `SELECT u.user_id, ${ROLL_NUMBER_SQL} AS roll_number
+        `WITH ${facultyAttendanceStatsCte('$2', '$3')}
+         SELECT u.user_id, ${ROLL_NUMBER_SQL} AS roll_number,
+                COALESCE(a.attendance_record_count, 0)::int AS attendance_record_count,
+                a.attendance_percent
          FROM users u
          LEFT JOIN student_profiles sp ON sp.user_id = u.user_id
+         LEFT JOIN attendance_stats a ON a.student_user_id = u.user_id::text
          WHERE u.user_id = ANY($1::uuid[])`,
-        [rows.map((r) => r.student_user_id)],
+        [rows.map((r) => r.student_user_id), tenantId, courseId],
       );
-      for (const p of profileRows) rollById.set(p.user_id, p.roll_number);
+      for (const p of profileRows) {
+        const count = Number(p.attendance_record_count ?? 0);
+        detailsById.set(p.user_id, {
+          roll_number: p.roll_number,
+          attendance_record_count: count,
+          // An enrollment's default zero is not evidence of recorded absences.
+          attendance_percent: count > 0 && p.attendance_percent != null
+            ? Number(p.attendance_percent)
+            : null,
+        });
+      }
     }
 
-    return rows.map((row) => ({
-      student_id: row.student_user_id,
-      name: row.student?.name ?? 'Student',
-      roll_number: rollById.get(row.student_user_id) ?? row.student_user_id,
-      email: row.student?.email ?? null,
-    }));
+    return rows.map((row) => {
+      const details = detailsById.get(row.student_user_id);
+      return {
+        student_id: row.student_user_id,
+        name: row.student?.name ?? 'Student',
+        roll_number: details?.roll_number ?? row.student_user_id,
+        email: row.student?.email ?? null,
+        attendance_record_count: details?.attendance_record_count ?? 0,
+        attendance_percent: details?.attendance_percent ?? null,
+      };
+    });
   }
 
   async getCourseAttendanceState(

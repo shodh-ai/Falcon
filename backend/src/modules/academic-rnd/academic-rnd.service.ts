@@ -1,16 +1,20 @@
 import {
   BadRequestException,
+  ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { isUUID } from 'class-validator';
 import * as ExcelJS from 'exceljs';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 import { NotificationService } from '../integrations/notification.service';
 import { UpsertRndConfigDto } from './dto/upsert-config.dto';
 import { SubmitRndApplicationDto } from './dto/submit-application.dto';
 import { RndApprovalActionDto, RndRankingDto } from './dto/approval-action.dto';
+import { postgresQueryRows } from '../../common/postgres-query-rows';
 
 const VALID_TRANSITIONS: Record<string, string[]> = {
   SUBMITTED: ['PENDING_GUIDE'],
@@ -260,16 +264,82 @@ export class AcademicRndService {
   }
 
   async listGuideQueue(tenantId: string | undefined, facultyUserId: string) {
+    const tid = await this.guideTenant(tenantId, facultyUserId);
     return this.db.query(
       `SELECT a.*, u.name AS student_name, c.title AS config_title
        FROM academic_rnd_applications a
-       JOIN users u ON u.user_id = a.student_user_id
-       LEFT JOIN academic_rnd_configs c ON c.config_id = a.config_id
+       JOIN users u ON u.user_id = a.student_user_id AND u.tenant_id = a.tenant_id AND u.deleted_at IS NULL
+       LEFT JOIN academic_rnd_configs c ON c.config_id = a.config_id AND c.tenant_id = a.tenant_id
        WHERE a.tenant_id = $1 AND a.status = 'PENDING_GUIDE'
          AND (a.guide_faculty_user_id = $2 OR a.guide_faculty_user_id IS NULL)
        ORDER BY a.submitted_at ASC`,
-      [this.tenant(tenantId), facultyUserId],
+      [tid, facultyUserId],
     );
+  }
+
+  private async guideTenant(tenantId: string | undefined, facultyUserId: string) {
+    const [actor] = await this.db.query(
+      `SELECT tenant_id FROM users WHERE user_id = $1 AND is_active = true AND deleted_at IS NULL`,
+      [facultyUserId],
+    );
+    if (!actor?.tenant_id || (tenantId && tenantId !== actor.tenant_id)) {
+      throw new ForbiddenException('An active account in this university is required');
+    }
+    return actor.tenant_id as string;
+  }
+
+  private async decideGuide(
+    tenantId: string | undefined,
+    approverUserId: string,
+    applicationId: string,
+    approved: boolean,
+    remarks?: string,
+  ) {
+    if (!isUUID(applicationId)) throw new BadRequestException('Select a valid research application');
+    if (remarks != null && typeof remarks !== 'string') throw new BadRequestException('Remarks must be text');
+    const normalizedRemarks = remarks?.trim() || null;
+    if (!approved && !normalizedRemarks) throw new BadRequestException('Enter a reason for rejecting this application');
+    const tid = await this.guideTenant(tenantId, approverUserId);
+    const nextStatus = approved ? 'PENDING_BUDGET' : 'GUIDE_REJECTED';
+    const { application, updated } = await this.db.transaction(async manager => {
+      const [application] = await manager.query(
+        `SELECT a.* FROM academic_rnd_applications a
+         JOIN users u ON u.user_id = a.student_user_id AND u.tenant_id = a.tenant_id AND u.deleted_at IS NULL
+         WHERE a.application_id = $1 AND a.tenant_id = $2
+         FOR UPDATE OF a`,
+        [applicationId, tid],
+      );
+      if (!application) throw new NotFoundException('Application not found');
+      if (application.guide_faculty_user_id && application.guide_faculty_user_id !== approverUserId) {
+        throw new ForbiddenException('This application is assigned to another research guide');
+      }
+      this.assertTransition(String(application.status), nextStatus);
+      const [updated] = postgresQueryRows(await manager.query(
+        `UPDATE academic_rnd_applications
+         SET status = $4, updated_at = NOW()
+         WHERE application_id = $1 AND tenant_id = $2 AND status = 'PENDING_GUIDE'
+           AND (guide_faculty_user_id = $3 OR guide_faculty_user_id IS NULL)
+         RETURNING *`,
+        [applicationId, tid, approverUserId, nextStatus],
+      ));
+      if (!updated) throw new ConflictException('This application changed. Refresh before reviewing it.');
+      await manager.query(
+        `INSERT INTO academic_rnd_approvals (
+           tenant_id, application_id, approver_user_id, approval_tier, status, remarks
+         ) VALUES ($1, $2, $3, 'GUIDE', $4, $5)`,
+        [tid, applicationId, approverUserId, approved ? 'APPROVED' : 'REJECTED', normalizedRemarks],
+      );
+      return { application, updated };
+    });
+    await this.notifyStudent(
+      tid,
+      String(application.student_user_id),
+      approved ? 'R&D Grant — Guide Approved' : 'R&D Grant — Guide Rejected',
+      approved
+        ? `Your project "${application.project_title}" passed technical review and is forwarded for budget approval.`
+        : `Your project "${application.project_title}" was rejected at guide review. Remarks: ${normalizedRemarks}`,
+    );
+    return updated;
   }
 
   async listBudgetQueue(tenantId?: string) {
@@ -314,34 +384,7 @@ export class AcademicRndService {
     applicationId: string,
     dto: RndApprovalActionDto,
   ) {
-    const tid = this.tenant(tenantId);
-    const app = await this.getApplication(tid, applicationId);
-    this.assertTransition(String(app.status), 'PENDING_BUDGET');
-
-    const rows = await this.db.query(
-      `UPDATE academic_rnd_applications
-       SET status = 'PENDING_BUDGET', updated_at = NOW()
-       WHERE application_id = $1 AND tenant_id = $2 AND status = 'PENDING_GUIDE'
-       RETURNING *`,
-      [applicationId, tid],
-    );
-    if (!rows[0])
-      throw new BadRequestException('Application not in guide review queue');
-
-    await this.db.query(
-      `INSERT INTO academic_rnd_approvals (
-         tenant_id, application_id, approver_user_id, approval_tier, status, remarks
-       ) VALUES ($1, $2, $3, 'GUIDE', 'APPROVED', $4)`,
-      [tid, applicationId, approverUserId, dto.remarks ?? null],
-    );
-
-    await this.notifyStudent(
-      tid,
-      String(app.student_user_id),
-      'R&D Grant — Guide Approved',
-      `Your project "${app.project_title}" passed technical review and is forwarded for budget approval.`,
-    );
-    return rows[0];
+    return this.decideGuide(tenantId, approverUserId, applicationId, true, dto?.remarks);
   }
 
   async rejectGuide(
@@ -350,34 +393,7 @@ export class AcademicRndService {
     applicationId: string,
     remarks: string,
   ) {
-    const tid = this.tenant(tenantId);
-    const app = await this.getApplication(tid, applicationId);
-    this.assertTransition(String(app.status), 'GUIDE_REJECTED');
-
-    const rows = await this.db.query(
-      `UPDATE academic_rnd_applications
-       SET status = 'GUIDE_REJECTED', updated_at = NOW()
-       WHERE application_id = $1 AND tenant_id = $2 AND status = 'PENDING_GUIDE'
-       RETURNING *`,
-      [applicationId, tid],
-    );
-    if (!rows[0])
-      throw new BadRequestException('Application not in guide review queue');
-
-    await this.db.query(
-      `INSERT INTO academic_rnd_approvals (
-         tenant_id, application_id, approver_user_id, approval_tier, status, remarks
-       ) VALUES ($1, $2, $3, 'GUIDE', 'REJECTED', $4)`,
-      [tid, applicationId, approverUserId, remarks],
-    );
-
-    await this.notifyStudent(
-      tid,
-      String(app.student_user_id),
-      'R&D Grant — Guide Rejected',
-      `Your project "${app.project_title}" was rejected at guide review. Remarks: ${remarks}`,
-    );
-    return rows[0];
+    return this.decideGuide(tenantId, approverUserId, applicationId, false, remarks);
   }
 
   async approveBudget(

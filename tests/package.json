@@ -7,10 +7,11 @@
     "test": "npm run test:unit && npm run test:integration && npm run test:frontend && npm run test:e2e",
     "test:unit": "jest --config jest.unit.config.cjs",
     "test:integration": "jest --config jest.integration.config.cjs",
+    "test:backend": "cd ../backend && npm test -- --runInBand",
     "test:frontend": "cd ../frontend && npm run test",
     "test:e2e": "playwright test --config e2e/playwright.config.ts",
     "coverage": "npm run test:unit -- --coverage && npm run test:integration -- --coverage && node scripts/verify-backend-coverage.cjs",
-    "test:ci": "npm run typecheck && npm run lint && npm run lint:frontend:tests && npm run coverage && npm run test:frontend:cov && npm run build && npm run test:e2e",
+    "test:ci": "npm run typecheck && npm run lint && npm run lint:frontend:tests && npm run test:backend && npm run coverage && npm run test:frontend:cov && npm run build && npm run test:e2e",
     "test:frontend:cov": "cd ../frontend && npm run test:cov",
     "typecheck": "tsc --noEmit -p tsconfig.json && npm run typecheck:backend && npm run typecheck:frontend",
     "typecheck:backend": "cd ../backend && npm run build",
@@ -22,6 +23,11 @@
     "build:backend": "cd ../backend && npm run build",
     "build:frontend": "cd ../frontend && npm run build",
     "db:migrate:test": "node scripts/migrate-test-db.cjs"
+  },
+  "overrides": {
+    "@istanbuljs/load-nyc-config": {
+      "js-yaml": "4.3.2"
+    }
   },
   "devDependencies": {
     "@nestjs/common": "^11.0.1",

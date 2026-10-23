@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { CheckCircle2, XCircle } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -30,15 +30,31 @@ function formatDate(date: string) {
 
 export function PendingLeaveRequests({ requests, onUpdated }: Props) {
   const api = useAuthedApi();
+  const [scope, setScope] = useState({ api, revision: 0 });
+  if (scope.api !== api) setScope({ api, revision: scope.revision + 1 });
+  return <PendingLeavesWorkspace key={scope.revision} api={api} requests={requests} onUpdated={onUpdated} />;
+}
+
+function PendingLeavesWorkspace({ api, requests, onUpdated }: Props & { api: ReturnType<typeof useAuthedApi> }) {
   const [remarks, setRemarks] = useState('');
   const [activeId, setActiveId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const decisionLock = useRef(false);
+  const alive = useRef(true);
+  const current = () => alive.current;
+
+  useLayoutEffect(() => {
+    alive.current = true;
+    return () => { alive.current = false; };
+  }, []);
 
   async function respond(interactionId: string, status: 'APPROVED' | 'REJECTED') {
+    if (decisionLock.current) return;
     if (status === 'REJECTED' && remarks.trim().length < 3) {
       toast.error('Please enter a short reason for the mentee');
       return;
     }
+    decisionLock.current = true;
     setSubmitting(true);
     try {
       if (isFacultyDemoSmokeId(interactionId)) {
@@ -52,14 +68,15 @@ export function PendingLeaveRequests({ requests, onUpdated }: Props) {
         status,
         remarks: remarks.trim() || undefined,
       });
+      if (!current()) return;
       toast.success(status === 'APPROVED' ? 'Leave request approved' : 'Leave request declined');
       setActiveId(null);
       setRemarks('');
       onUpdated();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Unable to update request');
+      if (current()) toast.error(err instanceof Error ? err.message : 'Unable to update request');
     } finally {
-      setSubmitting(false);
+      if (current()) { decisionLock.current = false; setSubmitting(false); }
     }
   }
 
@@ -88,6 +105,7 @@ export function PendingLeaveRequests({ requests, onUpdated }: Props) {
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
               {activeId === req.interaction_id && (
                 <Input
+                  disabled={submitting}
                   placeholder="Remarks (required if declining)"
                   value={remarks}
                   onChange={(e) => setRemarks(e.target.value)}

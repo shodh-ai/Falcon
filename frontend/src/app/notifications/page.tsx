@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, Bell, CheckCheck, Loader2 } from 'lucide-react';
@@ -33,6 +33,48 @@ export default function NotificationsPage() {
   const { notifications, isLoading, error, refresh } = useNotificationHistory();
   const [filter, setFilter] = useState<FilterTab>('all');
   const [category, setCategory] = useState('ALL');
+  const [busy, setBusy] = useState(false);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+  const operation = useRef<symbol | null>(null);
+  const mounted = useRef(false);
+  const activeToken = useRef(token);
+  useLayoutEffect(() => { activeToken.current = token; }, [token]);
+  useEffect(() => {
+    mounted.current = true;
+    operation.current = null;
+    // Remove the previous session's notification state before its replacement loads.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setBusy(false);
+    setRefreshError(null);
+    return () => { mounted.current = false; };
+  }, [token]);
+
+  const beginOperation = () => {
+    if (!token || operation.current) return null;
+    const id = Symbol();
+    operation.current = id;
+    setBusy(true);
+    return {
+      current: () => mounted.current && activeToken.current === token && operation.current === id,
+      finish: () => {
+        if (mounted.current && activeToken.current === token && operation.current === id) {
+          operation.current = null;
+          setBusy(false);
+        }
+      },
+    };
+  };
+
+  const retryRefresh = async () => {
+    const task = beginOperation();
+    if (!task) return;
+    try {
+      await refresh();
+      if (task.current()) setRefreshError(null);
+    } catch {
+      if (task.current()) setRefreshError('Could not refresh notifications. Retry to get the latest updates.');
+    } finally { task.finish(); }
+  };
 
   const items = useMemo(() => notifications.map(toAppNotification), [notifications]);
   const backHref = useMemo(
@@ -79,13 +121,23 @@ export default function NotificationsPage() {
   }
 
   const markAll = async () => {
-    if (!token) return;
-    const hasLive = notifications.some((n) => !isDemoNotificationId(n.notification_id));
-    if (hasLive) {
-      await notificationsApi.markAllRead(token);
-      await refresh();
-    }
-    toast.success('All notifications marked as read');
+    if (!token || isLoading || error || unreadCount === 0) return;
+    const task = beginOperation();
+    if (!task) return;
+    try {
+      const hasLive = notifications.some((n) => !isDemoNotificationId(n.notification_id));
+      if (hasLive) await notificationsApi.markAllRead(token);
+      if (!task.current()) return;
+      toast.success('All notifications marked as read');
+      try {
+        if (hasLive) await refresh();
+        if (task.current()) setRefreshError(null);
+      } catch {
+        if (task.current()) setRefreshError('Marked as read. Could not refresh the list; retry to see the latest updates.');
+      }
+    } catch (e) {
+      if (task.current()) toast.error(e instanceof Error ? e.message : 'Could not mark notifications as read');
+    } finally { task.finish(); }
   };
 
   const openNotification = async (
@@ -94,17 +146,20 @@ export default function NotificationsPage() {
     unread: boolean,
   ) => {
     if (!token) return;
+    const task = beginOperation();
+    if (!task) return;
     try {
       const result = await handleNotificationAction(token, actionLink, router);
+      if (!task.current()) return;
       if (result === 'download') toast.success('Download started');
+      if (unread && !isDemoNotificationId(id)) {
+        await notificationsApi.markRead(token, id);
+        if (!task.current()) return;
+        await refresh();
+      }
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Action failed');
-      return;
-    }
-    if (unread && !isDemoNotificationId(id)) {
-      await notificationsApi.markRead(token, id).catch(() => undefined);
-      await refresh();
-    }
+      if (task.current()) toast.error(e instanceof Error ? e.message : 'Could not open or update notification');
+    } finally { task.finish(); }
   };
 
   const dismissNotification = async (id: string) => {
@@ -113,22 +168,35 @@ export default function NotificationsPage() {
       toast.success('Demo notification dismissed');
       return;
     }
-    await refresh(
-      (current) => current?.filter((row) => row.notification_id !== id) ?? [],
-      { revalidate: false },
-    );
+    const task = beginOperation();
+    if (!task) return;
     try {
-      await notificationsApi.dismiss(token, id);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : '';
-      if (!/404|not found/i.test(msg)) {
-        toast.error('Could not remove notification');
-        await refresh();
-        return;
+      await refresh(
+        (current) => current?.filter((row) => row.notification_id !== id) ?? [],
+        { revalidate: false },
+      );
+      if (!task.current()) return;
+      try {
+        await notificationsApi.dismiss(token, id);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : '';
+        if (!/404|not found/i.test(msg)) {
+          if (task.current()) toast.error('Could not remove notification');
+          if (task.current()) await refresh();
+          return;
+        }
       }
-    }
-    await refresh();
-    window.dispatchEvent(new Event('falcon:notifications-refresh'));
+      if (!task.current()) return;
+      try {
+        await refresh();
+        if (task.current()) setRefreshError(null);
+      } catch {
+        if (task.current()) setRefreshError('Notification removed. Could not refresh the list; retry to see the latest updates.');
+      }
+      if (task.current()) window.dispatchEvent(new Event('falcon:notifications-refresh'));
+    } catch {
+      if (task.current()) setRefreshError('Could not refresh notifications. Retry to get the latest updates.');
+    } finally { task.finish(); }
   };
 
   return (
@@ -167,7 +235,7 @@ export default function NotificationsPage() {
               size="sm"
               className="w-full border-sgvu-navy/15 bg-white text-sgvu-navy sm:w-auto"
               onClick={markAll}
-              disabled={unreadCount === 0}
+              disabled={unreadCount === 0 || busy || isLoading || Boolean(error) || Boolean(refreshError)}
             >
               <CheckCheck className="mr-1 h-4 w-4" />
               Mark all read
@@ -214,10 +282,11 @@ export default function NotificationsPage() {
               Loading notifications…
             </div>
           )}
-          {error && (
-            <p className="py-6 text-center text-sm text-destructive">
-              Could not load notifications. Please refresh the page.
-            </p>
+          {(error || refreshError) && (
+            <div role="alert" className="space-y-2 py-6 text-center text-sm text-destructive">
+              <p>{refreshError || 'Could not load notifications.'}</p>
+              <Button variant="outline" disabled={busy || isLoading} onClick={() => void retryRefresh()}>Retry</Button>
+            </div>
           )}
           {!isLoading && !error && filtered.length === 0 && <NotificationEmptyState />}
           {!isLoading &&
@@ -226,8 +295,8 @@ export default function NotificationsPage() {
               <NotificationItem
                 key={n.id}
                 notification={n}
-                onClick={() => openNotification(n.id, n.actionLink, n.unread)}
-                onDismiss={() => void dismissNotification(n.id)}
+                onClick={busy ? undefined : () => void openNotification(n.id, n.actionLink, n.unread)}
+                onDismiss={busy ? undefined : () => void dismissNotification(n.id)}
               />
             ))}
         </CardContent>

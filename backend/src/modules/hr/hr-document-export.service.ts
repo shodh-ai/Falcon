@@ -7,7 +7,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { DataSource } from 'typeorm';
-import { createReadStream, existsSync, mkdirSync, writeFileSync } from 'fs';
+import { createReadStream, mkdirSync, writeFileSync } from 'fs';
 import { dirname, resolve } from 'path';
 import type { Response } from 'express';
 import { Readable } from 'stream';
@@ -15,6 +15,7 @@ import { Readable } from 'stream';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { ZipArchive } = require('archiver') as typeof import('archiver');
 import { ObjectStorageService } from '../../storage/object-storage.service';
+import { isSafeStorageKey } from '../../storage/disk-file-path';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 import {
   HR_DOCUMENT_EXPORT_QUEUE,
@@ -22,6 +23,7 @@ import {
 } from '../../common/constants/hr-export-queue.constants';
 import {
   openDocumentReadStream,
+  resolveDocumentDiskPath,
   uploadRoot,
 } from './utils/document-file-path.util';
 
@@ -134,13 +136,17 @@ export class HrDocumentExportService {
     const job = await this.loadExportJobRow(tenantId, jobId, requesterId);
 
     let download_url: string | null = null;
-    if (job.status === 'COMPLETED' && job.file_key) {
+    if (
+      job.status === 'COMPLETED' &&
+      job.file_key &&
+      isSafeStorageKey(job.file_key, tenantId)
+    ) {
       if (this.storage.isEnabled()) {
         download_url = await this.storage.getPresignedDownloadUrl(
           job.file_key,
           900,
         );
-      } else {
+      } else if (resolveDocumentDiskPath(job.file_key, tenantId)) {
         download_url = `/api/hr/documents/export-jobs/${jobId}/download`;
       }
     }
@@ -170,6 +176,11 @@ export class HrDocumentExportService {
           : 'Export is still processing',
       );
     }
+    if (!isSafeStorageKey(job.file_key, tenantId)) {
+      throw new NotFoundException(
+        'Export file not available in secure storage',
+      );
+    }
 
     const fileName = job.file_name ?? 'export.zip';
     res.setHeader('Content-Type', 'application/zip');
@@ -181,8 +192,8 @@ export class HrDocumentExportService {
       return;
     }
 
-    const fullPath = resolve(uploadRoot(), job.file_key);
-    if (!existsSync(fullPath)) {
+    const fullPath = resolveDocumentDiskPath(job.file_key, tenantId);
+    if (!fullPath) {
       throw new NotFoundException('Export file not found on disk');
     }
     createReadStream(fullPath).pipe(res);
@@ -247,7 +258,10 @@ export class HrDocumentExportService {
         throw new Error('No documents matched the selected filters');
       }
 
-      const { zipBuffer, packedCount } = await this.buildZipArchive(docs);
+      const { zipBuffer, packedCount } = await this.buildZipArchive(
+        docs,
+        job.tenantId,
+      );
       if (packedCount === 0) {
         throw new Error(
           'Matched documents exist but their files could not be read from storage. Check S3/MinIO or upload paths.',
@@ -335,6 +349,7 @@ export class HrDocumentExportService {
       employee_name: string;
       employee_id: string | null;
     }>,
+    tenantId: string,
   ): Promise<{ zipBuffer: Buffer; packedCount: number }> {
     return new Promise((resolvePromise, reject) => {
       const archive = new ZipArchive({ zlib: { level: 5 } });
@@ -352,6 +367,7 @@ export class HrDocumentExportService {
           const stream = await openDocumentReadStream(
             doc.file_url,
             this.storage,
+            tenantId,
           );
           if (!stream) continue;
           packedCount += 1;

@@ -63,16 +63,22 @@ export default function FacultyLibraryBookPage({ catalogId }: { catalogId: strin
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let cancelled = false;
+    // Each catalog/account change starts a remote resource load with its own loading boundary.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
     void api
       .get<CatalogDetail>(`/api/library/catalog/${catalogId}`)
       .then((data) => {
+        if (cancelled) return;
         setBook(withFacultyDemoFallback(data, demoCatalogDetail(catalogId), (v) => !v?.catalog_id));
       })
       .catch(() => {
+        if (cancelled) return;
         setBook(withFacultyDemoFallback(null, demoCatalogDetail(catalogId)));
       })
-      .finally(() => setLoading(false));
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [api, catalogId]);
 
   async function placeHold() {

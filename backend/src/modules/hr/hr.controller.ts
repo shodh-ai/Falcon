@@ -1413,11 +1413,15 @@ export class HrController {
 
   @Patch('ess/onboarding/steps/:stepKey')
   @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
-  completeOnboardingStep(
+  async completeOnboardingStep(
     @Param('stepKey') stepKey: string,
     @Body('pipeline_id') pipelineId: string,
+    @Req() req: { user: AuthUser },
+    @Query('entity_id') entityId?: string,
   ) {
-    return this.ess.completeOnboardingStep(pipelineId, stepKey);
+    const tenantId = this.resolveTenantId(req.user);
+    const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
+    return this.ess.completeOnboardingStep(tenantId, entity, req.user.user_id, pipelineId, stepKey);
   }
 
   @Post('ess/resignation')

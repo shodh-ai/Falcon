@@ -11,6 +11,7 @@ import { useAuthedApi } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import { getApiBaseUrl } from '@/lib/api-base-url';
 import { getSubdomainFromClient } from '@/lib/tenant';
+import { SelfServiceLoadError } from './SelfServiceLoadError';
 
 type MatrixDay = {
   date: string;
@@ -48,19 +49,26 @@ function AttendanceContent({ defaultScope }: Props) {
   const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
   const [data, setData] = useState<MatrixPayload | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [retry, setRetry] = useState(0);
   const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
+    let active = true;
+    // Scope/month changes invalidate the remote matrix until the next response arrives.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
+    setLoadError(null);
+    setData(null);
     void api
       .get<MatrixPayload>(`/api/hr/ess/team/attendance?scope=${scope}&month=${month}`)
-      .then(setData)
+      .then((result) => { if (active) setData(result); })
       .catch((e) => {
-        toast.error(e instanceof Error ? e.message : 'Failed to load matrix');
-        setData(null);
+        if (active) setLoadError(e instanceof Error ? e.message : 'Failed to load matrix');
       })
-      .finally(() => setLoading(false));
-  }, [api, scope, month]);
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [api, scope, month, retry]);
 
   async function downloadExcel() {
     if (!token) {
@@ -106,7 +114,7 @@ function AttendanceContent({ defaultScope }: Props) {
         <input
           type="month"
           value={month}
-          onChange={(e) => setMonth(e.target.value)}
+          onChange={(e) => { if (e.target.value) setMonth(e.target.value); }}
           className="rounded-md border px-3 py-2 text-sm"
         />
         <Button variant="outline" disabled={exporting} onClick={() => void downloadExcel()}>
@@ -120,6 +128,8 @@ function AttendanceContent({ defaultScope }: Props) {
           <Loader2 className="h-8 w-8 animate-spin text-sgvu-gold" />
         </div>
       )}
+
+      {!loading && loadError && <SelfServiceLoadError message={loadError} onRetry={() => setRetry((n) => n + 1)} />}
 
       {!loading && data && data.employees.length === 0 && (
         <HrEmptyState

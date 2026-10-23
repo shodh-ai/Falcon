@@ -438,11 +438,10 @@ export class DemeritsService {
       await qr
         .query(
           `UPDATE student_course_enrollments
-         SET status = 'FAILED', grade = 'F', grade_points = 0, updated_at = NOW()
+         SET status = 'FAILED', grade = 'F', grade_points = 0
          WHERE tenant_id = $1 AND student_user_id = $2 AND course_id = $3`,
           [tenantId, incident.student_user_id, incident.course_id],
-        )
-        .catch(() => undefined);
+        );
     }
 
     if (await this.tableExists(qr, 'student_discipline_records')) {
@@ -457,8 +456,7 @@ export class DemeritsService {
             `Automatic Subject Back — cumulative demerit points reached ${SUBJECT_BACK_THRESHOLD}.`,
             `Subject Back applied for approved demerit incident. DC remarks: ${remarks}`,
           ],
-        )
-        .catch(() => undefined);
+        );
     }
   }
 

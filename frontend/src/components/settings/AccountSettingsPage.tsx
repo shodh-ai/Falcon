@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
@@ -147,6 +147,7 @@ function PasswordField({
         />
         <button
           type="button"
+          disabled={disabled}
           className="absolute right-2 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-sgvu-navy/5 hover:text-sgvu-navy focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sgvu-gold/40"
           onClick={() => setVisible((v) => !v)}
           aria-label={visible ? `Hide ${label.toLowerCase()}` : `Show ${label.toLowerCase()}`}
@@ -261,7 +262,14 @@ export function AccountSettingsPage({
   /** When parent portal already renders FacultyPageHeader / equivalent. */
   hidePageHeader?: boolean;
 } = {}) {
+  const { user } = useAuth();
   const api = useAuthedApi();
+  const [scope, setScope] = useState({ api, revision: 0 });
+  if (scope.api !== api) setScope({ api, revision: scope.revision + 1 });
+  return <AccountSettingsWorkspace key={`${user?.tenant_id ?? ''}:${user?.user_id ?? ''}:${scope.revision}`} api={api} hidePageHeader={hidePageHeader} />;
+}
+
+function AccountSettingsWorkspace({ api, hidePageHeader }: { api: ReturnType<typeof useAuthedApi>; hidePageHeader: boolean }) {
   const { user, refreshUser, logout, isLoading } = useAuth();
   const pathname = usePathname();
   const workspaceRole =
@@ -279,10 +287,21 @@ export function AccountSettingsPage({
   const [confirmPassword, setConfirmPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [refreshWarning, setRefreshWarning] = useState<string | null>(null);
+  const actionLock = useRef(false);
+  const alive = useRef(true);
+  const current = () => alive.current;
   const [notifPrefs, setNotifPrefs] = useState<NotificationPrefs>(DEFAULT_NOTIF_PREFS);
   const [prefsReady, setPrefsReady] = useState(false);
 
+  useLayoutEffect(() => {
+    alive.current = true;
+    return () => { alive.current = false; };
+  }, []);
+
   useEffect(() => {
+    // Browser preferences are external state; read after hydration to keep SSR stable.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setNotifPrefs(loadNotificationPrefs());
     setPrefsReady(true);
   }, []);
@@ -296,17 +315,15 @@ export function AccountSettingsPage({
   const strength = useMemo(() => passwordStrength(newPassword), [newPassword]);
 
   function updateNotifPref<K extends keyof NotificationPrefs>(key: K, value: NotificationPrefs[K]) {
-    setNotifPrefs((prev) => {
-      const next = { ...prev, [key]: value };
-      try {
-        saveNotificationPrefs(next);
-        window.dispatchEvent(new Event('falcon:account-prefs-changed'));
-      } catch {
-        toast.error('Could not save preference on this device');
-      }
-      return next;
-    });
-    toast.success('Preference saved for this device');
+    const next = { ...notifPrefs, [key]: value };
+    try {
+      saveNotificationPrefs(next);
+      setNotifPrefs(next);
+      window.dispatchEvent(new Event('falcon:account-prefs-changed'));
+      toast.success('Preference saved for this device');
+    } catch {
+      toast.error('Could not save preference on this device');
+    }
   }
 
   async function handleDesktopToggle(next: boolean) {
@@ -317,6 +334,7 @@ export function AccountSettingsPage({
       }
       if (Notification.permission === 'default') {
         const permission = await Notification.requestPermission();
+        if (!current()) return;
         if (permission !== 'granted') {
           toast.error('Desktop notifications were not granted');
           return;
@@ -328,6 +346,7 @@ export function AccountSettingsPage({
 
   async function handleChangePassword(e: React.FormEvent) {
     e.preventDefault();
+    if (actionLock.current) return;
     const validationError = validatePasswordForm(
       currentPassword,
       newPassword,
@@ -340,6 +359,8 @@ export function AccountSettingsPage({
     }
 
     setFormError(null);
+    setRefreshWarning(null);
+    actionLock.current = true;
     setSubmitting(true);
     try {
       await api.post('/api/auth/change-password', {
@@ -347,17 +368,24 @@ export function AccountSettingsPage({
         new_password: newPassword,
         confirm_password: confirmPassword,
       });
+      if (!current()) return;
       toast.success('Password updated successfully');
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
-      await refreshUser();
+      try {
+        const refreshed = await refreshUser();
+        if (current() && !refreshed) setRefreshWarning('Your password was updated, but account details could not be refreshed. Refresh the page to update them.');
+      } catch {
+        if (current()) setRefreshWarning('Your password was updated, but account details could not be refreshed. Refresh the page to update them.');
+      }
     } catch (err) {
+      if (!current()) return;
       const message = err instanceof Error ? err.message : 'Could not update password';
       setFormError(message);
       toast.error(message);
     } finally {
-      setSubmitting(false);
+      if (current()) { actionLock.current = false; setSubmitting(false); }
     }
   }
 
@@ -562,6 +590,7 @@ export function AccountSettingsPage({
                 {mismatchHint ?? formError}
               </p>
             ) : null}
+            {refreshWarning && <p role="status" className="text-sm text-amber-800">{refreshWarning}</p>}
             <div className="mt-auto flex justify-center border-t border-sgvu-navy/10 pt-4">
               <Button
                 type="submit"

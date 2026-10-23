@@ -9,6 +9,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { useAuthedApi } from '@/lib/api';
+import { useAuth } from '@/context/AuthContext';
+import { getSubdomainFromClient } from '@/lib/tenant';
 import { ExamCellPageHeader } from '@/components/exam-cell/ExamCellPageHeader';
 import {
   ResultPublishingPipeline,
@@ -16,6 +18,7 @@ import {
   type PipelineStep,
 } from '@/components/exam-cell/ResultPublishingPipeline';
 import { PublishConfirmDialog } from '@/components/exam-cell/PublishConfirmDialog';
+import { DeclaredResultViewer } from '@/components/exam-cell/DeclaredResultViewer';
 import {
   Dialog,
   DialogContent,
@@ -61,6 +64,7 @@ type ResultSession = {
   entry_status: 'CLOSED' | 'OPEN' | 'LOCKED';
   marks_locked: boolean;
   declared_at: string | null;
+  declaration_note?: string | null;
   processed_at: string | null;
   pending_coe_count: number;
   report_count: number;
@@ -123,7 +127,23 @@ function stepIndex(step: WorkflowStep) {
 
 export default function ExamCellResultsPage() {
   const api = useAuthedApi();
+  const { user } = useAuth();
+  const tenant = getSubdomainFromClient();
+  const identity = useMemo(() => ({ api, userId: user?.user_id, tenantId: user?.tenant_id, schema: user?.tenant_schema, tenant }), [api, user?.user_id, user?.tenant_id, user?.tenant_schema, tenant]);
+  const [scope, setScope] = useState(() => ({ identity, revision: 0 }));
+  // Reset the complete page before a different account can render its controls.
+  // The key contains only a local revision number, never credentials.
+  if (scope.identity !== identity) {
+    setScope({ identity, revision: scope.revision + 1 });
+    return null;
+  }
+  return <ExamCellResultsContent key={scope.revision} api={api} />;
+}
+
+function ExamCellResultsContent({ api }: { api: ReturnType<typeof useAuthedApi> }) {
+  const active = useRef(true);
   const workflowRef = useRef<HTMLDivElement>(null);
+  const reportsRef = useRef<HTMLDivElement>(null);
   const [pending, setPending] = useState<PendingMark[]>([]);
   const [sessions, setSessions] = useState<ResultSession[]>([]);
   const [courses, setCourses] = useState<CourseOption[]>([]);
@@ -140,7 +160,7 @@ export default function ExamCellResultsPage() {
     pass_marks: '20',
     grading_policy_id: '',
   });
-  const [rulesForm, setRulesForm] = useState({ pass_marks: '', max_marks: '', grading_policy_id: '' });
+  const [rulesDraft, setRulesDraft] = useState<{ sessionId: string | null; form: { pass_marks: string; max_marks: string; grading_policy_id: string } }>({ sessionId: null, form: { pass_marks: '', max_marks: '', grading_policy_id: '' } });
   const [declareNote, setDeclareNote] = useState('');
   const [reopenReason, setReopenReason] = useState('');
   const [coeAuditStatus, setCoeAuditStatus] = useState<'idle' | 'passed' | 'anomaly'>('idle');
@@ -152,25 +172,38 @@ export default function ExamCellResultsPage() {
   const [publishDialogOpen, setPublishDialogOpen] = useState(false);
   const [publishConfirmText, setPublishConfirmText] = useState('');
 
-  const selected = sessions.find((s) => s.session_id === selectedId) ?? null;
+  const selected = useMemo(() => sessions.find((s) => s.session_id === selectedId) ?? null, [sessions, selectedId]);
+  const rulesForm = rulesDraft.sessionId === selected?.session_id ? rulesDraft.form : {
+    pass_marks: selected?.pass_marks != null ? String(selected.pass_marks) : '',
+    max_marks: String(selected?.max_marks ?? ''),
+    grading_policy_id: selected?.grading_policy_id != null ? String(selected.grading_policy_id) : '',
+  };
+  function setRulesForm(form: typeof rulesForm) { setRulesDraft({ sessionId: selected?.session_id ?? null, form }); }
   const workflowStep = deriveWorkflowStep(selected, preview);
   const activeStepIdx = stepIndex(workflowStep);
 
+  useEffect(() => {
+    active.current = true;
+    return () => { active.current = false; };
+  }, []);
+
   const load = useCallback(async () => {
+    if (!active.current) return;
     const [pendingRows, sessionRows, courseRows, policyRows] = await Promise.all([
       api.get<PendingMark[]>('/api/exam-cell/results/pending'),
       api.get<ResultSession[]>('/api/exam-cell/result-control/sessions'),
       api.get<CourseOption[]>('/api/exam-cell/result-control/courses'),
       api.get<PolicyOption[]>('/api/exam-cell/result-control/grading-policies'),
     ]);
+    if (!active.current) return;
     setPending(pendingRows);
     setSessions(sessionRows);
     setCourses(courseRows);
     setPolicies(policyRows);
-    if (selectedId && !sessionRows.some((s) => s.session_id === selectedId)) {
-      setSelectedId(sessionRows[0]?.session_id ?? null);
-    }
-  }, [api, selectedId]);
+    setSelectedId((current) => current && !sessionRows.some((s) => s.session_id === current)
+      ? sessionRows[0]?.session_id ?? null
+      : current);
+  }, [api]);
 
   useEffect(() => {
     void load().catch(() => toast.error('Could not load result control data'));
@@ -178,16 +211,11 @@ export default function ExamCellResultsPage() {
 
   useEffect(() => {
     if (!selected) return;
-    setRulesForm({
-      pass_marks: selected.pass_marks != null ? String(selected.pass_marks) : '',
-      max_marks: String(selected.max_marks ?? ''),
-      grading_policy_id: selected.grading_policy_id != null ? String(selected.grading_policy_id) : '',
-    });
-    setPreview(null);
-    setAppliedGrace(null);
+    let cancelled = false;
     void (async () => {
       try {
         const detail = await api.get<ResultSession>(`/api/exam-cell/result-control/sessions/${selected.session_id}`);
+        if (cancelled || !active.current) return;
         const status = detail.coe_audit_status ?? 'idle';
         setCoeAuditStatus(status);
         setDeanApproved(Boolean(detail.dean_approved));
@@ -197,12 +225,14 @@ export default function ExamCellResultsPage() {
           setAnomalySubjects([]);
         }
       } catch {
+        if (cancelled || !active.current) return;
         setCoeAuditStatus('idle');
         setDeanApproved(false);
         setAnomalySubjects([]);
       }
     })();
-  }, [selected?.session_id, api]);
+    return () => { cancelled = true; };
+  }, [selected, api]);
 
   const pendingGroups = useMemo(() => {
     const map = new Map<string, PendingGroup>();
@@ -652,7 +682,10 @@ export default function ExamCellResultsPage() {
                         type="button"
                         onClick={() => {
                           setSelectedId(s.session_id);
-                          scrollToWorkflow();
+                          setPreview(null);
+                          setAppliedGrace(null);
+                          setRulesDraft({ sessionId: null, form: { pass_marks: '', max_marks: '', grading_policy_id: '' } });
+                          reportsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
                         }}
                         className={`w-full rounded-xl border p-3 text-left text-sm transition-colors ${
                           selectedId === s.session_id
@@ -734,6 +767,10 @@ export default function ExamCellResultsPage() {
           ) : null}
         </CardContent>
       </Card>
+
+      <div ref={reportsRef} className="scroll-mt-24">
+        <DeclaredResultViewer session={selected} />
+      </div>
 
       {/* Actionable pending queue */}
       <Card className="border-sgvu-navy/10 bg-white shadow-sm">

@@ -18,7 +18,6 @@ export function FalconLogo({
   variant = 'mark',
   compact = false,
 }: FalconLogoProps) {
-  const height = size;
   const width = Math.round(size * LOGO_ASPECT);
 
   if (compact) {
@@ -43,10 +42,11 @@ export function FalconLogo({
     <Image
       src={LOGO_PATH}
       alt="Falcon"
-      width={width}
-      height={height}
+      width={1409}
+      height={736}
       loading="eager"
-      className="object-contain drop-shadow-[0_2px_12px_rgba(214,182,93,0.35)]"
+      style={{ width: `${width}px`, height: 'auto' }}
+      className="h-auto object-contain drop-shadow-[0_2px_12px_rgba(214,182,93,0.35)]"
     />
   );
 

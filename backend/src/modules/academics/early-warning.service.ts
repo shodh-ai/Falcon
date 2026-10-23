@@ -5,6 +5,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { MentorshipMeeting } from '../../entities/mentorship-meeting.entity';
 import { User } from '../../entities/user.entity';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
+import { facultyAttendanceStatsCte } from './faculty-attendance-sql';
 export type AuthCtx = { userId: string; tenantId: string; roles: string[] };
 
 @Injectable()
@@ -32,29 +33,49 @@ export class EarlyWarningService {
            AND tt.tenant_id = $2
            AND tt.deleted_at IS NULL
        ),
-       faculty_students AS (
-         SELECT DISTINCT sce.student_user_id
+       ${facultyAttendanceStatsCte('$2')},
+       faculty_enrollments AS (
+         SELECT DISTINCT sce.tenant_id, sce.student_user_id, sce.course_id
          FROM student_course_enrollments sce
          JOIN faculty_courses fc ON fc.course_id = sce.course_id
          WHERE sce.tenant_id = $2 AND sce.status = 'ENROLLED'
+           AND (to_jsonb(sce)->>'deleted_at') IS NULL
+       ),
+       faculty_students AS (
+         SELECT DISTINCT student_user_id FROM faculty_enrollments
        ),
        att_stats AS (
          SELECT sce.student_user_id,
-                ROUND(AVG(sce.attendance_percent)::numeric, 2) AS attendance_percent
-         FROM student_course_enrollments sce
-         JOIN faculty_courses fc ON fc.course_id = sce.course_id
-         WHERE sce.tenant_id = $2
-           AND sce.status = 'ENROLLED'
-           AND sce.attendance_percent IS NOT NULL
+                COALESCE(SUM(a.attendance_record_count), 0)::int AS attendance_record_count,
+                ROUND(
+                  100.0 * SUM(a.attendance_present_count) / NULLIF(SUM(a.attendance_record_count), 0),
+                  2
+                ) AS attendance_percent
+         FROM faculty_enrollments sce
+         LEFT JOIN attendance_stats a
+           ON a.tenant_id = sce.tenant_id
+          AND a.course_id = sce.course_id
+          AND a.student_user_id = sce.student_user_id::text
          GROUP BY sce.student_user_id
        ),
        exam_stats AS (
          SELECT m.student_user_id,
                 SUM(m.marks_obtained) AS total_obtained,
-                SUM(m.max_marks) AS total_max
+                SUM(m.max_marks) AS total_max,
+                COUNT(*)::int AS published_assessment_count
          FROM academic_marks m
          JOIN faculty_courses fc ON fc.course_id = m.course_id
          WHERE m.tenant_id = $2 AND m.status = 'PUBLISHED'
+           AND (to_jsonb(m)->>'deleted_at') IS NULL
+           AND m.max_marks > 0
+           AND m.marks_obtained IS NOT NULL
+           AND m.marks_obtained BETWEEN 0 AND m.max_marks
+           AND EXISTS (
+             SELECT 1 FROM faculty_enrollments fe
+             WHERE fe.tenant_id = m.tenant_id
+               AND fe.course_id = m.course_id
+               AND fe.student_user_id = m.student_user_id
+           )
          GROUP BY m.student_user_id
        )
        SELECT u.user_id,
@@ -64,8 +85,10 @@ export class EarlyWarningService {
               d.dept_name,
               sp.batch,
               a.attendance_percent,
+              COALESCE(a.attendance_record_count, 0)::int AS attendance_record_count,
               e.total_max,
-              e.total_obtained
+              e.total_obtained,
+              COALESCE(e.published_assessment_count, 0)::int AS published_assessment_count
        FROM faculty_students fs
        JOIN users u ON u.user_id = fs.student_user_id
        LEFT JOIN student_profiles sp ON sp.user_id = u.user_id
@@ -81,8 +104,11 @@ export class EarlyWarningService {
         let riskScore = 0;
         const riskFactors: string[] = [];
 
-        const attendancePct =
-          r.attendance_percent == null ? null : Number(r.attendance_percent);
+        const attendanceCount = Number(r.attendance_record_count ?? 0);
+        const rawAttendance = r.attendance_percent == null ? null : Number(r.attendance_percent);
+        const attendancePct = attendanceCount > 0 && rawAttendance !== null && Number.isFinite(rawAttendance)
+          ? rawAttendance
+          : null;
 
         if (attendancePct !== null) {
           if (attendancePct !== null && attendancePct < 75) {
@@ -96,11 +122,12 @@ export class EarlyWarningService {
           }
         }
 
-        const totalMax = Number(r.total_max || 0);
-        const totalObtained = Number(r.total_obtained || 0);
+        const assessmentCount = Number(r.published_assessment_count ?? 0);
+        const totalMax = Number(r.total_max ?? 0);
+        const totalObtained = r.total_obtained == null ? null : Number(r.total_obtained);
         let marksPct: number | null = null;
 
-        if (totalMax > 0) {
+        if (assessmentCount > 0 && totalMax > 0 && totalObtained !== null && Number.isFinite(totalMax) && Number.isFinite(totalObtained)) {
           marksPct = (totalObtained / totalMax) * 100;
           if (marksPct !== null && marksPct < 40) {
             riskScore += 50;
@@ -125,6 +152,8 @@ export class EarlyWarningService {
           metrics: {
             attendance_percent: attendancePct,
             grades_percent: marksPct,
+            attendance_record_count: attendanceCount,
+            published_assessment_count: assessmentCount,
           },
         };
       })

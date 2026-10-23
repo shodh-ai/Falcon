@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
   AlertTriangle,
@@ -20,6 +20,7 @@ import {
   FacultyPanel,
   FacultyMetricChip,
   FacultyEmptyState,
+  FacultyErrorBanner,
 } from '@/components/faculty';
 import {
   useFacultyCourses,
@@ -29,16 +30,16 @@ import { Button } from '@/components/ui/button';
 import { Select } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { useAuthedApi } from '@/lib/api';
+import { FacultyAccountScope } from '@/components/faculty/FacultyAccountScope';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { cn } from '@/lib/utils';
 import {
   isEmptyArray,
-  isFacultyDemoEntityId,
+  isFacultyDemoSmokeId,
   withFacultyDemoFallback,
 } from '@/lib/faculty-demo-mode';
 import {
   facultyDemoAssignments,
-  facultyDemoAttendanceAnalytics,
   facultyDemoCourses,
   facultyDemoReportStudents,
   studentsForCourse,
@@ -49,7 +50,8 @@ type ReportKind = 'full' | 'attendance' | 'assignments' | 'atrisk';
 type ReportStudent = {
   name?: string;
   roll_number?: string;
-  attendance_percent?: number | string;
+  attendance_percent?: number | string | null;
+  attendance_record_count?: number | string;
 };
 
 type ReportAssignment = {
@@ -67,7 +69,8 @@ type CourseReport = {
   kind: ReportKind;
   students: ReportStudent[];
   assignments: ReportAssignment[];
-  avgAttendance: number;
+  avgAttendance: number | null;
+  attendanceUnrecorded: number;
   below75: number;
   assignmentCount: number;
   submissionTotal: number;
@@ -127,8 +130,30 @@ function downloadCsv(filename: string, rows: string[][]) {
 }
 
 function pct(value: number | string | null | undefined) {
-  const n = Number(value ?? 0);
-  return Number.isFinite(n) ? n : 0;
+  if (value == null || (typeof value === 'string' && value.trim() === '')) return null;
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 && n <= 100 ? n : null;
+}
+
+function attendancePct(student: ReportStudent) {
+  if (student.attendance_record_count != null) {
+    const count = Number(student.attendance_record_count);
+    if (!Number.isFinite(count) || count <= 0) return null;
+  }
+  return pct(student.attendance_percent);
+}
+
+function attendanceText(student: ReportStudent) {
+  const value = attendancePct(student);
+  if (value !== null) return `${value.toFixed(1)}%`;
+  return student.attendance_record_count != null && Number(student.attendance_record_count) === 0
+    ? 'Not recorded'
+    : 'Not available';
+}
+
+function isAtRisk(student: ReportStudent) {
+  const value = attendancePct(student);
+  return value !== null && value < 75;
 }
 
 function demoStudentsForCourse(courseId: string): ReportStudent[] {
@@ -152,21 +177,48 @@ function demoAssignmentsForCourse(courseId: string): ReportAssignment[] {
 
 export default function FacultyReportsPage() {
   const api = useAuthedApi();
-  const { courses, loading } = useFacultyCourses();
+  return <FacultyAccountScope scope={api}><FacultyReportsContent api={api} /></FacultyAccountScope>;
+}
+
+function FacultyReportsContent({ api }: { api: ReturnType<typeof useAuthedApi> }) {
+  const { courses, loading, error: coursesError } = useFacultyCourses();
   const courseOptions = uniqueFacultyCoursesByCourseId(courses);
   const [courseId, setCourseId] = useState('');
   const [kind, setKind] = useState<ReportKind>('full');
   const [busy, setBusy] = useState(false);
-  const [report, setReport] = useState<CourseReport | null>(null);
+  const [generatedReport, setReport] = useState<CourseReport | null>(null);
+  const [reportError, setReportError] = useState<string | null>(null);
+  const generationId = useRef(0);
+
+  const courseLoadError = coursesError && coursesError !== 'No courses allocated to your timetable yet.'
+    ? coursesError
+    : null;
+  const coursesUnavailable = loading || Boolean(courseLoadError) || courseOptions.length === 0;
 
   const selectedCourse = useMemo(
-    () => courseOptions.find((c) => c.course_id === courseId) ?? null,
+    () => courseId
+      ? courseOptions.find((c) => c.course_id === courseId) ?? null
+      : courseOptions[0] ?? null,
     [courseOptions, courseId],
   );
 
-  const effectiveCourseId = courseId || courseOptions[0]?.course_id || '';
+  const effectiveCourseId = coursesUnavailable ? '' : selectedCourse?.course_id ?? '';
+  const report = !busy && generatedReport?.courseId === effectiveCourseId && generatedReport.kind === kind
+    ? generatedReport
+    : null;
+
+  useEffect(() => {
+    generationId.current += 1;
+    // A changed report scope must immediately invalidate its old snapshot and spinner.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setReport(null);
+    setReportError(null);
+    setBusy(false);
+    return () => { generationId.current += 1; };
+  }, [effectiveCourseId, kind, loading, courseLoadError]);
 
   async function generateReport() {
+    if (busy || coursesUnavailable) return;
     const targetCourseId = effectiveCourseId;
     if (!targetCourseId) {
       toast.error('Select a course first');
@@ -174,9 +226,7 @@ export default function FacultyReportsPage() {
     }
 
     const course =
-      courseOptions.find((c) => c.course_id === targetCourseId) ??
-      facultyDemoCourses().find((c) => c.course_id === targetCourseId) ??
-      null;
+      courseOptions.find((c) => c.course_id === targetCourseId) ?? null;
 
     if (!course) {
       toast.error('Course not found');
@@ -186,20 +236,20 @@ export default function FacultyReportsPage() {
     if (!courseId) setCourseId(targetCourseId);
 
     setBusy(true);
+    setReport(null);
+    setReportError(null);
+    const requestId = ++generationId.current;
     try {
       let students: ReportStudent[] = [];
       let assignments: ReportAssignment[] = [];
 
-      if (!isFacultyDemoEntityId(targetCourseId)) {
-        students = await api
-          .get<ReportStudent[]>(`/api/academics/faculty/course/${targetCourseId}/students`)
-          .catch(() => []);
-        assignments = await api
-          .get<ReportAssignment[]>(
-            `/api/academics/faculty/assignments?courseId=${targetCourseId}`,
-          )
-          .catch(() => []);
+      if (!isFacultyDemoSmokeId(targetCourseId)) {
+        [students, assignments] = await Promise.all([
+          api.get<ReportStudent[]>(`/api/academics/faculty/course/${targetCourseId}/students`),
+          api.get<ReportAssignment[]>(`/api/academics/faculty/assignments?courseId=${targetCourseId}`),
+        ]);
       }
+      if (requestId !== generationId.current) return;
 
       students = withFacultyDemoFallback(
         students,
@@ -212,29 +262,13 @@ export default function FacultyReportsPage() {
         isEmptyArray,
       );
 
-      // Prefer analytics averages when available; otherwise compute from roster.
-      let avgAttendance = 0;
-      if (students.length) {
-        avgAttendance =
-          students.reduce((sum, s) => sum + pct(s.attendance_percent), 0) / students.length;
-      }
-      if (!isFacultyDemoEntityId(targetCourseId)) {
-        const analytics = await api
-          .get<{
-            health?: { average_attendance_percent?: number };
-          }>(`/api/academics/faculty/course/${targetCourseId}/attendance/analytics`)
-          .catch(() => null);
-        if (analytics?.health?.average_attendance_percent != null) {
-          avgAttendance = Number(analytics.health.average_attendance_percent);
-        }
-      } else {
-        const demoAnalytics = facultyDemoAttendanceAnalytics(
-          facultyDemoCourses()[0]?.course_id ?? targetCourseId,
-        );
-        avgAttendance = Number(demoAnalytics.health.average_attendance_percent ?? avgAttendance);
-      }
-
-      const below75 = students.filter((s) => pct(s.attendance_percent) < 75).length;
+      const measuredAttendance = students
+        .map(attendancePct)
+        .filter((value): value is number => value !== null);
+      const avgAttendance = measuredAttendance.length
+        ? measuredAttendance.reduce((sum, value) => sum + value, 0) / measuredAttendance.length
+        : null;
+      const below75 = students.filter(isAtRisk).length;
       const submissionTotal = assignments.reduce(
         (sum, a) => sum + Number(a.submission_count ?? 0),
         0,
@@ -248,7 +282,8 @@ export default function FacultyReportsPage() {
         kind,
         students,
         assignments,
-        avgAttendance: Math.round(avgAttendance * 10) / 10,
+        avgAttendance: avgAttendance === null ? null : Math.round(avgAttendance * 10) / 10,
+        attendanceUnrecorded: students.length - measuredAttendance.length,
         below75,
         assignmentCount: assignments.length,
         submissionTotal,
@@ -257,9 +292,12 @@ export default function FacultyReportsPage() {
       setReport(built);
       toast.success(`${course.course_code} report ready`);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Could not generate report');
+      if (requestId !== generationId.current) return;
+      const message = e instanceof Error ? e.message : 'Could not generate report';
+      setReportError(message);
+      toast.error(message);
     } finally {
-      setBusy(false);
+      if (requestId === generationId.current) setBusy(false);
     }
   }
 
@@ -280,14 +318,14 @@ export default function FacultyReportsPage() {
         ]),
       ]);
     } else if (report.kind === 'atrisk') {
-      const rows = report.students.filter((s) => pct(s.attendance_percent) < 75);
+      const rows = report.students.filter(isAtRisk);
       downloadCsv(`${base}.csv`, [
         ['Name', 'Roll', 'Attendance %', 'Risk'],
         ...rows.map((s) => [
           s.name ?? '',
           s.roll_number ?? '',
-          String(s.attendance_percent ?? ''),
-          pct(s.attendance_percent) < 60 ? 'HIGH' : 'MEDIUM',
+          String(attendancePct(s) ?? ''),
+          (attendancePct(s) ?? 100) < 60 ? 'HIGH' : 'MEDIUM',
         ]),
       ]);
     } else if (report.kind === 'attendance') {
@@ -296,7 +334,7 @@ export default function FacultyReportsPage() {
         ...report.students.map((s) => [
           s.name ?? '',
           s.roll_number ?? '',
-          String(s.attendance_percent ?? ''),
+          String(attendancePct(s) ?? ''),
         ]),
       ]);
     } else {
@@ -306,7 +344,8 @@ export default function FacultyReportsPage() {
         ['Course', `${report.courseCode} — ${report.courseName}`],
         ['Generated', new Date(report.generatedAt).toLocaleString('en-IN')],
         ['Students', String(report.students.length)],
-        ['Avg attendance %', String(report.avgAttendance)],
+        ['Avg attendance %', report.avgAttendance === null ? '' : String(report.avgAttendance)],
+        ['Students without attendance data', String(report.attendanceUnrecorded)],
         ['Below 75%', String(report.below75)],
         ['Assignments', String(report.assignmentCount)],
         [],
@@ -315,7 +354,7 @@ export default function FacultyReportsPage() {
         ...report.students.map((s) => [
           s.name ?? '',
           s.roll_number ?? '',
-          String(s.attendance_percent ?? ''),
+          String(attendancePct(s) ?? ''),
         ]),
         [],
         ['--- Assignments ---'],
@@ -341,11 +380,11 @@ export default function FacultyReportsPage() {
     if (!report) return [];
     if (report.kind === 'atrisk') {
       return report.students
-        .filter((s) => pct(s.attendance_percent) < 75)
-        .sort((a, b) => pct(a.attendance_percent) - pct(b.attendance_percent));
+        .filter(isAtRisk)
+        .sort((a, b) => (attendancePct(a) ?? 101) - (attendancePct(b) ?? 101));
     }
     return [...report.students].sort(
-      (a, b) => pct(a.attendance_percent) - pct(b.attendance_percent),
+      (a, b) => (attendancePct(a) ?? 101) - (attendancePct(b) ?? 101),
     );
   }, [report]);
 
@@ -355,7 +394,7 @@ export default function FacultyReportsPage() {
         title="Reports"
         description="Generate course-wise teaching reports — preview first, then download or print."
         meta={
-          selectedCourse || courseOptions[0] ? (
+          !coursesUnavailable ? (
             <FacultyMetricChip
               label="Courses"
               value={courseOptions.length}
@@ -371,20 +410,21 @@ export default function FacultyReportsPage() {
         description="Pick a subject and report type, then generate a live preview"
       >
         <div className="space-y-5">
-          <label className="block text-sm">
+          <label htmlFor="reports-course" className="block text-sm">
             <span className="mb-1.5 block font-medium text-sgvu-navy">Course</span>
             <Select
+              id="reports-course"
               className="h-11 w-full rounded-lg border border-border/60 bg-background px-3 text-sm"
               value={effectiveCourseId}
               onChange={(e) => {
                 setCourseId(e.target.value);
                 setReport(null);
               }}
-              disabled={loading}
+              disabled={coursesUnavailable || busy}
             >
-              {courseOptions.length === 0 ? (
-                <option value="">No courses assigned</option>
-              ) : null}
+              <option value="">
+                {loading ? 'Loading courses…' : courseLoadError ? 'Unable to load courses' : courseOptions.length === 0 ? 'No courses assigned' : 'Select course'}
+              </option>
               {courseOptions.map((c) => (
                 <option key={c.course_id} value={c.course_id}>
                   {c.course_code} — {c.course_name}
@@ -392,6 +432,15 @@ export default function FacultyReportsPage() {
               ))}
             </Select>
           </label>
+          {!loading && courseLoadError ? (
+            <div role="alert">
+              <FacultyErrorBanner message={`${courseLoadError} Refresh the page to try again.`} />
+            </div>
+          ) : !loading && courseOptions.length === 0 ? (
+            <p className="text-sm text-muted-foreground" role="status">
+              No teaching courses are assigned yet. Contact your HOD if you expected a teaching assignment.
+            </p>
+          ) : null}
 
           <div>
             <p className="mb-2 text-sm font-medium text-sgvu-navy">Report type</p>
@@ -403,6 +452,7 @@ export default function FacultyReportsPage() {
                   <button
                     key={item.id}
                     type="button"
+                    disabled={busy || !effectiveCourseId}
                     onClick={() => {
                       setKind(item.id);
                       setReport(null);
@@ -471,10 +521,14 @@ export default function FacultyReportsPage() {
       {/* Preview */}
       {!report && !busy ? (
         <FacultyPanel title="Report preview" description="Your generated report will appear here">
-          <FacultyEmptyState
-            title="No report yet"
-            description="Select a course and report type, then click Generate report."
-          />
+          {reportError ? (
+            <div role="alert"><FacultyErrorBanner message={reportError} /></div>
+          ) : (
+            <FacultyEmptyState
+              title={loading ? 'Loading courses…' : 'No report yet'}
+              description="Select a course and report type, then click Generate report."
+            />
+          )}
         </FacultyPanel>
       ) : null}
 
@@ -500,12 +554,15 @@ export default function FacultyReportsPage() {
               <Badge variant="outline">{report.assignmentCount} assignments</Badge>
               {report.below75 > 0 ? (
                 <Badge variant="destructive">{report.below75} below 75%</Badge>
-              ) : (
+              ) : report.attendanceUnrecorded === 0 && report.students.length > 0 ? (
                 <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100">
                   <CheckCircle2 className="mr-1 h-3 w-3" />
                   Attendance healthy
                 </Badge>
-              )}
+              ) : null}
+              {report.attendanceUnrecorded > 0 ? (
+                <Badge variant="outline">{report.attendanceUnrecorded} without attendance data</Badge>
+              ) : null}
             </div>
 
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -518,7 +575,7 @@ export default function FacultyReportsPage() {
               <div className="rounded-xl border border-sgvu-navy/10 bg-sgvu-navy/5 p-4">
                 <p className="text-xs text-muted-foreground">Avg attendance</p>
                 <p className="mt-1 text-2xl font-black tabular-nums text-sgvu-navy">
-                  {report.avgAttendance}%
+                  {report.avgAttendance === null ? 'N/A' : `${report.avgAttendance}%`}
                 </p>
               </div>
               <div className="rounded-xl border border-border/60 bg-muted/30 p-4">
@@ -540,6 +597,12 @@ export default function FacultyReportsPage() {
               </div>
             </div>
           </FacultyPanel>
+
+          {report.attendanceUnrecorded > 0 ? (
+            <p className="px-1 text-sm text-muted-foreground">
+              Students without recorded attendance are excluded from the attendance average and at-risk count.
+            </p>
+          ) : null}
 
           {(report.kind === 'full' ||
             report.kind === 'attendance' ||
@@ -571,7 +634,7 @@ export default function FacultyReportsPage() {
                     </thead>
                     <tbody>
                       {previewStudents.slice(0, 40).map((s, i) => {
-                        const value = pct(s.attendance_percent);
+                        const value = attendancePct(s);
                         return (
                           <tr key={`${s.roll_number}-${i}`} className="border-b last:border-0">
                             <td className="px-3 py-2 tabular-nums text-muted-foreground">
@@ -582,14 +645,16 @@ export default function FacultyReportsPage() {
                             <td
                               className={cn(
                                 'px-3 py-2 text-right font-bold tabular-nums',
-                                value < 60
+                                value === null
+                                  ? 'text-muted-foreground'
+                                  : value < 60
                                   ? 'text-red-700'
                                   : value < 75
                                     ? 'text-amber-700'
                                     : 'text-emerald-700',
                               )}
                             >
-                              {value.toFixed(1)}%
+                              {attendanceText(s)}
                             </td>
                           </tr>
                         );

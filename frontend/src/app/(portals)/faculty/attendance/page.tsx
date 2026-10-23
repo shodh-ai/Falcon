@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useEffect, useMemo, useState } from 'react';
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { BookOpen, Check, Send, X } from 'lucide-react';
@@ -14,6 +14,7 @@ import {
   FacultyEmptyState,
   FacultyInlineLoading,
   FacultyMetricChip,
+  FacultyErrorBanner,
 } from '@/components/faculty';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -86,7 +87,18 @@ type FacultyClass = {
   room: string | null;
   start_time: string;
   end_time: string;
-  student_count: number;
+  student_count?: number;
+};
+
+type WeeklyTimetableRow = {
+  timetable_id: string;
+  course_id: string;
+  course_code: string;
+  course_name: string;
+  day_of_week: number;
+  start_time: string;
+  end_time: string;
+  room: string | null;
 };
 
 type Student = {
@@ -129,6 +141,7 @@ function MarkAttendanceContent() {
   const params = useSearchParams();
   const initialCourseId = params.get('courseId');
   const [classes, setClasses] = useState<FacultyClass[]>([]);
+  const [classListLabel, setClassListLabel] = useState("Today's classes");
   const [selectedCourseId, setSelectedCourseId] = useState<string | null>(initialCourseId);
   const [selectedTimetableId, setSelectedTimetableId] = useState<string | null>(null);
   const [students, setStudents] = useState<Student[]>([]);
@@ -140,6 +153,15 @@ function MarkAttendanceContent() {
   const [rosterLoading, setRosterLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [classesError, setClassesError] = useState<string | null>(null);
+  const [rosterError, setRosterError] = useState<string | null>(null);
+  const copyRequest = useRef(0);
+
+  useEffect(() => {
+    // A response belongs only to the account, department, class and date
+    // that requested it. Cleanup also invalidates copies after unmount.
+    return () => { copyRequest.current += 1; };
+  }, [api, activeDeptId, deptLoading, selectedCourseId, selectedTimetableId, selectedDate, locked]);
 
   const selectedClass = useMemo(
     () => classes.find((c) => c.timetable_id === selectedTimetableId) ?? classes.find((c) => c.course_id === selectedCourseId) ?? null,
@@ -168,13 +190,46 @@ function MarkAttendanceContent() {
 
   useEffect(() => {
     if (deptLoading) return;
+    let cancelled = false;
+    // Changing the department starts a new asynchronous class-list request.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setLoading(true);
+    setClassesError(null);
     void api
       .get<FacultyClass[]>(withTeachingDeptId('/api/academics/faculty/timetable/today', activeDeptId))
-      .then((data) => {
-        const classesResolved = withFacultyDemoFallback(data, facultyDemoTodayClasses(), isEmptyArray);
+      .then(async (data) => {
+        if (cancelled) return;
+        let classesResolved: FacultyClass[] = withFacultyDemoFallback(
+          data,
+          facultyDemoTodayClasses() as FacultyClass[],
+          isEmptyArray,
+        );
+        let label = "Today's classes";
+
+        // Attendance should still be usable on a day with no scheduled class.
+        // The faculty can choose an assigned timetable course and review its
+        // roster for another date from the date picker.
+        if (classesResolved.length === 0) {
+          const weekly = await api.get<WeeklyTimetableRow[]>(
+            withTeachingDeptId('/api/academics/faculty/workspaces/timetable', activeDeptId),
+          );
+          classesResolved = weekly.map((row) => ({
+            timetable_id: row.timetable_id,
+            course_id: row.course_id,
+            course_code: row.course_code,
+            course_name: row.course_name,
+            room: row.room,
+            start_time: row.start_time,
+            end_time: row.end_time,
+          }));
+          label = 'Available courses';
+        }
+        if (cancelled) return;
+        setClassListLabel(label);
         setClasses(classesResolved);
         if (classesResolved.length === 0) {
           setSelectedCourseId(null);
+          setSelectedTimetableId(null);
           return;
         }
         const fromUrl = initialCourseId
@@ -184,21 +239,54 @@ function MarkAttendanceContent() {
         setSelectedCourseId(pick.course_id);
         setSelectedTimetableId(pick.timetable_id);
       })
-      .catch(() => {
-        const classesResolved = withFacultyDemoFallback([], facultyDemoTodayClasses(), isEmptyArray);
+      .catch(async (error: unknown) => {
+        if (cancelled) return;
+        let classesResolved: FacultyClass[] = withFacultyDemoFallback(
+          [],
+          facultyDemoTodayClasses() as FacultyClass[],
+          isEmptyArray,
+        );
+        if (classesResolved.length === 0) {
+          try {
+            const weekly = await api.get<WeeklyTimetableRow[]>(
+              withTeachingDeptId('/api/academics/faculty/workspaces/timetable', activeDeptId),
+            );
+            classesResolved = weekly.map((row) => ({
+              timetable_id: row.timetable_id,
+              course_id: row.course_id,
+              course_code: row.course_code,
+              course_name: row.course_name,
+              room: row.room,
+              start_time: row.start_time,
+              end_time: row.end_time,
+            }));
+          } catch {
+            // Keep the original, more useful today-request error below.
+          }
+        }
+        if (cancelled) return;
+        setClassListLabel(classesResolved.length ? 'Available courses' : "Today's classes");
         setClasses(classesResolved);
         if (classesResolved[0]) {
           setSelectedCourseId(classesResolved[0].course_id);
           setSelectedTimetableId(classesResolved[0].timetable_id);
+        } else {
+          setSelectedCourseId(null);
+          setSelectedTimetableId(null);
+          setClassesError(error instanceof Error ? error.message : 'Failed to load classes');
         }
       })
-      .finally(() => setLoading(false));
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [api, initialCourseId, activeDeptId, deptLoading]);
 
   useEffect(() => {
     if (!selectedCourseId) return;
     let cancelled = false;
+    // Synchronize the loading boundary with the new course/date request before it can be submitted.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setRosterLoading(true);
+    setRosterError(null);
     const timetableId = selectedTimetableId ?? selectedClass?.timetable_id;
 
     function applyRoster(
@@ -272,12 +360,19 @@ function MarkAttendanceContent() {
           isEmptyArray,
         );
         if (rosterResolved.length === 0) {
-          toast.error(e instanceof Error ? e.message : 'Failed to load roster');
+          if (!cancelled) setRosterError(e instanceof Error ? e.message : 'Failed to load roster');
         }
         applyRoster(
           rosterResolved,
-          facultyDemoAttendanceState(selectedCourseId),
-          facultyDemoAttendanceAnalytics(selectedCourseId),
+          withFacultyDemoFallback<{
+            locked: boolean;
+            attendance_data: { student_id: string; status: UiStatus }[] | null;
+          }>(
+            { locked: false, attendance_data: null },
+            facultyDemoAttendanceState(selectedCourseId),
+            () => true,
+          ),
+          withFacultyDemoFallback(null, facultyDemoAttendanceAnalytics(selectedCourseId)),
         );
       } finally {
         if (!cancelled) setRosterLoading(false);
@@ -289,7 +384,8 @@ function MarkAttendanceContent() {
   }, [api, selectedCourseId, selectedDate, selectedTimetableId, selectedClass?.timetable_id]);
 
   async function copyPreviousAttendance() {
-    if (!selectedCourseId || !selectedTimetableId || locked) return;
+    if (!selectedCourseId || !selectedTimetableId || locked || saving || loading || rosterLoading || rosterError) return;
+    const requestId = ++copyRequest.current;
 
     if (isFacultyDemoSmokeId(selectedCourseId)) {
       const map: Record<string, UiStatus> = {};
@@ -305,6 +401,7 @@ function MarkAttendanceContent() {
       const prev = await api.get<{ attendance_data: { student_id: string; status: UiStatus }[] | null }>(
         `/api/academics/faculty/course/${selectedCourseId}/attendance/previous-session?date=${selectedDate}&timetableId=${selectedTimetableId}`,
       );
+      if (requestId !== copyRequest.current) return;
       if (!prev.attendance_data?.length) {
         toast.error('No previous session attendance found for this batch today.');
         return;
@@ -316,6 +413,7 @@ function MarkAttendanceContent() {
       setAttendance(map);
       toast.success('Copied attendance from previous hour');
     } catch (e) {
+      if (requestId !== copyRequest.current) return;
       toast.error(e instanceof Error ? e.message : 'Could not copy previous attendance');
     }
   }
@@ -341,6 +439,8 @@ function MarkAttendanceContent() {
       toast.error('Mark at least one student before saving.');
       return;
     }
+    // A pending copy must not replace the draft being submitted.
+    copyRequest.current += 1;
     setSaving(true);
     try {
       const timetableId = selectedTimetableId ?? selectedClass?.timetable_id;
@@ -369,7 +469,7 @@ function MarkAttendanceContent() {
         },
       );
       const state = await api.get<{ locked: boolean }>(
-        `/api/academics/faculty/course/${selectedCourseId}/attendance?date=${selectedDate}`,
+        `/api/academics/faculty/course/${selectedCourseId}/attendance?date=${selectedDate}${timetableId ? `&timetableId=${timetableId}` : ''}`,
       );
       setLocked(state.locked);
       const synced = result.attendance_updated?.length ?? 0;
@@ -431,14 +531,14 @@ function MarkAttendanceContent() {
         }
       />
 
-      {classes.length === 0 ? (
+      {classesError ? <FacultyErrorBanner message={classesError} /> : classes.length === 0 ? (
         <FacultyEmptyState
           title="No classes today"
-          description="When you have sessions on the timetable, they will appear here for attendance marking."
+          description="No active timetable courses were found for your faculty account."
         />
       ) : (
         <div className="grid gap-4 lg:grid-cols-[minmax(0,15rem)_minmax(0,1fr)] xl:grid-cols-[minmax(0,17rem)_minmax(0,1fr)]">
-          <FacultyPanel title="Today's classes" count={classes.length}>
+          <FacultyPanel title={classListLabel} count={classes.length}>
             <ul className="space-y-1.5">
               {classes.map((c) => {
                 const active = selectedTimetableId === c.timetable_id;
@@ -446,6 +546,7 @@ function MarkAttendanceContent() {
                   <li key={c.timetable_id}>
                     <button
                       type="button"
+                      disabled={saving}
                       onClick={() => {
                         setSelectedCourseId(c.course_id);
                         setSelectedTimetableId(c.timetable_id);
@@ -460,7 +561,7 @@ function MarkAttendanceContent() {
                       <p className="font-semibold text-sgvu-navy">{c.course_code}</p>
                       <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{c.course_name}</p>
                       <p className="mt-1 text-[11px] text-muted-foreground">
-                        {String(c.start_time).slice(0, 5)}–{String(c.end_time).slice(0, 5)} · {c.student_count} students
+                        {String(c.start_time).slice(0, 5)}–{String(c.end_time).slice(0, 5)} · {c.student_count != null ? `${c.student_count} students` : 'Select to load roster'}
                       </p>
                     </button>
                   </li>
@@ -471,12 +572,14 @@ function MarkAttendanceContent() {
 
           <FacultyPanel
             title={selectedClass ? `${selectedClass.course_code} — roster` : 'Student roster'}
-            description={selectedClass ? `${selectedClass.room ?? 'Room TBA'} · ${selectedClass.student_count} enrolled` : undefined}
+            description={selectedClass ? `${selectedClass.room ?? 'Room TBA'} · ${selectedClass.student_count != null ? `${selectedClass.student_count} enrolled` : 'Roster loads below'}` : undefined}
           >
             {!selectedClass ? (
               <FacultyEmptyState description="Select a class from the list to load the roster." />
             ) : rosterLoading ? (
               <FacultyInlineLoading label="Loading roster…" />
+            ) : rosterError ? (
+              <FacultyErrorBanner message={rosterError} />
             ) : (
               <div className="space-y-4">
                 <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
@@ -484,6 +587,7 @@ function MarkAttendanceContent() {
                     type="date"
                     className="rounded-lg border border-input bg-background px-3 py-2 text-sm"
                     value={selectedDate}
+                    disabled={saving}
                     onChange={(e) => setSelectedDate(e.target.value)}
                   />
                   <Input
@@ -510,7 +614,7 @@ function MarkAttendanceContent() {
                       <X className="mr-1 h-3.5 w-3.5" />
                       All absent
                     </Button>
-                    <Button type="button" size="sm" variant="secondary" onClick={() => void copyPreviousAttendance()}>
+                    <Button type="button" size="sm" variant="secondary" disabled={saving} onClick={() => void copyPreviousAttendance()}>
                       Take Same Attendance as Previous
                     </Button>
                   </div>

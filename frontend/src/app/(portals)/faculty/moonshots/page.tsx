@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
   Award,
@@ -308,7 +308,7 @@ export default function FacultyDeepTechMoonshotsPage() {
   const [newProgramId, setNewProgramId] = useState('');
   const [newNotes, setNewNotes] = useState('');
 
-  async function reload() {
+  const reload = useCallback(async () => {
     setLoading(true);
     try {
       const [progRows, projectRows] = await Promise.all([
@@ -323,11 +323,13 @@ export default function FacultyDeepTechMoonshotsPage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [moonshotsApi]);
 
   useEffect(() => {
+    // Begin the remote project/program read and expose its loading state.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void reload();
-  }, [moonshotsApi]);
+  }, [reload]);
 
   async function createProject() {
     if (!newTitle.trim()) {

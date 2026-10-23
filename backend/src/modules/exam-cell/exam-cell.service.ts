@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -12,6 +13,18 @@ import { AdmitCardPdfService } from '../exams/pdf/admit-card-pdf.service';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 import { NotificationEvents } from '../../core/notifications/notification.events';
 import { AttendanceEligibilityService } from '../attendance-policy/attendance-eligibility.service';
+import { isUUID } from 'class-validator';
+import { postgresQueryRows } from '../../common/postgres-query-rows';
+import {
+  publishReEvaluationSources,
+  validateReEvaluationSources,
+} from './re-evaluation-publication';
+import {
+  type ReEvaluationResultCandidate,
+  listReEvaluationResultCandidates,
+  reEvaluationResultMetadata,
+  resolveReEvaluationResult,
+} from '../exams/re-evaluation-result';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -1300,111 +1313,127 @@ export class ExamCellService {
     status: 'APPROVED' | 'REJECTED',
     comment: string,
   ) {
-    if (!comment?.trim()) {
+    if (!['APPROVED', 'REJECTED'].includes(status)) {
+      throw new BadRequestException('Select a valid duty swap decision');
+    }
+    if (typeof comment !== 'string' || !comment.trim()) {
       throw new BadRequestException('Comment is required');
     }
 
-    const rows = await this.db.query(
-      `SELECT s.*,
-              a.exam_date, a.room, a.session_label, a.exam_schedule_id, a.block_name,
-              a.faculty_user_id AS current_faculty_user_id,
-              req.name AS requester_name,
-              tgt.name AS target_name
-       FROM invigilation_duty_swaps s
-       JOIN faculty_invigilation_assignments a ON a.assignment_id = s.assignment_id
-       JOIN users req ON req.user_id = s.requester_faculty_user_id
-       JOIN users tgt ON tgt.user_id = s.target_faculty_user_id
-       WHERE s.swap_id = $1 AND s.tenant_id = $2 AND s.deleted_at IS NULL`,
-      [swapId, tenantId],
-    );
-    const swap = rows[0];
-    if (!swap) throw new NotFoundException('Swap request not found');
-    if (swap.status !== 'PENDING_EXAM_CELL') {
-      throw new BadRequestException('Swap is not awaiting Exam Cell approval');
-    }
-    if (swap.current_faculty_user_id !== swap.requester_faculty_user_id) {
-      throw new BadRequestException(
-        'Duty ownership changed; cancel and re-request the swap',
+    const { swap, updated } = await this.db.transaction(async (manager) => {
+      const rows = await manager.query(
+        `SELECT s.*,
+                a.exam_date::text AS exam_date, a.room, a.session_label, a.exam_schedule_id, a.block_name,
+                a.faculty_user_id AS current_faculty_user_id,
+                req.name AS requester_name,
+                tgt.name AS target_name
+         FROM invigilation_duty_swaps s
+         JOIN faculty_invigilation_assignments a ON a.assignment_id = s.assignment_id AND a.tenant_id = s.tenant_id
+         JOIN users req ON req.user_id = s.requester_faculty_user_id AND req.tenant_id = s.tenant_id
+         JOIN users tgt ON tgt.user_id = s.target_faculty_user_id AND tgt.tenant_id = s.tenant_id
+         WHERE s.swap_id = $1 AND s.tenant_id = $2 AND s.deleted_at IS NULL
+         FOR UPDATE OF s, a`,
+        [swapId, tenantId],
       );
-    }
-
-    const nextStatus =
-      status === 'APPROVED' ? 'APPROVED' : 'REJECTED_BY_EXAM_CELL';
-
-    if (status === 'APPROVED') {
-      const conflict = await this.db.query(
-        `SELECT 1 FROM faculty_invigilation_assignments
-         WHERE tenant_id = $1
-           AND faculty_user_id = $2
-           AND exam_date = $3::date
-           AND COALESCE(session_label, '') = COALESCE($4, '')
-           AND assignment_id <> $5
-         LIMIT 1`,
-        [
-          tenantId,
-          swap.target_faculty_user_id,
-          swap.exam_date,
-          swap.session_label ?? null,
-          swap.assignment_id,
-        ],
-      );
-      if (conflict[0]) {
+      const swap = rows[0];
+      if (!swap) throw new NotFoundException('Swap request not found');
+      if (swap.status !== 'PENDING_EXAM_CELL') {
+        throw new BadRequestException('Swap is not awaiting Exam Cell approval');
+      }
+      if (swap.current_faculty_user_id !== swap.requester_faculty_user_id) {
         throw new BadRequestException(
-          'Target faculty already has a conflicting duty in this session',
+          'Duty ownership changed; cancel and re-request the swap',
         );
       }
 
-      await this.db.query(
-        `UPDATE faculty_invigilation_assignments
-         SET faculty_user_id = $1
-         WHERE assignment_id = $2 AND tenant_id = $3`,
-        [swap.target_faculty_user_id, swap.assignment_id, tenantId],
-      );
+      const nextStatus =
+        status === 'APPROVED' ? 'APPROVED' : 'REJECTED_BY_EXAM_CELL';
 
-      if (swap.exam_schedule_id) {
-        await this.db.query(
-          `UPDATE exam_invigilation_duties
-           SET faculty_user_id = $1
-           WHERE tenant_id = $2
-             AND exam_schedule_id = $3
-             AND room = $4
-             AND faculty_user_id = $5`,
+      if (status === 'APPROVED') {
+        // Serialize approvals targeting the same faculty before checking conflicts.
+        const target = await manager.query(
+          `SELECT user_id FROM users WHERE user_id = $1 AND tenant_id = $2
+             AND is_active = true AND deleted_at IS NULL FOR UPDATE`,
+          [swap.target_faculty_user_id, tenantId],
+        );
+        if (!target[0]) throw new BadRequestException('Target faculty is no longer available');
+        const conflict = await manager.query(
+          `SELECT 1 FROM faculty_invigilation_assignments
+           WHERE tenant_id = $1
+             AND faculty_user_id = $2
+             AND exam_date = $3::date
+             AND COALESCE(session_label, '') = COALESCE($4, '')
+             AND assignment_id <> $5
+           LIMIT 1`,
           [
-            swap.target_faculty_user_id,
             tenantId,
-            swap.exam_schedule_id,
-            swap.room,
-            swap.requester_faculty_user_id,
+            swap.target_faculty_user_id,
+            swap.exam_date,
+            swap.session_label ?? null,
+            swap.assignment_id,
           ],
         );
+        if (conflict[0]) {
+          throw new BadRequestException(
+            'Target faculty already has a conflicting duty in this session',
+          );
+        }
+
+        await manager.query(
+          `UPDATE faculty_invigilation_assignments
+           SET faculty_user_id = $1
+           WHERE assignment_id = $2 AND tenant_id = $3`,
+          [swap.target_faculty_user_id, swap.assignment_id, tenantId],
+        );
+
+        if (swap.exam_schedule_id) {
+          await manager.query(
+            `UPDATE exam_invigilation_duties
+             SET faculty_user_id = $1
+             WHERE tenant_id = $2
+               AND exam_schedule_id = $3
+               AND room = $4
+               AND faculty_user_id = $5`,
+            [
+              swap.target_faculty_user_id,
+              tenantId,
+              swap.exam_schedule_id,
+              swap.room,
+              swap.requester_faculty_user_id,
+            ],
+          );
+        }
       }
-    }
 
-    const updated = await this.db.query(
-      `UPDATE invigilation_duty_swaps
-       SET status = $1,
-           exam_cell_user_id = $2,
-           exam_cell_comment = $3,
-           exam_cell_resolved_at = NOW(),
-           updated_at = NOW()
-       WHERE swap_id = $4
-       RETURNING *`,
-      [nextStatus, actorUserId, comment.trim(), swapId],
-    );
+      const updated = postgresQueryRows(await manager.query(
+        `UPDATE invigilation_duty_swaps
+         SET status = $1,
+             exam_cell_user_id = $2,
+             exam_cell_comment = $3,
+             exam_cell_resolved_at = NOW(),
+             updated_at = NOW()
+         WHERE swap_id = $4 AND tenant_id = $5 AND status = 'PENDING_EXAM_CELL'
+           AND deleted_at IS NULL
+         RETURNING *`,
+        [nextStatus, actorUserId, comment.trim(), swapId, tenantId],
+      ));
+      if (!updated[0]) throw new ConflictException('Swap request changed. Refresh before reviewing it.');
 
-    await this.db.query(
-      `INSERT INTO invigilation_duty_swap_audits
-         (tenant_id, swap_id, actor_user_id, action, from_status, to_status, details)
-       VALUES ($1, $2, $3, $4, 'PENDING_EXAM_CELL', $5, $6::jsonb)`,
-      [
-        tenantId,
-        swapId,
-        actorUserId,
-        status === 'APPROVED' ? 'EXAM_CELL_APPROVED' : 'EXAM_CELL_REJECTED',
-        nextStatus,
-        JSON.stringify({ comment: comment.trim() }),
-      ],
-    );
+      await manager.query(
+        `INSERT INTO invigilation_duty_swap_audits
+           (tenant_id, swap_id, actor_user_id, action, from_status, to_status, details)
+         VALUES ($1, $2, $3, $4, 'PENDING_EXAM_CELL', $5, $6::jsonb)`,
+        [
+          tenantId,
+          swapId,
+          actorUserId,
+          status === 'APPROVED' ? 'EXAM_CELL_APPROVED' : 'EXAM_CELL_REJECTED',
+          nextStatus,
+          JSON.stringify({ comment: comment.trim() }),
+        ],
+      );
+      return { swap, updated: updated[0] };
+    });
 
     const notifyBase = {
       swapId: swap.swap_id,
@@ -1429,7 +1458,7 @@ export class ExamCellService {
       });
     }
 
-    return updated[0];
+    return updated;
   }
 
   listPendingCoeMarks(tenantId: string) {
@@ -1617,8 +1646,8 @@ export class ExamCellService {
     return { published: updated.length, course_name: courseName };
   }
 
-  listReEvaluations(tenantId: string) {
-    return this.db.query(
+  async listReEvaluations(tenantId: string) {
+    const rows = await this.db.query(
       `SELECT a.*,
               u.name AS student_name,
               u.official_email AS student_email,
@@ -1644,10 +1673,36 @@ export class ExamCellService {
          a.created_at ASC`,
       [tenantId],
     );
+    return Promise.all(
+      rows.map((row: any) => this.enrichReEvaluation(tenantId, row)),
+    );
   }
 
-  async getReEvaluation(tenantId: string, applicationId: string) {
-    const rows = await this.db.query(
+  private async enrichReEvaluation(
+    tenantId: string,
+    row: any,
+    db: Pick<DataSource, 'query'> = this.db,
+  ) {
+    const resolution = await resolveReEvaluationResult(db, {
+      tenantId,
+      studentUserId: row.student_user_id,
+      subjectId: row.subject_id,
+      examResultId: row.exam_result_id ?? null,
+    });
+    return {
+      ...row,
+      ...reEvaluationResultMetadata(resolution, row.exam_result_id),
+    };
+  }
+
+  async getReEvaluation(
+    tenantId: string,
+    applicationId: string,
+    db: Pick<DataSource, 'query'> = this.db,
+    lock = false,
+    includeMetadata = true,
+  ) {
+    const rows = await db.query(
       `SELECT a.*,
               u.name AS student_name,
               sub.subject_name,
@@ -1659,41 +1714,43 @@ export class ExamCellService {
        LEFT JOIN users f ON f.user_id = a.assigned_faculty_user_id
        WHERE a.exam_application_id = $1
          AND a.application_type = 'RE_EVALUATION'
-         AND u.tenant_id = $2`,
+         AND u.tenant_id = $2
+         AND a.deleted_at IS NULL
+         AND u.deleted_at IS NULL
+         ${lock ? 'FOR UPDATE OF a' : ''}`,
       [applicationId, tenantId],
     );
     if (!rows[0])
       throw new NotFoundException('Re-evaluation application not found');
-    return rows[0];
+    return includeMetadata
+      ? this.enrichReEvaluation(tenantId, rows[0], db)
+      : rows[0];
   }
 
-  private async loadOriginalMarks(studentUserId: string, subjectId: number) {
-    const rows = await this.db.query<Array<{ marks_obtained: string | null }>>(
-      `SELECT marks_obtained
-       FROM academic_exam_results
-       WHERE student_user_id = $1 AND subject_id = $2
-       ORDER BY created_at DESC
-       LIMIT 1`,
-      [studentUserId, subjectId],
+  private async lockReEvaluationResult(
+    db: Pick<DataSource, 'query'>,
+    tenantId: string,
+    application: any,
+    examResultId?: string | null,
+  ) {
+    const input = {
+      tenantId,
+      studentUserId: application.student_user_id,
+      subjectId: application.subject_id,
+      examResultId: examResultId ?? application.exam_result_id ?? null,
+    };
+    const resolved = await resolveReEvaluationResult(db, input);
+    if (!resolved.result) throw new BadRequestException(resolved.message);
+    await db.query(
+      `SELECT result_id FROM academic_exam_results WHERE result_id = $1 FOR UPDATE`,
+      [resolved.result.result_id],
     );
-    if (rows[0]?.marks_obtained != null) return Number(rows[0].marks_obtained);
-    const markRows = await this.db.query<
-      Array<{ marks_obtained: string | null }>
-    >(
-      `SELECT m.marks_obtained
-       FROM academic_marks m
-       JOIN academic_courses c ON c.course_id = m.course_id
-       JOIN academic_subjects s ON s.subject_code = c.course_code
-       WHERE m.student_user_id = $1
-         AND s.subject_id = $2
-         AND m.status = 'PUBLISHED'
-       ORDER BY m.published_at DESC NULLS LAST
-       LIMIT 1`,
-      [studentUserId, subjectId],
-    );
-    return markRows[0]?.marks_obtained != null
-      ? Number(markRows[0].marks_obtained)
-      : null;
+    const locked = await resolveReEvaluationResult(db, {
+      ...input,
+      examResultId: resolved.result.result_id,
+    });
+    if (!locked.result) throw new ConflictException(locked.message);
+    return locked.result;
   }
 
   private reEvalNotifyPayload(
@@ -1728,104 +1785,380 @@ export class ExamCellService {
     applicationId: string,
     facultyUserId: string,
   ) {
-    const application = await this.getReEvaluation(tenantId, applicationId);
-    if (application.status !== 'PENDING') {
-      throw new BadRequestException(
-        'Only pending applications can be assigned',
+    const updated = await this.db.transaction(async (manager) => {
+      const application = await this.getReEvaluation(
+        tenantId,
+        applicationId,
+        manager,
+        true,
+        false,
       );
-    }
-
-    const facultyRows = await this.db.query(
-      `SELECT 1 FROM users u
+      if (application.status !== 'PENDING')
+        throw new BadRequestException(
+          'Only pending applications can be assigned',
+        );
+      const facultyRows = await manager.query(
+        `SELECT 1 FROM users u
        JOIN user_roles ur ON ur.user_id = u.user_id
        JOIN roles r ON r.role_id = ur.role_id
        WHERE u.user_id = $1 AND u.tenant_id = $2 AND lower(r.role_name) = 'faculty'`,
-      [facultyUserId, tenantId],
-    );
-    if (!facultyRows[0])
-      throw new BadRequestException('Selected faculty is invalid');
-
-    const originalMarks = await this.loadOriginalMarks(
-      application.student_user_id,
-      application.subject_id,
-    );
-
-    const rows = await this.db.query(
-      `UPDATE exam_applications
+        [facultyUserId, tenantId],
+      );
+      if (!facultyRows[0])
+        throw new BadRequestException('Selected faculty is invalid');
+      const target = await this.lockReEvaluationResult(
+        manager,
+        tenantId,
+        application,
+      );
+      const rows = postgresQueryRows(await manager.query(
+        `UPDATE exam_applications
        SET status = 'ASSIGNED',
            assigned_faculty_user_id = $2,
            assigned_by = $3,
            assigned_at = NOW(),
-           original_marks = $4
-       WHERE exam_application_id = $1
+           original_marks = $4,
+           exam_result_id = $5
+       WHERE exam_application_id = $1 AND status = 'PENDING' AND deleted_at IS NULL
        RETURNING *`,
-      [applicationId, facultyUserId, actorUserId, originalMarks],
-    );
-    const updated = {
-      ...application,
-      ...rows[0],
-      original_marks: originalMarks,
-    };
+        [
+          applicationId,
+          facultyUserId,
+          actorUserId,
+          target.marks_obtained,
+          target.result_id,
+        ],
+      ));
+      if (!rows[0])
+        throw new ConflictException(
+          'This application changed. Refresh and try again.',
+        );
+      return this.enrichReEvaluation(
+        tenantId,
+        { ...application, ...rows[0] },
+        manager,
+      );
+    });
 
     this.notify.examRevaluationAssigned({
       ...this.reEvalNotifyPayload(tenantId, updated),
       userId: facultyUserId,
     });
 
-    return this.getReEvaluation(tenantId, applicationId);
+    return updated;
+  }
+
+  private async reEvaluationFacultyTenant(
+    facultyUserId: string,
+    authTenantId?: string,
+  ) {
+    const [faculty] = await this.db.query<Array<{ tenant_id: string | null }>>(
+      `SELECT tenant_id FROM users
+       WHERE user_id = $1 AND is_active = true AND deleted_at IS NULL
+       LIMIT 1`,
+      [facultyUserId],
+    );
+    if (
+      !faculty?.tenant_id ||
+      (authTenantId && authTenantId !== faculty.tenant_id)
+    ) {
+      throw new ForbiddenException(
+        'An active faculty account in this university is required',
+      );
+    }
+    return faculty.tenant_id;
   }
 
   async submitReEvaluationReport(
     facultyUserId: string,
     applicationId: string,
     dto: { revised_marks: number; report_notes: string },
+    authTenantId?: string,
   ) {
-    const [faculty] = await this.db.query<Array<{ tenant_id: string }>>(
-      `SELECT tenant_id FROM users WHERE user_id = $1 LIMIT 1`,
-      [facultyUserId],
-    );
-    const tenantId =
-      faculty?.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
-
-    const application = await this.getReEvaluation(tenantId, applicationId);
-    if (application.assigned_faculty_user_id !== facultyUserId) {
-      throw new ForbiddenException(
-        'You are not assigned to this re-evaluation',
-      );
-    }
-    if (application.status !== 'ASSIGNED') {
+    if (!isUUID(applicationId))
+      throw new BadRequestException('Invalid re-evaluation application');
+    const revisedMarks = dto?.revised_marks;
+    if (
+      typeof revisedMarks !== 'number' ||
+      !Number.isFinite(revisedMarks) ||
+      revisedMarks < 0
+    ) {
       throw new BadRequestException(
-        'Report can only be submitted for assigned applications',
+        'Revised marks must be a finite non-negative number',
       );
     }
-
-    await this.db.query(
-      `UPDATE exam_applications
+    if (
+      revisedMarks > 9999.99 ||
+      !/^\d+(?:\.\d{1,2})?$/.test(String(revisedMarks))
+    ) {
+      throw new BadRequestException(
+        'Revised marks must fit the supported numeric format: 0–9999.99 with at most 2 decimal places',
+      );
+    }
+    const reportNotes =
+      typeof dto?.report_notes === 'string' ? dto.report_notes.trim() : '';
+    if (!reportNotes || reportNotes.length > 2000) {
+      throw new BadRequestException(
+        'Enter reassessment notes between 1 and 2000 characters',
+      );
+    }
+    const tenantId = await this.reEvaluationFacultyTenant(
+      facultyUserId,
+      authTenantId,
+    );
+    const refreshed = await this.db.transaction(async (manager) => {
+      const application = await this.getReEvaluation(
+        tenantId,
+        applicationId,
+        manager,
+        true,
+        false,
+      );
+      if (application.assigned_faculty_user_id !== facultyUserId) {
+        throw new ForbiddenException(
+          'You are not assigned to this re-evaluation',
+        );
+      }
+      if (application.status !== 'ASSIGNED') {
+        throw new BadRequestException(
+          'Report can only be submitted for assigned applications',
+        );
+      }
+      const target = await this.lockReEvaluationResult(
+        manager,
+        tenantId,
+        application,
+      );
+      if (revisedMarks > Number(target.max_marks)) {
+        throw new BadRequestException(
+          `Revised marks cannot exceed this exam's maximum of ${target.max_marks}`,
+        );
+      }
+      if (
+        application.original_marks != null &&
+        Number(application.original_marks) !== target.marks_obtained
+      ) {
+        throw new ConflictException(
+          'The original exam result changed. Ask Exam Cell to verify the linked result before reassessment.',
+        );
+      }
+      const rows = postgresQueryRows(await manager.query(
+        `UPDATE exam_applications a
        SET status = 'UNDER_REVIEW',
            revised_marks = $2,
            report_notes = $3,
-           report_submitted_at = NOW()
-       WHERE exam_application_id = $1`,
-      [applicationId, dto.revised_marks, dto.report_notes.trim()],
-    );
-
-    const refreshed = await this.getReEvaluation(tenantId, applicationId);
-    const [student] = await this.db.query<Array<{ tenant_id: string }>>(
-      `SELECT tenant_id FROM users WHERE user_id = $1`,
-      [refreshed.student_user_id],
-    );
-    const notifyTenantId = student?.tenant_id ?? tenantId;
+           report_submitted_at = NOW(),
+           exam_result_id = $6,
+           original_marks = COALESCE(a.original_marks, $7)
+       FROM users student
+       WHERE a.exam_application_id = $1
+         AND a.assigned_faculty_user_id = $4
+         AND a.application_type = 'RE_EVALUATION'
+         AND a.status = 'ASSIGNED'
+         AND a.report_submitted_at IS NULL
+         AND a.deleted_at IS NULL
+         AND student.user_id = a.student_user_id
+         AND student.tenant_id = $5
+         AND student.deleted_at IS NULL
+       RETURNING a.*`,
+        [
+          applicationId,
+          revisedMarks,
+          reportNotes,
+          facultyUserId,
+          tenantId,
+          target.result_id,
+          target.marks_obtained,
+        ],
+      ));
+      if (!rows[0]) {
+        throw new ConflictException(
+          'This assignment changed or its report was already submitted. Refresh and try again.',
+        );
+      }
+      return this.enrichReEvaluation(
+        tenantId,
+        { ...application, ...rows[0] },
+        manager,
+      );
+    });
 
     this.notify.examRevaluationReportReady({
-      ...this.reEvalNotifyPayload(notifyTenantId, {
-        ...refreshed,
-        revised_marks: dto.revised_marks,
-        report_notes: dto.report_notes,
-      }),
+      ...this.reEvalNotifyPayload(tenantId, refreshed),
       userId: refreshed.student_user_id,
     });
 
     return refreshed;
+  }
+
+  async listReEvaluationExamResults(tenantId: string, applicationId: string) {
+    if (!isUUID(applicationId))
+      throw new BadRequestException('Invalid re-evaluation application');
+    const application = await this.getReEvaluation(
+      tenantId,
+      applicationId,
+      this.db,
+      false,
+      false,
+    );
+    const candidates = await listReEvaluationResultCandidates(this.db, {
+      tenantId,
+      studentUserId: application.student_user_id,
+      subjectId: application.subject_id,
+    });
+    return Promise.all(candidates.map(async (candidate) => {
+      let message = candidate.is_valid
+        ? this.reEvaluationLinkValidationMessage(application, candidate)
+        : candidate.validation_message ?? 'The published result has invalid marks or maximum marks.';
+      if (!message) {
+        try {
+          await validateReEvaluationSources(
+            this.db,
+            tenantId,
+            application.student_user_id,
+            candidate,
+            candidate.marks_obtained!,
+          );
+        } catch (error) {
+          if (!(error instanceof ConflictException)) throw error;
+          message = error.message;
+        }
+      }
+      return {
+        ...candidate,
+        link_verified: message === null,
+        link_validation_message: message,
+      };
+    }));
+  }
+
+  private reEvaluationLinkValidationMessage(
+    application: {
+      status: string;
+      exam_result_id?: string | null;
+      original_marks?: unknown;
+      revised_marks?: unknown;
+    },
+    target: ReEvaluationResultCandidate,
+  ): string | null {
+    if (!['PENDING', 'ASSIGNED', 'UNDER_REVIEW'].includes(application.status)) {
+      return 'Only pending, assigned or submitted cases can have their exam link repaired';
+    }
+    if (
+      ['ASSIGNED', 'UNDER_REVIEW'].includes(application.status) &&
+      application.exam_result_id &&
+      application.exam_result_id.toLowerCase() !== target.result_id.toLowerCase()
+    ) {
+      return 'An assigned or submitted case cannot be moved to another exam result';
+    }
+    const original = application.original_marks;
+    if (
+      (typeof original !== 'number' && typeof original !== 'string') ||
+      String(original).trim() === '' ||
+      !Number.isFinite(Number(original)) ||
+      Number(original) !== target.marks_obtained
+    ) {
+      return 'The saved original marks do not match this result. Linking cannot change marks; Exam Cell must verify the correct official result first.';
+    }
+    const revised = application.revised_marks;
+    if (application.status === 'UNDER_REVIEW' && revised == null) {
+      return 'The submitted request has no revised marks. Resolve the missing report separately before linking.';
+    }
+    if (revised != null && (
+      (typeof revised !== 'number' && typeof revised !== 'string') ||
+      String(revised).trim() === '' ||
+      !Number.isFinite(Number(revised)) ||
+      Number(revised) < 0 ||
+      Number(revised) > Number(target.max_marks) ||
+      !/^\d+(?:\.\d{1,2})?$/.test(String(Number(revised)))
+    )) {
+      return 'The saved revised marks do not fit this exam maximum or numeric format. Linking cannot change the report or marks.';
+    }
+    return null;
+  }
+
+  async linkReEvaluationExamResult(
+    tenantId: string,
+    actorUserId: string,
+    applicationId: string,
+    examResultId: string,
+  ) {
+    if (!isUUID(applicationId) || !isUUID(examResultId))
+      throw new BadRequestException(
+        'Select a valid application and exam result',
+      );
+    return this.db.transaction(async (manager) => {
+      const application = await this.getReEvaluation(
+        tenantId,
+        applicationId,
+        manager,
+        true,
+        false,
+      );
+      if (
+        !['PENDING', 'ASSIGNED', 'UNDER_REVIEW'].includes(application.status)
+      ) {
+        throw new BadRequestException(
+          'Only pending, assigned or submitted cases can have their exam link repaired',
+        );
+      }
+      if (
+        ['ASSIGNED', 'UNDER_REVIEW'].includes(application.status) &&
+        application.exam_result_id &&
+        application.exam_result_id.toLowerCase() !== examResultId.toLowerCase()
+      ) {
+        throw new ConflictException(
+          'An assigned or submitted case cannot be moved to another exam result',
+        );
+      }
+      const target = await this.lockReEvaluationResult(
+        manager,
+        tenantId,
+        application,
+        examResultId,
+      );
+      const linkError = this.reEvaluationLinkValidationMessage(application, target);
+      if (linkError) throw new ConflictException(linkError);
+      await validateReEvaluationSources(
+        manager,
+        tenantId,
+        application.student_user_id,
+        target,
+        target.marks_obtained!,
+        true,
+      );
+      const rows = postgresQueryRows(await manager.query(
+        `UPDATE exam_applications a
+         SET exam_result_id = $2
+         FROM users student
+         WHERE a.exam_application_id = $1 AND a.status = $3 AND a.deleted_at IS NULL
+           AND a.application_type = 'RE_EVALUATION'
+           AND a.exam_result_id IS NOT DISTINCT FROM $4::uuid
+           AND a.original_marks IS NOT DISTINCT FROM $5::numeric
+           AND a.revised_marks IS NOT DISTINCT FROM $6::numeric
+           AND student.user_id = a.student_user_id
+           AND student.tenant_id = $7 AND student.deleted_at IS NULL
+         RETURNING a.*`,
+        [
+          applicationId,
+          target.result_id,
+          application.status,
+          application.exam_result_id ?? null,
+          application.original_marks,
+          application.revised_marks ?? null,
+          tenantId,
+        ],
+      ));
+      if (!rows[0])
+        throw new ConflictException(
+          'This application changed. Refresh before linking the result.',
+        );
+      return this.enrichReEvaluation(
+        tenantId,
+        { ...application, ...rows[0] },
+        manager,
+      );
+    });
   }
 
   async publishReEvaluation(
@@ -1833,73 +2166,123 @@ export class ExamCellService {
     actorUserId: string,
     applicationId: string,
   ) {
-    const application = await this.getReEvaluation(tenantId, applicationId);
-    if (application.status !== 'UNDER_REVIEW') {
-      throw new BadRequestException(
-        'Only applications with a submitted report can be published',
+    const refreshed = await this.db.transaction(async (manager) => {
+      const application = await this.getReEvaluation(
+        tenantId,
+        applicationId,
+        manager,
+        true,
+        false,
       );
-    }
+      if (application.status !== 'UNDER_REVIEW') {
+        throw new BadRequestException(
+          'Only applications with a submitted report can be published',
+        );
+      }
 
-    await this.db.query(
-      `UPDATE exam_applications
-       SET status = 'COMPLETED',
-           published_at = NOW(),
-           published_by = $2
-       WHERE exam_application_id = $1`,
-      [applicationId, actorUserId],
-    );
-
-    if (application.revised_marks != null) {
-      await this.db.query(
+      const target = await this.lockReEvaluationResult(
+        manager,
+        tenantId,
+        application,
+      );
+      const revised =
+        application.revised_marks == null
+          ? null
+          : Number(application.revised_marks);
+      if (
+        revised === null ||
+        !Number.isFinite(revised) ||
+        revised < 0 ||
+        revised > Number(target.max_marks)
+      ) {
+        throw new BadRequestException(
+          `The report marks must be between 0 and this exam's maximum of ${target.max_marks}`,
+        );
+      }
+      if (
+        application.original_marks == null ||
+        Number(application.original_marks) !== target.marks_obtained
+      ) {
+        throw new ConflictException(
+          'The original exam result changed. Reconcile the reassessment before publishing.',
+        );
+      }
+      const sourceUpdate = await publishReEvaluationSources(
+        manager, tenantId, application.student_user_id, target, revised,
+      );
+      const resultRows = postgresQueryRows(await manager.query(
         `UPDATE academic_exam_results
-         SET marks_obtained = $3, updated_at = NOW()
-         WHERE student_user_id = $1 AND subject_id = $2`,
+       SET marks_obtained = $2, grade=$7, grade_points=$8,
+           source_mark_updated_at=$9, updated_at = NOW()
+       WHERE result_id = $1 AND student_user_id = $3
+         AND (tenant_id = $4 OR tenant_id IS NULL)
+         AND status = 'PUBLISHED' AND deleted_at IS NULL
+         AND marks_obtained = $5 AND max_marks = $6
+       RETURNING result_id`,
         [
+          target.result_id,
+          revised,
           application.student_user_id,
-          application.subject_id,
-          application.revised_marks,
+          tenantId,
+          target.marks_obtained,
+          target.max_marks,
+          sourceUpdate.grade,
+          sourceUpdate.gradePoints,
+          sourceUpdate.sourceMarkUpdatedAt,
         ],
+      ));
+      if (!resultRows[0])
+        throw new ConflictException(
+          'The linked exam result changed. Refresh before publishing.',
+        );
+      const rows = postgresQueryRows(await manager.query(
+        `UPDATE exam_applications
+       SET status = 'COMPLETED', published_at = NOW(), published_by = $2, exam_result_id = $3
+       WHERE exam_application_id = $1 AND status = 'UNDER_REVIEW' AND deleted_at IS NULL
+       RETURNING *`,
+        [applicationId, actorUserId, target.result_id],
+      ));
+      if (!rows[0])
+        throw new ConflictException(
+          'This application changed. Refresh before publishing.',
+        );
+      const refreshed = { ...application, ...rows[0] };
+      const parentRows = await manager.query<
+        Array<{ parent_mobile: string; parent_name: string }>
+      >(
+        `SELECT parent_mobile, parent_name
+       FROM parent_student_links
+       WHERE student_user_id = $1`,
+        [refreshed.student_user_id],
       );
-    }
+      for (const parent of parentRows) {
+        const revisedText =
+          refreshed.revised_marks != null && refreshed.original_marks != null
+            ? `Marks updated from ${refreshed.original_marks} to ${refreshed.revised_marks}.`
+            : refreshed.revised_marks != null
+              ? `Revised marks: ${refreshed.revised_marks}.`
+              : 'Report published.';
+        await manager.query(
+          `INSERT INTO integration_jobs (tenant_id, integration_type, entity_type, payload)
+         VALUES ($1, 'WHATSAPP', 'revaluation_report', $2::jsonb)`,
+          [
+            tenantId,
+            JSON.stringify({
+              to: parent.parent_mobile,
+              message: `Re-evaluation report for ${refreshed.student_name} (${refreshed.subject_name}): ${revisedText}`,
+              provider: 'MSG91',
+            }),
+          ],
+        );
+      }
 
-    const refreshed = await this.getReEvaluation(tenantId, applicationId);
-    const payload = this.reEvalNotifyPayload(tenantId, refreshed);
-
+      return this.enrichReEvaluation(tenantId, refreshed, manager);
+    });
     this.notify.examRevaluationPublished({
-      ...payload,
+      ...this.reEvalNotifyPayload(tenantId, refreshed),
       userId: refreshed.student_user_id,
       actionLink: '/student/exams?intent=revaluation',
     });
-
-    const parentRows = await this.db.query<
-      Array<{ parent_mobile: string; parent_name: string }>
-    >(
-      `SELECT parent_mobile, parent_name
-       FROM parent_student_links
-       WHERE student_user_id = $1`,
-      [refreshed.student_user_id],
-    );
-    for (const parent of parentRows) {
-      const revisedText =
-        refreshed.revised_marks != null && refreshed.original_marks != null
-          ? `Marks updated from ${refreshed.original_marks} to ${refreshed.revised_marks}.`
-          : refreshed.revised_marks != null
-            ? `Revised marks: ${refreshed.revised_marks}.`
-            : 'Report published.';
-      await this.db.query(
-        `INSERT INTO integration_jobs (tenant_id, integration_type, entity_type, payload)
-         VALUES ($1, 'WHATSAPP', 'revaluation_report', $2::jsonb)`,
-        [
-          tenantId,
-          JSON.stringify({
-            to: parent.parent_mobile,
-            message: `Re-evaluation report for ${refreshed.student_name} (${refreshed.subject_name}): ${revisedText}`,
-            provider: 'MSG91',
-          }),
-        ],
-      );
-    }
-
     return refreshed;
   }
 
@@ -1914,17 +2297,20 @@ export class ExamCellService {
       throw new BadRequestException('This application cannot be rejected');
     }
 
-    await this.db.query(
+    const rows = postgresQueryRows(await this.db.query(
       `UPDATE exam_applications
        SET status = 'REJECTED',
            report_notes = COALESCE($2, report_notes),
            published_at = NOW(),
            published_by = $3
-       WHERE exam_application_id = $1`,
+       WHERE exam_application_id = $1
+         AND status IN ('PENDING', 'ASSIGNED', 'UNDER_REVIEW') AND deleted_at IS NULL
+       RETURNING *`,
       [applicationId, reason?.trim() || null, actorUserId],
-    );
+    ));
 
-    const refreshed = await this.getReEvaluation(tenantId, applicationId);
+    if (!rows[0]) throw new ConflictException('This application changed or was already published. Refresh before rejecting.');
+    const refreshed = await this.enrichReEvaluation(tenantId, { ...application, ...rows[0] });
     this.notify.examRevaluationPublished({
       ...this.reEvalNotifyPayload(tenantId, refreshed),
       userId: refreshed.student_user_id,
@@ -1938,8 +2324,12 @@ export class ExamCellService {
     return refreshed;
   }
 
-  listFacultyReEvaluations(facultyUserId: string) {
-    return this.db.query(
+  async listFacultyReEvaluations(facultyUserId: string, authTenantId?: string) {
+    const tenantId = await this.reEvaluationFacultyTenant(
+      facultyUserId,
+      authTenantId,
+    );
+    const rows = await this.db.query(
       `SELECT a.*,
               u.name AS student_name,
               sub.subject_name,
@@ -1949,31 +2339,46 @@ export class ExamCellService {
        JOIN academic_subjects sub ON sub.subject_id = a.subject_id
        WHERE a.application_type = 'RE_EVALUATION'
          AND a.assigned_faculty_user_id = $1
+         AND u.tenant_id = $2
+         AND a.deleted_at IS NULL
+         AND u.deleted_at IS NULL
+         AND sub.deleted_at IS NULL
          AND a.status IN ('ASSIGNED', 'UNDER_REVIEW', 'COMPLETED')
        ORDER BY a.assigned_at DESC NULLS LAST, a.created_at DESC`,
-      [facultyUserId],
+      [facultyUserId, tenantId],
+    );
+    return Promise.all(
+      rows.map((row: any) => this.enrichReEvaluation(tenantId, row)),
     );
   }
 
-  listStudentReEvaluations(studentUserId: string) {
-    return this.db.query(
-      `SELECT a.*,
+  async listStudentReEvaluations(studentUserId: string) {
+    const rows = await this.db.query(
+      `SELECT a.*, student.tenant_id AS _tenant_id,
               sub.subject_name,
               sub.subject_code,
               f.name AS faculty_name
        FROM exam_applications a
+       JOIN users student ON student.user_id = a.student_user_id
        JOIN academic_subjects sub ON sub.subject_id = a.subject_id
        LEFT JOIN users f ON f.user_id = a.assigned_faculty_user_id
        WHERE a.student_user_id = $1
          AND a.application_type = 'RE_EVALUATION'
+         AND a.deleted_at IS NULL AND student.deleted_at IS NULL AND student.tenant_id IS NOT NULL
        ORDER BY a.created_at DESC`,
       [studentUserId],
     );
+    return Promise.all(
+      rows.map(({ _tenant_id, ...row }: any) =>
+        this.enrichReEvaluation(_tenant_id, row),
+      ),
+    );
   }
 
-  listParentReEvaluations(studentUserId: string) {
-    return this.db.query(
-      `SELECT a.exam_application_id,
+  async listParentReEvaluations(studentUserId: string) {
+    const rows = await this.db.query(
+      `SELECT a.exam_application_id, a.student_user_id, a.subject_id, a.exam_result_id,
+              student.tenant_id AS _tenant_id,
               a.status,
               a.original_marks,
               a.revised_marks,
@@ -1982,12 +2387,19 @@ export class ExamCellService {
               sub.subject_name,
               sub.subject_code
        FROM exam_applications a
+       JOIN users student ON student.user_id = a.student_user_id
        JOIN academic_subjects sub ON sub.subject_id = a.subject_id
        WHERE a.student_user_id = $1
          AND a.application_type = 'RE_EVALUATION'
          AND a.status = 'COMPLETED'
+         AND a.deleted_at IS NULL AND student.deleted_at IS NULL AND student.tenant_id IS NOT NULL
        ORDER BY a.published_at DESC NULLS LAST`,
       [studentUserId],
+    );
+    return Promise.all(
+      rows.map(({ _tenant_id, ...row }: any) =>
+        this.enrichReEvaluation(_tenant_id, row),
+      ),
     );
   }
 

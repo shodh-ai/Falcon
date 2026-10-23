@@ -82,8 +82,13 @@ export function FacultyPlacementCoordinatorPanel() {
   const { token } = useAuth();
   const [drives, setDrives] = useState<Drive[]>([]);
   const [responses, setResponses] = useState<ResponseRow[]>([]);
-  const [selectedDriveId, setSelectedDriveId] = useState<string | null>(null);
-  const [selectedSubmittedDate, setSelectedSubmittedDate] = useState('');
+  const [selection, setSelection] = useState<{ driveId: string | null; submittedDate: string }>({
+    driveId: null,
+    submittedDate: '',
+  });
+  const selectedDriveId = drives.find((drive) => drive.drive_id === selection.driveId)?.drive_id
+    ?? drives[0]?.drive_id ?? null;
+  const selectedSubmittedDate = selection.driveId === selectedDriveId ? selection.submittedDate : '';
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [savingEdit, setSavingEdit] = useState(false);
@@ -91,6 +96,14 @@ export function FacultyPlacementCoordinatorPanel() {
   const [form, setForm] = useState<DriveForm>(EMPTY_FORM);
   const [editDrive, setEditDrive] = useState<Drive | null>(null);
   const [editForm, setEditForm] = useState<DriveForm>(EMPTY_FORM);
+
+  function setSelectedDriveId(driveId: string | null) {
+    setSelection({ driveId, submittedDate: '' });
+  }
+
+  function setSelectedSubmittedDate(submittedDate: string) {
+    setSelection({ driveId: selectedDriveId, submittedDate });
+  }
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -107,29 +120,23 @@ export function FacultyPlacementCoordinatorPanel() {
   }, [api]);
 
   useEffect(() => {
+    // Bootstrap the authenticated remote drive list; load also owns its loading boundary.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
   }, [load]);
 
   useEffect(() => {
-    if (drives.length > 0) {
-      setSelectedDriveId((prev) => prev ?? drives[0].drive_id);
-    }
-  }, [drives]);
-
-  useEffect(() => {
-    setSelectedSubmittedDate('');
-  }, [selectedDriveId]);
-
-  useEffect(() => {
-    if (!selectedDriveId) {
-      setResponses([]);
-      return;
-    }
+    let cancelled = false;
+    // A drive/date change invalidates the previous remote response list before the next fetch.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setResponses([]);
+    if (!selectedDriveId) return;
     const qs = selectedSubmittedDate ? `?submitted_date=${selectedSubmittedDate}` : '';
     void api
       .get<ResponseRow[]>(`/api/academics/hod/placement/drives/${selectedDriveId}/responses${qs}`)
-      .then(setResponses)
-      .catch(() => setResponses([]));
+      .then((rows) => { if (!cancelled) setResponses(rows); })
+      .catch(() => { if (!cancelled) setResponses([]); });
+    return () => { cancelled = true; };
   }, [api, selectedDriveId, selectedSubmittedDate]);
 
   async function createDrive() {

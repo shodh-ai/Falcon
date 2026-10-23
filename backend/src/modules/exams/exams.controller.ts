@@ -14,7 +14,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { ExamsService } from './exams.service';
 import { CreateExamApplicationDto } from './dto/create-exam-application.dto';
 
-type AuthUser = { user_id: string; role?: string };
+type AuthUser = { user_id: string; role?: string; tenant_id?: string };
 
 @Controller('api/academics/exams')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -51,9 +51,15 @@ export class ExamsController {
     return this.exams.listMyApplications(req.user.user_id);
   }
 
+  @Get('re-evaluation-results')
+  @Roles('Student')
+  reEvaluationResults(@Req() req: { user: AuthUser }) {
+    return this.exams.listReEvaluationResults(req.user.user_id, req.user.tenant_id);
+  }
+
   @Post('applications')
   @Roles('Student')
   apply(@Req() req: { user: AuthUser }, @Body() dto: CreateExamApplicationDto) {
-    return this.exams.createApplication(req.user.user_id, dto);
+    return this.exams.createApplication(req.user.user_id, dto, req.user.tenant_id);
   }
 }

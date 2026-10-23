@@ -25,6 +25,46 @@ export interface ExamEligibilityResult {
 
 export type ExamApplicationType = 'RE_EVALUATION' | 'BACKLOG';
 
+export type ExamLinkStatus = 'linked' | 'resolved' | 'missing' | 'ambiguous' | 'invalid';
+export interface ExamResultLink {
+  exam_result_id?: string | null;
+  exam_max_marks?: number | string | null;
+  exam_session?: string | null;
+  exam_type?: string | null;
+  exam_link_status?: ExamLinkStatus;
+  exam_link_message?: string | null;
+}
+
+export interface ReEvaluationResult {
+  result_id: string;
+  subject_id: number | null;
+  subject_name?: string | null;
+  subject_code?: string | null;
+  exam_session: string | null;
+  exam_type: string | null;
+  marks_obtained: number | string | null;
+  max_marks: number | string | null;
+  is_valid: boolean;
+  can_apply_for_re_evaluation?: boolean;
+  re_evaluation_eligibility_message?: string | null;
+  validation_message?: string | null;
+  link_verified?: boolean;
+  link_validation_message?: string | null;
+  grade?: string | null;
+  grade_letter?: string | null;
+}
+
+export type ExamApplicationCreate = { subject_id: number } & (
+  | { application_type: 'RE_EVALUATION'; exam_result_id: string }
+  | { application_type: 'BACKLOG'; exam_result_id?: string }
+);
+
+export function reevaluationMaximum(exam: ExamResultLink): number | null {
+  if (!['linked', 'resolved'].includes(exam.exam_link_status ?? '') || exam.exam_max_marks == null || String(exam.exam_max_marks).trim() === '') return null;
+  const maximum = Number(exam.exam_max_marks);
+  return Number.isFinite(maximum) && maximum > 0 ? maximum : null;
+}
+
 export type ExamApplicationStatus =
   | 'DRAFT'
   | 'PENDING'
@@ -34,7 +74,7 @@ export type ExamApplicationStatus =
   | 'APPROVED'
   | 'REJECTED';
 
-export interface ExamApplication {
+export interface ExamApplication extends ExamResultLink {
   exam_application_id: string;
   student_user_id: string;
   subject_id: number;
@@ -56,6 +96,7 @@ export const examsApi = {
   schedule: (token: string) => apiFetch<ExamSchedule[]>(token, { url: `${EXAMS}/schedule`, headers: {} }),
   eligibility: (token: string) => apiFetch<ExamEligibilityResult>(token, { url: `${EXAMS}/eligibility`, headers: {} }),
   myApplications: (token: string) => apiFetch<ExamApplication[]>(token, { url: `${EXAMS}/applications/my`, headers: {} }),
-  apply: (token: string, dto: { subject_id: number; application_type: ExamApplicationType }) =>
+  reEvaluationResults: (token: string) => apiFetch<ReEvaluationResult[]>(token, { url: `${EXAMS}/re-evaluation-results`, headers: {} }),
+  apply: (token: string, dto: ExamApplicationCreate) =>
     apiFetch<ExamApplication>(token, { url: `${EXAMS}/applications`, method: 'POST', headers: {}, data: dto }),
 };

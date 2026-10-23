@@ -1,11 +1,12 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { ThumbsUp, ThumbsDown, CheckCircle2, FileText } from 'lucide-react';
 import { FacultyEmptyState, FacultyPanel } from '@/components/faculty';
 import { Button } from '@/components/ui/button';
 import { useAuthedApi } from '@/lib/api';
+import { SelfServiceLoadError } from './SelfServiceLoadError';
 
 type Policy = {
   policy_id: string;
@@ -21,46 +22,73 @@ export function MyPoliciesPanel() {
   const api = useAuthedApi();
   const [policies, setPolicies] = useState<Policy[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const actionLock = useRef(false);
+  const scope = useRef(0);
+  const request = useRef(0);
 
-  const load = () => {
+  const load = useCallback(async (version = scope.current) => {
+    const requestId = ++request.current;
+    const current = () => version === scope.current && requestId === request.current;
     setLoading(true);
-    api
-      .get<Policy[]>('/api/hr/ess/policies')
-      .then(setPolicies)
-      .catch((err) => {
-        setPolicies([]);
-        toast.error(err instanceof Error ? err.message : 'Failed to load policies');
-      })
-      .finally(() => setLoading(false));
-  };
-
-  useEffect(() => {
-    load();
+    setError(null);
+    try {
+      const rows = await api.get<Policy[]>('/api/hr/ess/policies');
+      if (!current()) return;
+      if (!Array.isArray(rows)) throw new Error('Could not read policies. Please retry.');
+      setPolicies(rows);
+    } catch (err) {
+      if (current()) setError(err instanceof Error ? err.message : 'Failed to load policies');
+    } finally {
+      if (current()) setLoading(false);
+    }
   }, [api]);
 
-  async function acknowledge(id: string) {
+  useEffect(() => {
+    const version = ++scope.current;
+    // An account change invalidates the old policies before loading the new scope.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setPolicies([]);
+    setBusy(null);
+    actionLock.current = false;
+    void load(version);
+    return () => { scope.current += 1; };
+  }, [load]);
+
+  async function saveDecision(id: string, vote: 'YES' | 'NO' | null) {
+    const policy = policies.find((row) => row.policy_id === id);
+    if (actionLock.current || loading || error || !policy || (!vote && policy.acknowledged) || (vote && policy.user_vote === vote)) return;
+    const version = scope.current;
+    actionLock.current = true;
+    setBusy(id);
     try {
-      await api.post(`/api/hr/ess/policies/${id}/acknowledge`, {});
-      toast.success('Policy acknowledged');
-      load();
+      await api.post(`/api/hr/ess/policies/${id}/${vote ? 'vote' : 'acknowledge'}`, vote ? { vote } : {});
+      if (version !== scope.current) return;
+      setPolicies((rows) => rows.map((row) => row.policy_id !== id ? row : vote
+        ? { ...row, user_vote: vote }
+        : { ...row, acknowledged: true }));
+      toast.success(vote ? 'Vote submitted' : 'Policy acknowledged');
+      await load(version);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to acknowledge');
+      if (version === scope.current) toast.error(err instanceof Error ? err.message : vote ? 'Failed to submit vote' : 'Failed to acknowledge');
+    } finally {
+      if (version === scope.current) {
+        actionLock.current = false;
+        setBusy(null);
+      }
     }
   }
 
-  async function castVote(id: string, vote: 'YES' | 'NO') {
-    try {
-      await api.post(`/api/hr/ess/policies/${id}/vote`, { vote });
-      toast.success('Vote submitted');
-      load();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to submit vote');
-    }
-  }
+  const acknowledge = (id: string) => saveDecision(id, null);
+  const castVote = (id: string, vote: 'YES' | 'NO') => saveDecision(id, vote);
+  const unavailable = Boolean(busy) || loading || Boolean(error);
 
-  if (loading) {
+  if (loading && policies.length === 0) {
     return <p className="text-sm text-muted-foreground">Loading policies…</p>;
   }
+
+  if (error && policies.length === 0) return <SelfServiceLoadError message={error} onRetry={() => void load()} />;
 
   if (policies.length === 0) {
     return (
@@ -72,11 +100,16 @@ export function MyPoliciesPanel() {
   }
 
   return (
+    <>
+    {error && <SelfServiceLoadError message={error} onRetry={() => void load()} />}
+    {loading && <p role="status" className="text-sm text-muted-foreground">Refreshing policies…</p>}
     <FacultyPanel title="Active policies" count={policies.length}>
       <div className="space-y-3">
         {policies.map((p) => (
           <div
             key={p.policy_id}
+            role="group"
+            aria-label={p.title}
             className="rounded-xl border border-border/60 bg-background p-4 shadow-sm"
           >
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
@@ -107,6 +140,8 @@ export function MyPoliciesPanel() {
 
               <div className="flex flex-wrap items-center gap-2">
                 <Button
+                  disabled={unavailable}
+                  aria-pressed={p.user_vote === 'YES'}
                   variant={p.user_vote === 'YES' ? 'default' : 'outline'}
                   size="sm"
                   onClick={() => castVote(p.policy_id, 'YES')}
@@ -115,6 +150,8 @@ export function MyPoliciesPanel() {
                   In favour
                 </Button>
                 <Button
+                  disabled={unavailable}
+                  aria-pressed={p.user_vote === 'NO'}
                   variant={p.user_vote === 'NO' ? 'destructive' : 'outline'}
                   size="sm"
                   onClick={() => castVote(p.policy_id, 'NO')}
@@ -128,7 +165,7 @@ export function MyPoliciesPanel() {
                     Acknowledged
                   </span>
                 ) : (
-                  <Button size="sm" onClick={() => acknowledge(p.policy_id)}>Acknowledge</Button>
+                  <Button disabled={unavailable} size="sm" onClick={() => acknowledge(p.policy_id)}>Acknowledge</Button>
                 )}
               </div>
             </div>
@@ -136,5 +173,6 @@ export function MyPoliciesPanel() {
         ))}
       </div>
     </FacultyPanel>
+    </>
   );
 }

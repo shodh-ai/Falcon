@@ -38,7 +38,7 @@ export default function RootLayout({
       lang="en"
       className={`${GeistSans.variable} ${GeistMono.variable} antialiased`}
     >
-      <body className="min-h-svh">
+      <body className="min-h-svh" suppressHydrationWarning>
         {runtimeApiUrl && !runtimeApiUrl.includes('localhost') ? (
           <script
             dangerouslySetInnerHTML={{

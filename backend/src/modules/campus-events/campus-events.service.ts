@@ -11,6 +11,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Interval } from '@nestjs/schedule';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { postgresQueryRows } from '../../common/postgres-query-rows';
 import {
   BED_LOCK_GRACE_SEC,
   BED_LOCK_TTL_SEC,
@@ -437,7 +438,7 @@ export class CampusEventsService {
     const rows = await this.dataSource.query(
       `SELECT c.faculty_advisor_id
        FROM campus_events e
-       JOIN campus_clubs c ON c.club_id = e.club_id
+       JOIN campus_clubs c ON c.club_id = e.club_id AND c.tenant_id = e.tenant_id
        WHERE e.event_id = $1 AND e.tenant_id = $2`,
       [eventId, tenantId],
     );
@@ -583,8 +584,8 @@ export class CampusEventsService {
     const allScope = roles.includes('SuperAdmin');
     const params = allScope ? [tenantId] : [tenantId, advisorId];
     const clubJoin = allScope
-      ? 'LEFT JOIN campus_clubs c ON c.club_id = e.club_id'
-      : 'JOIN campus_clubs c ON c.club_id = e.club_id';
+      ? 'LEFT JOIN campus_clubs c ON c.club_id = e.club_id AND c.tenant_id = e.tenant_id'
+      : 'JOIN campus_clubs c ON c.club_id = e.club_id AND c.tenant_id = e.tenant_id';
     const advisorFilter = allScope ? '' : ' AND c.faculty_advisor_id = $2';
     const baseSelect = `SELECT e.*, c.name AS club_name, e.venue AS venue_asset_name
        FROM campus_events e
@@ -687,20 +688,21 @@ export class CampusEventsService {
     eventId: string,
   ) {
     await this.assertCanModerateEvent(tenantId, userId, roles, eventId);
-    const rows = await this.dataSource.query(
+    const rows = postgresQueryRows(await this.dataSource.query(
       `UPDATE campus_events
        SET advisor_approval = 'APPROVED', status = 'PENDING_HOD',
            approved_by = $3, approved_at = NOW(), rejection_comment = NULL
        WHERE event_id = $1 AND tenant_id = $2 AND status = 'PENDING_ADVISOR' AND advisor_approval = 'PENDING'
+         AND ($4::boolean OR EXISTS (SELECT 1 FROM campus_clubs c WHERE c.club_id = campus_events.club_id AND c.tenant_id = $2 AND c.faculty_advisor_id = $3))
        RETURNING *`,
-      [eventId, tenantId, userId],
-    );
+      [eventId, tenantId, userId, roles.includes('SuperAdmin')],
+    ));
     if (!rows[0])
       throw new BadRequestException('Event not found or already processed');
     const event = rows[0];
     const clubRows = await this.dataSource.query(
-      `SELECT name, faculty_advisor_id FROM campus_clubs WHERE club_id = $1`,
-      [event.club_id],
+      `SELECT name, faculty_advisor_id FROM campus_clubs WHERE club_id = $1 AND tenant_id = $2`,
+      [event.club_id, tenantId],
     );
     const clubName = clubRows[0]?.name ?? 'Club';
     if (clubRows[0]?.faculty_advisor_id) {
@@ -720,15 +722,20 @@ export class CampusEventsService {
     eventId: string,
     comment: string,
   ) {
+    const reason = typeof comment === 'string' ? comment.trim() : '';
+    if (reason.length < 3 || reason.length > 500) {
+      throw new BadRequestException('Enter a rejection reason between 3 and 500 characters');
+    }
     await this.assertCanModerateEvent(tenantId, userId, roles, eventId);
-    const rows = await this.dataSource.query(
+    const rows = postgresQueryRows(await this.dataSource.query(
       `UPDATE campus_events
        SET status = 'REJECTED', advisor_approval = 'REJECTED', rejection_comment = $3,
            approved_by = $4, approved_at = NOW()
-       WHERE event_id = $1 AND tenant_id = $2 AND status = 'PENDING_ADVISOR'
+       WHERE event_id = $1 AND tenant_id = $2 AND status = 'PENDING_ADVISOR' AND advisor_approval = 'PENDING'
+         AND ($5::boolean OR EXISTS (SELECT 1 FROM campus_clubs c WHERE c.club_id = campus_events.club_id AND c.tenant_id = $2 AND c.faculty_advisor_id = $4))
        RETURNING *`,
-      [eventId, tenantId, comment, userId],
-    );
+      [eventId, tenantId, reason, userId, roles.includes('SuperAdmin')],
+    ));
     if (!rows[0])
       throw new BadRequestException('Event not found or already processed');
     await this.notifyCoordinatorRejected(

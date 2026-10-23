@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useEffect, useState } from 'react';
+import { Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Inbox, Loader2 } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { cn } from '@/lib/utils';
@@ -15,6 +15,7 @@ import { getApiBaseUrl } from '@/lib/api-base-url';
 import { HodGatePassApprovalsPanel } from '@/components/hod/HodGatePassApprovalsPanel';
 import { isEmptyArray, withFacultyDemoFallback } from '@/lib/faculty-demo-mode';
 import { facultyDemoTeamRequests } from '@/lib/mock/faculty-portal-demo-modules';
+import { SelfServiceLoadError } from './SelfServiceLoadError';
 
 function leaveDocHref(path: string): string {
   if (path.startsWith('http')) return path;
@@ -22,6 +23,16 @@ function leaveDocHref(path: string): string {
 }
 
 type FundingApprovalRole = 'hod' | 'dean';
+
+type FundingRequest = {
+  request_id: string;
+  project_title: string;
+  faculty_name: string;
+  amount: number | string;
+  purpose: string | null;
+  status: string;
+  created_at: string | null;
+};
 
 function resolveUserRoles(user: { role?: string; roles?: string[]; primaryRole?: string } | null): string[] {
   if (!user) return [];
@@ -43,16 +54,16 @@ function hodApprovalRole(user: { role?: string; roles?: string[]; primaryRole?: 
 async function fetchPendingFundingRequests(
   api: ReturnType<typeof useAuthedApi>,
   role: FundingApprovalRole,
-): Promise<any[]> {
+): Promise<FundingRequest[]> {
   if (role === 'dean') {
-    const rows = await api.get<any[]>('/api/academics/dean/funding-requests');
+    const rows = await api.get<FundingRequest[]>('/api/academics/dean/funding-requests');
     return rows.filter((r) => r.status === 'APPROVED_HOD');
   }
-  const rows = await api.get<any[]>('/api/academics/hod/funding-requests');
+  const rows = await api.get<FundingRequest[]>('/api/academics/hod/funding-requests');
   return rows.filter((r) => r.status === 'PENDING_HOD');
 }
 
-function mapFundingRows(rows: any[], role: FundingApprovalRole): RequestItem[] {
+function mapFundingRows(rows: FundingRequest[], role: FundingApprovalRole): RequestItem[] {
   return rows.map((r) => ({
     id: r.request_id,
     request_type: `Project Funding (₹${r.amount})`,
@@ -109,14 +120,14 @@ type RequestsPayload = {
 
 type PendingCounts = {
   leaves: number;
-  gatePasses: number;
+  gatePasses: number | null;
   regularization: number;
   onDuty: number;
   compOff: number;
   documents: number;
   appraisals: number;
   attendanceOverrides: number;
-  fundingRequests: number;
+  fundingRequests: number | null;
 };
 
 const PENDING_COUNT_KEYS: (keyof PendingCounts)[] = [
@@ -127,10 +138,12 @@ const PENDING_COUNT_KEYS: (keyof PendingCounts)[] = [
   'compOff',
   'documents',
   'appraisals',
+  'attendanceOverrides',
   'fundingRequests',
 ];
 
-function sumPendingCounts(counts: PendingCounts): number {
+function sumPendingCounts(counts: PendingCounts): number | null {
+  if (PENDING_COUNT_KEYS.some((key) => counts[key] == null)) return null;
   return PENDING_COUNT_KEYS.reduce((sum, key) => sum + Number(counts[key] || 0), 0);
 }
 
@@ -154,42 +167,70 @@ function RequestsContent({ defaultScope }: Props) {
   const api = useAuthedApi();
   const { user } = useAuth();
   const fundingRole = fundingApprovalRole(user);
-  const showGatePassTab = hodApprovalRole(user);
+  const showGatePassTab = hodApprovalRole(user) === true;
   const visibleTabs = TABS.filter((t) => {
     if (t.id === 'FUNDING_REQUESTS') return Boolean(fundingRole);
     if (t.id === 'GATE_PASS') return showGatePassTab;
     return true;
   });
   const scope = useTeamScope(defaultScope);
-  const [tab, setTab] = useState<TabId>('LEAVE');
+  const [selectedTab, setTab] = useState<TabId>('LEAVE');
+  // Role changes can remove a tab; derive a permitted tab before rendering or fetching.
+  const tab = visibleTabs.some((item) => item.id === selectedTab) ? selectedTab : 'LEAVE';
   const [data, setData] = useState<RequestsPayload | null>(null);
   const [counts, setCounts] = useState<PendingCounts | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [countsError, setCountsError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkActing, setBulkActing] = useState(false);
+  const alive = useRef(false);
+  const activeContext = useRef({ api, scope, tab });
+  useLayoutEffect(() => { activeContext.current = { api, scope, tab }; }, [api, scope, tab]);
+  const rowsRequest = useRef(0);
+  const countsRequest = useRef(0);
+  const decisionLock = useRef(false);
+  const dataOwner = useRef<{ api: typeof api; scope: TeamScope; tab: TabId } | null>(null);
+  const current = useCallback(() => alive.current && activeContext.current.api === api && activeContext.current.scope === scope, [api, scope]);
 
-  async function loadCounts() {
+  useEffect(() => {
+    alive.current = true;
+    decisionLock.current = false;
+    // Selections and private request rows must not survive a scope/account switch.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setBulkActing(false); setData(null); setCounts(null); setSelected(new Set());
+    dataOwner.current = null;
+    return () => { alive.current = false; rowsRequest.current += 1; countsRequest.current += 1; };
+  }, [api, scope]);
+
+  const loadCounts = useCallback(async () => {
+    const id = ++countsRequest.current;
+    setCountsError(null);
     try {
       const res = await api.get<PendingCounts & { scope?: string }>(`/api/hr/team/pending-counts?scope=${scope}`);
-      let pendingFunding = 0;
-      let pendingGatePasses = 0;
+      let pendingFunding: number | null = 0;
+      let pendingGatePasses: number | null = 0;
+      const errors: string[] = [];
       if (fundingRole) {
         try {
           const fundingRows = await fetchPendingFundingRequests(api, fundingRole);
           pendingFunding = fundingRows.length;
-        } catch {
-          pendingFunding = 0;
+        } catch (error) {
+          pendingFunding = null;
+          errors.push(error instanceof Error ? error.message : 'Could not load funding approvals');
         }
       }
       if (showGatePassTab) {
         try {
           const gatePassRows = await api.get<unknown[]>('/api/academics/hod/approvals/gate-passes');
           pendingGatePasses = gatePassRows?.length ?? 0;
-        } catch {
-          pendingGatePasses = 0;
+        } catch (error) {
+          pendingGatePasses = null;
+          errors.push(error instanceof Error ? error.message : 'Could not load gate-pass approvals');
         }
       }
-
+      if (!current() || id !== countsRequest.current) return;
+      setCountsError(errors.length ? errors.join(' ') : null);
       setCounts({
         leaves: Number(res.leaves) || 0,
         gatePasses: pendingGatePasses,
@@ -201,37 +242,38 @@ function RequestsContent({ defaultScope }: Props) {
         attendanceOverrides: Number(res.attendanceOverrides) || 0,
         fundingRequests: pendingFunding,
       });
-    } catch {
-      setCounts({
-        leaves: 0,
-        gatePasses: 0,
-        regularization: 0,
-        onDuty: 0,
-        compOff: 0,
-        documents: 0,
-        appraisals: 0,
-        attendanceOverrides: 0,
-        fundingRequests: 0,
-      });
+    } catch (err) {
+      if (!current() || id !== countsRequest.current) return;
+      setCounts(null);
+      setCountsError(err instanceof Error ? err.message : 'Could not load approval counts.');
     }
-  }
+  }, [api, scope, fundingRole, showGatePassTab, current]);
 
-  async function load(active: TabId) {
+  const load = useCallback(async (active: TabId) => {
+    const id = ++rowsRequest.current;
+    const ownsRows = () => current() && id === rowsRequest.current && activeContext.current.tab === active;
     setLoading(true);
+    setLoadError(null);
+    setData(null);
+    dataOwner.current = null;
     setSelected(new Set());
     try {
       if (active === 'FUNDING_REQUESTS') {
         if (!fundingRole) {
+          if (!ownsRows()) return;
           setData({ count: 0, tab: active, items: [] });
           return;
         }
         const res = await fetchPendingFundingRequests(api, fundingRole);
+        if (!ownsRows()) return;
         const items = mapFundingRows(res, fundingRole);
+        dataOwner.current = { api, scope, tab: active };
         setData({ count: items.length, tab: active, items });
       } else {
         const res = await api.get<RequestsPayload>(
           `/api/hr/ess/team/requests?scope=${scope}&tab=${active}`,
         );
+        if (!ownsRows()) return;
         const demoItems = facultyDemoTeamRequests()
           .filter((r) => r.request_type === active)
           .map((r) => ({
@@ -250,9 +292,11 @@ function RequestsContent({ defaultScope }: Props) {
             },
           }));
         const items = withFacultyDemoFallback(res.items, demoItems, isEmptyArray);
-        setData({ ...res, count: items.length, items });
+        dataOwner.current = { api, scope, tab: active };
+        setData({ ...res, tab: active, count: items.length, items });
       }
     } catch (e) {
+      if (!ownsRows()) return;
       const demoItems = facultyDemoTeamRequests()
         .filter((r) => r.request_type === active)
         .map((r) => ({
@@ -271,38 +315,34 @@ function RequestsContent({ defaultScope }: Props) {
           },
         }));
       const items = withFacultyDemoFallback([], demoItems, isEmptyArray);
+      dataOwner.current = { api, scope, tab: active };
       setData({ count: items.length, tab: active, items });
       if (!items.length) {
-        toast.error(e instanceof Error ? e.message : 'Failed to load requests');
+        setData(null);
+        setLoadError(e instanceof Error ? e.message : 'Failed to load requests');
       }
     } finally {
-      setLoading(false);
+      if (ownsRows()) setLoading(false);
     }
-  }
+  }, [api, scope, fundingRole, current]);
 
   useEffect(() => {
+    // Starting this remote read clears an earlier count error before its async response.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadCounts();
-  }, [api, scope, fundingRole, showGatePassTab]);
+  }, [loadCounts]);
 
   useEffect(() => {
-    if (tab === 'FUNDING_REQUESTS' && !fundingRole && visibleTabs.length) {
-      setTab(visibleTabs[0].id);
-      return;
-    }
-    if (tab === 'GATE_PASS' && !showGatePassTab && visibleTabs.length) {
-      setTab(visibleTabs[0].id);
-      return;
-    }
-    if (tab === 'GATE_PASS') {
-      setLoading(false);
-      return;
-    }
+    if (tab === 'GATE_PASS') return;
+    // Resetting the remote rows and loading indicator prevents decisions on stale tab data.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void load(tab);
-  }, [api, scope, tab, fundingRole, showGatePassTab]);
+  }, [tab, load]);
 
   function tabLabel(t: (typeof TABS)[number]) {
-    const n = counts?.[TAB_COUNT_KEY[t.id]] ?? 0;
-    return n > 0 ? `${t.label} (${n})` : t.label;
+    const n = counts?.[TAB_COUNT_KEY[t.id]];
+    if (counts && n == null) return `${t.label} (Unavailable)`;
+    return (n ?? 0) > 0 ? `${t.label} (${n})` : t.label;
   }
 
   function toggleAll(checked: boolean) {
@@ -320,26 +360,33 @@ function RequestsContent({ defaultScope }: Props) {
   }
 
   async function bulkAction(action: 'APPROVE' | 'REJECT') {
+    if (decisionLock.current || loading || loadError || data?.tab !== tab) return;
     if (!selected.size) {
       toast.error('Select at least one request');
       return;
     }
     if (action === 'REJECT') {
       const comment = window.prompt('Reason for rejection (shown to employee)?');
-      if (!comment || comment.length < 3) {
+      if (!comment || comment.trim().length < 3) {
         toast.error('A short reason is required');
         return;
       }
-      await runBulk(action, comment);
+      await runBulk(action, comment.trim());
       return;
     }
     await runBulk(action);
   }
 
   async function runBulk(action: 'APPROVE' | 'REJECT', comment?: string) {
+    const owner = dataOwner.current;
+    if (decisionLock.current || loading || loadError || !current() || !owner || owner.api !== api || owner.scope !== scope || owner.tab !== tab || data?.tab !== tab || !selected.size || [...selected].some((id) => !data.items.some((row) => row.id === id))) return;
+    const activeTab = owner.tab;
+    const selectedIds = [...selected];
+    const ownsDecision = () => current() && activeContext.current.tab === activeTab;
+    decisionLock.current = true;
     setBulkActing(true);
     try {
-      if (tab === 'FUNDING_REQUESTS' && fundingRole) {
+      if (activeTab === 'FUNDING_REQUESTS' && fundingRole) {
         const status =
           fundingRole === 'dean'
             ? action === 'APPROVE'
@@ -352,30 +399,44 @@ function RequestsContent({ defaultScope }: Props) {
           fundingRole === 'dean'
             ? '/api/academics/dean/funding-requests'
             : '/api/academics/hod/funding-requests';
-        await Promise.all(
-          [...selected].map((id) =>
+        const results = await Promise.allSettled(
+          selectedIds.map((id) =>
             api.patch(`${endpoint}/${id}`, {
               status,
               commitMessage: comment || '',
             }),
           ),
         );
-        toast.success(`${action === 'APPROVE' ? 'Approved' : 'Rejected'} ${selected.size} funding request(s)`);
+        if (!ownsDecision()) return;
+        const completed = new Set(selectedIds.filter((_id, index) => results[index].status === 'fulfilled'));
+        setData((value) => value ? { ...value, items: value.items.filter((row) => !completed.has(row.id)), count: Math.max(0, value.count - completed.size) } : value);
+        setSelected(new Set(selectedIds.filter((id) => !completed.has(id))));
+        if (completed.size !== selectedIds.length) {
+          toast.error(`${completed.size} funding decision(s) saved; ${selectedIds.length - completed.size} could not be saved. Retry the remaining requests.`);
+          await loadCounts();
+          return;
+        }
+        toast.success(`${action === 'APPROVE' ? 'Approved' : 'Rejected'} ${selectedIds.length} funding request(s)`);
       } else {
         await api.patch('/api/hr/ess/team/requests/bulk', {
-          ids: [...selected],
+          ids: selectedIds,
           action,
           comment,
-          tab,
+          tab: activeTab,
         });
-        toast.success(`${action === 'APPROVE' ? 'Approved' : 'Rejected'} ${selected.size} request(s)`);
+        if (!ownsDecision()) return;
+        setData((value) => value ? { ...value, items: value.items.filter((row) => !selectedIds.includes(row.id)), count: Math.max(0, value.count - selectedIds.length) } : value);
+        setSelected(new Set());
+        toast.success(`${action === 'APPROVE' ? 'Approved' : 'Rejected'} ${selectedIds.length} request(s)`);
       }
-      await Promise.all([load(tab), loadCounts()]);
+      if (!ownsDecision()) return;
+      await Promise.all([load(activeTab), loadCounts()]);
+      if (!ownsDecision()) return;
       window.dispatchEvent(new CustomEvent('falcon:notifications-refresh'));
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Bulk action failed');
+      if (ownsDecision()) toast.error(e instanceof Error ? e.message : 'Bulk action failed');
     } finally {
-      setBulkActing(false);
+      if (current()) { decisionLock.current = false; setBulkActing(false); }
     }
   }
 
@@ -394,6 +455,7 @@ function RequestsContent({ defaultScope }: Props) {
           <button
             key={t.id}
             type="button"
+            disabled={bulkActing}
             onClick={() => setTab(t.id)}
             className={cn(
               'rounded-lg px-3 py-2 text-sm font-medium transition-colors',
@@ -410,9 +472,9 @@ function RequestsContent({ defaultScope }: Props) {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2">
           <Inbox className="h-5 w-5 text-sgvu-gold" />
-          <FacultyMetricChip label="Pending in scope" value={totalPending} emphasis={totalPending > 0} />
+          <FacultyMetricChip label="Pending in scope" value={counts && totalPending != null ? totalPending : 'Unavailable'} emphasis={(totalPending ?? 0) > 0} />
         </div>
-        {data && data.items.length > 0 && tab !== 'GATE_PASS' && (
+        {data && data.tab === tab && !loading && !loadError && data.items.length > 0 && tab !== 'GATE_PASS' && (
           <div className="flex gap-2">
             <Button size="sm" disabled={bulkActing || !selected.size} onClick={() => void bulkAction('APPROVE')}>
               Bulk Approve
@@ -429,6 +491,8 @@ function RequestsContent({ defaultScope }: Props) {
         )}
       </div>
 
+      {countsError && <SelfServiceLoadError message={countsError} onRetry={() => void loadCounts()} />}
+
       {tab === 'GATE_PASS' ? (
         <HodGatePassApprovalsPanel onUpdated={() => void loadCounts()} />
       ) : (
@@ -439,14 +503,16 @@ function RequestsContent({ defaultScope }: Props) {
         </div>
       )}
 
-      {!loading && data && data.items.length === 0 && (
+      {!loading && loadError && <SelfServiceLoadError message={loadError} onRetry={() => void load(tab)} />}
+
+      {!loading && data && data.tab === tab && data.items.length === 0 && (
         <FacultyEmptyState
           title="No requests found"
           description={`You have no pending ${TABS.find((t) => t.id === tab)?.label.toLowerCase()} in this scope.`}
         />
       )}
 
-      {!loading && data && data.items.length > 0 && (
+      {!loading && data && data.tab === tab && data.items.length > 0 && (
         <div className="overflow-x-auto rounded-xl border border-border/60 bg-card shadow-sm">
           <table className="w-full text-sm">
             <thead>
@@ -454,6 +520,7 @@ function RequestsContent({ defaultScope }: Props) {
                 <th className="w-10 px-3 py-3">
                   <input
                     type="checkbox"
+                    disabled={bulkActing}
                     checked={allSelected}
                     onChange={(e) => toggleAll(e.target.checked)}
                     className="h-4 w-4 rounded border-gray-300"
@@ -472,6 +539,7 @@ function RequestsContent({ defaultScope }: Props) {
                   <td className="px-3 py-3">
                     <input
                       type="checkbox"
+                      disabled={bulkActing}
                       checked={selected.has(row.id)}
                       onChange={(e) => toggleOne(row.id, e.target.checked)}
                       className="h-4 w-4 rounded border-gray-300"
@@ -524,9 +592,10 @@ function RequestsContent({ defaultScope }: Props) {
 }
 
 export function TeamRequestsPanel({ defaultScope = 'direct' }: Props) {
+  const { user, token } = useAuth();
   return (
     <Suspense fallback={<Loader2 className="mx-auto h-8 w-8 animate-spin" />}>
-      <RequestsContent defaultScope={defaultScope} />
+      <RequestsContent key={`${user?.user_id ?? ''}:${token ?? ''}`} defaultScope={defaultScope} />
     </Suspense>
   );
 }

@@ -35,11 +35,14 @@ export type FacultyStudentReportData = {
     course_name: string;
   };
   summary: {
-    internal_avg_percent: number;
+    internal_avg_percent: number | null;
+    published_assessment_count: number;
     attendance_percent: number | null;
-    class_average_percent: number;
-    class_rank: number;
+    attendance_record_count: number;
+    class_average_percent: number | null;
+    class_rank: number | null;
     class_size: number;
+    graded_student_count?: number;
     cumulative_demerit_points: number;
     course_demerit_points: number;
     is_subject_back_triggered: boolean;
@@ -48,13 +51,13 @@ export type FacultyStudentReportData = {
     assignments_graded: number;
     pending_assignments: number;
     assignment_completion_percent: number;
-    graded_assignment_avg_percent: number;
+    graded_assignment_avg_percent: number | null;
   };
   academic: {
     academic_year: string;
     semester: number;
-    sgpa: number;
-    cgpa: number;
+    sgpa: number | null;
+    cgpa: number | null;
     backlog_count: number;
     progression_status: string;
     remarks: string | null;
@@ -91,8 +94,8 @@ export type FacultyStudentReportData = {
   }>;
   gpa_history?: Array<{
     semester: number;
-    sgpa: number;
-    cgpa: number;
+    sgpa: number | null;
+    cgpa: number | null;
     status: string;
     academic_year: string | null;
     source: string;
@@ -105,8 +108,32 @@ function flagVariant(severity: 'LOW' | 'MEDIUM' | 'HIGH') {
   return 'outline';
 }
 
-function formatPercent(value: number) {
-  return `${Math.round(Number(value ?? 0))}%`;
+function numericValue(value: unknown) {
+  if (value == null || (typeof value === 'string' && !value.trim())) return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function measuredPercent(value: number | null, count?: number) {
+  if (count === 0) return null;
+  const number = numericValue(value);
+  return number !== null && number >= 0 && number <= 100 ? number : null;
+}
+
+function formatPercent(value: number | null, missing: string) {
+  return value === null ? missing : `${Math.round(value)}%`;
+}
+
+function formatGpa(value: number | null | undefined) {
+  const number = numericValue(value);
+  return number === null ? 'N/A' : number.toFixed(2);
+}
+
+function gpaSourceLabel(source: string) {
+  if (source === 'grade_card') return 'Grade card';
+  if (source === 'academic_record' || source === 'academic') return 'Academic record';
+  if (source === 'enrollment') return 'Completed course enrollments';
+  return 'Recorded GPA history';
 }
 
 export function FacultyStudentReport({
@@ -120,6 +147,11 @@ export function FacultyStudentReport({
   const assignments = report.assignments ?? [];
   const demerits = report.demerits ?? [];
   const risk_flags = report.risk_flags ?? [];
+  const internalPercent = measuredPercent(summary.internal_avg_percent, summary.published_assessment_count);
+  const attendancePercent = measuredPercent(summary.attendance_percent, summary.attendance_record_count);
+  const assessmentIncomplete = internalPercent === null || attendancePercent === null;
+  const classRank = internalPercent === null ? null : numericValue(summary.class_rank);
+  const gradedStudentCount = numericValue(summary.graded_student_count ?? summary.class_size);
   const gpaHistory = report.gpa_history ?? [];
   const latestGpa = gpaHistory.length ? gpaHistory[gpaHistory.length - 1] : null;
   const academicSnapshot = academic ?? (latestGpa
@@ -137,9 +169,12 @@ export function FacultyStudentReport({
   const gpaChartData = gpaHistory.map((row) => ({
     semester: row.semester,
     label: `Sem ${row.semester}`,
-    sgpa: Number(row.sgpa ?? 0),
-    cgpa: Number(row.cgpa ?? 0),
+    sgpa: numericValue(row.sgpa),
+    cgpa: numericValue(row.cgpa),
   }));
+  const hasGpaValues = gpaChartData.some((row) => row.sgpa !== null || row.cgpa !== null);
+  const historySources = [...new Set(gpaHistory.map((row) => gpaSourceLabel(row.source)))];
+  const hasWithheldGradeCard = gpaHistory.some((row) => row.source === 'grade_card' && row.status.toUpperCase() === 'WITHHELD');
 
   const sortedAssignments = [...assignments].sort(
     (a, b) => new Date(a.due_date).getTime() - new Date(b.due_date).getTime(),
@@ -153,14 +188,18 @@ export function FacultyStudentReport({
         <FacultyEmptyState description="No semester-wise SGPA or CGPA history is available for this student yet." className="py-6" />
       ) : (
         <div className="flex min-h-0 flex-1 flex-col space-y-4 overflow-y-auto">
-          <div className="h-48 w-full shrink-0">
+          <p className="text-xs text-muted-foreground">History source: {historySources.join(', ')}.</p>
+          {hasWithheldGradeCard ? (
+            <p className="text-xs text-amber-800">Withheld grade-card values are shown for review and are not published results.</p>
+          ) : null}
+          {hasGpaValues ? <div className="h-48 w-full shrink-0">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={gpaChartData} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} />
                 <XAxis dataKey="label" tick={{ fontSize: 10 }} />
                 <YAxis domain={[0, 10]} tick={{ fontSize: 10 }} />
                 <Tooltip
-                  formatter={(value: number, name: string) => [Number(value).toFixed(2), name]}
+                  formatter={(value: number, name: string) => [formatGpa(value), name]}
                   labelFormatter={(label) => label}
                 />
                 <Legend />
@@ -172,6 +211,7 @@ export function FacultyStudentReport({
                   strokeWidth={2}
                   dot={{ r: 3, fill: '#d6b65d' }}
                   activeDot={{ r: 5 }}
+                  connectNulls={false}
                 />
                 <Line
                   type="monotone"
@@ -181,10 +221,11 @@ export function FacultyStudentReport({
                   strokeWidth={2}
                   dot={{ r: 3, fill: '#08234a' }}
                   activeDot={{ r: 5 }}
+                  connectNulls={false}
                 />
               </LineChart>
             </ResponsiveContainer>
-          </div>
+          </div> : <FacultyEmptyState description="No recorded SGPA or CGPA values are available for this student yet." className="py-6" />}
           <div className="overflow-x-auto rounded-xl border border-border/60">
             <table className="w-full min-w-[360px] text-sm">
               <thead>
@@ -199,8 +240,8 @@ export function FacultyStudentReport({
                 {gpaHistory.map((row) => (
                   <tr key={row.semester} className="border-b last:border-0">
                     <td className="px-3 py-2 font-medium text-sgvu-navy">Sem {row.semester}</td>
-                    <td className="px-3 py-2">{Number(row.sgpa).toFixed(2)}</td>
-                    <td className="px-3 py-2">{Number(row.cgpa).toFixed(2)}</td>
+                    <td className="px-3 py-2">{formatGpa(row.sgpa)}</td>
+                    <td className="px-3 py-2">{formatGpa(row.cgpa)}</td>
                     <td className="px-3 py-2">
                       <Badge variant="outline" className="text-[10px]">
                         {row.status.replace(/_/g, ' ')}
@@ -244,6 +285,8 @@ export function FacultyStudentReport({
                   <AlertTriangle className="h-3 w-3" />
                   Needs attention
                 </Badge>
+              ) : assessmentIncomplete ? (
+                <Badge variant="outline">Assessment incomplete</Badge>
               ) : (
                 <Badge variant="secondary" className="bg-emerald-100 text-emerald-800">On track</Badge>
               )}
@@ -259,28 +302,33 @@ export function FacultyStudentReport({
               {[student.department, student.batch ? `Batch ${student.batch}` : null].filter(Boolean).join(' · ') ||
                 'Department not set'}
             </p>
+              <p className="mt-1 text-xs text-muted-foreground">Subject score uses published marks, weighted by each assessment&apos;s maximum marks.</p>
             </div>
           </div>
           <div className="flex flex-col items-start gap-3 lg:items-end">
             {actions ? <div className="flex flex-wrap gap-2">{actions}</div> : null}
             <div className="flex flex-wrap gap-2 lg:justify-end">
-            <FacultyMetricChip label="Internal score" value={formatPercent(summary.internal_avg_percent)} emphasis />
+            <FacultyMetricChip label="Published marks" value={formatPercent(internalPercent, 'Not graded')} emphasis />
             <FacultyMetricChip
               label="Attendance"
               value={
-                summary.attendance_percent == null
-                  ? 'N/A'
-                  : formatPercent(summary.attendance_percent)
+                formatPercent(attendancePercent, 'Not recorded')
               }
             />
             <FacultyMetricChip
-              label="Class rank"
-              value={summary.class_size ? `${summary.class_rank}/${summary.class_size}` : 'N/A'}
+              label="Rank among graded students"
+              value={classRank !== null && classRank > 0 && gradedStudentCount !== null && gradedStudentCount > 0 ? `${classRank}/${gradedStudentCount}` : 'N/A'}
             />
             <FacultyMetricChip label="Assignments" value={`${summary.assignments_submitted}/${summary.assignments_total}`} />
             <FacultyMetricChip label="Demerits" value={summary.course_demerit_points} />
-            {academicSnapshot ? <FacultyMetricChip label="CGPA" value={academicSnapshot.cgpa || 'N/A'} /> : null}
+            {academicSnapshot ? <FacultyMetricChip label="CGPA" value={numericValue(academicSnapshot.cgpa) ?? 'N/A'} /> : null}
             </div>
+            {academicSnapshot ? (
+              <p className="text-xs text-muted-foreground">
+                CGPA source: {academic ? 'Academic record' : gpaSourceLabel(latestGpa?.source ?? '')} · Sem {academicSnapshot.semester}
+                {academicSnapshot.academic_year && academicSnapshot.academic_year !== '—' ? ` · ${academicSnapshot.academic_year}` : ''}
+              </p>
+            ) : null}
           </div>
         </div>
       </div>
@@ -400,9 +448,9 @@ export function FacultyStudentReport({
           contentClassName="flex flex-1 flex-col"
         >
           {risk_flags.length === 0 ? (
-            <div className="flex flex-1 items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50/60 px-4 py-3 text-sm text-emerald-900">
+            <div className={cn('flex flex-1 items-center gap-2 rounded-xl border px-4 py-3 text-sm', assessmentIncomplete ? 'border-border/60 bg-muted/20 text-muted-foreground' : 'border-emerald-200 bg-emerald-50/60 text-emerald-900')}>
               <GraduationCap className="h-4 w-4 shrink-0" />
-              No non-attendance concern flags for this subject.
+              {assessmentIncomplete ? 'Published marks or attendance are not recorded yet. No overall assessment is available.' : 'No concern flags from the available records.'}
             </div>
           ) : (
             <div className="flex-1 space-y-3 overflow-y-auto">

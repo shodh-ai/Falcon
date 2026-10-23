@@ -1,15 +1,12 @@
 "use client";
 
-import { ChangeEvent, useCallback, useEffect, useState } from "react";
+import { ChangeEvent, useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, Upload } from "lucide-react";
 import { toast } from "@/lib/notifications/falcon-toast";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { useAuth } from "@/context/AuthContext";
 import { useAuthedApi } from "@/lib/api";
-import { getApiBaseUrl } from "@/lib/api-base-url";
-import { getSubdomainFromClient } from "@/lib/tenant";
 import {
   FacultyPageHeader,
   FacultyPageShell,
@@ -17,6 +14,7 @@ import {
   FacultyEmptyState,
   FacultyPanel,
   FacultyMetricChip,
+  FacultyErrorBanner,
 } from "@/components/faculty";
 import { cn } from "@/lib/utils";
 import {
@@ -57,18 +55,26 @@ function workflowStatusLabel(status: string) {
 }
 
 export default function FacultyIqacPage() {
-  const { token } = useAuth();
   const api = useAuthedApi();
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [selectedAssignmentId, setSelectedAssignmentId] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const scope = useRef(0);
+  const request = useRef(0);
+  const uploadLock = useRef(false);
 
-  const loadTasks = useCallback(async () => {
+  const loadTasks = useCallback(async (version = scope.current) => {
+    const requestId = ++request.current;
+    const current = () => version === scope.current && requestId === request.current;
     setLoading(true);
+    setLoadError(null);
     try {
       const data = await api.get<Assignment[]>("/tasks/assignments/my");
+      if (!current()) return;
+      if (!Array.isArray(data)) throw new Error("Could not read IQAC tasks. Please retry.");
       const resolved = withFacultyDemoFallback(
         Array.isArray(data) ? data : [],
         facultyDemoIqacTasks() as Assignment[],
@@ -76,32 +82,41 @@ export default function FacultyIqacPage() {
       );
       setAssignments(resolved);
       setSelectedAssignmentId(
-        (current) => current || resolved[0]?.assignment_id || "",
+        (current) => resolved.some((row) => row.assignment_id === current)
+          ? current : resolved[0]?.assignment_id || "",
       );
     } catch (error) {
+      if (!current()) return;
       const resolved = withFacultyDemoFallback(
         [],
         facultyDemoIqacTasks() as Assignment[],
         isEmptyArray,
       );
-      setAssignments(resolved);
-      setSelectedAssignmentId(resolved[0]?.assignment_id || "");
-      if (resolved.length === 0) {
-        toast.error(
-          error instanceof Error ? error.message : "Failed to load IQAC tasks",
-        );
-      }
+      if (resolved.length) {
+        setAssignments(resolved);
+        setSelectedAssignmentId(resolved[0]?.assignment_id || "");
+      } else setLoadError(error instanceof Error ? error.message : "Failed to load IQAC tasks");
     } finally {
-      setLoading(false);
+      if (current()) setLoading(false);
     }
   }, [api]);
 
   useEffect(() => {
-    void loadTasks();
+    const version = ++scope.current;
+    // An account/API change invalidates task data and the evidence file before starting a scoped load.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setAssignments([]);
+    setSelectedAssignmentId("");
+    setFile(null);
+    setUploading(false);
+    uploadLock.current = false;
+    void loadTasks(version);
+    return () => { scope.current += 1; };
   }, [loadTasks]);
 
   async function uploadEvidence() {
-    if (!token || !file || !selectedAssignmentId) {
+    if (uploadLock.current || uploading || loading || loadError || !canSubmitSelected) return;
+    if (!file || !selectedAssignmentId) {
       toast.error("Select a task and file first");
       return;
     }
@@ -112,37 +127,40 @@ export default function FacultyIqacPage() {
     }
     const formData = new FormData();
     formData.append("file", file);
+    const version = scope.current;
+    const assignmentId = selectedAssignmentId;
+    uploadLock.current = true;
     setUploading(true);
     try {
-      const uploadResponse = await fetch(`${getApiBaseUrl()}/uploads/single`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "x-tenant-subdomain": getSubdomainFromClient(),
-        },
-        body: formData,
-      });
-      if (!uploadResponse.ok) throw new Error("Upload failed");
-      const uploaded = await uploadResponse.json();
-      await api.post(`/tasks/submissions/${selectedAssignmentId}`, {
+      const uploaded = await api.post<{ path?: string; url?: string; originalname?: string; size?: number; mimetype?: string }>(
+        "/uploads/single", formData,
+      );
+      if (version !== scope.current) return;
+      if (!uploaded.path && !uploaded.url) throw new Error("The upload did not return a file reference. Please retry.");
+      await api.post(`/tasks/submissions/${assignmentId}`, {
         file_path: uploaded.path ?? uploaded.url,
         file_name: uploaded.originalname ?? file.name,
         file_size: uploaded.size ?? file.size,
         file_type: uploaded.mimetype ?? file.type,
       });
+      if (version !== scope.current) return;
       toast.success("Evidence submitted to your HOD for review");
       setFile(null);
-      await loadTasks();
+      await loadTasks(version);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Upload failed");
+      if (version === scope.current) toast.error(error instanceof Error ? error.message : "Upload failed");
     } finally {
-      setUploading(false);
+      if (version === scope.current) {
+        uploadLock.current = false;
+        setUploading(false);
+      }
     }
   }
 
   const selectedAssignment = assignments.find(
     (item) => item.assignment_id === selectedAssignmentId,
   );
+  const canSubmitSelected = Boolean(selectedAssignment && ['OPEN', 'PENDING', 'OVERDUE', 'CHANGES_REQUESTED'].includes(selectedAssignment.status.toUpperCase()));
   const submissionCount = assignments.reduce(
     (n, a) => n + (a.submissions?.length ?? 0),
     0,
@@ -168,6 +186,7 @@ export default function FacultyIqacPage() {
       />
 
       {loading && <FacultyPageLoading label="Loading IQAC tasks…" branded />}
+      {loadError && <><FacultyErrorBanner message={loadError} /><Button variant="outline" onClick={() => void loadTasks()}>Retry IQAC tasks</Button></>}
 
       {!loading && (
         <div className="grid gap-4 lg:grid-cols-3">
@@ -181,9 +200,11 @@ export default function FacultyIqacPage() {
                 <button
                   key={assignment.assignment_id}
                   type="button"
-                  onClick={() =>
-                    setSelectedAssignmentId(assignment.assignment_id)
-                  }
+                  disabled={uploading}
+                  onClick={() => {
+                    setSelectedAssignmentId(assignment.assignment_id);
+                    setFile(null);
+                  }}
                   className={cn(
                     "w-full rounded-xl border p-3 text-left text-sm transition-colors",
                     selectedAssignmentId === assignment.assignment_id
@@ -211,7 +232,7 @@ export default function FacultyIqacPage() {
                   </Badge>
                 </button>
               ))}
-              {assignments.length === 0 && (
+              {!loadError && assignments.length === 0 && (
                 <FacultyEmptyState
                   description="No IQAC tasks assigned."
                   className="py-6"
@@ -234,18 +255,20 @@ export default function FacultyIqacPage() {
                 Upload report and supporting evidence
               </p>
               <Input
+                key={selectedAssignmentId}
                 className="mt-4 max-w-md mx-auto"
                 type="file"
-                disabled={!selectedAssignmentId}
+                disabled={uploading || Boolean(loadError) || !canSubmitSelected}
                 onChange={(event: ChangeEvent<HTMLInputElement>) =>
                   setFile(event.target.files?.[0] ?? null)
                 }
               />
+              {file && <p className="mt-2 text-sm">Selected file: {file.name}</p>}
             </div>
             <Button
               className="mt-4 w-full sm:w-auto gap-1.5"
               onClick={() => void uploadEvidence()}
-              disabled={uploading || !file || !selectedAssignmentId}
+              disabled={uploading || Boolean(loadError) || !file || !canSubmitSelected}
             >
               {uploading ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -254,6 +277,7 @@ export default function FacultyIqacPage() {
               )}
               Submit to HOD
             </Button>
+            {selectedAssignment && !canSubmitSelected && <p role="status" className="mt-3 text-sm text-muted-foreground">This task is closed or already under review. Evidence can be submitted for open tasks or requested changes.</p>}
             {selectedAssignment?.review_comments && (
               <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
                 Reviewer feedback: {selectedAssignment.review_comments}
@@ -267,7 +291,7 @@ export default function FacultyIqacPage() {
             description="Your report is reviewed by the HOD before IQAC can accept it"
             className="lg:col-span-3"
           >
-            {submissionCount === 0 ? (
+            {submissionCount === 0 ? !loadError && (
               <FacultyEmptyState
                 description="No evidence submitted yet."
                 className="py-6"

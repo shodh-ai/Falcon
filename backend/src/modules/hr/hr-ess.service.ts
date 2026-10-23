@@ -76,35 +76,47 @@ export class HrEssService {
     return rows[0];
   }
 
-  async completeOnboardingStep(pipelineId: string, stepKey: string) {
-    await this.dataSource.query(
-      `UPDATE hr_onboarding_steps SET status = 'COMPLETED', completed_at = NOW()
-       WHERE pipeline_id = $1 AND step_key = $2`,
-      [pipelineId, stepKey],
-    );
-    const counts = await this.dataSource.query(
-      `SELECT COUNT(*)::int AS total,
-              COUNT(*) FILTER (WHERE status = 'COMPLETED')::int AS done
-       FROM hr_onboarding_steps WHERE pipeline_id = $1`,
-      [pipelineId],
-    );
-    const total = counts[0]?.total ?? 4;
-    const done = counts[0]?.done ?? 0;
-    const pct = Math.round((done / total) * 100);
-    const stage =
-      pct >= 100
-        ? 'COMPLETED'
-        : done >= 2
-          ? 'POLICIES'
-          : done >= 1
-            ? 'OFFER'
-            : 'DOCUMENTS';
-    await this.dataSource.query(
-      `UPDATE hr_onboarding_pipelines SET progress_percent = $2, stage = $3, updated_at = NOW()
-       WHERE pipeline_id = $1`,
-      [pipelineId, pct, stage],
-    );
-    return { progress_percent: pct, stage };
+  async completeOnboardingStep(
+    tenantId: string,
+    entityId: number,
+    userId: string,
+    pipelineId: string,
+    stepKey: string,
+  ) {
+    return this.dataSource.transaction(async (manager) => {
+      // Serialize progress recalculation and authorize the pipeline before changing any step.
+      const pipeline = await manager.query(
+        `SELECT pipeline_id FROM hr_onboarding_pipelines
+         WHERE pipeline_id = $1 AND tenant_id = $2 AND entity_id = $3 AND user_id = $4
+         FOR UPDATE`,
+        [pipelineId, tenantId, entityId, userId],
+      );
+      if (!pipeline[0]) throw new NotFoundException('Onboarding checklist not found');
+      const updated = await manager.query(
+        `WITH updated AS (
+           UPDATE hr_onboarding_steps SET status = 'COMPLETED', completed_at = COALESCE(completed_at, NOW())
+           WHERE pipeline_id = $1 AND step_key = $2 RETURNING step_key
+         ) SELECT step_key FROM updated`,
+        [pipelineId, stepKey],
+      );
+      if (!updated[0]) throw new NotFoundException('Onboarding step not found');
+      const counts = await manager.query(
+        `SELECT COUNT(*)::int AS total,
+                COUNT(*) FILTER (WHERE status = 'COMPLETED')::int AS done
+         FROM hr_onboarding_steps WHERE pipeline_id = $1`,
+        [pipelineId],
+      );
+      const total = Number(counts[0]?.total ?? 0);
+      const done = Number(counts[0]?.done ?? 0);
+      const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+      const stage = pct >= 100 ? 'COMPLETED' : done >= 2 ? 'POLICIES' : done >= 1 ? 'OFFER' : 'DOCUMENTS';
+      await manager.query(
+        `UPDATE hr_onboarding_pipelines SET progress_percent = $2, stage = $3, updated_at = NOW()
+         WHERE pipeline_id = $1`,
+        [pipelineId, pct, stage],
+      );
+      return { progress_percent: pct, stage };
+    });
   }
 
   async listOnboardingKanban(tenantId: string, entityId: number) {
@@ -448,9 +460,12 @@ export class HrEssService {
     userId: string,
     month: string,
   ) {
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
+      throw new BadRequestException('Month must use YYYY-MM format');
+    }
     const [year, monthNum] = month.split('-').map(Number);
     const start = `${year}-${String(monthNum).padStart(2, '0')}-01`;
-    const endDate = new Date(year, monthNum, 0);
+    const endDate = new Date(Date.UTC(year, monthNum, 0));
     const end = endDate.toISOString().slice(0, 10);
 
     const [attendance, holidays, leaves, shift] = await Promise.all([
@@ -462,6 +477,7 @@ export class HrEssService {
       this.dataSource.query(
         `SELECT holiday_id, title, date, type FROM hr_holidays
          WHERE date BETWEEN $1 AND $2 AND (entity_id = $3 OR entity_id IS NULL)
+           AND deleted_at IS NULL
            AND applicable_to IN ('ALL', 'STAFF')`,
         [start, end, entityId],
       ),

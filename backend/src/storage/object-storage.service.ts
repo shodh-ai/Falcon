@@ -1,4 +1,10 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+  OnModuleInit,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   S3Client,
@@ -8,9 +14,22 @@ import {
   CreateBucketCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { existsSync, mkdirSync, writeFileSync, createReadStream } from 'fs';
+import {
+  existsSync,
+  mkdirSync,
+  writeFileSync,
+  createReadStream,
+  lstatSync,
+  realpathSync,
+} from 'fs';
 import { resolve } from 'path';
 import { Readable } from 'stream';
+import {
+  isSafeStorageKey,
+  isSafeTenantId,
+  resolveTenantDiskPath,
+  uploadRoot,
+} from './disk-file-path';
 
 export interface StoredObject {
   key: string;
@@ -46,9 +65,7 @@ export class ObjectStorageService implements OnModuleInit {
 
   async onModuleInit() {
     if (!this.enabled) {
-      this.logger.warn(
-        'S3/MinIO not configured — uploads will use disk fallback',
-      );
+      this.logger.log(`Local disk storage active: ${uploadRoot()}`);
       return;
     }
     try {
@@ -70,6 +87,12 @@ export class ObjectStorageService implements OnModuleInit {
   }
 
   buildKey(tenantId: string, filename: string): string {
+    if (
+      !isSafeTenantId(tenantId) ||
+      !isSafeStorageKey(`${tenantId}/${filename}`, tenantId)
+    ) {
+      throw new BadRequestException('Invalid storage location');
+    }
     const date = new Date();
     const y = date.getFullYear();
     const m = String(date.getMonth() + 1).padStart(2, '0');
@@ -82,10 +105,11 @@ export class ObjectStorageService implements OnModuleInit {
     body: Buffer,
     contentType: string,
   ): Promise<StoredObject> {
+    if (!isSafeStorageKey(key, tenantId)) {
+      throw new BadRequestException('Invalid storage location');
+    }
     if (!this.enabled) {
-      const uploadRoot = resolve(process.env.UPLOAD_PATH || './uploads');
-      const fullPath = resolve(uploadRoot, key);
-      mkdirSync(resolve(fullPath, '..'), { recursive: true });
+      const fullPath = this.prepareDiskWritePath(key);
       writeFileSync(fullPath, body);
       return {
         key,
@@ -114,12 +138,12 @@ export class ObjectStorageService implements OnModuleInit {
   }
 
   async getDownloadStream(key: string): Promise<Readable> {
+    if (!isSafeStorageKey(key)) {
+      throw new NotFoundException('File not found');
+    }
     if (!this.enabled) {
-      const uploadRoot = resolve(process.env.UPLOAD_PATH || './uploads');
-      const fullPath = resolve(uploadRoot, key);
-      if (!fullPath.startsWith(uploadRoot) || !existsSync(fullPath)) {
-        throw new Error(`File not found: ${key}`);
-      }
+      const fullPath = resolveTenantDiskPath(key, key.split('/')[0]);
+      if (!fullPath) throw new NotFoundException('File not found');
       return createReadStream(fullPath);
     }
 
@@ -133,7 +157,37 @@ export class ObjectStorageService implements OnModuleInit {
     key: string,
     expiresInSeconds = 3600,
   ): Promise<string> {
+    if (!isSafeStorageKey(key)) throw new NotFoundException('File not found');
+    if (!this.enabled) {
+      if (!resolveTenantDiskPath(key, key.split('/')[0])) {
+        throw new NotFoundException('File not found');
+      }
+      return `/api/uploads/download?key=${encodeURIComponent(key)}`;
+    }
     const command = new GetObjectCommand({ Bucket: this.bucket, Key: key });
     return getSignedUrl(this.client, command, { expiresIn: expiresInSeconds });
+  }
+
+  private prepareDiskWritePath(key: string): string {
+    const root = uploadRoot();
+    mkdirSync(root, { recursive: true });
+    let current = realpathSync(root);
+    const parts = key.split('/');
+    for (const part of parts.slice(0, -1)) {
+      current = resolve(current, part);
+      if (!existsSync(current)) mkdirSync(current);
+      const entry = lstatSync(current);
+      if (entry.isSymbolicLink() || !entry.isDirectory()) {
+        throw new BadRequestException('Invalid storage location');
+      }
+    }
+    const filePath = resolve(current, parts[parts.length - 1]);
+    if (existsSync(filePath)) {
+      const entry = lstatSync(filePath);
+      if (entry.isSymbolicLink() || !entry.isFile()) {
+        throw new BadRequestException('Invalid storage location');
+      }
+    }
+    return filePath;
   }
 }

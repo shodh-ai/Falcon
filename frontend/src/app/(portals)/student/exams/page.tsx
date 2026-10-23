@@ -1,15 +1,14 @@
 'use client';
 
-import { useEffect, useMemo, useState, type ComponentType } from 'react';
+import { useEffect, useMemo, useRef, useState, type ComponentType } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { AlertTriangle, FileDown, ListChecks, Lock, RefreshCcw } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/context/AuthContext';
-import { academicsApi } from '@/lib/api/api.academics';
 import { API_URL, authHeaders } from '@/lib/api/client';
-import { examsApi, type ExamApplication, type ExamEligibilityResult, type ExamSchedule } from '@/lib/api/api.exams';
+import { examsApi, reevaluationMaximum, type ExamApplication, type ExamEligibilityResult, type ExamSchedule, type ReEvaluationResult } from '@/lib/api/api.exams';
 import { useAuthedApi } from '@/lib/api';
 import { StudentExemptionPanel } from '@/components/attendance/StudentExemptionPanel';
 import { StudentPageHeader } from '@/components/student/StudentPageHeader';
@@ -22,6 +21,22 @@ import { toast } from '@/lib/notifications/falcon-toast';
 import { extractApiErrorMessage } from '@/lib/notifications/parse-api-error';
 
 type TabKey = 'schedule' | 'admit' | 'reeval';
+type StudentExamResult = ReEvaluationResult;
+
+function isFeeDueDetail(value: unknown): value is { fee_head: string; outstanding: number | string } {
+  if (!value || typeof value !== 'object') return false;
+  return 'fee_head' in value && typeof value.fee_head === 'string'
+    && 'outstanding' in value && (typeof value.outstanding === 'number' || typeof value.outstanding === 'string')
+    && String(value.outstanding).trim() !== '' && Number.isFinite(Number(value.outstanding));
+}
+
+function canApplyForResult(result: StudentExamResult) {
+  const maximum = result.max_marks == null ? NaN : Number(result.max_marks);
+  const obtained = result.marks_obtained == null || String(result.marks_obtained).trim() === '' ? NaN : Number(result.marks_obtained);
+  return result.is_valid === true && result.can_apply_for_re_evaluation === true && typeof result.result_id === 'string' && /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(result.result_id)
+    && Number.isInteger(Number(result.subject_id)) && Number(result.subject_id) > 0
+    && Number.isFinite(maximum) && maximum > 0 && Number.isFinite(obtained) && obtained >= 0 && obtained <= maximum;
+}
 
 function reEvalStatusLabel(status: string) {
   switch (status) {
@@ -106,16 +121,27 @@ export default function StudentExamsPage() {
   const { token, user } = useAuth();
   const api = useAuthedApi();
   const searchParams = useSearchParams();
+  const intent = searchParams.get('intent');
   const [tab, setTab] = useState<TabKey>(
-    searchParams.get('intent') === 'revaluation' ? 'reeval' : 'schedule',
+    intent === 'revaluation' ? 'reeval' : 'schedule',
   );
+  const [previousIntent, setPreviousIntent] = useState(intent);
+  // Apply a changed deep-link before rendering the tab rather than after paint.
+  if (previousIntent !== intent) {
+    setPreviousIntent(intent);
+    if (intent === 'revaluation') setTab('reeval');
+  }
   const [examDesk, setExamDesk] = useState<ExamDesk | null>(null);
   const [schedules, setSchedules] = useState<ExamSchedule[]>([]);
   const [eligibility, setEligibility] = useState<ExamEligibilityResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [applications, setApplications] = useState<ExamApplication[]>([]);
-  const [results, setResults] = useState<unknown[]>([]);
+  const [results, setResults] = useState<StudentExamResult[]>([]);
+  const [applyingResultId, setApplyingResultId] = useState<string | null>(null);
+  const [dataAccount, setDataAccount] = useState({ token, userId:user?.user_id });
+  const applying = useRef(false);
+  const account = useRef({ token, userId: user?.user_id });
   const [downloadingAdmit, setDownloadingAdmit] = useState(false);
 
   const ineligibleMessage = useMemo(() => {
@@ -127,8 +153,8 @@ export default function StudentExamsPage() {
     if (attendanceReason) {
       lines.push(`Attendance is ${eligibility.attendance_percent}% (minimum ${eligibility.min_required ?? 75}% required).`);
     }
-    if (duesReason && Array.isArray((duesReason as any).details)) {
-      const dues = (duesReason as any).details as Array<{ fee_head: string; outstanding: number }>;
+    if (duesReason) {
+      const dues = Array.isArray(duesReason.details) ? duesReason.details.filter(isFeeDueDetail) : [];
       if (dues.length > 0) {
         const parts = dues.map((d) => `${d.fee_head} of ₹${Math.round(Number(d.outstanding))}`).join(' and ');
         lines.push(`Please clear your ${parts} to unlock.`);
@@ -140,10 +166,15 @@ export default function StudentExamsPage() {
   }, [eligibility]);
 
   useEffect(() => {
-    if (searchParams.get('intent') === 'revaluation') setTab('reeval');
-  }, [searchParams]);
-
-  useEffect(() => {
+    let active = true;
+    account.current = { token, userId: user?.user_id };
+    // Clear the old account's results and in-flight actions before fetching the new account.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setDataAccount({ token, userId:user?.user_id });
+    applying.current = false;
+    setApplyingResultId(null);
+    setResults([]);
+    setApplications([]);
     const load = async () => {
       if (!token) return;
       setLoading(true);
@@ -154,6 +185,7 @@ export default function StudentExamsPage() {
           examsApi.eligibility(token),
           examsApi.myApplications(token),
         ]);
+        if (!active) return;
         const demoSchedules = () =>
           DEMO_EXAMS.map((ex, i) => ({
             exam_schedule_id: ex.exam_id,
@@ -176,10 +208,11 @@ export default function StudentExamsPage() {
         setApplications(apps);
 
         if (user?.user_id) {
-          const studentResults = await academicsApi.studentResults(token, user.user_id);
-          setResults(studentResults);
+          const studentResults = await examsApi.reEvaluationResults(token);
+          if (active) setResults(studentResults);
         }
       } catch (e) {
+        if (!active) return;
         setError(e instanceof Error ? e.message : 'Failed to load examinations data');
         setSchedules(
           isStudentDemoModeEnabled()
@@ -196,7 +229,7 @@ export default function StudentExamsPage() {
             : [],
         );
       } finally {
-        setLoading(false);
+        if (active) setLoading(false);
       }
     };
     void load();
@@ -212,6 +245,7 @@ export default function StudentExamsPage() {
     void api
       .get<ExamDesk>('/api/student/exam-desk')
       .then((desk) => {
+        if (!active) return;
         if (!desk?.seating?.length) {
           setExamDesk({
             seating: isStudentDemoModeEnabled() ? demoSeating() : [],
@@ -220,11 +254,12 @@ export default function StudentExamsPage() {
           setExamDesk({ seating: desk.seating });
         }
       })
-      .catch(() =>
-        setExamDesk({
+      .catch(() => {
+        if (active) setExamDesk({
           seating: isStudentDemoModeEnabled() ? demoSeating() : [],
-        }),
-      );
+        });
+      });
+    return () => { active = false; account.current = { token, userId: user?.user_id }; };
   }, [token, user?.user_id, api]);
 
   const downloadAdmitCard = async () => {
@@ -268,15 +303,27 @@ export default function StudentExamsPage() {
     }
   };
 
-  const applyReevaluation = async (subjectId: number) => {
-    if (!token) return;
+  const applyReevaluation = async (result: StudentExamResult) => {
+    if (!token || account.current.token !== token || account.current.userId !== user?.user_id || applying.current || !canApplyForResult(result)) return;
+    const context = account.current;
+    applying.current = true;
+    setApplyingResultId(result.result_id!);
     setError(null);
     try {
-      await examsApi.apply(token, { subject_id: subjectId, application_type: 'RE_EVALUATION' });
-      const apps = await examsApi.myApplications(token);
-      setApplications(apps);
+      const created = await examsApi.apply(token, { subject_id: Number(result.subject_id), exam_result_id: result.result_id!, application_type: 'RE_EVALUATION' });
+      if (account.current !== context) return;
+      setApplications((current) => [{ ...created, exam_result_id: result.result_id }, ...current.filter((app) => app.exam_application_id !== created.exam_application_id)]);
+      toast.success('Re-evaluation application submitted');
+      try {
+        const apps = await examsApi.myApplications(token);
+        if (account.current === context) setApplications(apps);
+      } catch (e) {
+        if (account.current === context) setError(`Application submitted, but requests could not be refreshed. ${e instanceof Error ? e.message : 'Please refresh the page.'}`);
+      }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to apply for re-evaluation');
+      if (account.current === context) setError(e instanceof Error ? e.message : 'Failed to apply for re-evaluation');
+    } finally {
+      if (account.current === context) { applying.current = false; setApplyingResultId(null); }
     }
   };
 
@@ -515,19 +562,22 @@ export default function StudentExamsPage() {
             ) : (
               <>
                 <div className="space-y-2">
-                  <p className="text-sm font-semibold text-sgvu-navy">Eligible subjects (from results)</p>
+                  <p className="text-sm font-semibold text-sgvu-navy">Choose the exam result to re-evaluate</p>
                   {results.length === 0 ? (
                     <p className="text-sm text-muted-foreground">No results found.</p>
                   ) : (
                     <div className="space-y-2">
-                      {results.slice(0, 6).map((row: any, idx) => (
+                      {results.map((row, idx) => (
                         <div key={String(row?.result_id ?? idx)} className="flex items-center justify-between rounded-xl border px-4 py-3">
                           <div className="min-w-0">
-                            <p className="truncate text-sm font-medium text-sgvu-navy">Subject #{row?.subject_id ?? '—'}</p>
+                            <p className="truncate text-sm font-medium text-sgvu-navy">{row.subject_name ?? `Subject #${row.subject_id ?? '—'}`}{row.subject_code ? ` (${row.subject_code})` : ''}</p>
+                            <p className="text-xs text-muted-foreground">{row.exam_session ?? (canApplyForResult(row) ? 'Published exam result' : 'Session unavailable')} · {row.exam_type?.replaceAll('_', ' ') ?? 'Exam type unavailable'}</p>
+                            <p className="text-xs text-muted-foreground">Marks: {row.marks_obtained ?? 'Not recorded'} / {row.max_marks ?? 'Unavailable'}</p>
                             <p className="text-xs text-muted-foreground">Grade: {row?.grade ?? row?.grade_letter ?? '—'}</p>
+                            {!canApplyForResult(row) ? <p className="text-xs text-amber-800">{row.validation_message || row.re_evaluation_eligibility_message || 'Exam Cell must verify this result’s official declaration source before a paid re-evaluation can be requested.'}</p> : null}
                           </div>
-                          <Button size="sm" onClick={() => applyReevaluation(Number(row?.subject_id ?? 0))} disabled={!row?.subject_id}>
-                            Apply
+                          <Button size="sm" onClick={() => void applyReevaluation(row)} disabled={dataAccount.token !== token || dataAccount.userId !== user?.user_id || Boolean(applyingResultId) || !canApplyForResult(row) || applications.some((app) => app.application_type === 'RE_EVALUATION' && app.exam_result_id === row.result_id && app.status !== 'REJECTED')}>
+                            {applyingResultId === row.result_id ? 'Applying…' : applications.some((app) => app.application_type === 'RE_EVALUATION' && app.exam_result_id === row.result_id && app.status !== 'REJECTED') ? 'Applied' : 'Apply'}
                           </Button>
                         </div>
                       ))}
@@ -555,6 +605,7 @@ export default function StudentExamsPage() {
                                   Applied {app.created_at ? String(app.created_at).slice(0, 10) : ''}
                                   {app.faculty_name ? ` · Faculty: ${app.faculty_name}` : ''}
                                 </p>
+                                <p className="text-xs text-muted-foreground">{app.exam_session ?? (reevaluationMaximum(app) !== null ? 'Published exam result' : 'Exam link awaiting Exam Cell')}{app.exam_type ? ` · ${app.exam_type.replaceAll('_', ' ')}` : ''} · Maximum marks: {app.exam_max_marks ?? 'Unavailable'}</p>
                               </div>
                               <div className="flex flex-wrap items-center gap-2">
                                 <Badge variant={app.status === 'COMPLETED' ? 'success' : app.status === 'REJECTED' ? 'destructive' : 'secondary'}>

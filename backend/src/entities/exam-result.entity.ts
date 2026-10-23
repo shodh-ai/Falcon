@@ -15,6 +15,24 @@ export class ExamResult extends BaseSoftDeleteEntity {
   @PrimaryGeneratedColumn('uuid')
   result_id: string;
 
+  @Column({ type: 'uuid', nullable: true })
+  result_session_id: string | null;
+
+  @Column({ type: 'uuid', nullable: true })
+  source_mark_id: string | null;
+
+  @Column({ type: 'uuid', nullable: true })
+  source_report_id: string | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  source_mark_updated_at: Date | null;
+
+  @Column({ type: 'jsonb', nullable: true })
+  grading_policy_snapshot: Record<string, unknown> | null;
+
+  @Column({ type: 'numeric', precision: 6, scale: 2, nullable: true })
+  pass_marks_snapshot: number | null;
+
   @Column({ type: 'uuid' })
   student_user_id: string;
 

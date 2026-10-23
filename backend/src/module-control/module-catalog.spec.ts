@@ -39,6 +39,15 @@ describe('module catalogue', () => {
     expect(resolveApiModule('/api/academics/calendar')).toBe('sis_academics');
   });
 
+  it('keeps local re-evaluation QA endpoints under examination module control', () => {
+    expect(resolveApiModule('/api/qa/re-evaluations/case/report')).toBe(
+      'examinations_credentials',
+    );
+    expect(resolveApiModule('/api/qa/re-evaluations/case/complete')).toBe(
+      'examinations_credentials',
+    );
+  });
+
   it('does not overlap API prefixes across business modules', () => {
     const prefixes = MODULE_CATALOGUE.flatMap((item) =>
       item.apiPrefixes.map((prefix) => `${prefix}:${item.moduleKey}`),

@@ -2330,6 +2330,10 @@ export class AcademicsController {
     },
   ) {
     const targetFacultyId = body.faculty_user_id || req.user.user_id;
+    const roles = new Set([req.user.role, ...(req.user.roles ?? [])]);
+    if (targetFacultyId !== req.user.user_id && !['HOD', 'Dean', 'SuperAdmin'].some((role) => roles.has(role))) {
+      throw new ForbiddenException('Faculty can only create projects for themselves');
+    }
     return this.facultyWorkspaces.assignProjectGuide(
       targetFacultyId,
       this.resolveTenantId(req.user),

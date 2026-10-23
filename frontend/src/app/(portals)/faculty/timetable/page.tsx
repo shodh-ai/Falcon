@@ -1,7 +1,7 @@
 'use client';
 
 import { Select } from '@/components/ui/select';
-import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   BookOpen,
   CalendarCheck,
@@ -20,6 +20,8 @@ import {
   FacultyEmptyState,
   FacultyStatCard,
   FacultyMetricChip,
+  FacultyErrorBanner,
+  FacultyInlineLoading,
 } from '@/components/faculty';
 import { useFacultyCourses, uniqueFacultyCoursesByCourseId } from '@/components/faculty/useFacultyCourses';
 import { Button } from '@/components/ui/button';
@@ -155,22 +157,34 @@ export default function FacultyTimetablePage() {
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [viewAdjustment, setViewAdjustment] = useState<Adjustment | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const requestId = useRef(0);
   const formDateTime = toDateTimeLocalValue(form.date_part, form.time_part);
 
   const loadPageData = useCallback(async () => {
+    const currentRequest = ++requestId.current;
+    setLoading(true);
+    setError(null);
     try {
       const [scheduleData, statsData, adjustmentData] = await Promise.all([
         api.get<TimetableRow[]>(withTeachingDeptId('/api/academics/faculty/workspaces/timetable', activeDeptId)),
         api.get<TimetableStats>(withTeachingDeptId('/api/academics/faculty/workspaces/timetable/stats', activeDeptId)),
         api.get<Adjustment[]>('/api/academics/faculty/workspaces/adjustments'),
       ]);
+      if (currentRequest !== requestId.current) return;
       setSchedule(withFacultyDemoFallback(scheduleData, facultyDemoTimetable(), isEmptyArray));
       setStats(withFacultyDemoFallback(statsData, facultyDemoTimetableStats()));
       setAdjustments(withFacultyDemoFallback(adjustmentData, facultyDemoAdjustments(), isEmptyArray));
-    } catch {
-      setSchedule(withFacultyDemoFallback([], facultyDemoTimetable(), isEmptyArray));
+    } catch (err: unknown) {
+      if (currentRequest !== requestId.current) return;
+      const fallback = withFacultyDemoFallback([], facultyDemoTimetable(), isEmptyArray);
+      setSchedule(fallback);
       setStats(withFacultyDemoFallback(null, facultyDemoTimetableStats()));
       setAdjustments(withFacultyDemoFallback([], facultyDemoAdjustments(), isEmptyArray));
+      if (fallback.length === 0) setError(err instanceof Error ? err.message : 'Failed to load timetable');
+    } finally {
+      if (currentRequest === requestId.current) setLoading(false);
     }
   }, [api, activeDeptId]);
 
@@ -178,6 +192,7 @@ export default function FacultyTimetablePage() {
     if (deptLoading) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadPageData();
+    return () => { requestId.current += 1; };
   }, [loadPageData, deptLoading]);
 
   const pendingAdjustments = useMemo(
@@ -347,7 +362,9 @@ export default function FacultyTimetablePage() {
         description="Your published teaching plan for the week"
         contentClassName="p-0"
       >
-        {schedule.length === 0 ? (
+        {loading ? <FacultyInlineLoading label="Loading timetable…" /> : error ? (
+          <FacultyErrorBanner message={error} />
+        ) : schedule.length === 0 ? (
           <div className="p-4 sm:p-5">
             <FacultyEmptyState
               description={

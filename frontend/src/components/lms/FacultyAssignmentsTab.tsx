@@ -1,11 +1,13 @@
 'use client';
 
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ChevronRight, Edit3, Plus, X } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import {
   FacultyPanel,
   FacultyEmptyState,
+  FacultyErrorBanner,
+  FacultyInlineLoading,
 } from '@/components/faculty';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -29,6 +31,56 @@ import {
 type Props = {
   courseId: string;
 };
+
+function AssignmentSection({
+  title,
+  description,
+  rows,
+  onOpenRoster,
+  onEdit,
+}: {
+  title: string;
+  description: string;
+  rows: FacultyAssignment[];
+  onOpenRoster: (assignmentId: string, title: string, maxMarks: number) => Promise<void>;
+  onEdit: (assignment: FacultyAssignment) => void;
+}) {
+  return (
+    <FacultyPanel title={title} count={rows.length} description={description}>
+      {rows.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No assignments in this section.</p>
+      ) : (
+        <div className="space-y-2">
+          {rows.map((a) => (
+            <div
+              key={a.assignment_id}
+              className="group flex w-full items-center justify-between gap-3 rounded-xl border border-border/60 bg-background p-4 text-left shadow-sm transition hover:border-sgvu-gold/50 hover:bg-sgvu-gold/5 hover:shadow-md"
+            >
+              <button
+                type="button"
+                onClick={() => void onOpenRoster(a.assignment_id, a.title, a.max_marks)}
+                className="min-w-0 flex-1 text-left"
+              >
+                <p className="font-semibold text-sgvu-navy">{a.title}</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  Publishes {new Date(a.start_date).toLocaleString()} · Due {new Date(a.due_date).toLocaleString()} · Max {a.max_marks}
+                </p>
+              </button>
+              <div className="flex shrink-0 items-center gap-2">
+                <Badge variant="outline">{a.submission_count ?? 0} submitted</Badge>
+                <Button type="button" size="sm" variant="outline" onClick={() => onEdit(a)} className="gap-1.5">
+                  <Edit3 className="h-3.5 w-3.5" />
+                  Edit
+                </Button>
+                <ChevronRight className="h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-sgvu-navy" />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </FacultyPanel>
+  );
+}
 
 function buildDemoAssignmentRoster(
   assignmentId: string,
@@ -68,6 +120,11 @@ function buildDemoAssignmentRoster(
 }
 
 export function FacultyAssignmentsTab({ courseId }: Props) {
+  const { user, token } = useAuth();
+  return <AssignmentsWorkspace key={`${courseId}:${user?.user_id ?? ''}:${token ?? ''}`} courseId={courseId} />;
+}
+
+function AssignmentsWorkspace({ courseId }: Props) {
   const api = useAuthedApi();
   const { token } = useAuth();
   const [assignments, setAssignments] = useState<FacultyAssignment[]>([]);
@@ -91,35 +148,83 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
   const [gradeMarks, setGradeMarks] = useState<Record<string, string>>({});
   const [returnRemarks, setReturnRemarks] = useState<Record<string, string>>({});
   const [returningId, setReturningId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [rosterLoading, setRosterLoading] = useState(false);
+  const [rosterError, setRosterError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const requestId = useRef(0);
+  const rosterRequestId = useRef(0);
+  const alive = useRef(false);
+  const activeApi = useRef(api);
+  useLayoutEffect(() => { activeApi.current = api; }, [api]);
+  const actionLock = useRef(false);
+  const [acting, setActing] = useState(false);
+  const [now, setNow] = useState(Date.now);
+  const current = useCallback(() => alive.current && activeApi.current === api, [api]);
+  const busy = saving || acting || returningId !== null;
 
-  function loadAssignments() {
+  useEffect(() => {
+    // Keep publication/deadline sections current while this workspace stays open.
+    const interval = window.setInterval(() => setNow(Date.now()), 30_000);
+    return () => window.clearInterval(interval);
+  }, []);
+
+  const loadAssignments = useCallback(() => {
+    const currentRequest = ++requestId.current;
+    setLoading(true);
+    setError(null);
     void api
       .get<FacultyAssignment[]>(`/api/academics/faculty/assignments?courseId=${courseId}`)
-      .then((rows) =>
+      .then((rows) => {
+        if (!current() || currentRequest !== requestId.current) return;
         setAssignments(
           withFacultyDemoFallback(
             rows,
             facultyDemoAssignments(courseId) as unknown as FacultyAssignment[],
             isEmptyArray,
           ),
-        ),
-      )
-      .catch(() =>
-        setAssignments(
-          withFacultyDemoFallback(
+        );
+      })
+      .catch((err: unknown) => {
+        if (!current() || currentRequest !== requestId.current) return;
+        const fallback = withFacultyDemoFallback(
             [],
             facultyDemoAssignments(courseId) as unknown as FacultyAssignment[],
             isEmptyArray,
-          ),
-        ),
-      );
-  }
+          );
+        if (fallback.length) setAssignments(fallback);
+        if (fallback.length === 0) setError(err instanceof Error ? err.message : 'Failed to load assignments');
+      })
+      .finally(() => { if (current() && currentRequest === requestId.current) setLoading(false); });
+  }, [api, courseId, current]);
 
   useEffect(() => {
+    alive.current = true;
+    actionLock.current = false;
+    // Roster and mutation drafts must belong to the authenticated course workspace.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSaving(false); setActing(false); setReturningId(null);
+    setCreateOpen(false); setEditing(null);
+    // Roster and form state must belong to the course being loaded.
+    setSelectedId(null);
+    setAssignments([]);
     loadAssignments();
-  }, [api, courseId]);
+    return () => {
+      alive.current = false;
+      requestId.current += 1;
+      rosterRequestId.current += 1;
+    };
+  }, [loadAssignments]);
 
   async function openRoster(assignmentId: string, title: string, maxMarks: number) {
+    if (!current()) return;
+    const currentRequest = ++rosterRequestId.current;
+    setRosterLoading(true);
+    setRosterError(null);
+    setRoster([]);
+    setGradeMarks({});
+    setReturnRemarks({});
     setSelectedId(assignmentId);
     setSelectedTitle(title);
     setSelectedMaxMarks(maxMarks);
@@ -127,6 +232,7 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
       const data = await api.get<{ roster: AssignmentRosterRow[] }>(
         `/api/academics/faculty/assignments/${assignmentId}/roster`,
       );
+      if (!current() || currentRequest !== rosterRequestId.current) return;
       const demoRoster = buildDemoAssignmentRoster(assignmentId, courseId, maxMarks);
       const rosterResolved = withFacultyDemoFallback(data.roster, demoRoster, isEmptyArray);
       setRoster(rosterResolved);
@@ -135,20 +241,25 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
         if (r.marks_awarded) marks[r.submission_id ?? ''] = String(r.marks_awarded);
       });
       setGradeMarks(marks);
-    } catch {
+    } catch (err: unknown) {
+      if (!current() || currentRequest !== rosterRequestId.current) return;
       const demoRoster = buildDemoAssignmentRoster(assignmentId, courseId, maxMarks);
-      setRoster(withFacultyDemoFallback([], demoRoster, isEmptyArray));
+      const fallback = withFacultyDemoFallback([], demoRoster, isEmptyArray);
+      setRoster(fallback);
+      if (fallback.length === 0) setRosterError(err instanceof Error ? err.message : 'Failed to load submissions');
       const marks: Record<string, string> = {};
-      demoRoster.forEach((r) => {
+      fallback.forEach((r) => {
         if (r.marks_awarded) marks[r.submission_id ?? ''] = String(r.marks_awarded);
       });
       setGradeMarks(marks);
+    } finally {
+      if (current() && currentRequest === rosterRequestId.current) setRosterLoading(false);
     }
   }
 
   async function createDa(e: FormEvent) {
     e.preventDefault();
-    if (!token || !daTitle.trim() || !dueAt) return;
+    if (actionLock.current || !current() || !token || !daTitle.trim() || !dueAt) return;
     if (isFacultyDemoEntityId(courseId)) {
       toast.success('Assignment published successfully (demo)');
       setCreateOpen(false);
@@ -161,22 +272,31 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
       setRefFile(null);
       return;
     }
+    const starts = publishAt ? new Date(publishAt) : new Date();
+    const due = new Date(dueAt);
+    if (!Number.isFinite(starts.getTime()) || !Number.isFinite(due.getTime()) || due <= starts || !Number.isFinite(Number(maxMarks)) || Number(maxMarks) <= 0) {
+      toast.error('Enter valid marks and a due date after the publish date');
+      return;
+    }
+    actionLock.current = true;
     const form = new FormData();
     form.append('course_id', courseId);
     form.append('title', daTitle.trim());
     if (daDescription.trim()) form.append('description', daDescription.trim());
     form.append('max_marks', maxMarks);
-    form.append('start_date', publishAt ? new Date(publishAt).toISOString() : new Date().toISOString());
-    form.append('due_date', new Date(dueAt).toISOString());
+    form.append('start_date', starts.toISOString());
+    form.append('due_date', due.toISOString());
     if (semester.trim()) form.append('semester', semester.trim());
     if (sectionCode.trim()) form.append('section_code', sectionCode.trim().toUpperCase());
     if (refFile) form.append('file', refFile);
+    setSaving(true);
     try {
       const created = (await postMultipart(
         '/api/academics/faculty/assignments',
         token,
         form,
       )) as { notified_count?: number } | null;
+      if (!current()) return;
       const notified = Number(created?.notified_count ?? 0);
       const publishImmediate = !publishAt || new Date(publishAt).getTime() <= Date.now();
       if (publishImmediate) {
@@ -198,32 +318,45 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
       setRefFile(null);
       loadAssignments();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Create failed');
+      if (current()) toast.error(err instanceof Error ? err.message : 'Create failed');
+    } finally {
+      if (current()) { actionLock.current = false; setSaving(false); }
     }
   }
 
   async function gradeRow(submissionId: string, max: number) {
+    if (actionLock.current || !current() || rosterLoading || rosterError || !roster.some((row) => row.submission_id === submissionId)) return;
     const raw = gradeMarks[submissionId];
     if (raw === undefined || raw === '') {
       toast.error('Enter marks first');
+      return;
+    }
+    if (!Number.isFinite(Number(raw)) || Number(raw) < 0 || Number(raw) > max) {
+      toast.error(`Enter marks between 0 and ${max}`);
       return;
     }
     if (isFacultyDemoSmokeId(submissionId)) {
       toast.success('Marks saved (demo)');
       return;
     }
+    actionLock.current = true;
+    setActing(true);
     try {
       await api.post(`/api/academics/faculty/submissions/${submissionId}/grade`, {
         marks_awarded: Number(raw),
       });
+      if (!current()) return;
       toast.success('Marks saved');
       if (selectedId) void openRoster(selectedId, selectedTitle, selectedMaxMarks);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Grading failed');
+      if (current()) toast.error(err instanceof Error ? err.message : 'Grading failed');
+    } finally {
+      if (current()) { actionLock.current = false; setActing(false); }
     }
   }
 
   async function returnRow(submissionId: string) {
+    if (actionLock.current || !current() || rosterLoading || rosterError || !roster.some((row) => row.submission_id === submissionId)) return;
     const remarks = returnRemarks[submissionId]?.trim();
     if (!remarks) {
       toast.error('Enter remarks explaining what the student must fix');
@@ -233,18 +366,20 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
       toast.success('Returned to student for revision (demo)');
       return;
     }
+    actionLock.current = true;
     setReturningId(submissionId);
     try {
       await api.post(`/api/academics/faculty/submissions/${submissionId}/return`, {
         faculty_remarks: remarks,
         revision_days: 3,
       });
+      if (!current()) return;
       toast.success('Returned to student for revision');
       if (selectedId) void openRoster(selectedId, selectedTitle, selectedMaxMarks);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Return failed');
+      if (current()) toast.error(err instanceof Error ? err.message : 'Return failed');
     } finally {
-      setReturningId(null);
+      if (current()) { actionLock.current = false; setReturningId(null); }
     }
   }
 
@@ -264,91 +399,49 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
 
   async function saveEdit(e: FormEvent) {
     e.preventDefault();
-    if (!token || !editing) return;
+    if (actionLock.current || !current() || !token || !editing) return;
     if (isFacultyDemoSmokeId(editing.assignment_id)) {
       toast.success('Assignment updated (demo)');
       setEditing(null);
       return;
     }
+    const starts = new Date(editStartAt);
+    const due = new Date(editDueAt);
+    if (!Number.isFinite(starts.getTime()) || !Number.isFinite(due.getTime()) || due <= starts) {
+      toast.error('Enter a valid due date after the publish date');
+      return;
+    }
+    actionLock.current = true;
     const form = new FormData();
-    form.append('start_date', new Date(editStartAt).toISOString());
-    form.append('due_date', new Date(editDueAt).toISOString());
+    form.append('start_date', starts.toISOString());
+    form.append('due_date', due.toISOString());
     if (editFile) form.append('file', editFile);
+    setSaving(true);
     try {
       await patchMultipart(`/api/academics/faculty/assignments/${editing.assignment_id}`, token, form);
+      if (!current()) return;
       toast.success('Assignment updated');
       setEditing(null);
       loadAssignments();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Update failed');
+      if (current()) toast.error(err instanceof Error ? err.message : 'Update failed');
+    } finally {
+      if (current()) { actionLock.current = false; setSaving(false); }
     }
   }
 
-  const now = Date.now();
   const scheduledAssignments = assignments.filter((a) => new Date(a.start_date).getTime() > now);
   const activeAssignments = assignments.filter(
     (a) => new Date(a.start_date).getTime() <= now && new Date(a.due_date).getTime() >= now,
   );
   const closedAssignments = assignments.filter((a) => new Date(a.due_date).getTime() < now);
 
-  function AssignmentSection({
-    title,
-    description,
-    rows,
-  }: {
-    title: string;
-    description: string;
-    rows: FacultyAssignment[];
-  }) {
-    return (
-      <FacultyPanel title={title} count={rows.length} description={description}>
-        {rows.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No assignments in this section.</p>
-        ) : (
-          <div className="space-y-2">
-            {rows.map((a) => (
-              <div
-                key={a.assignment_id}
-                className="group flex w-full items-center justify-between gap-3 rounded-xl border border-border/60 bg-background p-4 text-left shadow-sm transition hover:border-sgvu-gold/50 hover:bg-sgvu-gold/5 hover:shadow-md"
-              >
-                <button
-                  type="button"
-                  onClick={() => void openRoster(a.assignment_id, a.title, a.max_marks)}
-                  className="min-w-0 flex-1 text-left"
-                >
-                  <p className="font-semibold text-sgvu-navy">{a.title}</p>
-                  <p className="mt-0.5 text-xs text-muted-foreground">
-                    Publishes {new Date(a.start_date).toLocaleString()} · Due {new Date(a.due_date).toLocaleString()} · Max {a.max_marks}
-                  </p>
-                </button>
-                <div className="flex shrink-0 items-center gap-2">
-                  <Badge variant="outline">{a.submission_count ?? 0} submitted</Badge>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() => openEdit(a)}
-                    className="gap-1.5"
-                  >
-                    <Edit3 className="h-3.5 w-3.5" />
-                    Edit
-                  </Button>
-                  <ChevronRight className="h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-sgvu-navy" />
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </FacultyPanel>
-    );
-  }
-
   if (selectedId) {
     const submittedCount = roster.filter((r) => r.submitted).length;
 
     return (
-      <div className="space-y-4">
-        <Button variant="outline" size="sm" onClick={() => setSelectedId(null)} className="gap-1.5">
+      <fieldset disabled={busy} className="min-w-0 space-y-4">
+        <Button variant="outline" size="sm" onClick={() => { if (!actionLock.current) { rosterRequestId.current += 1; setSelectedId(null); } }} className="gap-1.5">
           ← Back to assignments
         </Button>
         <FacultyPanel
@@ -356,7 +449,9 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
           description="Grade submissions and download student PDFs"
           count={submittedCount}
         >
-          <div className="overflow-x-auto">
+          {rosterLoading ? <FacultyInlineLoading label="Loading submissions…" /> : rosterError ? (
+            <FacultyErrorBanner message={rosterError} />
+          ) : <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border/60 text-left text-xs font-medium text-muted-foreground">
@@ -461,14 +556,14 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
                 ))}
               </tbody>
             </table>
-          </div>
+          </div>}
         </FacultyPanel>
-      </div>
+      </fieldset>
     );
   }
 
   return (
-    <div className="space-y-4">
+    <fieldset disabled={busy} className="min-w-0 space-y-4">
       <div className="flex justify-end">
         <Button onClick={() => setCreateOpen(true)} className="gap-1.5">
           <Plus className="h-4 w-4" />
@@ -476,7 +571,9 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
         </Button>
       </div>
 
-      {assignments.length === 0 ? (
+      {loading ? <FacultyInlineLoading label="Loading assignments…" /> : error ? (
+        <><FacultyErrorBanner message={error} /><Button type="button" variant="outline" onClick={loadAssignments}>Retry assignments</Button></>
+      ) : assignments.length === 0 ? (
         <FacultyEmptyState
           title="No digital assignments yet"
           description="Create a DA to collect PDF submissions from enrolled students with a strict deadline."
@@ -487,16 +584,22 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
             title="Scheduled / Archived"
             description="Future publish date. Students cannot see these yet."
             rows={scheduledAssignments}
+            onOpenRoster={openRoster}
+            onEdit={openEdit}
           />
           <AssignmentSection
             title="Active"
             description="Visible to students now and still before deadline."
             rows={activeAssignments}
+            onOpenRoster={openRoster}
+            onEdit={openEdit}
           />
           <AssignmentSection
             title="Closed"
             description="Deadline has passed. Faculty can still edit dates or the reference PDF."
             rows={closedAssignments}
+            onOpenRoster={openRoster}
+            onEdit={openEdit}
           />
         </div>
       )}
@@ -596,7 +699,7 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
                 <p className="text-xs text-muted-foreground">PDF only · Max 5MB</p>
               </div>
               <div className="flex gap-2 pt-1">
-                <Button type="submit">Publish Assignment</Button>
+                <Button type="submit" disabled={saving}>{saving ? 'Publishing…' : 'Publish Assignment'}</Button>
                 <Button type="button" variant="outline" onClick={() => setCreateOpen(false)}>
                   Cancel
                 </Button>
@@ -652,7 +755,7 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
                 <p className="text-xs text-muted-foreground">PDF only · Max 5MB</p>
               </div>
               <div className="flex gap-2 pt-1">
-                <Button type="submit">Save changes</Button>
+                <Button type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</Button>
                 <Button type="button" variant="outline" onClick={() => setEditing(null)}>
                   Cancel
                 </Button>
@@ -661,6 +764,6 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
           </div>
         </div>
       )}
-    </div>
+    </fieldset>
   );
 }

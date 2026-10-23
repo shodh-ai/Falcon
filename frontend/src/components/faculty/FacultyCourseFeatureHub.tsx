@@ -169,7 +169,7 @@ export function FacultyCourseFeatureHub({ feature }: { feature: FacultyCourseFea
               title={`${selected.course_code} — Assignments`}
               description={selected.course_name}
             >
-              <FacultyAssignmentsTab courseId={selected.course_id} />
+              <FacultyAssignmentsTab key={selected.course_id} courseId={selected.course_id} />
             </FacultyPanel>
           ) : null}
 
@@ -178,7 +178,7 @@ export function FacultyCourseFeatureHub({ feature }: { feature: FacultyCourseFea
               title={`${selected.course_code} — Announcements`}
               description={selected.course_name}
             >
-              <FacultyAnnouncementsTab courseId={selected.course_id} />
+              <FacultyAnnouncementsTab key={selected.course_id} courseId={selected.course_id} />
             </FacultyPanel>
           ) : null}
 

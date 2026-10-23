@@ -1,7 +1,7 @@
 'use client';
 
 import { Select } from '@/components/ui/select';
-import { useEffect, useState, useRef } from 'react';
+import { useCallback, useEffect, useState, useRef } from 'react';
 import { usePathname } from 'next/navigation';
 import * as XLSX from 'xlsx';
 import { toast } from '@/lib/notifications/falcon-toast';
@@ -10,11 +10,13 @@ import {
   FacultyPageHeader,
   FacultyPageShell,
   FacultyPanel,
+  FacultyErrorBanner,
 } from '@/components/faculty';
 import { useFacultyCourses } from '@/components/faculty/useFacultyCourses';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useAuthedApi } from '@/lib/api';
+import { useAuth } from '@/context/AuthContext';
 import Link from 'next/link';
 import {
   Dialog,
@@ -31,8 +33,29 @@ import { cn } from '@/lib/utils';
 
 const TEST_TYPES = ['WT1', 'WT2'] as const;
 
+type FacultyWeeklyTest = {
+  test_id: string;
+  course_code: string;
+  course_name: string;
+  test_type: string;
+  is_active: boolean;
+  start_time: string;
+  end_time: string;
+  response_count?: number;
+  avg_score?: number | string | null;
+};
+
 export default function FacultyWeeklyTestsPage() {
   const api = useAuthedApi();
+  const { user, token } = useAuth();
+  const [apiIdentity, setApiIdentity] = useState({ api, revision: 0 });
+  if (apiIdentity.api !== api) {
+    setApiIdentity({ api, revision: apiIdentity.revision + 1 });
+  }
+  return <WeeklyTestsWorkspace key={`${user?.user_id ?? ''}:${token ?? ''}:${apiIdentity.revision}`} api={api} />;
+}
+
+function WeeklyTestsWorkspace({ api }: { api: ReturnType<typeof useAuthedApi> }) {
   const pathname = usePathname();
   const questionBankPath = pathname.startsWith('/hod/')
     ? '/hod/academics/question-bank'
@@ -51,19 +74,30 @@ export default function FacultyWeeklyTestsPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [submitting, setSubmitting] = useState(false);
+  const [acting, setActing] = useState(false);
+  const alive = useRef(false);
+  const listRequest = useRef(0);
+  const resultsRequest = useRef(0);
+  const readerRequest = useRef(0);
+  const mutationLock = useRef(false);
+  const current = useCallback(() => alive.current, []);
+  const busy = submitting || acting;
 
   const handleExcelUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!current() || mutationLock.current) return;
     const file = e.target.files?.[0];
     if (!file) return;
 
+    const request = ++readerRequest.current;
     const reader = new FileReader();
     reader.onload = (evt) => {
+      if (!current() || mutationLock.current || request !== readerRequest.current) return;
       try {
         const bstr = evt.target?.result;
         const wb = XLSX.read(bstr, { type: 'binary' });
         const wsname = wb.SheetNames[0];
         const ws = wb.Sheets[wsname];
-        const data = XLSX.utils.sheet_to_json(ws, { header: 1 }) as any[][];
+        const data = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1 });
         
         const newAnswerKey = [...answerKey];
         let count = 0;
@@ -119,15 +153,20 @@ export default function FacultyWeeklyTestsPage() {
         toast.error('Failed to parse Excel file');
       }
     };
+    reader.onerror = () => {
+      if (current() && request === readerRequest.current) toast.error('Failed to read Excel file');
+    };
     reader.readAsBinaryString(file);
     e.target.value = '';
   };
 
   // My tests state
-  const [myTests, setMyTests] = useState<any[]>([]);
+  const [myTests, setMyTests] = useState<FacultyWeeklyTest[]>([]);
   const [loadingTests, setLoadingTests] = useState(true);
+  const [testsError, setTestsError] = useState<string | null>(null);
   const [resultsOpen, setResultsOpen] = useState(false);
   const [resultsLoading, setResultsLoading] = useState(false);
+  const [resultsError, setResultsError] = useState<string | null>(null);
   const [results, setResults] = useState<{
     test: { course_code?: string; course_name?: string; test_type?: string };
     responses: Array<{
@@ -139,25 +178,44 @@ export default function FacultyWeeklyTestsPage() {
     }>;
   } | null>(null);
 
-  const fetchMyTests = async () => {
+  const fetchMyTests = useCallback(async () => {
+    const request = ++listRequest.current;
+    setLoadingTests(true);
     try {
-      const data = await api.get<any[]>('/api/weekly-tests/faculty');
+      const data = await api.get<FacultyWeeklyTest[]>('/api/weekly-tests/faculty');
+      if (!current() || request !== listRequest.current) return;
+      setTestsError(null);
       setMyTests(withFacultyDemoFallback(data, facultyDemoWeeklyTests(), isEmptyArray));
     } catch (e) {
-      console.error(e);
-      setMyTests(withFacultyDemoFallback([], facultyDemoWeeklyTests(), isEmptyArray));
+      if (!current() || request !== listRequest.current) return;
+      const fallback = withFacultyDemoFallback([], facultyDemoWeeklyTests(), isEmptyArray);
+      setMyTests(fallback);
+      if (fallback.length === 0) setTestsError(e instanceof Error ? e.message : 'Failed to load tests');
     } finally {
-      setLoadingTests(false);
+      if (current() && request === listRequest.current) setLoadingTests(false);
     }
-  };
+  }, [api, current]);
 
   useEffect(() => {
-    fetchMyTests();
-  }, []);
+    alive.current = true;
+    // The remote list starts loading on mount and reloads through event handlers.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void fetchMyTests();
+    return () => {
+      alive.current = false;
+      listRequest.current += 1;
+      resultsRequest.current += 1;
+      readerRequest.current += 1;
+    };
+  }, [fetchMyTests]);
 
   async function openResults(testId: string) {
+    if (!current() || mutationLock.current) return;
+    const request = ++resultsRequest.current;
     setResultsOpen(true);
     setResultsLoading(true);
+    setResults(null);
+    setResultsError(null);
     try {
       const data = await api.get<{
         test: { course_code?: string; course_name?: string; test_type?: string };
@@ -169,32 +227,41 @@ export default function FacultyWeeklyTestsPage() {
           violation_count?: number;
         }>;
       }>(`/api/weekly-tests/faculty/${testId}/results`);
+      if (!current() || request !== resultsRequest.current) return;
       setResults(data);
-    } catch (e: any) {
-      toast.error(e.message || 'Failed to load results');
-      setResults(null);
+    } catch (e: unknown) {
+      if (current() && request === resultsRequest.current) {
+        setResultsError(e instanceof Error ? e.message : 'Failed to load results');
+      }
     } finally {
-      setResultsLoading(false);
+      if (current() && request === resultsRequest.current) setResultsLoading(false);
     }
   }
 
   const handleDeleteTest = async (testId: string) => {
+    if (!current() || mutationLock.current) return;
     if (!confirm('Are you sure you want to delete this test? It will be permanently removed for all students.')) return;
     if (isFacultyDemoSmokeId(testId)) {
       setMyTests((prev) => prev.filter((t) => t.test_id !== testId));
       toast.success('Test deleted successfully (demo)');
       return;
     }
+    mutationLock.current = true;
+    setActing(true);
     try {
       await api.del(`/api/weekly-tests/faculty/${testId}`);
+      if (!current()) return;
       toast.success('Test deleted successfully');
-      fetchMyTests();
-    } catch (e: any) {
-      toast.error(e.message || 'Failed to delete test');
+      void fetchMyTests();
+    } catch (e: unknown) {
+      if (current()) toast.error(e instanceof Error ? e.message : 'Failed to delete test');
+    } finally {
+      if (current()) { mutationLock.current = false; setActing(false); }
     }
   };
 
   const handleToggleTest = async (testId: string, isActive: boolean) => {
+    if (!current() || mutationLock.current) return;
     if (isFacultyDemoSmokeId(testId)) {
       setMyTests((prev) =>
         prev.map((t) => (t.test_id === testId ? { ...t, is_active: !isActive } : t)),
@@ -202,12 +269,17 @@ export default function FacultyWeeklyTestsPage() {
       toast.success(`Test ${!isActive ? 'activated' : 'deactivated'} successfully (demo)`);
       return;
     }
+    mutationLock.current = true;
+    setActing(true);
     try {
       await api.patch(`/api/weekly-tests/faculty/${testId}/toggle`, { is_active: !isActive });
+      if (!current()) return;
       toast.success(`Test ${!isActive ? 'activated' : 'deactivated'} successfully`);
-      fetchMyTests();
-    } catch (e: any) {
-      toast.error(e.message || 'Failed to toggle test status');
+      void fetchMyTests();
+    } catch (e: unknown) {
+      if (current()) toast.error(e instanceof Error ? e.message : 'Failed to toggle test status');
+    } finally {
+      if (current()) { mutationLock.current = false; setActing(false); }
     }
   };
 
@@ -222,7 +294,11 @@ export default function FacultyWeeklyTestsPage() {
   const isAnswerKeyComplete = answerKey.every(a => a !== '');
 
   async function handleSchedule() {
-    if (!courseId) return toast.error('Please select a course.');
+    if (!current() || mutationLock.current) return;
+    if (coursesLoading) return toast.error('Wait for your teaching courses to finish loading.');
+    if (!courseId || !courses.some((course) => course.course_id === courseId)) {
+      return toast.error('Please select a course from your current teaching allocation.');
+    }
     if (isFacultyDemoEntityId(courseId)) {
       toast.success('Weekly test scheduled (demo)');
       return;
@@ -232,10 +308,12 @@ export default function FacultyWeeklyTestsPage() {
     if (!file) return toast.error('Please upload a PDF question paper.');
     if (!isAnswerKeyComplete) return toast.error('Please complete the answer key for all 10 questions.');
 
+    mutationLock.current = true;
     setSubmitting(true);
     try {
       toast.info('Uploading question paper...');
       const paperUrl = await handleFileUpload(file);
+      if (!current()) return;
 
       toast.info('Scheduling test...');
       const created = await api.post<{ notified_count?: number }>('/api/weekly-tests/faculty/create', {
@@ -247,6 +325,7 @@ export default function FacultyWeeklyTestsPage() {
         end_time: new Date(endTime).toISOString(),
       });
 
+      if (!current()) return;
       const notified = Number(created?.notified_count ?? 0);
       toast.success(
         `Weekly test scheduled successfully. Notifications sent to ${notified} student${notified === 1 ? '' : 's'}.`,
@@ -260,11 +339,11 @@ export default function FacultyWeeklyTestsPage() {
       setAnswerKey(Array(10).fill(''));
 
       // Refresh tests list
-      fetchMyTests();
+      void fetchMyTests();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed to schedule test');
+      if (current()) toast.error(e instanceof Error ? e.message : 'Failed to schedule test');
     } finally {
-      setSubmitting(false);
+      if (current()) { mutationLock.current = false; setSubmitting(false); }
     }
   }
 
@@ -329,7 +408,7 @@ export default function FacultyWeeklyTestsPage() {
 
       <div className="w-full space-y-6">
         <FacultyPanel title="Schedule New Test" description="Configure details and upload the paper" className="w-full">
-          <div className="grid gap-6">
+          <fieldset disabled={busy} className="min-w-0 grid gap-6">
             <div className="grid gap-4 sm:grid-cols-2">
               <label className="text-sm">
                 <span className="mb-1.5 block font-medium text-sgvu-navy">Course</span>
@@ -353,7 +432,10 @@ export default function FacultyWeeklyTestsPage() {
                 <Select
                   className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm"
                   value={testType}
-                  onChange={(e) => setTestType(e.target.value as any)}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    if (value === 'WT1' || value === 'WT2') setTestType(value);
+                  }}
                 >
                   {TEST_TYPES.map((t) => (
                     <option key={t} value={t}>{t}</option>
@@ -386,6 +468,7 @@ export default function FacultyWeeklyTestsPage() {
                 <div className="flex items-center gap-2">
                   <Input
                     type="file"
+                    aria-label="Question Paper (PDF)"
                     accept="application/pdf"
                     onChange={(e) => setFile(e.target.files?.[0] || null)}
                     className="flex-1"
@@ -395,7 +478,7 @@ export default function FacultyWeeklyTestsPage() {
 
               <div className="text-sm flex flex-col justify-end">
                 <span className="mb-1.5 block font-medium text-sgvu-navy opacity-0">Answer Key</span>
-                <Dialog open={isAnswerKeyModalOpen} onOpenChange={setIsAnswerKeyModalOpen}>
+                <Dialog open={isAnswerKeyModalOpen} onOpenChange={(open) => { if (!mutationLock.current) setIsAnswerKeyModalOpen(open); }}>
                   <DialogTrigger asChild>
                     <Button variant={isAnswerKeyComplete ? "default" : "outline"} className="w-full justify-between">
                       <span className="flex items-center gap-2">
@@ -449,12 +532,12 @@ export default function FacultyWeeklyTestsPage() {
             </div>
 
             <div className="flex justify-end pt-4 mt-2 border-t border-border/40">
-              <Button onClick={handleSchedule} disabled={submitting}>
+              <Button onClick={handleSchedule} disabled={busy || coursesLoading || !courses.some((course) => course.course_id === courseId)}>
                 {submitting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Upload className="w-4 h-4 mr-2" />}
                 Schedule Test
               </Button>
             </div>
-          </div>
+          </fieldset>
         </FacultyPanel>
 
         <FacultyPanel title="Manage Scheduled Tests" description="View and delete upcoming tests you have scheduled" className="w-full">
@@ -462,9 +545,9 @@ export default function FacultyWeeklyTestsPage() {
             <div className="flex justify-center py-8">
               <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
             </div>
-          ) : myTests.length === 0 ? (
+          ) : testsError ? <><FacultyErrorBanner message={testsError} /><Button variant="outline" onClick={() => void fetchMyTests()} disabled={busy}>Retry tests</Button></> : myTests.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground text-sm">
-              You haven't scheduled any tests yet.
+              You haven&apos;t scheduled any tests yet.
             </div>
           ) : (
             <div className="mt-4 grid w-full grid-cols-1 gap-4">
@@ -516,6 +599,7 @@ export default function FacultyWeeklyTestsPage() {
                           size="sm"
                           className="h-9 w-full justify-center"
                           onClick={() => void openResults(test.test_id)}
+                          disabled={busy}
                         >
                           <BarChart3 className="mr-1.5 h-4 w-4" />
                           Results
@@ -529,6 +613,7 @@ export default function FacultyWeeklyTestsPage() {
                               !test.is_active && 'border-orange-200 bg-orange-50 text-orange-600',
                             )}
                             onClick={() => handleToggleTest(test.test_id, test.is_active)}
+                            disabled={busy}
                           >
                             {test.is_active ? (
                               <EyeOff className="mr-1.5 h-4 w-4" />
@@ -548,6 +633,7 @@ export default function FacultyWeeklyTestsPage() {
                           size="sm"
                           className="h-9 w-full justify-center"
                           onClick={() => handleDeleteTest(test.test_id)}
+                          disabled={busy}
                         >
                           <Trash2 className="mr-1.5 h-4 w-4" />
                           Delete Test
@@ -582,7 +668,15 @@ export default function FacultyWeeklyTestsPage() {
         </FacultyPanel>
       </div>
 
-      <Dialog open={resultsOpen} onOpenChange={setResultsOpen}>
+      <Dialog open={resultsOpen} onOpenChange={(open) => {
+        setResultsOpen(open);
+        if (!open) {
+          resultsRequest.current += 1;
+          setResults(null);
+          setResultsError(null);
+          setResultsLoading(false);
+        }
+      }}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>Test results</DialogTitle>
@@ -596,7 +690,7 @@ export default function FacultyWeeklyTestsPage() {
             <div className="flex justify-center py-8">
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
             </div>
-          ) : !results?.responses?.length ? (
+          ) : resultsError ? <FacultyErrorBanner message={resultsError} /> : !results?.responses?.length ? (
             <p className="text-sm text-muted-foreground">No submissions yet.</p>
           ) : (
             <div className="max-h-[50vh] overflow-auto">

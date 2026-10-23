@@ -8,6 +8,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import type { Response } from 'express';
 import { ObjectStorageService } from '../../storage/object-storage.service';
+import { isSafeStorageKey } from '../../storage/disk-file-path';
 import {
   HR_DOCUMENT_CATEGORIES,
   HR_DOCUMENT_GROUP_MAP,
@@ -145,6 +146,11 @@ export class HrDocumentVaultService {
 
     const key = parseStorageKey(doc.file_url);
     if (key && this.storage.isEnabled()) {
+      if (!isSafeStorageKey(key, tenantId)) {
+        throw new NotFoundException(
+          'Document file not available in secure storage',
+        );
+      }
       const url = await this.storage.getPresignedDownloadUrl(
         key,
         PRESIGNED_TTL_SECONDS,
@@ -173,29 +179,10 @@ export class HrDocumentVaultService {
       };
     }
 
-    if (
-      resolveDocumentDiskPath(doc.file_url) ||
-      (key && !this.storage.isEnabled())
-    ) {
+    if (resolveDocumentDiskPath(doc.file_url, tenantId)) {
       return {
         url: `/api/hr/documents/${docId}/file`,
         delivery: 'authenticated' as const,
-        expires_at: new Date(
-          Date.now() + PRESIGNED_TTL_SECONDS * 1000,
-        ).toISOString(),
-        file_name: doc.file_name,
-      };
-    }
-
-    if (
-      doc.file_url.startsWith('/') ||
-      doc.file_url.includes('uploads/download')
-    ) {
-      return {
-        url: doc.file_url.startsWith('http')
-          ? doc.file_url
-          : `/api/uploads/download?key=${encodeURIComponent(key ?? '')}`,
-        delivery: 'presigned' as const,
         expires_at: new Date(
           Date.now() + PRESIGNED_TTL_SECONDS * 1000,
         ).toISOString(),
@@ -228,7 +215,11 @@ export class HrDocumentVaultService {
       throw new ForbiddenException('You can only download your own documents');
     }
 
-    const stream = await openDocumentReadStream(doc.file_url, this.storage);
+    const stream = await openDocumentReadStream(
+      doc.file_url,
+      this.storage,
+      tenantId,
+    );
     if (!stream) {
       throw new NotFoundException(
         'Document file not available in secure storage',

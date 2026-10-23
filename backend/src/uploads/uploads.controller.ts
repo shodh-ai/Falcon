@@ -21,9 +21,14 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { ObjectStorageService } from '../storage/object-storage.service';
-import { createReadStream, existsSync, mkdirSync, writeFileSync } from 'fs';
-import { basename, resolve } from 'path';
+import { createReadStream } from 'fs';
+import { basename } from 'path';
 import type { Response } from 'express';
+import {
+  isSafeStorageKey,
+  isSafeTenantId,
+  resolveTenantDiskPath,
+} from '../storage/disk-file-path';
 
 /** Authenticated campus roles that may upload files through the shared endpoint. */
 const UPLOAD_ROLES = [
@@ -92,7 +97,7 @@ export class UploadsController {
     if (!file) {
       throw new BadRequestException('No file uploaded');
     }
-    return this.persistFile(file, req.user?.tenant_id ?? 'unknown');
+    return this.persistFile(file, this.requireTenant(req));
   }
 
   @Post('multiple')
@@ -104,7 +109,7 @@ export class UploadsController {
     if (!files?.length) {
       throw new BadRequestException('No files uploaded');
     }
-    const tenantId = req.user?.tenant_id ?? 'unknown';
+    const tenantId = this.requireTenant(req);
     return Promise.all(files.map((f) => this.persistFile(f, tenantId)));
   }
 
@@ -115,17 +120,12 @@ export class UploadsController {
     @Req() req: AuthRequest & { user?: { tenant_id?: string } },
     @Res() res: Response,
   ) {
-    // Class-level JwtAuthGuard applies (Bearer, access_token query, or auth cookie).
-    if (!req.user) {
-      throw new UnauthorizedException(
-        'Authentication required to download files',
-      );
-    }
+    // Class-level JwtAuthGuard applies (Bearer or auth cookie).
+    const tenantId = this.requireTenant(req);
 
-    if (objectKey && this.objectStorage.isEnabled()) {
-      const tenantId = req.user.tenant_id;
+    if (objectKey) {
       // Object keys are tenant-prefixed by ObjectStorageService.buildKey
-      if (tenantId && !objectKey.startsWith(`${tenantId}/`)) {
+      if (!isSafeStorageKey(objectKey, tenantId)) {
         throw new NotFoundException('File not found');
       }
       const stream = await this.objectStorage.getDownloadStream(objectKey);
@@ -143,24 +143,8 @@ export class UploadsController {
       throw new BadRequestException('File path or object key is required');
     }
 
-    const uploadRoot = resolve(process.env.UPLOAD_PATH || './uploads');
-    let resolvedPath = resolve(filePath);
-
-    if (filePath.startsWith('/uploads/')) {
-      resolvedPath = resolve(uploadRoot, filePath.replace(/^\/uploads\//, ''));
-    }
-
-    if (!resolvedPath.startsWith(uploadRoot) || !existsSync(resolvedPath)) {
-      throw new NotFoundException('File not found');
-    }
-
-    const tenantId = req.user.tenant_id;
-    if (tenantId) {
-      const tenantRoot = resolve(uploadRoot, tenantId);
-      if (!resolvedPath.startsWith(tenantRoot)) {
-        throw new NotFoundException('File not found');
-      }
-    }
+    const resolvedPath = resolveTenantDiskPath(filePath, tenantId);
+    if (!resolvedPath) throw new NotFoundException('File not found');
 
     res.setHeader(
       'Content-Disposition',
@@ -174,15 +158,15 @@ export class UploadsController {
 
   private async persistFile(file: Express.Multer.File, tenantId: string) {
     const uniqueName = `${uuidv4()}${extname(file.originalname)}`;
+    const key = this.objectStorage.buildKey(tenantId, uniqueName);
+    const stored = await this.objectStorage.upload(
+      tenantId,
+      key,
+      file.buffer,
+      file.mimetype,
+    );
 
     if (this.objectStorage.isEnabled()) {
-      const key = this.objectStorage.buildKey(tenantId, uniqueName);
-      const stored = await this.objectStorage.upload(
-        tenantId,
-        key,
-        file.buffer,
-        file.mimetype,
-      );
       return {
         filename: uniqueName,
         originalname: file.originalname,
@@ -194,25 +178,24 @@ export class UploadsController {
       };
     }
 
-    const uploadPath = process.env.UPLOAD_PATH || './uploads';
-    const date = new Date();
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const relativePath = `${tenantId}/${year}/${month}/${uniqueName}`;
-    const targetDir = `${uploadPath}/${tenantId}/${year}/${month}`;
-    mkdirSync(targetDir, { recursive: true });
-    const fullPath = `${targetDir}/${uniqueName}`;
-    writeFileSync(fullPath, file.buffer);
-    const publicUrl = `/uploads/${relativePath}`;
-
     return {
       filename: uniqueName,
       originalname: file.originalname,
       mimetype: file.mimetype,
       size: file.size,
-      path: fullPath,
-      url: publicUrl,
+      path: `${process.env.UPLOAD_PATH || './uploads'}/${key}`,
+      url: stored.url,
       storage: 'disk',
     };
+  }
+
+  private requireTenant(req: AuthRequest): string {
+    const tenantId = req.user?.tenant_id;
+    if (!tenantId || !isSafeTenantId(tenantId)) {
+      throw new UnauthorizedException(
+        'Authentication with tenant context required',
+      );
+    }
+    return tenantId;
   }
 }

@@ -4,14 +4,14 @@ import { join } from 'path';
 const service = readFileSync(
   join(process.cwd(), 'src/modules/procurements/procurement.service.ts'),
   'utf8',
-);
+).replace(/\r\n/g, '\n');
 const migration = readFileSync(
   join(
     process.cwd(),
     'migrations/20260829120000_dofa_module2_progressive_procurement.sql',
   ),
   'utf8',
-);
+).replace(/\r\n/g, '\n');
 
 describe('Module 2 concurrency contract', () => {
   it('locks the case before financial and quantity transitions', () => {

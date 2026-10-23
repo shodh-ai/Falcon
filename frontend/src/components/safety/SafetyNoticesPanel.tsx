@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { AlertTriangle, Loader2, Shield } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -41,28 +41,42 @@ function statusTone(status: string) {
   return 'border-transparent bg-sgvu-navy/10 text-sgvu-navy';
 }
 
-export function SafetyNoticesPanel({
-  title = 'Safety notices',
-  description = 'Official notices when a safety concern involving you is under review or has been closed. Do not contact any student about these matters.',
-  embedded = false,
-}: {
+type SafetyNoticesProps = {
   title?: string;
   description?: string;
   /** When true, omit page-level title (parent workspace already shows chrome). */
   embedded?: boolean;
-}) {
+};
+
+export function SafetyNoticesPanel(props: SafetyNoticesProps) {
   const api = useAuthedApi();
   const pathname = usePathname();
-  const facultySmoke = pathname?.startsWith('/faculty');
+  const facultySmoke = Boolean(pathname?.startsWith('/faculty'));
+  const [scope, setScope] = useState({ api, facultySmoke, revision: 0 });
+  if (scope.api !== api || scope.facultySmoke !== facultySmoke) setScope({ api, facultySmoke, revision: scope.revision + 1 });
+  return <SafetyNoticesWorkspace key={scope.revision} api={api} facultySmoke={facultySmoke} {...props} />;
+}
+
+function SafetyNoticesWorkspace({
+  api,
+  facultySmoke,
+  title = 'Safety notices',
+  description = 'Official notices when a safety concern involving you is under review or has been closed. Do not contact any student about these matters.',
+  embedded = false,
+}: SafetyNoticesProps & { api: ReturnType<typeof useAuthedApi>; facultySmoke: boolean }) {
   const [rows, setRows] = useState<Notice[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const requestId = useRef(0);
+  const mounted = useRef(false);
 
   const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+    const id = ++requestId.current;
+    const current = () => mounted.current && requestId.current === id;
     try {
       const data = await api.get<Notice[]>('/api/student-safety/accused/notices');
+      if (!current()) return;
+      setError(null);
       const live = Array.isArray(data) ? data : [];
       setRows(
         facultySmoke
@@ -70,6 +84,7 @@ export function SafetyNoticesPanel({
           : live,
       );
     } catch (e) {
+      if (!current()) return;
       if (facultySmoke) {
         const demo = withFacultyDemoFallback(
           [],
@@ -83,11 +98,18 @@ export function SafetyNoticesPanel({
         setError(e instanceof Error ? e.message : 'Could not load safety notices');
       }
     } finally {
-      setLoading(false);
+      if (current()) setLoading(false);
     }
   }, [api, facultySmoke]);
 
+  useLayoutEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; requestId.current += 1; };
+  }, []);
+
   useEffect(() => {
+    // Subscribe to the current account's notices; guarded responses populate state.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
   }, [load]);
 
@@ -111,7 +133,7 @@ export function SafetyNoticesPanel({
           title="Could not load notices"
           description={error}
           action={
-            <Button variant="outline" onClick={() => void load()}>
+            <Button variant="outline" onClick={() => { setLoading(true); setError(null); void load(); }}>
               Try again
             </Button>
           }

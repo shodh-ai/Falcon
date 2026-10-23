@@ -70,7 +70,7 @@ describe('AuthService.localLogin', () => {
   let service: AuthService;
 
   const mockDataSource = {
-    query: jest.fn(),
+    query: jest.fn<Promise<unknown[]>, [sql: string, params?: unknown[]]>(),
   };
 
   const mockUserRepository = {
@@ -103,35 +103,35 @@ describe('AuthService.localLogin', () => {
   function mockSuccessfulLoginQueries(
     fixture: ReturnType<typeof buildLoginFixture>,
   ) {
-    mockDataSource.query.mockImplementation(async (sql: string) => {
+    mockDataSource.query.mockImplementation((sql: string) => {
       const text = String(sql);
       if (text.includes('password_hash')) {
-        return [fixture.credential];
+        return Promise.resolve([fixture.credential]);
       }
       if (text.includes('official_email AS email')) {
-        return [fixture.userRow];
+        return Promise.resolve([fixture.userRow]);
       }
       if (text.includes('FROM user_roles ur')) {
-        return fixture.roleRows;
+        return Promise.resolve(fixture.roleRows);
       }
       if (text.includes('COUNT(*)')) {
-        return [{ count: '0' }];
+        return Promise.resolve([{ count: '0' }]);
       }
       if (text.includes('EXISTS')) {
-        return [{ is_hod: false }];
+        return Promise.resolve([{ is_hod: false }]);
       }
-      return [];
+      return Promise.resolve([]);
     });
   }
 
   beforeEach(async () => {
     jest.clearAllMocks();
 
-    mockDataSource.query.mockImplementation(async (sql: string) => {
+    mockDataSource.query.mockImplementation((sql: string) => {
       if (String(sql).includes('COUNT(*)')) {
-        return [{ count: '0' }];
+        return Promise.resolve([{ count: '0' }]);
       }
-      return [];
+      return Promise.resolve([]);
     });
 
     mockTenantService.findBySubdomain.mockResolvedValue(TENANT);
@@ -182,7 +182,7 @@ describe('AuthService.localLogin', () => {
     expect(mockUserRepository.findOne).not.toHaveBeenCalled();
   });
 
-  it('casts the login audit resource id so PostgreSQL does not infer conflicting types', async () => {
+  it('binds the shared login audit actor parameter as UUID before converting it to resource text', async () => {
     const fixture = buildLoginFixture({
       user_id: '00000000-0000-4000-8000-000000000001',
       email: 'library@mygyanvihar.com',
@@ -190,7 +190,7 @@ describe('AuthService.localLogin', () => {
     });
     mockSuccessfulLoginQueries(fixture);
 
-    await service.localLogin(
+    const result = await service.localLogin(
       'library@mygyanvihar.com',
       'password123',
       'sgvu',
@@ -199,7 +199,73 @@ describe('AuthService.localLogin', () => {
     const auditCall = mockDataSource.query.mock.calls.find(([sql]) =>
       String(sql).includes('INSERT INTO admin_control_audit'),
     );
-    expect(auditCall?.[0]).toContain('$2::text');
+    expect(auditCall).toBeDefined();
+    // A direct $2::text conflicts with actor_user_id's UUID column when the
+    // same untyped parameter also supplies that column. Both occurrences
+    // must bind as UUID; only the resource value is then rendered as text.
+    expect(String(auditCall?.[0]).replace(/\s+/g, ' ')).toContain(
+      "VALUES ($1::uuid, $2::uuid, 'LOGIN', 'session', ($2::uuid)::text,",
+    );
+    expect(auditCall?.[1]).toEqual([
+      TENANT.tenant_id,
+      fixture.credential.user_id,
+    ]);
+    expect(mockDataSource.query).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO admin_login_history'),
+      [
+        TENANT.tenant_id,
+        fixture.credential.user_id,
+        fixture.userRow.email,
+        true,
+      ],
+    );
+    expect(result.token).toBe('signed-jwt');
+  });
+
+  it('records rejected credentials without a successful-session audit or last-login update', async () => {
+    const fixture = buildLoginFixture({ roleName: 'Faculty' });
+    mockSuccessfulLoginQueries(fixture);
+    (bcrypt.compare as jest.Mock).mockResolvedValue(false);
+
+    await expect(
+      service.localLogin(fixture.userRow.email, 'incorrect-password', 'sgvu'),
+    ).rejects.toThrow('Invalid email or password');
+
+    expect(mockDataSource.query).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO admin_login_history'),
+      [
+        TENANT.tenant_id,
+        fixture.credential.user_id,
+        fixture.userRow.email,
+        false,
+      ],
+    );
+    const queries = mockDataSource.query.mock.calls.map(([sql]) => String(sql));
+    expect(
+      queries.some((sql) => sql.includes('INSERT INTO admin_control_audit')),
+    ).toBe(false);
+    expect(
+      queries.some((sql) => sql.includes('SET last_login_at = NOW()')),
+    ).toBe(false);
+    expect(mockAuthProvider.signToken).not.toHaveBeenCalled();
+  });
+
+  it('still authenticates when the optional audit table is unavailable', async () => {
+    const fixture = buildLoginFixture({ roleName: 'Faculty' });
+    mockSuccessfulLoginQueries(fixture);
+    const queryImplementation = mockDataSource.query.getMockImplementation();
+    mockDataSource.query.mockImplementation((sql: string) => {
+      if (sql.includes('INSERT INTO admin_control_audit')) {
+        return Promise.reject(
+          new Error('relation "admin_control_audit" does not exist'),
+        );
+      }
+      return queryImplementation?.(sql) ?? Promise.resolve([]);
+    });
+
+    await expect(
+      service.localLogin(fixture.userRow.email, 'valid-password', 'sgvu'),
+    ).resolves.toMatchObject({ token: 'signed-jwt' });
   });
 
   it('falls back to sgvu when tenant subdomain header is empty', async () => {
@@ -227,17 +293,21 @@ describe('AuthService.localLogin', () => {
       roleName: 'Faculty',
     });
     mockTenantService.findById.mockResolvedValue(gvmcTenant);
-    mockDataSource.query.mockImplementation(async (sql: string) => {
+    mockDataSource.query.mockImplementation((sql: string) => {
       const text = String(sql);
       if (text.includes('INNER JOIN tenants t')) {
-        return [{ ...fixture.credential, tenant_id: gvmcTenant.tenant_id }];
+        return Promise.resolve([
+          { ...fixture.credential, tenant_id: gvmcTenant.tenant_id },
+        ]);
       }
-      if (text.includes('password_hash')) return [];
-      if (text.includes('official_email AS email')) return [fixture.userRow];
-      if (text.includes('FROM user_roles ur')) return fixture.roleRows;
-      if (text.includes('COUNT(*)')) return [{ count: '0' }];
-      if (text.includes('EXISTS')) return [{ is_hod: false }];
-      return [];
+      if (text.includes('password_hash')) return Promise.resolve([]);
+      if (text.includes('official_email AS email'))
+        return Promise.resolve([fixture.userRow]);
+      if (text.includes('FROM user_roles ur'))
+        return Promise.resolve(fixture.roleRows);
+      if (text.includes('COUNT(*)')) return Promise.resolve([{ count: '0' }]);
+      if (text.includes('EXISTS')) return Promise.resolve([{ is_hod: false }]);
+      return Promise.resolve([]);
     });
 
     const result = await service.localLogin(
@@ -254,22 +324,20 @@ describe('AuthService.localLogin', () => {
   });
 
   it('fails closed when the same email belongs to multiple tenants', async () => {
-    mockDataSource.query
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([
-        {
-          user_id: 'user-1',
-          password_hash: PASSWORD_HASH,
-          is_active: true,
-          tenant_id: TENANT.tenant_id,
-        },
-        {
-          user_id: 'user-2',
-          password_hash: PASSWORD_HASH,
-          is_active: true,
-          tenant_id: 'b0000000-0000-4000-8000-000000000002',
-        },
-      ]);
+    mockDataSource.query.mockResolvedValueOnce([]).mockResolvedValueOnce([
+      {
+        user_id: 'user-1',
+        password_hash: PASSWORD_HASH,
+        is_active: true,
+        tenant_id: TENANT.tenant_id,
+      },
+      {
+        user_id: 'user-2',
+        password_hash: PASSWORD_HASH,
+        is_active: true,
+        tenant_id: 'b0000000-0000-4000-8000-000000000002',
+      },
+    ]);
 
     await expect(
       service.localLogin('shared@mygyanvihar.com', 'password123', 'sgvu'),

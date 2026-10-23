@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Loader2, Search, Trash2 } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { FacultyEmptyState, FacultyPanel } from '@/components/faculty';
@@ -45,7 +45,7 @@ export function FacultyQuestionBankPanel({
   const [options, setOptions] = useState({ a: '', b: '', c: '', d: '' });
   const [correct, setCorrect] = useState('A');
 
-  async function reload() {
+  const reload = useCallback(async () => {
     setLoading(true);
     try {
       const qs = courseFilter ? `?courseId=${encodeURIComponent(courseFilter)}` : '';
@@ -58,11 +58,13 @@ export function FacultyQuestionBankPanel({
     } finally {
       setLoading(false);
     }
-  }
+  }, [api, courseFilter]);
 
   useEffect(() => {
+    // Course/account filters own a new remote question-bank load and loading boundary.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void reload();
-  }, [api, courseFilter]);
+  }, [reload]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();

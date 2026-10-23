@@ -244,6 +244,8 @@ export function FacultyAiWorkspace({ compact = false }: { compact?: boolean }) {
     if (compact || prefillsApplied.current) return;
     const q = searchParams.get('q');
     if (q?.trim()) {
+      // Apply an external deep-link prompt once; subsequent typing must stay user-owned.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setInput(q.trim());
       prefillsApplied.current = true;
     }

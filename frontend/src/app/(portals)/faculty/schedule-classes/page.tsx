@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   CheckCircle2,
   GripVertical,
@@ -50,6 +50,17 @@ type TimetableSlot = {
   end_time: string;
   room?: string | null;
   section?: string | null;
+};
+
+type AvailableRoom = {
+  roomName: string;
+  capacity: number | null;
+  available: boolean;
+};
+
+type ScheduleData = {
+  allocations: Allocation[];
+  timetables: TimetableSlot[];
 };
 
 const DOW = ['', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -113,17 +124,17 @@ export default function FacultyScheduleClassesPage() {
 
   const [roomModalOpen, setRoomModalOpen] = useState(false);
   const [activeSlotId, setActiveSlotId] = useState<string | null>(null);
-  const [availableRooms, setAvailableRooms] = useState<any[]>([]);
+  const [availableRooms, setAvailableRooms] = useState<AvailableRoom[]>([]);
   const [loadingRooms, setLoadingRooms] = useState(false);
 
   const [selectedCourseId, setSelectedCourseId] = useState<string | null>(null);
   const [focusedSlotId, setFocusedSlotId] = useState<string | null>(null);
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
 
-  async function load() {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await api.get<{ allocations: Allocation[]; timetables: any[]; faculty: any[] }>(
+      const data = await api.get<ScheduleData>(
         withTeachingDeptId('/api/academics/faculty/workspaces/timetable/schedule-data', activeDeptId),
       );
       const demo = facultyDemoScheduleData();
@@ -201,12 +212,14 @@ export default function FacultyScheduleClassesPage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [api, activeDeptId]);
 
   useEffect(() => {
     if (deptLoading) return;
+    // Begin the authenticated remote timetable read and expose its loading state.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
-  }, [api, activeDeptId, deptLoading]);
+  }, [load, deptLoading]);
 
   const uniqueAllocations = useMemo(() => dedupeAllocations(allocations), [allocations]);
   const scheduledCourseIds = useMemo(
@@ -238,7 +251,7 @@ export default function FacultyScheduleClassesPage() {
     }
 
     const newSlot: TimetableSlot = {
-      timetable_id: `draft-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+      timetable_id: `draft-${crypto.randomUUID()}`,
       course_id: allocation.course_id,
       faculty_user_id: allocation.faculty_user_id,
       course_code: allocation.course_code,
@@ -341,7 +354,7 @@ export default function FacultyScheduleClassesPage() {
     setRoomModalOpen(true);
     setLoadingRooms(true);
     try {
-      const data = await api.get<any[]>(
+      const data = await api.get<AvailableRoom[]>(
         `/api/academics/faculty/workspaces/timetable/rooms/availability?day=${slot.day_of_week}&startTime=${slot.start_time}&endTime=${slot.end_time}`,
       );
 

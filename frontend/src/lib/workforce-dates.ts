@@ -1,10 +1,12 @@
+import { localTodayKey } from '@/lib/faculty/calendar-date';
+
 export const WORKFORCE_RETROACTIVE_DAYS = 3;
 
 /** Earliest selectable date for leave / OD / regularization (today minus 3 days). */
 export function workforceMinDate(): string {
   const d = new Date();
   d.setDate(d.getDate() - WORKFORCE_RETROACTIVE_DAYS);
-  return d.toISOString().slice(0, 10);
+  return localTodayKey(d);
 }
 
 export function workforceDateInputProps(requestType: string): { min?: string } {

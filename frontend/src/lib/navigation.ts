@@ -96,7 +96,7 @@ import {
   FINANCE_DESK_ROLE_NAMES,
   getAccountSettingsHrefForPortal,
 } from '@/lib/auth-routing';
-import { rolesIncludeAny, rolesMatchForAccess } from '@/lib/campus-admin.roles';
+import { rolesMatchForAccess } from '@/lib/campus-admin.roles';
 import { selfServicePaths, type WorkspacePrefix } from '@/lib/workspace-self-service';
 
 export type HrModuleKey =
@@ -658,6 +658,7 @@ export const facultyPortal: PortalConfig = {
       items: [
         { label: 'Timetable & Classes', href: '/faculty/timetable', icon: CalendarClock, keywords: ['schedule', 'slots', 'substitute', 'cancel', 'ltp', 'extra class'] },
         { label: 'Mark Attendance', href: '/faculty/attendance', icon: ClipboardCheck, keywords: ['attendance', 'present', 'absent'] },
+        { label: 'Class Logbook', href: '/faculty/logbook', icon: BookOpen, keywords: ['logbook', 'lecture', 'topic coverage', 'teaching diary'] },
         { label: 'My Courses', href: '/faculty/courses', icon: BookOpen, keywords: ['lesson plan', 'handout', 'course page', 'workspace'] },
         { label: 'Assignments', href: '/faculty/assignments', icon: ClipboardList, keywords: ['da', 'digital assignment', 'submission', 'deadline', 'grade'] },
         { label: 'Study Materials', href: '/faculty/materials', icon: BookMarked, keywords: ['notes', 'ppt', 'syllabus', 'upload', 'modules'] },
@@ -728,6 +729,7 @@ export const facultyPortal: PortalConfig = {
       items: [
         { label: 'Timetable & Classes', href: '/faculty/timetable', icon: CalendarClock, keywords: ['schedule', 'slots', 'substitute', 'cancel', 'ltp', 'extra'] },
         { label: 'Mark Attendance', href: '/faculty/attendance', icon: ClipboardCheck, keywords: ['attendance', 'present', 'absent'] },
+        { label: 'Class Logbook', href: '/faculty/logbook', icon: BookOpen, keywords: ['logbook', 'lecture', 'topic coverage', 'teaching diary'] },
         { label: 'My Courses', href: '/faculty/courses', icon: BookOpen, keywords: ['lesson plan', 'handout', 'course page', 'workspace'] },
         { label: 'Assignments', href: '/faculty/assignments', icon: ClipboardList, keywords: ['da', 'digital assignment', 'submission', 'deadline', 'grade'] },
         { label: 'Study Materials', href: '/faculty/materials', icon: BookMarked, keywords: ['notes', 'ppt', 'syllabus', 'upload', 'modules'] },

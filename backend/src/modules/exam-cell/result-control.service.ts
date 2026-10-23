@@ -1,13 +1,17 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { postgresQueryRows } from '../../common/postgres-query-rows';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 import { ExamCellAuditService } from './exam-cell-audit.service';
 import { resolveDeanDepartmentIds } from '../academics/dean-scope.util';
+import { isQaDeclarationNote } from '../exams/official-result-provenance';
+import { validateReEvaluationSources } from './re-evaluation-publication';
 import {
   computeGradeFromPercent,
   computePassFail,
@@ -20,6 +24,36 @@ import type {
   OpenResultEntryDto,
   ReopenResultEntryDto,
 } from './dto/result-control.dto';
+
+type DeclaredSessionReportRow = {
+  report_id: string;
+  student_user_id: string;
+  marks_obtained: string | number | null;
+  max_marks: string | number | null;
+  grade: string | null;
+  grade_points: string | number | null;
+  result_status: string | null;
+  declared_at: Date | string | null;
+  [key: string]: unknown;
+};
+
+type ReadOnlySessionReport = DeclaredSessionReportRow & {
+  course_code: string;
+  course_name: string;
+  semester: number;
+  session_declared_at: Date | string | null;
+  declaration_note: string | null;
+  result_id: string | null;
+  exam_session: string | null;
+  canonical_marks_obtained: string | number | null;
+  canonical_max_marks: string | number | null;
+  canonical_grade: string | null;
+  canonical_status: string | null;
+  source_mark_id: string | null;
+  source_report_id: string | null;
+  verification_status: 'verified' | 'unverified' | 'qa';
+  verification_message: string;
+};
 
 @Injectable()
 export class ResultControlService {
@@ -259,9 +293,12 @@ export class ResultControlService {
     );
   }
 
-  private async loadGradeBands(session: { grading_policy_id?: number | null }) {
+  private async loadGradeBands(
+    session: { grading_policy_id?: number | null },
+    db: Pick<DataSource, 'query'> = this.db,
+  ) {
     if (!session.grading_policy_id) return parseGradeBands(null);
-    const rows = await this.db.query<Array<{ rules: Record<string, unknown> }>>(
+    const rows = await db.query<Array<{ rules: Record<string, unknown> }>>(
       `SELECT rules FROM academic_grading_policies WHERE policy_id = $1`,
       [session.grading_policy_id],
     );
@@ -710,184 +747,289 @@ export class ResultControlService {
     actorUserId: string,
     dto: DeclareResultSessionDto,
   ) {
-    const session = await this.getSession(tenantId, sessionId);
-    if (session.declared_at)
-      throw new BadRequestException('Results already declared');
+    const outcome = await this.db.transaction(async (manager) => {
+      const sessions = await manager.query(
+        `SELECT s.*, c.course_name FROM exam_result_sessions s
+       JOIN academic_courses c ON c.course_id=s.course_id AND c.tenant_id=s.tenant_id AND c.deleted_at IS NULL
+       WHERE s.tenant_id=$1 AND s.session_id=$2 AND s.deleted_at IS NULL FOR UPDATE OF s`,
+        [tenantId, sessionId],
+      );
+      const session = sessions[0];
+      if (!session) throw new NotFoundException('Result session not found');
+      const notifications: Array<Record<string, any>> = [];
+      if (session.declared_at)
+        throw new BadRequestException('Results already declared');
 
-    const deanApproved = await this.db.query(
-      `SELECT 1 FROM exam_result_dean_approval_requests
+      const deanApproved = await manager.query(
+        `SELECT 1 FROM exam_result_dean_approval_requests
        WHERE tenant_id = $1 AND session_id = $2 AND status = 'APPROVED'
        LIMIT 1`,
-      [tenantId, sessionId],
-    );
-    if (!deanApproved.length) {
-      const legacyApproved = await this.audit.hasAction(
-        tenantId,
-        sessionId,
-        'RESULT_DEAN_APPROVED',
+        [tenantId, sessionId],
       );
-      if (!legacyApproved) {
-        throw new BadRequestException(
-          'Dean approval is required before publishing results',
+      if (!deanApproved.length) {
+        const legacyApproved = await this.audit.hasAction(
+          tenantId,
+          sessionId,
+          'RESULT_DEAN_APPROVED',
         );
+        if (!legacyApproved) {
+          throw new BadRequestException(
+            'Dean approval is required before publishing results',
+          );
+        }
       }
-    }
 
-    const bands = await this.loadGradeBands(session);
-    const passMarks =
-      session.pass_marks != null ? Number(session.pass_marks) : null;
+      const bands = await this.loadGradeBands(session, manager);
+      const passMarks =
+        session.pass_marks != null ? Number(session.pass_marks) : null;
 
-    const marks = await this.db.query<
-      Array<{
-        mark_id: string;
-        student_user_id: string;
-        marks_obtained: string;
-        max_marks: string;
-      }>
-    >(
-      `SELECT mark_id, student_user_id, marks_obtained, max_marks FROM academic_marks
-       WHERE tenant_id = $1 AND course_id = $2 AND exam_type = $3 AND status = 'PENDING_COE'`,
-      [tenantId, session.course_id, session.exam_type],
-    );
-    if (!marks.length)
-      throw new BadRequestException('No PENDING_COE marks to declare');
-
-    const courseName = session.course_name ?? 'Course';
-    let declared = 0;
-
-    for (const row of marks) {
-      const obtained = Number(row.marks_obtained);
-      const max = Number(row.max_marks ?? session.max_marks);
-      const percent = max > 0 ? Number(((obtained / max) * 100).toFixed(2)) : 0;
-      const { grade, gradePoints } = computeGradeFromPercent(percent, bands);
-      const resultStatus = computePassFail(obtained, max, passMarks);
-      const summary = `${courseName} ${session.exam_type}: ${obtained}/${max} (${percent}%) — Grade ${grade}`;
-
-      await this.db.query(
-        `UPDATE academic_marks SET status = 'PUBLISHED', published_at = NOW(), updated_at = NOW() WHERE mark_id = $1`,
-        [row.mark_id],
+      const marks = await manager.query<
+        Array<{
+          mark_id: string;
+          student_user_id: string;
+          marks_obtained: string;
+          max_marks: string;
+        }>
+      >(
+        `SELECT mark_id, student_user_id, marks_obtained, max_marks FROM academic_marks
+       WHERE tenant_id = $1 AND course_id = $2 AND exam_type = $3 AND status = 'PENDING_COE'
+         AND (to_jsonb(academic_marks)->>'deleted_at') IS NULL FOR UPDATE`,
+        [tenantId, session.course_id, session.exam_type],
       );
+      if (!marks.length)
+        throw new BadRequestException('No PENDING_COE marks to declare');
 
-      await this.upsertExamResult(
-        tenantId,
-        row.student_user_id,
-        session.course_id,
-        session.exam_type,
-        obtained,
-        max,
-        grade,
-      );
+      const courseName = session.course_name ?? 'Course';
+      let declared = 0;
 
-      await this.db.query(
-        `INSERT INTO student_exam_reports (
+      for (const row of marks) {
+        const obtained = Number(row.marks_obtained);
+        const max = Number(row.max_marks ?? session.max_marks);
+        if (
+          row.marks_obtained == null ||
+          row.max_marks == null ||
+          !Number.isFinite(obtained) ||
+          !Number.isFinite(max) ||
+          max <= 0 ||
+          obtained < 0 ||
+          obtained > max ||
+          max !== Number(session.max_marks)
+        ) {
+          throw new BadRequestException(
+            'Verify source marks and this exam session maximum before declaration',
+          );
+        }
+        const percent =
+          max > 0 ? Number(((obtained / max) * 100).toFixed(2)) : 0;
+        const { grade, gradePoints } = computeGradeFromPercent(percent, bands);
+        const resultStatus = computePassFail(obtained, max, passMarks);
+        const summary = `${courseName} ${session.exam_type}: ${obtained}/${max} (${percent}%) — Grade ${grade}`;
+
+        const markUpdate = postgresQueryRows(
+          await manager.query(
+            `UPDATE academic_marks SET status='PUBLISHED', published_at=NOW(), updated_at=NOW()
+         WHERE mark_id=$1 RETURNING updated_at::text`,
+            [row.mark_id],
+          ),
+        );
+        if (markUpdate.length !== 1)
+          throw new BadRequestException(
+            'Source marks changed during declaration',
+          );
+
+        const reports = postgresQueryRows(
+          await manager.query(
+            `INSERT INTO student_exam_reports (
            tenant_id, session_id, student_user_id, course_id, exam_type,
            marks_obtained, max_marks, percent, grade, grade_points, result_status, report_summary, declared_at
          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,NOW())
          ON CONFLICT (session_id, student_user_id) DO UPDATE SET
            marks_obtained = EXCLUDED.marks_obtained, max_marks = EXCLUDED.max_marks,
            percent = EXCLUDED.percent, grade = EXCLUDED.grade, grade_points = EXCLUDED.grade_points,
-           result_status = EXCLUDED.result_status, report_summary = EXCLUDED.report_summary, declared_at = NOW()`,
-        [
+           result_status = EXCLUDED.result_status, report_summary = EXCLUDED.report_summary, declared_at = NOW()
+         RETURNING report_id`,
+            [
+              tenantId,
+              sessionId,
+              row.student_user_id,
+              session.course_id,
+              session.exam_type,
+              obtained,
+              max,
+              percent,
+              grade,
+              gradePoints,
+              resultStatus,
+              summary,
+            ],
+          ),
+        );
+
+        if (reports.length !== 1)
+          throw new BadRequestException('Declared report could not be saved');
+        await this.upsertExamResult(manager, {
           tenantId,
+          studentUserId: row.student_user_id,
+          courseId: session.course_id,
+          examType: session.exam_type,
+          semester: session.semester,
           sessionId,
-          row.student_user_id,
-          session.course_id,
-          session.exam_type,
+          markId: row.mark_id,
+          reportId: reports[0].report_id,
+          markUpdatedAt: markUpdate[0].updated_at,
           obtained,
-          max,
-          percent,
+          maximum: max,
           grade,
           gradePoints,
-          resultStatus,
-          summary,
-        ],
-      );
+          policy: { bands },
+          passMarks,
+        });
 
-      if (
-        session.exam_type === 'END_TERM' ||
-        session.exam_type === 'INTERNAL'
-      ) {
-        await this.db.query(
-          `UPDATE student_course_enrollments
+        if (
+          session.exam_type === 'END_TERM' ||
+          session.exam_type === 'INTERNAL'
+        ) {
+          const enrolled = postgresQueryRows(
+            await manager.query(
+              `UPDATE student_course_enrollments
            SET grade = $4, grade_points = $5,
                status = CASE WHEN $6 = 'PASS' THEN 'COMPLETED' ELSE 'FAILED' END
-           WHERE tenant_id = $1 AND student_user_id = $2 AND course_id = $3 AND semester = $7`,
-          [
-            tenantId,
-            row.student_user_id,
-            session.course_id,
-            grade,
-            gradePoints,
-            resultStatus,
-            session.semester,
-          ],
+           WHERE tenant_id = $1 AND student_user_id = $2 AND course_id = $3 AND semester = $7
+             AND (to_jsonb(student_course_enrollments)->>'deleted_at') IS NULL
+           RETURNING enrollment_id`,
+              [
+                tenantId,
+                row.student_user_id,
+                session.course_id,
+                grade,
+                gradePoints,
+                resultStatus,
+                session.semester,
+              ],
+            ),
+          );
+          if (enrolled.length !== 1)
+            throw new BadRequestException(
+              'Verify this student enrollment and semester before declaration',
+            );
+        }
+
+        notifications.push({
+          tenantId,
+          userId: row.student_user_id,
+          courseName,
+          examType: session.exam_type,
+          actionLink: `/student/marks?report=${sessionId}`,
+          message: summary,
+        });
+
+        await manager.query(
+          `UPDATE student_exam_reports SET notified_at = NOW() WHERE session_id = $1 AND student_user_id = $2`,
+          [sessionId, row.student_user_id],
         );
+        declared += 1;
       }
 
-      this.notify.examResultsPublished({
-        tenantId,
-        userId: row.student_user_id,
-        courseName,
-        examType: session.exam_type,
-        actionLink: `/student/marks?report=${sessionId}`,
-        message: summary,
-      });
-
-      await this.db.query(
-        `UPDATE student_exam_reports SET notified_at = NOW() WHERE session_id = $1 AND student_user_id = $2`,
-        [sessionId, row.student_user_id],
-      );
-      declared += 1;
-    }
-
-    await this.db.query(
-      `UPDATE exam_result_sessions
+      await manager.query(
+        `UPDATE exam_result_sessions
        SET declared_at = NOW(), declared_by = $2, declaration_note = $3,
            entry_status = 'LOCKED', marks_locked = TRUE, updated_at = NOW()
        WHERE session_id = $1`,
-      [sessionId, actorUserId, dto.declaration_note?.trim() ?? null],
-    );
+        [sessionId, actorUserId, dto.declaration_note?.trim() ?? null],
+      );
 
-    return {
-      declared,
-      course_name: courseName,
-      exam_type: session.exam_type,
-      session_id: sessionId,
-    };
+      return {
+        response: {
+          declared,
+          course_name: courseName,
+          exam_type: session.exam_type,
+          session_id: sessionId,
+        },
+        notifications,
+      };
+    });
+    for (const notice of outcome.notifications) {
+      this.notify.examResultsPublished(notice as any);
+    }
+    return outcome.response;
   }
 
-  /** Best-effort mirror into legacy results table; RCC uses student_exam_reports. */
+  /** A declaration owns one canonical attempt per student and result session. */
   private async upsertExamResult(
-    tenantId: string,
-    studentUserId: string,
-    courseId: string,
-    examType: string,
-    marksObtained: number,
-    maxMarks: number,
-    grade: string,
+    manager: Pick<DataSource, 'query'>,
+    input: {
+      tenantId: string;
+      studentUserId: string;
+      courseId: string;
+      examType: string;
+      semester: number;
+      sessionId: string;
+      markId: string;
+      reportId: string;
+      markUpdatedAt: string;
+      obtained: number;
+      maximum: number;
+      grade: string;
+      gradePoints: number;
+      policy: Record<string, unknown>;
+      passMarks: number | null;
+    },
   ) {
-    try {
-      await this.db.query(
-        `DELETE FROM academic_exam_results
-         WHERE tenant_id = $1 AND student_user_id = $2 AND course_id = $3 AND exam_type = $4`,
-        [tenantId, studentUserId, courseId, examType],
+    const scope = [input.tenantId, input.studentUserId, input.sessionId];
+    await manager.query(
+      `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
+      [`exam-result-session:${scope.join(':')}`],
+    );
+    const existing = await manager.query<Array<{ result_id: string }>>(
+      `SELECT result_id FROM academic_exam_results
+       WHERE tenant_id=$1 AND student_user_id=$2 AND result_session_id=$3 AND deleted_at IS NULL FOR UPDATE`,
+      scope,
+    );
+    if (existing.length > 1)
+      throw new BadRequestException(
+        'Multiple results match this exact exam session',
       );
-      await this.db.query(
-        `INSERT INTO academic_exam_results (
-           tenant_id, student_user_id, course_id, exam_type, marks_obtained, max_marks, grade, status
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,'PUBLISHED')`,
-        [
-          tenantId,
-          studentUserId,
-          courseId,
-          examType,
-          marksObtained,
-          maxMarks,
-          grade,
-        ],
+    const values = [
+      input.tenantId,
+      input.studentUserId,
+      input.courseId,
+      input.examType,
+      input.obtained,
+      input.maximum,
+      input.grade,
+      input.gradePoints,
+      input.sessionId,
+      input.markId,
+      input.reportId,
+      input.markUpdatedAt,
+      JSON.stringify(input.policy),
+      input.passMarks,
+      `Semester ${input.semester}`,
+    ];
+    if (existing.length) {
+      const updated = postgresQueryRows(
+        await manager.query(
+          `UPDATE academic_exam_results SET marks_obtained=$5,max_marks=$6,grade=$7,grade_points=$8,
+         source_mark_id=$10,source_report_id=$11,source_mark_updated_at=$12,
+         grading_policy_snapshot=$13::jsonb,pass_marks_snapshot=$14,exam_session=$15,status='PUBLISHED',updated_at=NOW()
+         WHERE result_id=$16 AND tenant_id=$1 AND student_user_id=$2 AND course_id=$3
+           AND exam_type=$4 AND result_session_id=$9 AND deleted_at IS NULL RETURNING result_id`,
+          [...values, existing[0].result_id],
+        ),
       );
-    } catch {
-      // Ignore schema drift on legacy table; declaration still succeeds via student_exam_reports.
+      if (updated.length !== 1)
+        throw new BadRequestException(
+          'The exact declared result changed; refresh before declaring',
+        );
+    } else {
+      await manager.query(
+        `INSERT INTO academic_exam_results
+         (tenant_id,student_user_id,course_id,exam_type,marks_obtained,max_marks,grade,grade_points,
+          result_session_id,source_mark_id,source_report_id,source_mark_updated_at,
+          grading_policy_snapshot,pass_marks_snapshot,exam_session,status)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14,$15,'PUBLISHED')`,
+        values,
+      );
     }
   }
 
@@ -959,12 +1101,198 @@ export class ResultControlService {
     );
   }
 
-  listSessionReports(tenantId: string, sessionId: string) {
-    return this.db.query(
-      `SELECT r.*, u.name AS student_name FROM student_exam_reports r
-       JOIN users u ON u.user_id = r.student_user_id
-       WHERE r.tenant_id = $1 AND r.session_id = $2 ORDER BY u.name`,
+  /** Existing declaration evidence only: this reader never creates or repairs results. */
+  async listSessionReports(
+    tenantId: string,
+    sessionId: string,
+  ): Promise<ReadOnlySessionReport[]> {
+    const [session] = await this.db.query<
+      Array<{
+        session_id: string;
+        course_id: string;
+        course_code: string;
+        course_name: string;
+        exam_type: string;
+        semester: number;
+        declared_at: Date | string | null;
+        declaration_note: string | null;
+      }>
+    >(
+      `SELECT s.session_id, s.course_id, c.course_code, c.course_name,
+              s.exam_type, s.semester, s.declared_at, s.declaration_note
+       FROM exam_result_sessions s
+       JOIN academic_courses c ON c.course_id=s.course_id
+         AND c.tenant_id=s.tenant_id AND c.deleted_at IS NULL
+       WHERE s.tenant_id=$1 AND s.session_id=$2 AND s.deleted_at IS NULL`,
       [tenantId, sessionId],
     );
+    if (!session) throw new NotFoundException('Result session not found');
+
+    const reports = await this.db.query<DeclaredSessionReportRow[]>(
+      `SELECT r.*, u.name AS student_name,
+              COALESCE(NULLIF(BTRIM(sp.enrollment_number), ''),
+                       NULLIF(BTRIM(sp.enrollment_no), ''),
+                       NULLIF(BTRIM(sp.prn_number), '')) AS enrollment_number
+       FROM student_exam_reports r
+       JOIN exam_result_sessions s ON s.session_id=r.session_id
+         AND s.tenant_id=r.tenant_id AND s.course_id=r.course_id
+         AND s.exam_type=r.exam_type AND s.deleted_at IS NULL
+       JOIN academic_courses c ON c.course_id=r.course_id
+         AND c.tenant_id=r.tenant_id AND c.deleted_at IS NULL
+       JOIN users u ON u.user_id=r.student_user_id
+         AND u.tenant_id=r.tenant_id AND u.deleted_at IS NULL
+       LEFT JOIN student_profiles sp ON sp.user_id=u.user_id
+         AND sp.tenant_id=u.tenant_id AND (to_jsonb(sp)->>'deleted_at') IS NULL
+       WHERE r.tenant_id=$1 AND r.session_id=$2
+         AND (to_jsonb(r)->>'deleted_at') IS NULL
+       ORDER BY u.name, r.report_id`,
+      [tenantId, sessionId],
+    );
+    if (!reports.length) return [];
+
+    // Read all published mirrors for each student in this exact session. Do not
+    // choose one arbitrarily if duplicate or conflicting mirrors are present.
+    const results = await this.db.query<
+      Array<{
+        tenant_id: string;
+        result_id: string;
+        student_user_id: string;
+        course_id: string;
+        exam_type: string;
+        result_session_id: string;
+        source_mark_id: string | null;
+        source_report_id: string | null;
+        source_mark_updated_at: string | null;
+        grading_policy_snapshot: Record<string, unknown> | null;
+        pass_marks_snapshot: string | number | null;
+        exam_session: string | null;
+        marks_obtained: string | number | null;
+        max_marks: string | number | null;
+        grade: string | null;
+        grade_points: string | number | null;
+        status: string;
+      }>
+    >(
+      `SELECT er.tenant_id, er.result_id, er.student_user_id, er.course_id,
+              er.exam_type, er.result_session_id, er.source_mark_id,
+              er.source_report_id, er.source_mark_updated_at::text,
+              er.grading_policy_snapshot, er.pass_marks_snapshot, er.exam_session,
+              er.marks_obtained, er.max_marks, er.grade, er.grade_points, er.status
+       FROM academic_exam_results er
+       WHERE er.tenant_id=$1 AND er.result_session_id=$2
+         AND er.student_user_id=ANY($3::uuid[])
+         AND er.status='PUBLISHED' AND er.deleted_at IS NULL
+       ORDER BY er.result_id`,
+      [
+        tenantId,
+        sessionId,
+        [...new Set(reports.map((r) => r.student_user_id))],
+      ],
+    );
+    const resultsByStudent = new Map<string, typeof results>();
+    for (const result of results) {
+      const matching = resultsByStudent.get(result.student_user_id) ?? [];
+      matching.push(result);
+      resultsByStudent.set(result.student_user_id, matching);
+    }
+
+    const response: ReadOnlySessionReport[] = [];
+    for (const report of reports) {
+      const candidates = resultsByStudent.get(report.student_user_id) ?? [];
+      const candidate = candidates.length === 1 ? candidates[0] : null;
+      const exact =
+        candidate?.tenant_id === tenantId &&
+        candidate.result_session_id === session.session_id &&
+        candidate.course_id === session.course_id &&
+        candidate.exam_type === session.exam_type &&
+        candidate.source_report_id === report.report_id &&
+        candidate.status === 'PUBLISHED'
+          ? candidate
+          : null;
+      let verificationStatus: 'verified' | 'unverified' | 'qa' = 'unverified';
+      let verificationMessage =
+        candidates.length > 1
+          ? 'Multiple published results exist for this student and session. Exam Cell must resolve the ambiguity before linking.'
+          : 'No exact published result is connected to this student report. Leave the request unlinked until official evidence is verified.';
+
+      if (isQaDeclarationNote(session.declaration_note)) {
+        verificationStatus = 'qa';
+        verificationMessage =
+          'This session is labelled as QA or demo data. It cannot verify an official re-evaluation request.';
+      } else if (!session.declared_at || !report.declared_at) {
+        verificationMessage =
+          'Both the session and this student report must have a recorded declaration before the result can be verified.';
+      } else if (exact) {
+        const obtained = Number(exact.marks_obtained);
+        const maximum = Number(exact.max_marks);
+        if (
+          exact.marks_obtained == null ||
+          exact.max_marks == null ||
+          !Number.isFinite(obtained) ||
+          !Number.isFinite(maximum) ||
+          maximum <= 0 ||
+          obtained < 0 ||
+          obtained > maximum
+        ) {
+          verificationMessage =
+            'The published result has invalid original or maximum marks. No changes have been made.';
+        } else {
+          try {
+            const verified = await validateReEvaluationSources(
+              this.db,
+              tenantId,
+              report.student_user_id,
+              { ...exact, marks_obtained: obtained, max_marks: maximum },
+              obtained,
+              false,
+            );
+            if (
+              report.marks_obtained == null ||
+              report.max_marks == null ||
+              Number(report.marks_obtained) !== obtained ||
+              Number(report.max_marks) !== maximum ||
+              report.grade !== exact.grade ||
+              report.grade !== verified.grade ||
+              report.grade_points == null ||
+              exact.grade_points == null ||
+              Number(report.grade_points) !== Number(exact.grade_points) ||
+              Number(report.grade_points) !== verified.gradePoints ||
+              report.result_status !== verified.resultStatus
+            ) {
+              verificationMessage =
+                'The report, published result or historical grading evidence do not agree. Leave the request unlinked for Exam Cell review.';
+            } else {
+              verificationStatus = 'verified';
+              verificationMessage =
+                'The published result matches this declared report, source marks and historical grading evidence. Confirm the exact exam and attempt before linking.';
+            }
+          } catch (error) {
+            if (!(error instanceof ConflictException)) throw error;
+            verificationMessage =
+              'The declaration, source marks or historical grading evidence could not be verified. Leave the request unlinked for Exam Cell review.';
+          }
+        }
+      }
+
+      response.push({
+        ...report,
+        course_code: session.course_code,
+        course_name: session.course_name,
+        semester: session.semester,
+        session_declared_at: session.declared_at,
+        declaration_note: session.declaration_note,
+        result_id: exact?.result_id ?? null,
+        exam_session: exact?.exam_session ?? null,
+        canonical_marks_obtained: exact?.marks_obtained ?? null,
+        canonical_max_marks: exact?.max_marks ?? null,
+        canonical_grade: exact?.grade ?? null,
+        canonical_status: exact?.status ?? null,
+        source_mark_id: exact?.source_mark_id ?? null,
+        source_report_id: exact?.source_report_id ?? null,
+        verification_status: verificationStatus,
+        verification_message: verificationMessage,
+      });
+    }
+    return response;
   }
 }

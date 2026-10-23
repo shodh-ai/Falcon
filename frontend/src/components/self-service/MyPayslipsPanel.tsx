@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { Download, Loader2, Send } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
@@ -14,6 +14,7 @@ import { getApiBaseUrl } from '@/lib/api-base-url';
 import { getSubdomainFromClient } from '@/lib/tenant';
 import { isEmptyArray, withFacultyDemoFallback } from '@/lib/faculty-demo-mode';
 import { facultyDemoPayslips } from '@/lib/mock/faculty-portal-demo';
+import { SelfServiceLoadError } from './SelfServiceLoadError';
 
 type PublishedMonth = {
   payslip_id: string;
@@ -47,6 +48,11 @@ function statusBadge(status: DownloadRequest['status']) {
 }
 
 export function MyPayslipsPanel() {
+  const { user, token } = useAuth();
+  return <PayslipsWorkspace key={`${user?.user_id ?? ''}:${token ?? ''}`} />;
+}
+
+function PayslipsWorkspace() {
   const api = useAuthedApi();
   const { token } = useAuth();
   const pathname = usePathname();
@@ -54,11 +60,19 @@ export function MyPayslipsPanel() {
   const [published, setPublished] = useState<PublishedMonth[]>([]);
   const [requests, setRequests] = useState<DownloadRequest[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [periodFrom, setPeriodFrom] = useState('');
   const [periodTo, setPeriodTo] = useState('');
   const [reason, setReason] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [requestSubmitted, setRequestSubmitted] = useState(false);
+  const alive = useRef(false);
+  const activeApi = useRef(api);
+  useLayoutEffect(() => { activeApi.current = api; }, [api]);
+  const requestId = useRef(0);
+  const actionLock = useRef(false);
+  const current = useCallback(() => alive.current && activeApi.current === api, [api]);
 
   const bounds = useMemo(() => {
     if (!published.length) return null;
@@ -84,13 +98,18 @@ export function MyPayslipsPanel() {
     return count;
   }, [periodFrom, periodTo, published]);
 
-  async function load() {
+  const load = useCallback(async (afterSave = false) => {
+    const id = ++requestId.current;
     setLoading(true);
-    try {
-      const [months, reqs] = await Promise.all([
-        api.get<PublishedMonth[]>('/api/hr/payslips/my-payslips'),
-        api.get<DownloadRequest[]>('/api/hr/payslips/download-requests/mine'),
-      ]);
+    setError(null);
+    const [monthsResult, requestsResult] = await Promise.allSettled([
+      api.get<PublishedMonth[]>('/api/hr/payslips/my-payslips').then((rows) => { if (!Array.isArray(rows)) throw new Error('Invalid published payslips response'); return rows; }),
+      api.get<DownloadRequest[]>('/api/hr/payslips/download-requests/mine').then((rows) => { if (!Array.isArray(rows)) throw new Error('Invalid download requests response'); return rows; }),
+    ]);
+    if (!current() || id !== requestId.current) return;
+    const errors: string[] = [];
+    if (monthsResult.status === 'fulfilled') {
+      const months = monthsResult.value;
       const resolvedMonths = facultySmoke
         ? withFacultyDemoFallback(
             months,
@@ -99,67 +118,82 @@ export function MyPayslipsPanel() {
           )
         : months;
       setPublished(resolvedMonths);
-      setRequests(reqs);
-      if (resolvedMonths.length && !periodFrom) {
+      if (resolvedMonths.length) {
         const keys = resolvedMonths.map((m) => m.period_key).sort();
-        setPeriodFrom(keys[keys.length - 1]!);
-        setPeriodTo(keys[keys.length - 1]!);
+        setPeriodFrom((value) => value || keys[keys.length - 1]!);
+        setPeriodTo((value) => value || keys[keys.length - 1]!);
       }
-    } catch (e) {
+    } else {
+      const e = monthsResult.reason;
       if (facultySmoke) {
         const demo = withFacultyDemoFallback(
           [],
           facultyDemoPayslips() as PublishedMonth[],
           isEmptyArray,
         );
-        setPublished(demo);
-        setRequests([]);
-        if (demo.length && !periodFrom) {
+        if (demo.length) setPublished(demo);
+        if (demo.length) {
           const keys = demo.map((m) => m.period_key).sort();
-          setPeriodFrom(keys[keys.length - 1]!);
-          setPeriodTo(keys[keys.length - 1]!);
+          setPeriodFrom((value) => value || keys[keys.length - 1]!);
+          setPeriodTo((value) => value || keys[keys.length - 1]!);
         }
         if (demo.length === 0) {
-          toast.error(e instanceof Error ? e.message : 'Failed to load payslips');
+          errors.push(`Published payslips: ${e instanceof Error ? e.message : 'Failed to load payslips'}`);
         }
       } else {
-        toast.error(e instanceof Error ? e.message : 'Failed to load payslips');
+        errors.push(`Published payslips: ${e instanceof Error ? e.message : 'Failed to load payslips'}`);
       }
-    } finally {
-      setLoading(false);
     }
-  }
+    if (requestsResult.status === 'fulfilled') {
+      setRequests(requestsResult.value);
+      setRequestSubmitted(false);
+    } else errors.push(`Download requests: ${requestsResult.reason instanceof Error ? requestsResult.reason.message : 'Failed to load requests'}`);
+    setError(errors.length ? `${afterSave ? 'Request saved, but payslip information could not be fully refreshed. ' : ''}${errors.join(' ')}` : null);
+    setLoading(false);
+  }, [api, facultySmoke, current]);
 
   useEffect(() => {
+    alive.current = true;
+    actionLock.current = false;
+    // Payroll and request drafts must be cleared before loading a new account.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setPublished([]); setRequests([]); setPeriodFrom(''); setPeriodTo(''); setReason('');
+    setRequestSubmitted(false); setSubmitting(false); setDownloadingId(null);
     void load();
-  }, [api]);
+    return () => { alive.current = false; requestId.current += 1; };
+  }, [load]);
 
   async function submitDownloadRequest(e: FormEvent) {
     e.preventDefault();
-    if (!periodFrom || !periodTo) return;
+    if (actionLock.current || loading || error || hasPending || requestSubmitted || monthsInSelection === 0 || reason.trim().length < 10 || !/^\d{4}-(0[1-9]|1[0-2])$/.test(periodFrom) || !/^\d{4}-(0[1-9]|1[0-2])$/.test(periodTo)) return;
     if (periodFrom > periodTo) {
       toast.error('Start month must be before or equal to end month');
       return;
     }
+    actionLock.current = true;
     setSubmitting(true);
     try {
-      await api.post('/api/hr/payslips/request-download', {
+      const created = await api.post<DownloadRequest>('/api/hr/payslips/request-download', {
         period_from: periodFrom,
         period_to: periodTo,
-        reason,
+        reason: reason.trim(),
       });
+      if (!current()) return;
+      setRequestSubmitted(true);
+      if (created?.request_id) setRequests((rows) => [created, ...rows.filter((row) => row.request_id !== created.request_id)]);
       toast.success('Request sent to HR. Download unlocks after approval.');
       setReason('');
-      await load();
+      await load(true);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Request failed');
+      if (current()) toast.error(err instanceof Error ? err.message : 'Request failed');
     } finally {
-      setSubmitting(false);
+      if (current()) { actionLock.current = false; setSubmitting(false); }
     }
   }
 
   async function downloadRequest(req: DownloadRequest) {
-    if (!token || req.status !== 'APPROVED') return;
+    if (!token || req.status !== 'APPROVED' || actionLock.current || !current()) return;
+    actionLock.current = true;
     setDownloadingId(req.request_id);
     try {
       const res = await fetch(
@@ -182,6 +216,7 @@ export function MyPayslipsPanel() {
         throw new Error(message);
       }
       const blob = await res.blob();
+      if (!current()) return;
       const objectUrl = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = objectUrl;
@@ -190,15 +225,15 @@ export function MyPayslipsPanel() {
       URL.revokeObjectURL(objectUrl);
       toast.success('Salary certificate downloaded');
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed to download payslip');
+      if (current()) toast.error(e instanceof Error ? e.message : 'Failed to download payslip');
     } finally {
-      setDownloadingId(null);
+      if (current()) { actionLock.current = false; setDownloadingId(null); }
     }
   }
 
   const hasPending = requests.some((r) => r.status === 'PENDING');
 
-  if (loading) {
+  if (loading && !published.length && !requests.length) {
     return (
       <div className="flex justify-center py-12">
         <Loader2 className="h-8 w-8 animate-spin text-sgvu-gold" />
@@ -206,7 +241,9 @@ export function MyPayslipsPanel() {
     );
   }
 
-  if (!published.length) {
+  if (error && !published.length && !requests.length) return <SelfServiceLoadError message={error} onRetry={() => void load()} />;
+
+  if (!published.length && !requests.length) {
     return (
       <p className="text-sm text-muted-foreground">
         No payslips published yet. They appear here after payroll is processed each month.
@@ -216,6 +253,8 @@ export function MyPayslipsPanel() {
 
   return (
     <div className="space-y-6">
+      {error ? <SelfServiceLoadError message={error} onRetry={() => { if (!actionLock.current) void load(); }} /> : null}
+      <fieldset disabled={submitting || Boolean(downloadingId) || loading} className="min-w-0 space-y-6">
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Request payslip download</CardTitle>
@@ -235,6 +274,7 @@ export function MyPayslipsPanel() {
               <label className="text-xs text-muted-foreground">From month</label>
               <Input
                 type="month"
+                aria-label="From month"
                 required
                 min={bounds?.min}
                 max={bounds?.max}
@@ -246,6 +286,7 @@ export function MyPayslipsPanel() {
               <label className="text-xs text-muted-foreground">To month</label>
               <Input
                 type="month"
+                aria-label="To month"
                 required
                 min={bounds?.min}
                 max={bounds?.max}
@@ -272,12 +313,12 @@ export function MyPayslipsPanel() {
               <Button
                 type="submit"
                 className="gap-2"
-                disabled={submitting || hasPending || monthsInSelection === 0 || reason.trim().length < 10}
+                disabled={submitting || loading || Boolean(error) || requestSubmitted || hasPending || monthsInSelection === 0 || reason.trim().length < 10}
               >
                 {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                 Submit to HR
               </Button>
-              {hasPending && (
+              {(hasPending || requestSubmitted) && (
                 <p className="mt-2 text-xs text-muted-foreground">You already have a request awaiting HR.</p>
               )}
             </div>
@@ -347,6 +388,7 @@ export function MyPayslipsPanel() {
           </div>
         </div>
       )}
+      </fieldset>
     </div>
   );
 }

@@ -18,6 +18,8 @@ import { ExamCellEnterpriseService } from './exam-cell-enterprise.service';
 import { ExamCellDevService } from './exam-cell-dev.service';
 import { OfficialTranscriptService } from './official-transcript.service';
 import { OfficialTranscriptPdfService } from './official-transcript-pdf.service';
+import { ReEvaluationQaController } from './re-evaluation-qa.controller';
+import { ReEvaluationQaService } from './re-evaluation-qa.service';
 
 @Module({
   imports: [
@@ -31,6 +33,7 @@ import { OfficialTranscriptPdfService } from './official-transcript-pdf.service'
     ExamCellController,
     FacultyReEvaluationsController,
     TranscriptVerifyController,
+    ReEvaluationQaController,
   ],
   providers: [
     ExamCellService,
@@ -44,6 +47,7 @@ import { OfficialTranscriptPdfService } from './official-transcript-pdf.service'
     ExamCellDevService,
     OfficialTranscriptService,
     OfficialTranscriptPdfService,
+    ReEvaluationQaService,
   ],
   exports: [
     ExamCellService,

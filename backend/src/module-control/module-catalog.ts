@@ -149,6 +149,7 @@ export const MODULE_CATALOGUE: readonly ModuleDefinition[] = [
     ['/exam-cell', '/exams', '/student/exams', '/certificates'],
     [
       '/api/exam-cell',
+      '/api/qa/re-evaluations',
       '/api/academics/exams',
       '/api/certificate-automation',
       '/api/verify',

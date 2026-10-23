@@ -6,6 +6,7 @@ import { Progress } from '@/components/ui/progress';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useAuthedApi } from '@/lib/api';
+import { SelfServiceLoadError } from './SelfServiceLoadError';
 
 type Step = { step_key: string; step_label: string; status: string };
 type ProgressData = {
@@ -17,24 +18,49 @@ type ProgressData = {
 
 export function MyOnboardingPanel() {
   const api = useAuthedApi();
+  const [scope, setScope] = useState({ api, revision: 0 });
+  if (scope.api !== api) setScope({ api, revision: scope.revision + 1 });
+  return <MyOnboardingWorkspace key={scope.revision} api={api} />;
+}
+
+function MyOnboardingWorkspace({ api }: { api: ReturnType<typeof useAuthedApi> }) {
   const [data, setData] = useState<ProgressData | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [savingStep, setSavingStep] = useState<string | null>(null);
+  const [retry, setRetry] = useState(0);
 
   useEffect(() => {
-    void api.get<ProgressData>('/api/hr/ess/onboarding/progress').then(setData);
-  }, [api]);
+    let active = true;
+    void api.get<ProgressData>('/api/hr/ess/onboarding/progress')
+      .then((result) => { if (active) setData(result); })
+      .catch((err) => { if (active) setError(err instanceof Error ? err.message : 'Could not load onboarding progress.'); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [api, retry]);
 
   async function complete(stepKey: string) {
-    if (!data?.pipeline?.pipeline_id) return;
-    await api.patch(`/api/hr/ess/onboarding/steps/${stepKey}`, { pipeline_id: data.pipeline.pipeline_id });
-    setData(await api.get<ProgressData>('/api/hr/ess/onboarding/progress'));
+    if (!data?.pipeline?.pipeline_id || savingStep) return;
+    setSavingStep(stepKey);
+    setError(null);
+    try {
+      await api.patch(`/api/hr/ess/onboarding/steps/${encodeURIComponent(stepKey)}`, { pipeline_id: data.pipeline.pipeline_id });
+      setData(await api.get<ProgressData>('/api/hr/ess/onboarding/progress'));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not update onboarding progress.');
+    } finally {
+      setSavingStep(null);
+    }
   }
 
-  if (!data) return <p className="text-sm text-muted-foreground">Loading…</p>;
+  if (loading) return <p className="text-sm text-muted-foreground">Loading onboarding…</p>;
+  if (error) return <SelfServiceLoadError message={error} onRetry={() => { setLoading(true); setError(null); setRetry((n) => n + 1); }} />;
+  if (!data) return null;
 
   if (!data.is_new_hire) {
     return (
       <p className="text-sm text-muted-foreground">
-        Your joining kit is available in the Document Vault.
+        No onboarding checklist is assigned to your account. Contact HR if you are awaiting one.
       </p>
     );
   }
@@ -47,20 +73,20 @@ export function MyOnboardingPanel() {
         <Card key={step.step_key}>
           <CardHeader className="flex flex-row items-center justify-between py-3">
             <CardTitle className="flex items-center gap-2 text-base font-medium">
-              {step.status === 'DONE' ? (
+              {['COMPLETED', 'DONE'].includes(step.status) ? (
                 <CheckCircle2 className="h-5 w-5 text-green-600" />
               ) : (
                 <Circle className="h-5 w-5 text-muted-foreground" />
               )}
               {step.step_label}
             </CardTitle>
-            {step.status !== 'DONE' && (
-              <Button size="sm" variant="outline" onClick={() => void complete(step.step_key)}>
-                Mark done
+            {!['COMPLETED', 'DONE'].includes(step.status) && (
+              <Button size="sm" variant="outline" disabled={savingStep !== null} onClick={() => void complete(step.step_key)}>
+                {savingStep === step.step_key ? 'Saving…' : 'Mark done'}
               </Button>
             )}
           </CardHeader>
-          {step.status === 'DONE' && (
+          {['COMPLETED', 'DONE'].includes(step.status) && (
             <CardContent className="pt-0 text-xs text-muted-foreground">Completed</CardContent>
           )}
         </Card>

@@ -1,7 +1,7 @@
 'use client';
 
 import { Select } from '@/components/ui/select';
-import { FormEvent, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useSearchParams } from 'next/navigation';
 import {
   BookOpen,
@@ -31,7 +31,6 @@ import {
   FacultyStatCard,
   FacultyTabBar,
   FacultyEmptyState,
-  FacultyErrorBanner,
 } from '@/components/faculty';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -40,6 +39,8 @@ import { MyDocumentsPanel } from '@/components/self-service/MyDocumentsPanel';
 import { useAuth } from '@/context/AuthContext';
 import { withFacultyDemoFallback } from '@/lib/faculty-demo-mode';
 import { FACULTY_DEMO_PROFILE } from '@/lib/mock/faculty-portal-demo';
+import { SelfServiceLoadError } from '@/components/self-service/SelfServiceLoadError';
+import { getApiBaseUrl } from '@/lib/api-base-url';
 import { useAuthedApi } from '@/lib/api';
 import { getSubdomainFromClient } from '@/lib/tenant';
 
@@ -194,8 +195,10 @@ function FormField({
 }) {
   return (
     <div className={className}>
-      <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{label}</label>
-      <div className="mt-2">{children}</div>
+      <label className="block text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        {label}
+        <span className="mt-2 block normal-case font-normal tracking-normal">{children}</span>
+      </label>
     </div>
   );
 }
@@ -203,33 +206,36 @@ function FormField({
 function FacultyProfileAvatar({
   name,
   photoUrl,
-  onPhotoUpdated,
+  onPhotoUpload,
+  disabled,
+  uploading,
 }: {
   name: string;
   photoUrl: string | null;
-  onPhotoUpdated: (url: string | null) => void;
+  onPhotoUpload: (file: File) => Promise<void>;
+  disabled: boolean;
+  uploading: boolean;
 }) {
-  const api = useAuthedApi();
   const { token } = useAuth();
   const fileRef = useRef<HTMLInputElement>(null);
-  const [src, setSrc] = useState<string | null>(null);
-  const [uploading, setUploading] = useState(false);
+  const [loadedPhoto, setLoadedPhoto] = useState<{ photoUrl: string; token: string; src: string } | null>(null);
+  const src = !photoUrl || !token
+    ? null
+    : photoUrl.startsWith('data:') || photoUrl.startsWith('blob:')
+      ? photoUrl
+      : loadedPhoto?.photoUrl === photoUrl && loadedPhoto.token === token ? loadedPhoto.src : null;
 
   useEffect(() => {
-    if (!photoUrl || !token) {
-      setSrc(null);
-      return;
-    }
-    if (photoUrl.startsWith('data:') || photoUrl.startsWith('blob:')) {
-      setSrc(photoUrl);
-      return;
-    }
+    if (!photoUrl || !token || photoUrl.startsWith('data:') || photoUrl.startsWith('blob:')) return;
 
     let objectUrl: string | null = null;
-    const apiBase = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+    let cancelled = false;
+    const controller = new AbortController();
+    const apiBase = getApiBaseUrl();
     const fetchUrl = photoUrl.startsWith('http') ? photoUrl : `${apiBase}${photoUrl}`;
 
     void fetch(fetchUrl, {
+      signal: controller.signal,
       headers: {
         Authorization: `Bearer ${token}`,
         'x-tenant-subdomain': getSubdomainFromClient(),
@@ -240,34 +246,18 @@ function FacultyProfileAvatar({
         return res.blob();
       })
       .then((blob) => {
+        if (cancelled) return;
         objectUrl = URL.createObjectURL(blob);
-        setSrc(objectUrl);
+        setLoadedPhoto({ photoUrl, token, src: objectUrl });
       })
-      .catch(() => setSrc(null));
+      .catch(() => { if (!cancelled) setLoadedPhoto(null); });
 
     return () => {
+      cancelled = true;
+      controller.abort();
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
   }, [photoUrl, token]);
-
-  async function handleFileSelect(file: File) {
-    if (!file.type.startsWith('image/')) {
-      toast.error('Please choose a JPG, PNG, or WEBP photo');
-      return;
-    }
-    setUploading(true);
-    try {
-      const form = new FormData();
-      form.append('file', file);
-      const updated = await api.post<FacultyProfile>('/api/academics/faculty/profile/photo', form);
-      onPhotoUpdated(updated.profile_photo_url);
-      toast.success('Profile photo updated');
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed to upload photo', { category: 'HR' });
-    } finally {
-      setUploading(false);
-    }
-  }
 
   return (
     <div className="group relative flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-2xl border-2 border-white/25 bg-white/10 text-3xl font-black shadow-inner">
@@ -281,7 +271,8 @@ function FacultyProfileAvatar({
         type="button"
         className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-black/60 text-white opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
         onClick={() => fileRef.current?.click()}
-        disabled={uploading}
+        disabled={disabled}
+        aria-label="Upload profile photo"
       >
         <Camera className="h-5 w-5" />
         <span className="text-[10px] font-semibold uppercase tracking-wide">
@@ -291,11 +282,13 @@ function FacultyProfileAvatar({
       <input
         ref={fileRef}
         type="file"
+        aria-label="Profile photo"
+        disabled={disabled}
         accept="image/jpeg,image/png,image/webp"
         className="hidden"
         onChange={(e) => {
           const file = e.target.files?.[0];
-          if (file) void handleFileSelect(file);
+          if (file) void onPhotoUpload(file);
           e.target.value = '';
         }}
       />
@@ -305,10 +298,14 @@ function FacultyProfileAvatar({
 
 function ProfileHero({
   profile,
-  onPhotoUpdated,
+  onPhotoUpload,
+  disabled,
+  uploading,
 }: {
   profile: FacultyProfile;
-  onPhotoUpdated: (url: string | null) => void;
+  onPhotoUpload: (file: File) => Promise<void>;
+  disabled: boolean;
+  uploading: boolean;
 }) {
   return (
     <section
@@ -318,9 +315,12 @@ function ProfileHero({
         <div className="absolute -right-8 -top-8 h-40 w-40 rounded-full bg-sgvu-gold/20 blur-3xl" />
         <div className="relative flex flex-col gap-5 sm:flex-row sm:items-center">
           <FacultyProfileAvatar
+            key={profile.profile_photo_url ?? 'no-photo'}
             name={profile.name}
             photoUrl={profile.profile_photo_url}
-            onPhotoUpdated={onPhotoUpdated}
+            onPhotoUpload={onPhotoUpload}
+            disabled={disabled}
+            uploading={uploading}
           />
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
@@ -396,16 +396,51 @@ function QualificationTimeline({ items }: { items: Qualification[] }) {
 
 export function FacultyProfilePage() {
   const api = useAuthedApi();
+  const { user, token } = useAuth();
+  const [attempt, setAttempt] = useState(0);
+  const [apiIdentity, setApiIdentity] = useState({ api, revision: 0 });
+  if (apiIdentity.api !== api) {
+    setApiIdentity({ api, revision: apiIdentity.revision + 1 });
+  }
+  return (
+    <FacultyProfileWorkspace
+      key={`${user?.user_id ?? ''}:${token ?? ''}:${apiIdentity.revision}:${attempt}`}
+      api={api}
+      onRetry={() => setAttempt((n) => n + 1)}
+    />
+  );
+}
+
+function FacultyProfileWorkspace({ api, onRetry }: { api: ReturnType<typeof useAuthedApi>; onRetry: () => void }) {
+  const { user, token } = useAuth();
+  const scope = useMemo(() => ({ api, userId: user?.user_id, token }), [api, user?.user_id, token]);
   const searchParams = useSearchParams();
-  const [tab, setTab] = useState<ProfileTab>('overview');
+  const queryTab = searchParams.get('tab');
+  const requestedTab = TABS.find((item) => item.id === queryTab)?.id ?? 'overview';
+  const [tabSelection, setTabSelection] = useState<{ query: string | null; value: ProfileTab }>({ query: queryTab, value: requestedTab });
+  if (tabSelection.query !== queryTab) {
+    setTabSelection({ query: queryTab, value: requestedTab });
+  }
+  const tab = tabSelection.query === queryTab
+    ? tabSelection.value
+    : requestedTab;
+  const setTab = (value: ProfileTab) => setTabSelection({ query: queryTab, value });
   const [profile, setProfile] = useState<FacultyProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
+  const [mutation, setMutation] = useState<'personal' | 'research' | 'bank' | 'qualification' | 'kyc' | 'photo' | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+  const mounted = useRef(false);
+  const activeScope = useRef(scope);
+  const [loadedScope, setLoadedScope] = useState(scope);
+  const loadRequest = useRef(0);
+  const mutationInFlight = useRef(false);
+  const qualificationInput = useRef<HTMLInputElement>(null);
+  const unavailable = Boolean(mutation) || refreshing || loading || loadedScope !== scope || !profile || !scope.userId || !scope.token;
 
   const [kycRevealed, setKycRevealed] = useState<KycRevealed | null>(null);
   const [revealPassword, setRevealPassword] = useState('');
-  const [revealing, setRevealing] = useState(false);
 
   const [personalForm, setPersonalForm] = useState({
     emergency_contact_name: '',
@@ -430,10 +465,11 @@ export function FacultyProfilePage() {
     specialization: '',
   });
   const [qualFile, setQualFile] = useState<File | null>(null);
-  const [addingQual, setAddingQual] = useState(false);
 
-  const applyProfile = useCallback((data: FacultyProfile) => {
+  const applyProfile = useCallback((data: FacultyProfile, syncForms: boolean) => {
+    setLoadedScope(scope);
     setProfile(data);
+    if (!syncForms) return;
     setPersonalForm({
       emergency_contact_name: data.personal.emergency_contact_name ?? '',
       emergency_contact_phone: data.personal.emergency_contact_phone ?? '',
@@ -449,65 +485,100 @@ export function FacultyProfilePage() {
         : '',
       industry_experience_years: String(data.industry_experience_years ?? 0),
     });
-  }, []);
+  }, [scope]);
+
+  const isCurrent = useCallback(() => mounted.current && activeScope.current === scope, [scope]);
 
   const loadProfile = useCallback(async () => {
+    const requestId = ++loadRequest.current;
     try {
+      if (!scope.userId || !scope.token) throw new Error('Sign in to view your faculty profile');
       const data = await api.get<FacultyProfile>('/api/academics/faculty/profile');
+      if (!isCurrent() || requestId !== loadRequest.current) return;
       const resolved = withFacultyDemoFallback(
         data,
         FACULTY_DEMO_PROFILE() as unknown as FacultyProfile,
       );
-      applyProfile(resolved);
       return resolved;
     } catch (e) {
+      if (!isCurrent() || requestId !== loadRequest.current) return;
       const demo = withFacultyDemoFallback(
         null,
         FACULTY_DEMO_PROFILE() as unknown as FacultyProfile,
       );
-      if (demo) {
-        applyProfile(demo);
-        return demo;
-      }
+      if (demo) return demo;
       throw e;
     }
-  }, [api, applyProfile]);
+  }, [api, isCurrent, scope]);
 
   useEffect(() => {
-    const t = searchParams.get('tab');
-    if (
-      t === 'overview' ||
-      t === 'personal' ||
-      t === 'qualifications' ||
-      t === 'research' ||
-      t === 'workload' ||
-      t === 'documents'
-    ) {
-      setTab(t);
-    }
-  }, [searchParams]);
-
-  useEffect(() => {
+    let cancelled = false;
+    mounted.current = true;
+    activeScope.current = scope;
+    // Account/token changes and explicit retries remount this workspace, so
+    // confidential values and drafts start from their initial state immediately.
     void loadProfile()
-      .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load profile'))
-      .finally(() => setLoading(false));
-  }, [loadProfile]);
+      .then((data) => {
+        if (!cancelled && isCurrent() && data) {
+          applyProfile(data, true);
+          setError(null);
+        }
+      })
+      .catch((e) => {
+        if (!cancelled && isCurrent()) {
+          setLoadedScope(scope);
+          setError(e instanceof Error ? e.message : 'Failed to load profile');
+        }
+      })
+      .finally(() => { if (!cancelled && isCurrent()) setLoading(false); });
+    return () => { cancelled = true; mounted.current = false; loadRequest.current += 1; };
+  }, [loadProfile, scope, isCurrent, applyProfile]);
+
+  function beginMutation(kind: NonNullable<typeof mutation>) {
+    if (mutationInFlight.current || unavailable || !isCurrent()) return false;
+    mutationInFlight.current = true;
+    setMutation(kind);
+    return true;
+  }
+
+  function finishMutation() {
+    if (!isCurrent()) return;
+    mutationInFlight.current = false;
+    setMutation(null);
+  }
+
+  async function refreshProfile(afterSave = false) {
+    if (!isCurrent()) return;
+    setRefreshing(true);
+    setRefreshError(null);
+    try {
+      const data = await loadProfile();
+      if (data && isCurrent()) applyProfile(data, false);
+    } catch (err) {
+      if (!isCurrent()) return;
+      const message = err instanceof Error ? err.message : 'Could not refresh profile';
+      setRefreshError(afterSave ? `Changes saved, but the profile could not be refreshed. ${message}` : message);
+    } finally {
+      if (isCurrent()) setRefreshing(false);
+    }
+  }
 
   async function savePersonal() {
-    setSaving(true);
+    if (!beginMutation('personal')) return;
     try {
       const updated = await api.patch<FacultyProfile>('/api/academics/faculty/profile', personalForm);
+      if (!isCurrent()) return;
       setProfile(updated);
       toast.success('Contact and address details saved');
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Save failed');
+      if (isCurrent()) toast.error(e instanceof Error ? e.message : 'Save failed');
     } finally {
-      setSaving(false);
+      finishMutation();
     }
   }
 
   async function saveResearch() {
-    setSaving(true);
+    if (!beginMutation('research')) return;
     try {
       const updated = await api.patch<FacultyProfile>('/api/academics/faculty/profile', {
         orcid_id: researchForm.orcid_id,
@@ -518,58 +589,69 @@ export function FacultyProfilePage() {
           : undefined,
         industry_experience_years: Number(researchForm.industry_experience_years || 0),
       });
+      if (!isCurrent()) return;
       setProfile(updated);
       toast.success('Research profile updated');
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Save failed');
+      if (isCurrent()) toast.error(e instanceof Error ? e.message : 'Save failed');
     } finally {
-      setSaving(false);
+      finishMutation();
     }
   }
 
   async function revealKyc() {
+    if (mutationInFlight.current || unavailable) return;
     if (!revealPassword) {
       toast.error('Enter your password to reveal KYC data');
       return;
     }
-    setRevealing(true);
+    if (!beginMutation('kyc')) return;
     try {
       const data = await api.post<FacultyProfile & { kyc_revealed?: KycRevealed }>(
         '/api/academics/faculty/profile/kyc/reveal',
         { password: revealPassword },
       );
+      if (!isCurrent()) return;
       setKycRevealed(data.kyc_revealed ?? null);
       setRevealPassword('');
       toast.success('KYC data revealed — do not share this screen');
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Password verification failed');
+      if (isCurrent()) toast.error(e instanceof Error ? e.message : 'Password verification failed');
     } finally {
-      setRevealing(false);
+      finishMutation();
     }
   }
 
   async function submitBankChange(e: FormEvent) {
     e.preventDefault();
-    setSaving(true);
+    if (mutationInFlight.current || unavailable || profile?.bank_change_pending) return;
+    if (!bankForm.bank_account_no.trim() || !bankForm.ifsc_code.trim()) {
+      toast.error('Bank account number and IFSC are required');
+      return;
+    }
+    if (!beginMutation('bank')) return;
     try {
-      await api.post('/api/academics/faculty/profile/bank-change-request', bankForm);
+      const created = await api.post<{ request_id: string; status: string; created_at: string }>('/api/academics/faculty/profile/bank-change-request', bankForm);
+      if (!isCurrent()) return;
+      setProfile((current) => current ? { ...current, bank_change_pending: { request_id: created?.request_id ?? 'submitted', status: created?.status ?? 'PENDING_APPROVAL', created_at: created?.created_at ?? new Date().toISOString() } } : current);
       toast.success('Bank change submitted for HR approval');
       setBankForm({ bank_account_no: '', ifsc_code: '', bank_name: '' });
-      await loadProfile();
+      await refreshProfile(true);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Request failed');
+      if (isCurrent()) toast.error(err instanceof Error ? err.message : 'Request failed');
     } finally {
-      setSaving(false);
+      finishMutation();
     }
   }
 
   async function addQualification(e: FormEvent) {
     e.preventDefault();
+    if (mutationInFlight.current || unavailable) return;
     if (!qualForm.university.trim()) {
       toast.error('University is required');
       return;
     }
-    setAddingQual(true);
+    if (!beginMutation('qualification')) return;
     try {
       const formData = new FormData();
       formData.append('degree_level', qualForm.degree_level);
@@ -579,7 +661,9 @@ export function FacultyProfilePage() {
       formData.append('specialization', qualForm.specialization);
       if (qualFile) formData.append('document', qualFile);
 
-      await api.post('/api/academics/faculty/profile/qualifications', formData);
+      const created = await api.post<Qualification>('/api/academics/faculty/profile/qualifications', formData);
+      if (!isCurrent()) return;
+      if (created?.qual_id) setProfile((current) => current ? { ...current, qualifications: [created, ...current.qualifications.filter((row) => row.qual_id !== created.qual_id)] } : current);
       toast.success('Qualification added');
       setQualForm({
         degree_level: 'PG',
@@ -589,19 +673,40 @@ export function FacultyProfilePage() {
         specialization: '',
       });
       setQualFile(null);
-      await loadProfile();
+      if (qualificationInput.current) qualificationInput.current.value = '';
+      await refreshProfile(true);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to add qualification');
+      if (isCurrent()) toast.error(err instanceof Error ? err.message : 'Failed to add qualification');
     } finally {
-      setAddingQual(false);
+      finishMutation();
     }
   }
 
-  if (loading) return <FacultyPageLoading label="Loading faculty profile…" branded />;
+  async function uploadPhoto(file: File) {
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+      if (!unavailable) toast.error('Please choose a JPG, PNG, or WEBP photo');
+      return;
+    }
+    if (!beginMutation('photo')) return;
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const updated = await api.post<FacultyProfile>('/api/academics/faculty/profile/photo', formData);
+      if (!isCurrent()) return;
+      setProfile(updated);
+      toast.success('Profile photo updated');
+    } catch (err) {
+      if (isCurrent()) toast.error(err instanceof Error ? err.message : 'Failed to upload photo', { category: 'HR' });
+    } finally {
+      finishMutation();
+    }
+  }
+
+  if (loading || loadedScope !== scope) return <FacultyPageLoading label="Loading faculty profile…" branded />;
   if (error || !profile) {
     return (
       <FacultyPageShell>
-        <FacultyErrorBanner message={error ?? 'Profile unavailable'} />
+        <SelfServiceLoadError message={error ?? 'Profile unavailable'} onRetry={onRetry} />
       </FacultyPageShell>
     );
   }
@@ -619,12 +724,17 @@ export function FacultyProfilePage() {
         }
       />
 
+      <fieldset disabled={unavailable} className="min-w-0 space-y-5">
+      {refreshing ? <p role="status" className="text-sm text-muted-foreground">Refreshing faculty profile…</p> : null}
+      {refreshError ? <SelfServiceLoadError message={refreshError} onRetry={() => { if (!mutationInFlight.current && !refreshing) void refreshProfile(); }} /> : null}
       <ProfileHero
         profile={profile}
-        onPhotoUpdated={(url) => setProfile((prev) => (prev ? { ...prev, profile_photo_url: url } : prev))}
+        onPhotoUpload={uploadPhoto}
+        disabled={unavailable}
+        uploading={mutation === 'photo'}
       />
 
-      <FacultyTabBar tabs={TABS} active={tab} onChange={setTab} />
+      <FacultyTabBar tabs={TABS} active={tab} onChange={(next) => { if (!mutationInFlight.current && !unavailable) setTab(next); }} />
 
       {tab === 'overview' && (
         <div className="space-y-5">
@@ -696,7 +806,7 @@ export function FacultyProfilePage() {
                   />
                 </div>
               </div>
-              <Button variant="outline" className="border-amber-300 bg-white" onClick={() => void revealKyc()} disabled={revealing}>
+              <Button variant="outline" className="border-amber-300 bg-white" onClick={() => void revealKyc()} disabled={unavailable}>
                 {kycRevealed ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 {kycRevealed ? 'Re-verify' : 'Reveal KYC'}
               </Button>
@@ -754,7 +864,7 @@ export function FacultyProfilePage() {
                 />
               </FormField>
             </div>
-            <Button className="mt-5" onClick={() => void savePersonal()} disabled={saving}>
+            <Button className="mt-5" onClick={() => void savePersonal()} disabled={unavailable}>
               <Save className="h-4 w-4" />
               Save contact & address
             </Button>
@@ -789,7 +899,7 @@ export function FacultyProfilePage() {
                 />
               </FormField>
               <div className="sm:col-span-2">
-                <Button type="submit" variant="outline" disabled={saving || profile.bank_change_pending != null}>
+                <Button type="submit" variant="outline" disabled={unavailable || profile.bank_change_pending != null}>
                   Submit for HR approval
                 </Button>
               </div>
@@ -837,10 +947,10 @@ export function FacultyProfilePage() {
                 <Input value={qualForm.specialization} onChange={(e) => setQualForm((q) => ({ ...q, specialization: e.target.value }))} />
               </FormField>
               <FormField label="Degree certificate (PDF)" className="sm:col-span-2">
-                <Input type="file" accept=".pdf,application/pdf" onChange={(e) => setQualFile(e.target.files?.[0] ?? null)} />
+                <Input ref={qualificationInput} type="file" accept=".pdf,application/pdf" onChange={(e) => setQualFile(e.target.files?.[0] ?? null)} />
               </FormField>
               <div className="sm:col-span-2">
-                <Button type="submit" disabled={addingQual}>
+                <Button type="submit" disabled={unavailable}>
                   <Plus className="h-4 w-4" />
                   Add qualification
                 </Button>
@@ -878,7 +988,7 @@ export function FacultyProfilePage() {
                   <Input type="number" step="0.1" value={researchForm.industry_experience_years} onChange={(e) => setResearchForm((r) => ({ ...r, industry_experience_years: e.target.value }))} />
                 </FormField>
               </div>
-              <Button className="mt-5" onClick={() => void saveResearch()} disabled={saving}>
+              <Button className="mt-5" onClick={() => void saveResearch()} disabled={unavailable}>
                 <Save className="h-4 w-4" />
                 Save research profile
               </Button>
@@ -959,6 +1069,7 @@ export function FacultyProfilePage() {
           )}
         </div>
       )}
+      </fieldset>
     </FacultyPageShell>
   );
 }

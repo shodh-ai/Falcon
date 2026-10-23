@@ -4,7 +4,6 @@ import { Select } from '@/components/ui/select';
 import { FormEvent, useEffect, useState } from 'react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { useAuthedApi } from '@/lib/api';
 import { isFacultyDemoSmokeId } from '@/lib/faculty-demo-mode';
 

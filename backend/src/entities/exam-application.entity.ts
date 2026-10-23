@@ -21,6 +21,7 @@ export type ExamApplicationStatus =
 @Entity('exam_applications')
 @Index(['student_user_id'])
 @Index(['status'])
+@Index('idx_exam_applications_exam_result', ['exam_result_id'], { where: 'exam_result_id IS NOT NULL' })
 export class ExamApplication extends BaseSoftDeleteEntity {
   @PrimaryGeneratedColumn('uuid')
   exam_application_id: string;
@@ -30,6 +31,9 @@ export class ExamApplication extends BaseSoftDeleteEntity {
 
   @Column({ type: 'int' })
   subject_id: number;
+
+  @Column({ type: 'uuid', nullable: true })
+  exam_result_id: string | null;
 
   @Column({ length: 20 })
   application_type: ExamApplicationType;

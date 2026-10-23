@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
   ForbiddenException,
@@ -19,9 +20,11 @@ import {
   getDashboardPathForRoleName,
   getOnboardingResubmitPathForRoleName,
   getRequiredDocTypes,
+  normalizeOnboardingStatusForWizard,
   resolveOnboardingPortalKind,
   type OnboardingPortalKind,
 } from './onboarding-portal.util';
+import { postgresQueryRows } from '../../common/postgres-query-rows';
 
 type OnboardingDocRow = {
   doc_id: string;
@@ -152,6 +155,29 @@ export class StudentOnboardingService {
     currentPassword: string,
     newPassword: string,
   ) {
+    const tenant = this.resolveTenantId(tenantId);
+    const [row] = await this.dataSource.query<
+      Array<{ password_hash: string | null; onboarding_status: string | null }>
+    >(
+      `SELECT password_hash, onboarding_status
+       FROM users
+       WHERE user_id = $1 AND tenant_id = $2`,
+      [userId, tenant],
+    );
+    if (!row?.password_hash)
+      throw new UnauthorizedException('Invalid current password');
+    const onboardingStatus =
+      (row.onboarding_status ?? '').trim().toUpperCase() || 'PENDING_PASSWORD_RESET';
+    if (!['PENDING_PASSWORD_RESET', 'PENDING_ONBOARDING'].includes(onboardingStatus)) {
+      // A retry after a successful reset is a no-op. Return the authoritative
+      // onboarding stage so the client can continue instead of trapping the
+      // user on the password screen with a 400.
+      return {
+        onboarding_status: row.onboarding_status,
+        password_changed: false,
+      };
+    }
+
     if (!newPassword || newPassword.length < 8) {
       throw new BadRequestException(
         'New password must be at least 8 characters',
@@ -163,35 +189,37 @@ export class StudentOnboardingService {
       );
     }
 
-    const tenant = this.resolveTenantId(tenantId);
-    const [row] = await this.dataSource.query<
-      Array<{ password_hash: string | null; onboarding_status: string }>
-    >(
-      `SELECT password_hash, onboarding_status
-       FROM users
-       WHERE user_id = $1 AND tenant_id = $2`,
-      [userId, tenant],
-    );
-    if (!row?.password_hash)
-      throw new UnauthorizedException('Invalid current password');
-    if (row.onboarding_status !== 'PENDING_PASSWORD_RESET') {
-      throw new BadRequestException(
-        'Password reset is not required at this stage',
-      );
-    }
-
     const valid = await bcrypt.compare(currentPassword, row.password_hash);
     if (!valid) throw new UnauthorizedException('Invalid current password');
 
     const hash = await bcrypt.hash(newPassword, 10);
-    await this.dataSource.query(
-      `UPDATE users
+    // SELECT the returned rows through a CTE so DataSource.query has the same
+    // result shape as the reads above (raw UPDATE results include a row count).
+    const updated = await this.dataSource.query<Array<{ onboarding_status: string }>>(
+      `WITH updated AS (UPDATE users
        SET password_hash = $1, onboarding_status = 'PENDING_DOCUMENTS', updated_at = NOW()
-       WHERE user_id = $2 AND tenant_id = $3`,
-      [hash, userId, tenant],
+       WHERE user_id = $2 AND tenant_id = $3
+         AND COALESCE(UPPER(BTRIM(onboarding_status)), '') IN ('', 'PENDING_PASSWORD_RESET', 'PENDING_ONBOARDING')
+         AND password_hash = $4
+       RETURNING onboarding_status)
+       SELECT onboarding_status FROM updated`,
+      [hash, userId, tenant, row.password_hash],
     );
 
-    return { onboarding_status: 'PENDING_DOCUMENTS' };
+    if (!updated.length) {
+      const [current] = await this.dataSource.query<Array<{ onboarding_status: string | null }>>(
+        `SELECT onboarding_status FROM users WHERE user_id = $1 AND tenant_id = $2`,
+        [userId, tenant],
+      );
+      if (!current) throw new UnauthorizedException('User account is unavailable');
+      const currentStatus = (current.onboarding_status ?? '').trim().toUpperCase();
+      if (['', 'PENDING_PASSWORD_RESET', 'PENDING_ONBOARDING'].includes(currentStatus)) {
+        throw new ConflictException('Your account changed while saving. Please try again.');
+      }
+      return { onboarding_status: current.onboarding_status, password_changed: false };
+    }
+
+    return { onboarding_status: 'PENDING_DOCUMENTS', password_changed: true };
   }
 
   async getStep2Profile(tenantId: string, userId: string) {
@@ -369,7 +397,14 @@ export class StudentOnboardingService {
 
   async submitForVerification(tenantId: string, userId: string) {
     const user = await this.getUserRow(tenantId, userId);
-    if (user.onboarding_status !== 'PENDING_DOCUMENTS') {
+    const status = normalizeOnboardingStatusForWizard(
+      user.onboarding_status,
+      user.role_name,
+    );
+    if (['PENDING_ADMIN_APPROVAL', 'COMPLETED', 'ACTIVE'].includes(status)) {
+      return { onboarding_status: status };
+    }
+    if (status !== 'PENDING_DOCUMENTS') {
       throw new BadRequestException(
         'Profile submission is not available at this stage',
       );
@@ -387,16 +422,27 @@ export class StudentOnboardingService {
       throw new BadRequestException(`Missing documents: ${missing.join(', ')}`);
     }
 
-    const submitted = await this.dataSource.query<Array<{ user_id: string }>>(
-      `UPDATE users
-       SET onboarding_status = 'PENDING_ADMIN_APPROVAL', updated_at = NOW()
-       WHERE user_id = $1 AND tenant_id = $2 AND onboarding_status = 'PENDING_DOCUMENTS'
-       RETURNING user_id`,
-      [userId, tenantId],
+    const submitted = postgresQueryRows<{ user_id: string }>(
+      await this.dataSource.query(
+        `UPDATE users
+         SET onboarding_status = 'PENDING_ADMIN_APPROVAL', updated_at = NOW()
+         WHERE user_id = $1 AND tenant_id = $2
+           AND onboarding_status IN ('PENDING_DOCUMENTS', 'IN_PROGRESS')
+         RETURNING user_id`,
+        [userId, tenantId],
+      ),
     );
     if (!submitted.length) {
-      throw new BadRequestException(
-        'Could not submit profile for verification',
+      const current = await this.getUserRow(tenantId, userId);
+      const currentStatus = normalizeOnboardingStatusForWizard(
+        current.onboarding_status,
+        current.role_name,
+      );
+      if (['PENDING_ADMIN_APPROVAL', 'COMPLETED', 'ACTIVE'].includes(currentStatus)) {
+        return { onboarding_status: currentStatus };
+      }
+      throw new ConflictException(
+        'Your profile changed while submitting. Refresh and try again.',
       );
     }
 

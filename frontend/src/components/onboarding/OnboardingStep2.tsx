@@ -1,7 +1,7 @@
 'use client';
 
 import { Select } from '@/components/ui/select';
-import { useCallback, useEffect, useMemo, useState, type ComponentProps } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   FileCheck2,
@@ -35,6 +35,8 @@ import {
   STAFF_DEGREE_LEVELS,
   STAFF_DOC_LABELS,
   STUDENT_DOC_LABELS,
+  getOnboardingStepPath,
+  isFirstLoginOnboardingComplete,
   type PortalOnboardingConfig,
 } from '@/lib/onboarding/portal-onboarding';
 
@@ -89,6 +91,7 @@ function DocumentsSidebar({
   docLabels,
   documents,
   uploading,
+  disabled,
   uploadedCount,
   onUpload,
   className,
@@ -97,6 +100,7 @@ function DocumentsSidebar({
   docLabels: Record<string, string>;
   documents: OnboardingDoc[];
   uploading: string | null;
+  disabled: boolean;
   uploadedCount: number;
   onUpload: (docType: string, file: File) => void;
   className?: string;
@@ -131,7 +135,7 @@ function DocumentsSidebar({
                 label={docLabels[docType]}
                 hint={docType === 'PHOTO' ? 'JPG or PNG · Max 5MB' : 'PDF or image · Max 5MB'}
                 accept={docType === 'PHOTO' ? '.jpg,.jpeg,.png,image/jpeg,image/png' : undefined}
-                disabled={uploading !== null}
+                disabled={disabled || uploading !== null}
                 fileName={existing?.file_path ? docLabels[docType] : null}
                 onFile={(file) => onUpload(docType, file)}
               />
@@ -180,9 +184,14 @@ function SubmitBlock({
 }
 
 export function OnboardingStep2({ config }: { config: PortalOnboardingConfig }) {
+  const { token, user } = useAuth();
+  return <OnboardingStep2Form key={`${user?.user_id ?? ''}:${token ?? ''}:${config.portalPrefix}`} config={config} />;
+}
+
+function OnboardingStep2Form({ config }: { config: PortalOnboardingConfig }) {
   const api = useAuthedApi();
   const router = useRouter();
-  const { refreshUser } = useAuth();
+  const { updateOnboardingStatus } = useAuth();
   const isStaff = config.kind === 'staff';
   const docLabels = isStaff ? STAFF_DOC_LABELS : STUDENT_DOC_LABELS;
   const docTypes = Object.keys(docLabels);
@@ -221,6 +230,10 @@ export function OnboardingStep2({ config }: { config: PortalOnboardingConfig }) 
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const mounted = useRef(false);
+  const readGeneration = useRef(0);
+  const mutationPending = useRef(false);
 
   const uploadedCount = useMemo(
     () => docTypes.filter((t) => documents.some((d) => d.doc_type === t && d.file_path)).length,
@@ -228,9 +241,10 @@ export function OnboardingStep2({ config }: { config: PortalOnboardingConfig }) 
   );
 
   const loadProfile = useCallback(async () => {
-    setLoading(true);
+    const generation = ++readGeneration.current;
     try {
       const data = await api.get<Record<string, unknown>>(`${config.apiPrefix}/profile`);
+      if (!mounted.current || generation !== readGeneration.current) return;
       setBloodGroup(String(data.blood_group ?? ''));
       setAbcId(String(data.abc_id ?? ''));
       setPanNumber(String(data.pan_number ?? ''));
@@ -263,17 +277,23 @@ export function OnboardingStep2({ config }: { config: PortalOnboardingConfig }) 
       setDocuments((data.documents as OnboardingDoc[]) ?? []);
       setAdminRemarks((data.admin_remarks as string | null) ?? null);
     } catch (err) {
-      toast.error(parseApiError(err));
+      if (mounted.current && generation === readGeneration.current) setLoadError(parseApiError(err));
     } finally {
-      setLoading(false);
+      if (mounted.current && generation === readGeneration.current) setLoading(false);
     }
   }, [api, config.apiPrefix]);
 
   useEffect(() => {
+    mounted.current = true;
+    // Subscribe to the profile request; form state is populated from its response.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadProfile();
+    return () => { mounted.current = false; readGeneration.current += 1; };
   }, [loadProfile]);
 
   const uploadDoc = async (docType: string, file: File) => {
+    if (!mounted.current || mutationPending.current || loading || loadError) return;
+    mutationPending.current = true;
     setUploading(docType);
     try {
       const form = new FormData();
@@ -282,16 +302,19 @@ export function OnboardingStep2({ config }: { config: PortalOnboardingConfig }) 
         `${config.apiPrefix}/documents/${docType}`,
         form,
       );
+      if (!mounted.current) return;
+      if (!Array.isArray(updated)) throw new Error('The document list could not be refreshed. Reload your profile before submitting.');
       setDocuments(updated);
       toast.success(`${docLabels[docType] ?? docType} uploaded`);
     } catch (err) {
-      toast.error(parseApiError(err));
+      if (mounted.current) toast.error(parseApiError(err));
     } finally {
-      setUploading(null);
+      if (mounted.current) { mutationPending.current = false; setUploading(null); }
     }
   };
 
   const saveAndSubmit = async () => {
+    if (!mounted.current || mutationPending.current || loading || loadError) return;
     if (!isStaff) {
       const missing = validateStudentForm({
         bloodGroup,
@@ -320,6 +343,7 @@ export function OnboardingStep2({ config }: { config: PortalOnboardingConfig }) 
       return;
     }
 
+    mutationPending.current = true;
     setSubmitting(true);
     try {
       const payload = isStaff
@@ -365,14 +389,25 @@ export function OnboardingStep2({ config }: { config: PortalOnboardingConfig }) 
           };
 
       await api.post(`${config.apiPrefix}/profile`, payload);
-      await api.post(`${config.apiPrefix}/submit`);
-      await refreshUser();
-      toast.success('Submitted for admin verification');
-      router.replace(`${config.portalPrefix}/onboarding/step-3`);
+      if (!mounted.current) return;
+      const result = await api.post<{ onboarding_status: string }>(`${config.apiPrefix}/submit`);
+      if (!mounted.current) return;
+      if (result?.onboarding_status !== 'PENDING_ADMIN_APPROVAL' && !isFirstLoginOnboardingComplete(result?.onboarding_status, config.portalLabel)) {
+        throw new Error('Your profile has not been submitted for verification. Please try again.');
+      }
+      if (updateOnboardingStatus(result.onboarding_status) === false) return;
+      toast.success(result.onboarding_status === 'PENDING_ADMIN_APPROVAL'
+        ? 'Submitted for admin verification'
+        : 'Your onboarding is already complete');
+      router.replace(getOnboardingStepPath(
+        config.portalPrefix,
+        result.onboarding_status,
+        config.portalLabel.toLowerCase(),
+      ) ?? config.dashboardPath);
     } catch (err) {
-      toast.error(parseApiError(err));
+      if (mounted.current) toast.error(parseApiError(err));
     } finally {
-      setSubmitting(false);
+      if (mounted.current) { mutationPending.current = false; setSubmitting(false); }
     }
   };
 
@@ -385,12 +420,17 @@ export function OnboardingStep2({ config }: { config: PortalOnboardingConfig }) 
     );
   }
 
+  if (loadError) {
+    return <OnboardingAlert title="Unable to load your profile"><p>{loadError}</p><Button type="button" className="mt-3" onClick={() => { setLoading(true); setLoadError(null); void loadProfile(); }}>Retry</Button></OnboardingAlert>;
+  }
+
   const docsSidebar = (
     <DocumentsSidebar
       docTypes={docTypes}
       docLabels={docLabels}
       documents={documents}
       uploading={uploading}
+      disabled={submitting}
       uploadedCount={uploadedCount}
       onUpload={(type, file) => void uploadDoc(type, file)}
     />
@@ -404,6 +444,7 @@ export function OnboardingStep2({ config }: { config: PortalOnboardingConfig }) 
         </OnboardingAlert>
       ) : null}
 
+      <fieldset disabled={submitting || uploading !== null} className="contents">
       <OnboardingPanel
         icon={FileCheck2}
         title="Profile & documents"
@@ -541,6 +582,7 @@ export function OnboardingStep2({ config }: { config: PortalOnboardingConfig }) 
           </aside>
         </div>
       </OnboardingPanel>
+      </fieldset>
     </div>
   );
 }

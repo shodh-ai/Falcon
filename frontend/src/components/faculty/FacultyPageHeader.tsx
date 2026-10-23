@@ -9,8 +9,6 @@ export function FacultyPageHeader({
   meta,
   eyebrow = 'Faculty Portal',
   className,
-  /** @deprecated Always renders the white header card; kept for call-site compatibility. */
-  variant: _variant = 'hero',
 }: {
   title?: string;
   /** Preferred description prop (existing call sites). */
@@ -21,6 +19,7 @@ export function FacultyPageHeader({
   meta?: ReactNode;
   eyebrow?: string;
   className?: string;
+  /** @deprecated Always renders the white header card; kept for call-site compatibility. */
   variant?: 'hero' | 'compact';
 }) {
   const body = description ?? subtitle ?? '';

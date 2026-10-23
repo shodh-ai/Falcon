@@ -81,8 +81,8 @@ export default function FacultyAtRiskPage() {
   return (
     <FacultyPageShell>
       <FacultyPageHeader
-        title="Student Analytics"
-        description="Students below 75% attendance or failing in assessments across your active batches."
+        title="At-Risk Students"
+        description="Risk flags use recorded attendance and published marks across your active teaching courses. Missing data does not create a risk flag."
         meta={
           <>
             <FacultyMetricChip label="High risk" value={highCount} emphasis={highCount > 0} />

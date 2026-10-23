@@ -1,7 +1,7 @@
 'use client';
 
 import { Select } from '@/components/ui/select';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Check, Download, Eye, Upload } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Button } from '@/components/ui/button';
@@ -11,6 +11,8 @@ import { useAuth } from '@/context/AuthContext';
 import { useAuthedApi } from '@/lib/api';
 import { useHrApi } from '@/lib/api/use-hr-api';
 import { getSubdomainFromClient } from '@/lib/tenant';
+import { getApiBaseUrl } from '@/lib/api-base-url';
+import { SelfServiceLoadError } from '@/components/self-service/SelfServiceLoadError';
 import type { VaultDocument, VaultResponse } from '@/lib/api/api.hr-documents';
 import { HR_DOCUMENT_CATEGORIES } from '@/lib/api/api.hr-documents';
 import { withFacultyDemoFallback } from '@/lib/faculty-demo-mode';
@@ -38,17 +40,31 @@ function DocumentVaultGridInner({ userId, mode, api }: Props & { api: VaultApi }
   const { token } = useAuth();
   const [vault, setVault] = useState<VaultResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [uploadType, setUploadType] = useState('AADHAAR');
   const [uploading, setUploading] = useState(false);
+  const [acting, setActing] = useState(false);
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const alive = useRef(false);
+  const activeApi = useRef(api);
+  useLayoutEffect(() => { activeApi.current = api; }, [api]);
+  const requestId = useRef(0);
+  const mutation = useRef(false);
+  const uploadedFile = useRef<{ file: File; url: string } | null>(null);
+  const current = useCallback(() => alive.current && activeApi.current === api, [api]);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (afterSave = false) => {
+    const id = ++requestId.current;
     setLoading(true);
+    setError(null);
     try {
       const path =
         mode === 'hr' && userId
           ? `/api/hr/employees/${userId}/documents`
           : '/api/hr/ess/documents';
       const data = await api.get<VaultResponse>(path);
+      if (!current() || id !== requestId.current) return;
       if (mode === 'ess') {
         setVault(
           withFacultyDemoFallback(
@@ -61,25 +77,36 @@ function DocumentVaultGridInner({ userId, mode, api }: Props & { api: VaultApi }
         setVault(data);
       }
     } catch (e) {
+      if (!current() || id !== requestId.current) return;
       if (mode === 'ess') {
         const demo = withFacultyDemoFallback(
           null,
           facultyDemoEssDocuments() as VaultResponse,
         );
-        setVault(demo);
+        if (demo) setVault(demo);
         if (!demo?.documents?.length) {
-          toast.error(e instanceof Error ? e.message : 'Failed to load documents');
+          setError(`${afterSave ? 'Changes saved, but documents could not be refreshed. ' : ''}${e instanceof Error ? e.message : 'Failed to load documents'}`);
         }
       } else {
-        toast.error(e instanceof Error ? e.message : 'Failed to load documents');
+        setError(`${afterSave ? 'Changes saved, but documents could not be refreshed. ' : ''}${e instanceof Error ? e.message : 'Failed to load documents'}`);
       }
     } finally {
-      setLoading(false);
+      if (current() && id === requestId.current) setLoading(false);
     }
-  }, [api, mode, userId]);
+  }, [api, mode, userId, current]);
 
   useEffect(() => {
+    alive.current = true;
+    mutation.current = false;
+    uploadedFile.current = null;
+    // Discard confidential data and staged uploads when the authenticated API changes.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setVault(null);
+    setUploading(false);
+    setActing(false);
+    setPendingFile(null);
     void load();
+    return () => { alive.current = false; requestId.current += 1; };
   }, [load]);
 
   async function secureDownload(docId: string) {
@@ -90,13 +117,14 @@ function DocumentVaultGridInner({ userId, mode, api }: Props & { api: VaultApi }
         delivery?: 'presigned' | 'authenticated';
         file_name?: string | null;
       }>(`/api/hr/documents/${docId}/download`);
+      if (!current()) return;
 
       if (meta.delivery !== 'authenticated' && meta.url.startsWith('http')) {
         window.open(meta.url, '_blank', 'noopener,noreferrer');
         return;
       }
 
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
+      const apiUrl = getApiBaseUrl();
       const streamPath = meta.url.startsWith('http')
         ? meta.url
         : `${apiUrl}${meta.url.startsWith('/') ? meta.url : `/api/hr/documents/${docId}/file`}`;
@@ -111,42 +139,58 @@ function DocumentVaultGridInner({ userId, mode, api }: Props & { api: VaultApi }
         throw new Error(text || 'Download failed');
       }
       const blob = await res.blob();
+      if (!current()) return;
       const objectUrl = URL.createObjectURL(blob);
       window.open(objectUrl, '_blank', 'noopener,noreferrer');
       window.setTimeout(() => URL.revokeObjectURL(objectUrl), 120_000);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Download failed');
+      if (current()) toast.error(e instanceof Error ? e.message : 'Download failed');
     }
   }
 
   async function verify(docId: string, status: 'VERIFIED' | 'REJECTED') {
+    if (mutation.current || loading || error || !vault?.documents.some((doc) => doc.document_id === docId)) return;
+    mutation.current = true;
+    setActing(true);
     try {
       await api.patch(`/api/hr/documents/${docId}/verify`, { status });
+      if (!current()) return;
+      setVault((value) => value ? { ...value, documents: value.documents.map((doc) => doc.document_id === docId ? { ...doc, verification_status: status } : doc), groups: Object.fromEntries(Object.entries(value.groups).map(([group, docs]) => [group, docs.map((doc) => doc.document_id === docId ? { ...doc, verification_status: status } : doc)])) } : value);
       toast.success(status === 'VERIFIED' ? 'Document verified' : 'Document rejected');
-      await load();
+      await load(true);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Action failed');
+      if (current()) toast.error(e instanceof Error ? e.message : 'Action failed');
+    } finally {
+      if (current()) { mutation.current = false; setActing(false); }
     }
   }
 
   async function uploadFile(file: File) {
-    if (!token) return;
+    if (!token || mutation.current || !current()) return;
+    mutation.current = true;
+    setPendingFile(file);
     setUploading(true);
     try {
-      const formData = new FormData();
-      formData.append('file', file);
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? '';
-      const uploadRes = await fetch(`${apiUrl}/uploads/single`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'x-tenant-subdomain': getSubdomainFromClient(),
-        },
-        body: formData,
-      });
-      if (!uploadRes.ok) throw new Error('File upload failed');
-      const uploaded = (await uploadRes.json()) as { url?: string; path?: string };
-      const fileUrl = uploaded.url ?? uploaded.path ?? '';
+      let fileUrl = uploadedFile.current?.file === file ? uploadedFile.current.url : undefined;
+      if (!fileUrl) {
+        const formData = new FormData();
+        formData.append('file', file);
+        const apiUrl = getApiBaseUrl();
+        const uploadRes = await fetch(`${apiUrl}/uploads/single`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'x-tenant-subdomain': getSubdomainFromClient(),
+          },
+          body: formData,
+        });
+        if (!uploadRes.ok) throw new Error('File upload failed');
+        const uploaded = (await uploadRes.json()) as { url?: string; path?: string };
+        if (!current()) return;
+        fileUrl = [uploaded.url, uploaded.path].find((value) => typeof value === 'string' && value.trim())?.trim();
+        if (!fileUrl) throw new Error('Upload did not return a file location');
+        uploadedFile.current = { file, url: fileUrl };
+      }
       const postPath =
         mode === 'hr' && userId
           ? `/api/hr/employees/${userId}/documents`
@@ -156,22 +200,29 @@ function DocumentVaultGridInner({ userId, mode, api }: Props & { api: VaultApi }
         file_url: fileUrl,
         file_name: file.name,
       });
+      if (!current()) return;
+      uploadedFile.current = null;
+      setPendingFile(null);
+      if (fileInput.current) fileInput.current.value = '';
       toast.success('Document uploaded');
-      await load();
+      await load(true);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Upload failed');
+      if (current()) toast.error(e instanceof Error ? e.message : 'Upload failed');
     } finally {
-      setUploading(false);
+      if (current()) { mutation.current = false; setUploading(false); }
     }
   }
 
-  if (loading) return <p className="text-sm text-muted-foreground">Loading document vault…</p>;
+  if (loading && !vault) return <p className="text-sm text-muted-foreground">Loading document vault…</p>;
+  if (error && !vault) return <SelfServiceLoadError message={error} onRetry={() => void load()} />;
   if (!vault) return null;
 
   const groupOrder = ['Identity', 'Academic', 'Financial', 'HR Letters', 'Other'];
 
   return (
     <div className="space-y-6">
+      {error ? <SelfServiceLoadError message={error} onRetry={() => { if (!mutation.current) void load(); }} /> : null}
+      <fieldset disabled={uploading || acting || loading} className="min-w-0 space-y-6">
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Upload Document</CardTitle>
@@ -196,7 +247,10 @@ function DocumentVaultGridInner({ userId, mode, api }: Props & { api: VaultApi }
               </span>
             </Button>
             <input
+              ref={fileInput}
               type="file"
+              aria-label="Upload document"
+              disabled={uploading || acting || loading}
               accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
               className="hidden"
               onChange={(e) => {
@@ -205,6 +259,7 @@ function DocumentVaultGridInner({ userId, mode, api }: Props & { api: VaultApi }
               }}
             />
           </label>
+          {pendingFile && !uploading ? <Button type="button" variant="outline" onClick={() => void uploadFile(pendingFile)}>Retry document upload</Button> : null}
         </CardContent>
       </Card>
 
@@ -256,6 +311,7 @@ function DocumentVaultGridInner({ userId, mode, api }: Props & { api: VaultApi }
       {!vault.documents.length && (
         <p className="text-sm text-muted-foreground">No documents uploaded yet.</p>
       )}
+      </fieldset>
     </div>
   );
 }
@@ -271,8 +327,10 @@ function HrEmployeeDocumentVaultGrid({ userId }: { userId?: string }) {
 }
 
 export function DocumentVaultGrid({ userId, mode }: Props) {
+  const { user, token } = useAuth();
+  const key = `${user?.user_id ?? ''}:${token ?? ''}:${mode}:${userId ?? ''}`;
   if (mode === 'ess') {
-    return <EssDocumentVaultGrid />;
+    return <EssDocumentVaultGrid key={key} />;
   }
-  return <HrEmployeeDocumentVaultGrid userId={userId} />;
+  return <HrEmployeeDocumentVaultGrid key={key} userId={userId} />;
 }
