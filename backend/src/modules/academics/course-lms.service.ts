@@ -6,17 +6,11 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import {
-  createReadStream,
-  existsSync,
-  mkdirSync,
-  unlinkSync,
-  writeFileSync,
-} from 'fs';
+import { createReadStream, existsSync, mkdirSync, writeFileSync } from 'fs';
 import { basename, resolve } from 'path';
 import { extname, join } from 'path';
 import { v4 as uuidv4 } from 'uuid';
-import { DataSource, In, Repository } from 'typeorm';
+import { DataSource, In, IsNull, Not, Repository } from 'typeorm';
 import { CourseModule } from '../../entities/course-module.entity';
 import { CourseMaterial } from '../../entities/course-material.entity';
 import { CourseMaterialVisibility } from '../../entities/course-material-visibility.entity';
@@ -159,22 +153,44 @@ export class CourseLmsService {
     if (!items?.length)
       throw new BadRequestException('At least one module is required');
 
-    await this.modules.delete({ tenant_id: tenantId, course_id: courseId });
-
-    const rows = items.map((item) =>
-      this.modules.create({
-        tenant_id: tenantId,
-        course_id: courseId,
-        faculty_user_id: facultyUserId,
-        module_number: item.module_number,
-        title: item.title.trim(),
-        description: item.description?.trim() || null,
-        status: 'PENDING',
-        planned_completion_date: item.planned_completion_date ?? null,
-        hod_approval_status: 'PENDING',
-      }),
-    );
-    await this.modules.save(rows);
+    await this.dataSource.transaction(async (manager) => {
+      // Lock the parent before checking references so a concurrent upload cannot
+      // acquire its course foreign-key reference between the check and deletion.
+      const course = await manager.getRepository(AcademicCourse).findOne({
+        where: { tenant_id: tenantId, course_id: courseId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!course) throw new NotFoundException('Course not found');
+      const materialCount = await manager.getRepository(CourseMaterial).count({
+        where: {
+          tenant_id: tenantId,
+          course_id: courseId,
+          module_id: Not(IsNull()),
+        },
+        withDeleted: true,
+      });
+      if (materialCount > 0) {
+        throw new BadRequestException(
+          'This syllabus has current or archived materials. Update its existing units instead of replacing the syllabus to preserve recovery information.',
+        );
+      }
+      const modules = manager.getRepository(CourseModule);
+      await modules.delete({ tenant_id: tenantId, course_id: courseId });
+      const rows = items.map((item) =>
+        modules.create({
+          tenant_id: tenantId,
+          course_id: courseId,
+          faculty_user_id: facultyUserId,
+          module_number: item.module_number,
+          title: item.title.trim(),
+          description: item.description?.trim() || null,
+          status: 'PENDING',
+          planned_completion_date: item.planned_completion_date ?? null,
+          hod_approval_status: 'PENDING',
+        }),
+      );
+      await modules.save(rows);
+    });
     return this.getFacultyWorkspace(facultyUserId, tenantId, courseId);
   }
 
@@ -305,16 +321,24 @@ export class CourseLmsService {
       facultyUserId,
       tenantId,
     );
-    const materialCount = await this.materials.count({
-      where: { tenant_id: tenantId, module_id: moduleId },
+    await this.dataSource.transaction(async (manager) => {
+      const modules = manager.getRepository(CourseModule);
+      const locked = await modules.findOne({
+        where: { tenant_id: tenantId, module_id: mod.module_id },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!locked) throw new NotFoundException('Module not found');
+      const materialCount = await manager.getRepository(CourseMaterial).count({
+        where: { tenant_id: tenantId, module_id: moduleId },
+        withDeleted: true,
+      });
+      if (materialCount > 0) {
+        throw new BadRequestException(
+          'This unit has current or archived materials and must be retained to preserve recovery information.',
+        );
+      }
+      await modules.remove(locked);
     });
-    if (materialCount > 0) {
-      throw new BadRequestException(
-        'Delete the files in this unit before deleting the unit',
-      );
-    }
-
-    await this.modules.remove(mod);
     return { deleted: true, module_id: moduleId };
   }
 
@@ -571,8 +595,9 @@ export class CourseLmsService {
       }
     }
 
-    await this.removeStoredFile(material);
-    await this.materials.remove(material);
+    // Keep original bytes, metadata and visibility links for authorized recovery.
+    // LMS repository reads and student downloads exclude the archived row.
+    await this.materials.softRemove(material);
     return { deleted: true, material_id: materialId };
   }
 
@@ -866,7 +891,9 @@ export class CourseLmsService {
     if (!allocationIds.length) return;
 
     const hodDepartmentIds = await this.resolveHodDepartmentIds(facultyUserId);
-    const validIds = await this.dataSource.query<Array<{ allocation_id: string }>>(
+    const validIds = await this.dataSource.query<
+      Array<{ allocation_id: string }>
+    >(
       `SELECT a.allocation_id
        FROM academic_course_allocations a
        LEFT JOIN users assigned ON assigned.user_id = a.faculty_user_id
@@ -1122,26 +1149,6 @@ export class CourseLmsService {
       this.logger.warn(
         `Material ${materialId} was uploaded, but student notifications could not be sent: ${message}`,
       );
-    }
-  }
-
-  private async removeStoredFile(material: CourseMaterial) {
-    if (material.file_key && this.objectStorage.isEnabled()) {
-      return;
-    }
-    const uploadRoot = resolve(process.env.UPLOAD_PATH || './uploads');
-    const filePath = material.file_path.startsWith('/')
-      ? material.file_path
-      : resolve(process.cwd(), material.file_path);
-    const resolved = filePath.includes(uploadRoot)
-      ? filePath
-      : resolve(uploadRoot, material.file_path);
-    if (existsSync(resolved)) {
-      try {
-        unlinkSync(resolved);
-      } catch {
-        /* best-effort disk cleanup */
-      }
     }
   }
 

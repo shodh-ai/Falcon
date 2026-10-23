@@ -1579,11 +1579,30 @@ export class AdminControlService {
 
   async deleteCourse(tenantId: string, actorId: string, courseId: string) {
     const tid = this.tid(tenantId);
-    const result = await this.db.query(
-      `DELETE FROM academic_courses WHERE tenant_id = $1 AND course_id = $2 RETURNING course_id`,
-      [tid, courseId],
-    );
-    if (!result?.[0]) throw new NotFoundException('Course not found');
+    await this.db.transaction(async (manager) => {
+      // Course deletion cascades to materials. Lock first so a new material's
+      // foreign-key insert cannot race the recovery-reference check.
+      const course = await manager.query<Array<{ course_id: string }>>(
+        `SELECT course_id FROM academic_courses
+         WHERE tenant_id = $1 AND course_id = $2 FOR UPDATE`,
+        [tid, courseId],
+      );
+      if (!course?.[0]) throw new NotFoundException('Course not found');
+      const materials = await manager.query<Array<{ material_id: string }>>(
+        `SELECT material_id FROM course_materials
+         WHERE tenant_id = $1 AND course_id = $2 LIMIT 1`,
+        [tid, courseId],
+      );
+      if (materials?.[0]) {
+        throw new BadRequestException(
+          'This course has current or archived materials and must be retained to preserve recovery information.',
+        );
+      }
+      await manager.query(
+        `DELETE FROM academic_courses WHERE tenant_id = $1 AND course_id = $2`,
+        [tid, courseId],
+      );
+    });
     await this.writeAudit(tid, actorId, 'DELETE', 'course', courseId);
     return { deleted: true, course_id: courseId };
   }
