@@ -839,6 +839,7 @@ export const hrPortal: PortalConfig = {
         { label: 'Offboarding & Exit', href: '/hr/offboarding', icon: DoorOpen, keywords: ['resignation', 'fnf', 'separation'], hrModule: 'offboarding' },
         { label: 'Recruitment (ATS)', href: '/hr/recruitment', icon: Briefcase, keywords: ['kanban', 'hired', 'interview'], hrModule: 'recruitment' },
         { label: 'Appraisals & API Scores', href: '/hr/appraisals', icon: Award, keywords: ['ugc', 'api', 'scopus', 'research'], hrModule: 'directory' },
+        { label: 'Designation API Policies', href: '/hr/appraisals/policies', icon: ListChecks, keywords: ['appraisal rules', 'weights', 'calculation', 'designation'], hrModule: 'policies', roles: ['HR','HRAdmin','SuperAdmin'] },
         { label: 'Promotions & Workflows', href: '/hr/promotions', icon: ArrowUpCircle, keywords: ['associate prof', 'professor', 'eligible'], hrModule: 'directory' },
       ],
     },

@@ -1,11 +1,11 @@
-'use client';
+"use client";
 
-import { useEffect, useState } from 'react';
-import { HrPageHeader } from '@/components/hr/HrPageHeader';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { useHrApi } from '@/lib/api/use-hr-api';
-import { useHrEntity } from '@/context/HrEntityContext';
+import { useState } from "react";
+import Link from "next/link";
+import { HrPageHeader } from "@/components/hr/HrPageHeader";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { useHrSWR } from "@/hooks/useHrSWR";
 
 type AppraisalRow = {
   appraisal_record_id: string;
@@ -17,20 +17,18 @@ type AppraisalRow = {
 };
 
 export default function HrAppraisalsPage() {
-  const api = useHrApi();
-  const { entityId } = useHrEntity();
   const [year, setYear] = useState(new Date().getFullYear());
-  const [rows, setRows] = useState<AppraisalRow[]>([]);
-
-  useEffect(() => {
-    void api.get<AppraisalRow[]>(`/api/hr/appraisals/api-scores?year=${year}`).then(setRows);
-  }, [api, entityId, year]);
+  const { data: rows = [], error } = useHrSWR<AppraisalRow[]>(
+    ["hr-legacy-appraisals", year],
+    `/api/hr/appraisals/api-scores?year=${year}`,
+    { dedupingInterval: 0, revalidateOnMount: true },
+  );
 
   return (
     <>
       <HrPageHeader
         title="Appraisals & API Scores"
-        description="UGC-style Academic Performance Indicator auto-calculated from faculty research logs (Scopus +10, book chapter +5, etc.)."
+        description="Saved legacy appraisal results. Viewing this page no longer recalculates or overwrites scores. Configure designation-specific rules separately."
         actions={
           <input
             type="number"
@@ -40,13 +38,34 @@ export default function HrAppraisalsPage() {
           />
         }
       />
+      <div className="my-4 rounded-lg border p-4 text-sm">
+        <Link
+          className="font-semibold underline"
+          href="/hr/appraisals/policies"
+        >
+          Open Designation API Policies and calculation preview
+        </Link>
+        <p>
+          Legacy publication scores and HoD ratings are not calculations under
+          the new policy framework. New calculation records do not automatically
+          approve appraisals or determine promotions.
+        </p>
+      </div>
+      {!!error && (
+        <p role="alert">
+          {error instanceof Error
+            ? error.message
+            : "Could not load saved appraisals"}
+        </p>
+      )}
 
       <div className="space-y-3">
         {rows.map((r) => (
           <Card key={r.appraisal_record_id}>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-base">
-                {r.employee_name} <span className="text-muted-foreground">({r.employee_id})</span>
+                {r.employee_name}{" "}
+                <span className="text-muted-foreground">({r.employee_id})</span>
               </CardTitle>
               <Badge>API {Number(r.auto_api_score).toFixed(1)}</Badge>
             </CardHeader>
@@ -60,7 +79,11 @@ export default function HrAppraisalsPage() {
             </CardContent>
           </Card>
         ))}
-        {rows.length === 0 ? <p className="text-sm text-muted-foreground">No faculty appraisal records for this year.</p> : null}
+        {!error && rows.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No saved faculty appraisal records for this year.
+          </p>
+        ) : null}
       </div>
     </>
   );

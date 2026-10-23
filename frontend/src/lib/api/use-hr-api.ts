@@ -43,8 +43,8 @@ export function useHrApi() {
       get: <T>(path: string) => resolveRequest(path, (p, h) => api.get<T>(p, h)),
       post: <T>(path: string, body?: unknown, headers?: Record<string, string>) =>
         resolveRequest(path, (p, h) => api.post<T>(p, body, { ...h, ...headers })),
-      patch: <T>(path: string, body?: unknown) =>
-        resolveRequest(path, (p, h) => api.patch<T>(p, body, h)),
+      patch: <T>(path: string, body?: unknown, headers?: Record<string, string>) =>
+        resolveRequest(path, (p, h) => api.patch<T>(p, body, { ...h, ...headers })),
       put: <T>(path: string, body?: unknown) =>
         resolveRequest(path, (p, h) => api.put<T>(p, body, h)),
       del: <T>(path: string) => resolveRequest(path, (p, h) => api.del<T>(p, h)),

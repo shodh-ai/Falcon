@@ -1,0 +1,112 @@
+FALCON — DESIGNATION-WISE ACADEMIC PERFORMANCE INDICATOR FRAMEWORK
+Local implementation and validation — 23 October 2026
+
+STATUS
+Implemented on local branch hr-qa-oct23. Not pushed, deployed or activated.
+No production tables, policies, appraisals, accounts or approvals were changed.
+
+WHERE HR WILL FIND IT AFTER AN AUTHORIZED DEPLOYMENT
+HR navigation > Designation API Policies
+Route: /hr/appraisals/policies
+The existing Appraisals page also links to the policy editor.
+API means Academic Performance Indicator here, not a software API.
+
+SCORING SHEET
+The starter is an illustrative institutional-review draft, not an official or
+current UGC, PCI, CAS or promotion eligibility policy. Historical API category
+inspiration: https://www.ugc.gov.in/e-book/UGC_Regulation/files/basic-html/page791.html
+The sample weights, targets, caps and rates below are original illustrative
+defaults, not copied regulatory requirements. HR must replace/approve them.
+
+Sample categories: Teaching 40%, Research 30%, Development 15%, Service 15%.
+Sample criteria: teaching delivery, teaching resources, research outputs,
+projects/supervision, professional development and institutional service.
+HR can add/remove/rename categories and criteria for each actual designation
+and assessment year; designation is not the employee's login role.
+
+Two scoring modes:
+- WEIGHTED_100: criterion points are capped, each category is normalized to its
+  category maximum and multiplied by its percentage weight. Weights total 100.
+- RAW_POINTS: add capped criterion points without normalization. Category
+  weights are ignored. The denominator is the sum of all criterion caps.
+
+Three supported criterion methods (no arbitrary executable formulas):
+- COUNT: min(whole-number quantity x points per item, maximum points).
+- TARGET: min(progress / target x maximum points, maximum points).
+- DIRECT: reviewed score between zero and the criterion maximum.
+Intermediate values round to four decimal places; final total to two.
+An explicit zero differs from a missing value. Positive claims need an evidence
+reference when that rule is enabled. References are not automatically verified.
+Invalid numbers, fractional counts, unknown criteria and invalid weights fail
+with an explanation. Incomplete previews cannot become saved calculations.
+
+MANUAL CHECK FLOW
+1. Sign in locally as scoped HR Admin and select the intended organization.
+2. Open Designation API Policies. Loading does not activate any template.
+3. Choose an actual designation, assessment year and descriptive policy title.
+4. Review every category, criterion, cap, rate/target and evidence requirement.
+5. Enter sample values and use Calculate preview. Inspect input, formula,
+   raw points, cap, earned points, category contribution and final total.
+6. Save draft. This is inactive. Reload/select that version to confirm retention.
+7. To publish, provide an institutional approval reference and acknowledge HR's
+   review. Unsaved changes must be saved first. Publication is an explicit
+   HRAdmin/SuperAdmin action, not automated regulatory or dual approval.
+8. With a published policy, select a scoped employee of the matching designation,
+   enter complete evidence-backed values, calculate, then save the immutable
+   calculation record. Save retries must not create duplicate records.
+9. Load recent saved calculations and audit history. Check version, timestamp,
+   formulas and checksum. Copy a published version into a new draft to change
+   rules; publishing the new version must not alter old saved calculations.
+10. Try a read-only HR role and an out-of-scope organization/employee. Write
+    actions are denied and employee details remain scope-filtered.
+
+Example using the illustrative weighted template: teaching delivery 80% earns
+48/60, resources count 4 earns 20/40; teaching contribution = 68/100 x 40 = 27.2.
+Research outputs count 4 earns 20/60 plus projects direct 20/40 => 12 weighted.
+Development 15 of 30 hours => 7.5 weighted. Service direct 60/100 => 9 weighted.
+Total = 55.7/100, assuming the required evidence references are supplied.
+At full caps the same template gives 100/100 weighted or 400/400 raw points.
+
+DATA AND AUTHORIZATION SAFETY
+Tenant, entity, current HR role and delegated object scopes are checked on the
+server. The browser cannot supply a trusted total, actor or tenant. Creation
+and calculation saves use idempotency keys. Draft updates/publication use
+If-Match revision checks. Published definitions and calculation snapshots are
+immutable; changes create a new policy version. Audit events are append-only.
+Existing appraisal list reads no longer recalculate or overwrite saved scores.
+Legacy fallback insertions cannot overwrite a concurrently reviewed appraisal.
+
+BOUNDARY: This framework saves CHECKED_CALCULATION_NOT_FINAL_APPRAISAL records.
+It does not replace the faculty/HoD/HR final appraisal workflow, grant promotion
+eligibility or change payroll. Existing legacy assessments remain separate.
+
+SCHEMA / DEPLOYMENT GATES — NOT EXECUTED IN PRODUCTION
+Expand-only migration:
+backend/migrations/20261023150000_hr_designation_api_policies.sql
+Creates policy versions, current designation/year assignments, audit events and
+calculation snapshots. Does not seed active policies or modify staff data.
+Before future deployment: review the exact migration hash/manifest, take normal
+backups, apply through the approved migration procedure, and verify runtime DB
+permissions. Runtime needs scoped SELECT/INSERT, draft-policy UPDATE and
+assignment UPDATE plus event-sequence USAGE; it must not have unrestricted
+DDL/TRUNCATE/trigger-disabling privileges. Do not run all historical migrations
+blindly. Verify the real schema and staff designation mappings in staging.
+
+LOCAL VALIDATION
+- Backend: 2,243 passed, 9 existing/skipped tests, 0 failures (244 test files).
+- Frontend: 958 passed, 0 failures (includes policy editor interaction tests).
+- Both TypeScript no-emit checks passed; changed frontend ESLint passed.
+- New PostgreSQL persistence tests applied the migration inside an isolated
+  synthetic schema and rolled back. No live database was used.
+- Tests include caps/formulas, raw/weighted modes, missing evidence/zero values,
+  invalid inputs, immutable publication/history, revisions, duplicate retries,
+  current access revocation, organization/designation scope and legacy safety.
+- Full frontend production build and live browser acceptance are NOT completed:
+  Mac disk has only about 200 MB free. No deployment should be inferred from
+  passing unit/integration tests or typechecks.
+
+NEXT AUTHORIZED RELEASE CHECKS
+Review the real institution-approved scoring sheet with HR, verify designation
+coverage and local browser behavior, complete a clean production build with
+adequate disk space (or an explicitly authorized external builder), then follow
+the normal reviewed migration/image release process only after user approval.
