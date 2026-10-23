@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   Logger,
@@ -272,6 +273,38 @@ export class AssignmentsService {
       tenantId,
     );
     return { ...saved, notified_count };
+  }
+
+  async deleteFacultyAssignment(
+    facultyUserId: string,
+    tenantId: string,
+    assignmentId: string,
+  ) {
+    const assignment = await this.assignments.findOne({
+      where: { tenant_id: tenantId, assignment_id: assignmentId },
+    });
+    if (!assignment) throw new NotFoundException('Assignment not found');
+    // Publishing faculty alone may withdraw an unsubmitted assignment. A
+    // co-teacher or HOD can manage dates, but cannot erase another author’s work.
+    if (assignment.faculty_user_id !== facultyUserId) {
+      throw new NotFoundException('Assignment not found');
+    }
+    const submissionCount = await this.submissions.count({
+      where: { tenant_id: tenantId, assignment_id: assignmentId },
+    });
+    if (submissionCount > 0) {
+      throw new ConflictException(
+        'This assignment has student submissions and cannot be deleted; keep it for grading and audit',
+      );
+    }
+    // Keep the academic and notification record for audit while removing the
+    // assignment from faculty/student lists and blocking new submissions.
+    const result = await this.assignments.softDelete({
+      tenant_id: tenantId,
+      assignment_id: assignmentId,
+    });
+    if (!result.affected) throw new NotFoundException('Assignment not found');
+    return { deleted: true, assignment_id: assignmentId };
   }
 
   /** Future-dated assignments: notify once start_date is reached. */

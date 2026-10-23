@@ -7,13 +7,14 @@ export type LmsModule = {
   title: string;
   description?: string | null;
   status: string;
-  materials: { material_id: string; title: string; material_type: string; uploaded_at?: string }[];
+  materials: LmsMaterial[];
 };
 
 export type LmsMaterial = {
   material_id: string;
   title: string;
   material_type: string;
+  external_url?: string | null;
   uploaded_at?: string;
   published_sections?: string[];
 };
@@ -73,6 +74,7 @@ export type StudentWorkspace = {
 
 export type FacultyAssignment = {
   assignment_id: string;
+  faculty_user_id?: string;
   title: string;
   max_marks: number;
   start_date: string;
@@ -118,9 +120,57 @@ export async function downloadWithAuth(path: string, token: string, filename: st
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = filename.endsWith('.pdf') ? filename : `${filename}.pdf`;
+  a.download = resolveDownloadFilename(
+    filename,
+    res.headers.get('Content-Disposition'),
+    res.headers.get('Content-Type') || blob.type,
+  );
   a.click();
   URL.revokeObjectURL(url);
+}
+
+const DOWNLOAD_EXTENSIONS: Record<string, string> = {
+  'application/pdf': '.pdf',
+  'application/msword': '.doc',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '.docx',
+  'application/vnd.ms-powerpoint': '.ppt',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation': '.pptx',
+  'application/vnd.ms-excel': '.xls',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': '.xlsx',
+  'text/csv': '.csv',
+  'text/plain': '.txt',
+  'image/png': '.png',
+  'image/jpeg': '.jpg',
+  'image/webp': '.webp',
+  'application/zip': '.zip',
+};
+
+export function resolveDownloadFilename(
+  title: string,
+  contentDisposition: string | null,
+  contentType: string | null,
+): string {
+  const encoded = contentDisposition?.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+  let serverName: string | undefined;
+  if (encoded) {
+    try {
+      serverName = decodeURIComponent(encoded);
+    } catch {
+      // A malformed header must not prevent the download.
+    }
+  }
+  serverName ||= contentDisposition?.match(/filename="?([^";]+)"?/i)?.[1];
+  if (serverName) {
+    return serverName.replace(/[\\/\x00-\x1f\x7f]/g, '_');
+  }
+
+  const safeTitle = title.replace(/[\\/\x00-\x1f\x7f]/g, '_').trim() || 'download';
+  const extension = DOWNLOAD_EXTENSIONS[(contentType || '').split(';')[0].toLowerCase()];
+  if (!extension) return safeTitle;
+  const stem = safeTitle
+    .replace(/\.(pdf|docx?|pptx?|xlsx?|csv|txt|png|jpe?g|webp|zip)$/i, '')
+    .trim() || 'download';
+  return `${stem}${extension}`;
 }
 
 export async function getBlobUrlWithAuth(path: string, token: string) {

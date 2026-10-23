@@ -13,7 +13,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from 'fs';
-import { basename, resolve } from 'path';
+import { resolve } from 'path';
 import { extname, join } from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { DataSource, In, Repository } from 'typeorm';
@@ -28,6 +28,8 @@ import { User } from '../../entities/user.entity';
 import { ObjectStorageService } from '../../storage/object-storage.service';
 import { AssignmentsService } from './assignments.service';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
+import { materialDownloadMetadata } from './material-download';
+import { normalizeYouTubeMaterialUrl } from './youtube-material';
 
 @Injectable()
 export class CourseLmsService {
@@ -395,49 +397,107 @@ export class CourseLmsService {
     const course = await this.getCourseOrFail(mod.course_id, tenantId);
     const materialType = (dto.material_type ?? 'NOTES').toUpperCase();
     const allocationIds = this.parseAllocationIds(dto.allocation_ids);
-    const materials = await Promise.all(
-      files.map(async (file) => {
-        const stored = await this.persistFile(tenantId, file);
-        const material = await this.materials.save(
-          this.materials.create({
+    // Validate section scope before writing any file or material row. A rejected
+    // publish must not leave a material behind that looks successfully uploaded.
+    const validIds = await this.resolveMaterialAllocationIds(
+      allocationIds, facultyUserId, tenantId, mod.course_id, true,
+    );
+    const storedFiles: Array<{ filePath: string; fileKey: string | null }> = [];
+    let materials: CourseMaterial[];
+    try {
+      for (const file of files) storedFiles.push(await this.persistFile(tenantId, file));
+      // All material and visibility rows commit together. A section mapping
+      // failure can no longer leave a visible file paired with an HTTP 500.
+      materials = await this.dataSource.transaction(async (manager) => {
+        const saved: CourseMaterial[] = [];
+        for (let index = 0; index < files.length; index += 1) {
+          const file = files[index];
+          const stored = storedFiles[index];
+          const material = await manager.save(CourseMaterial, this.materials.create({
             tenant_id: tenantId,
             course_id: mod.course_id,
             faculty_user_id: facultyUserId,
             module_id: mod.module_id,
-            title:
-              files.length === 1 && dto.title?.trim()
-                ? dto.title.trim()
-                : file.originalname.replace(/\.[^.]+$/, ''),
+            title: files.length === 1 && dto.title?.trim()
+              ? dto.title.trim()
+              : file.originalname.replace(/\.[^.]+$/, ''),
             file_path: stored.filePath,
             file_key: stored.fileKey,
             material_type: materialType,
-          }),
-        );
-        await this.attachMaterialVisibility(
-          material.material_id,
-          allocationIds,
-          facultyUserId,
-          tenantId,
-          mod.course_id,
-        );
-        return material;
-      }),
-    );
+          }));
+          if (validIds.length) {
+            await manager.query(
+              `INSERT INTO course_material_visibility (material_id, allocation_id)
+               SELECT $1::uuid, unnest($2::uuid[])`,
+              [material.material_id, validIds],
+            );
+          }
+          saved.push(material);
+        }
+        return saved;
+      });
 
-    await Promise.all(
-      materials.map((material) =>
-        this.notifyStudentsForMaterialBestEffort(
-          tenantId,
-          mod.course_id,
-          course.course_name,
-          material.title,
-          material.material_id,
-          allocationIds,
-        ).catch(() => undefined),
+    } catch (error) {
+      for (const stored of storedFiles) {
+        await this.removeStoredFile({
+          file_path: stored.filePath,
+          file_key: stored.fileKey,
+        } as CourseMaterial).catch(() => undefined);
+      }
+      throw error;
+    }
+    await Promise.all(materials.map((material) =>
+      this.notifyStudentsForMaterialBestEffort(
+        tenantId, mod.course_id, course.course_name,
+        material.title, material.material_id, validIds,
       ),
-    );
-
+    ));
     return { module: mod, materials };
+  }
+
+  async addYouTubeMaterial(
+    facultyUserId: string,
+    tenantId: string,
+    moduleId: string,
+    dto: { title?: string; url?: string; allocation_ids?: string | string[] },
+  ) {
+    const mod = await this.getModuleForFaculty(moduleId, facultyUserId, tenantId);
+    const title = dto.title?.trim();
+    if (!title || title.length > 255) {
+      throw new BadRequestException('Video title is required (maximum 255 characters)');
+    }
+    const externalUrl = normalizeYouTubeMaterialUrl(dto.url ?? '');
+    const allocationIds = this.parseAllocationIds(dto.allocation_ids);
+    const validIds = await this.resolveMaterialAllocationIds(
+      allocationIds, facultyUserId, tenantId, mod.course_id, true,
+    );
+    const course = await this.getCourseOrFail(mod.course_id, tenantId);
+    const material = await this.dataSource.transaction(async (manager) => {
+      const saved = await manager.save(CourseMaterial, this.materials.create({
+        tenant_id: tenantId,
+        course_id: mod.course_id,
+        faculty_user_id: facultyUserId,
+        module_id: mod.module_id,
+        title,
+        file_path: '',
+        file_key: null,
+        external_url: externalUrl,
+        material_type: 'YOUTUBE',
+      }));
+      if (validIds.length) {
+        await manager.query(
+          `INSERT INTO course_material_visibility (material_id, allocation_id)
+           SELECT $1::uuid, unnest($2::uuid[])`,
+          [saved.material_id, validIds],
+        );
+      }
+      return saved;
+    });
+    await this.notifyStudentsForMaterialBestEffort(
+      tenantId, mod.course_id, course.course_name,
+      material.title, material.material_id, validIds,
+    );
+    return { module: mod, material };
   }
 
   async uploadCourseSyllabus(
@@ -610,14 +670,17 @@ export class CourseLmsService {
   }
 
   async streamMaterialDownload(material: CourseMaterial) {
+    if (material.external_url || !material.file_path) {
+      throw new BadRequestException('This material is an external link, not a downloadable file');
+    }
+    const metadata = materialDownloadMetadata(material);
     if (material.file_key && this.objectStorage.isEnabled()) {
       const stream = await this.objectStorage.getDownloadStream(
         material.file_key,
       );
       return {
         stream,
-        filename: basename(material.file_key),
-        mimeType: 'application/pdf',
+        ...metadata,
       };
     }
     const uploadRoot = resolve(process.env.UPLOAD_PATH || './uploads');
@@ -631,8 +694,7 @@ export class CourseLmsService {
       throw new NotFoundException('File not found on server');
     return {
       stream: createReadStream(resolved),
-      filename: basename(resolved),
-      mimeType: 'application/pdf',
+      ...metadata,
     };
   }
 
@@ -666,6 +728,7 @@ export class CourseLmsService {
       material_id: m.material_id,
       title: m.title,
       material_type: m.material_type,
+      external_url: m.external_url ?? null,
       uploaded_at: m.uploaded_at,
       published_sections: visibilityByMaterial?.get(m.material_id) ?? [],
     }));
@@ -795,23 +858,29 @@ export class CourseLmsService {
 
   private parseAllocationIds(raw?: string | string[]): string[] {
     if (!raw) return [];
-    if (Array.isArray(raw)) return raw.filter(Boolean);
-    const trimmed = raw.trim();
-    if (!trimmed) return [];
-    if (trimmed.startsWith('[')) {
+    let values: string[];
+    if (Array.isArray(raw)) {
+      values = raw;
+    } else if (!raw.trim()) {
+      return [];
+    } else if (raw.trim().startsWith('[')) {
       try {
-        const parsed = JSON.parse(trimmed) as unknown;
-        return Array.isArray(parsed)
-          ? parsed.filter((v): v is string => typeof v === 'string' && !!v)
-          : [];
+        const parsed = JSON.parse(raw) as unknown;
+        if (!Array.isArray(parsed) || !parsed.every((v) => typeof v === 'string')) {
+          throw new Error('Invalid section list');
+        }
+        values = parsed;
       } catch {
-        return [];
+        throw new BadRequestException('Invalid teaching section selection');
       }
+    } else {
+      values = raw.split(',');
     }
-    return trimmed
-      .split(',')
-      .map((v) => v.trim())
-      .filter(Boolean);
+    const ids = values.map((v) => v.trim()).filter(Boolean);
+    if (ids.some((id) => !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id))) {
+      throw new BadRequestException('Invalid teaching section ID');
+    }
+    return [...new Set(ids)];
   }
 
   private formatAllocationLabel(
@@ -856,14 +925,26 @@ export class CourseLmsService {
     return (value ?? '').replace(/\s+/g, '').toUpperCase();
   }
 
-  private async attachMaterialVisibility(
-    materialId: string,
+  private async resolveMaterialAllocationIds(
     allocationIds: string[],
     facultyUserId: string,
     tenantId: string,
     courseId: string,
-  ) {
-    if (!allocationIds.length) return;
+    requireSelection = false,
+  ): Promise<string[]> {
+    if (!allocationIds.length) {
+      if (requireSelection) {
+        const available = await this.dataSource.query<Array<{ allocation_id: string }>>(
+          `SELECT allocation_id FROM academic_course_allocations
+           WHERE tenant_id = $1 AND course_id = $2 AND status = 'ACTIVE' LIMIT 1`,
+          [tenantId, courseId],
+        );
+        if (available.length) {
+          throw new BadRequestException('Select at least one teaching section for this material');
+        }
+      }
+      return [];
+    }
 
     const hodDepartmentIds = await this.resolveHodDepartmentIds(facultyUserId);
     const validIds = await this.dataSource.query<Array<{ allocation_id: string }>>(
@@ -873,35 +954,41 @@ export class CourseLmsService {
        WHERE a.tenant_id = $1
          AND a.course_id = $2
          AND a.allocation_id = ANY($3::uuid[])
+         AND a.status = 'ACTIVE'
          AND (
            a.faculty_user_id = $4
            OR assigned.dept_id = ANY($5::int[])
          )`,
       [tenantId, courseId, allocationIds, facultyUserId, hodDepartmentIds],
     );
-    const valid = validIds.length
-      ? await this.allocations.find({
-          where: {
-            tenant_id: tenantId,
-            course_id: courseId,
-            allocation_id: In(validIds.map((row) => row.allocation_id)),
-          },
-        })
-      : [];
-
-    if (!valid.length) {
+    const valid = validIds.map((row) => row.allocation_id);
+    if (valid.length !== new Set(allocationIds).size) {
       throw new BadRequestException(
-        'No valid teaching sections selected for publish',
+        'One or more teaching sections are not available for publish',
       );
     }
+    return valid;
+  }
 
-    await this.materialVisibility.save(
-      valid.map((row) =>
-        this.materialVisibility.create({
-          material_id: materialId,
-          allocation_id: row.allocation_id,
-        }),
-      ),
+  private async attachMaterialVisibility(
+    materialId: string,
+    allocationIds: string[],
+    facultyUserId: string,
+    tenantId: string,
+    courseId: string,
+  ) {
+    const valid = await this.resolveMaterialAllocationIds(
+      allocationIds, facultyUserId, tenantId, courseId,
+    );
+    if (!valid.length) return;
+    // CourseAllocation's inherited deleted_at is absent on older databases.
+    // Insert validated IDs directly instead of loading that entity, which
+    // previously failed after the material had already been saved (HTTP 500).
+    await this.dataSource.query(
+      `INSERT INTO course_material_visibility (material_id, allocation_id)
+       SELECT $1::uuid, unnest($2::uuid[])
+       ON CONFLICT (material_id, allocation_id) DO NOTHING`,
+      [materialId, valid],
     );
   }
 
@@ -966,9 +1053,13 @@ export class CourseLmsService {
       ...new Set(visibilityRows.map((row) => row.allocation_id)),
     ];
     const allocationRows = allocationIds.length
-      ? await this.allocations.find({
-          where: { allocation_id: In(allocationIds) },
-        })
+      ? await this.dataSource.query<Array<Pick<CourseAllocation, 'allocation_id' | 'semester' | 'program_name'>>>(
+          `SELECT allocation_id, semester, program_name
+           FROM academic_course_allocations
+           WHERE tenant_id = $1 AND course_id = $2
+             AND allocation_id = ANY($3::uuid[])`,
+          [tenantId, courseId, allocationIds],
+        )
       : [];
 
     const allocationMap = new Map(
@@ -1008,7 +1099,7 @@ export class CourseLmsService {
 
   private enrollmentMatchesAllocation(
     enrollment: StudentCourseEnrollment,
-    allocation: CourseAllocation,
+    allocation: Pick<CourseAllocation, 'semester' | 'program_name'>,
     studentProgram: string,
   ) {
     const { semesterNum, sectionCode } = this.parseAllocationSemester(
@@ -1126,6 +1217,7 @@ export class CourseLmsService {
   }
 
   private async removeStoredFile(material: CourseMaterial) {
+    if (!material.file_path) return;
     if (material.file_key && this.objectStorage.isEnabled()) {
       return;
     }

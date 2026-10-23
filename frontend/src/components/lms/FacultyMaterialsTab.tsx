@@ -1,7 +1,7 @@
 'use client';
 
 import { DragEvent, FormEvent, useState } from 'react';
-import { BookOpen, FileText, Plus, Trash2, Upload, X } from 'lucide-react';
+import { BookOpen, ExternalLink, FileText, Plus, Trash2, Upload, X } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { cn } from '@/lib/utils';
 import { FacultyPanel, FacultyEmptyState } from '@/components/faculty';
@@ -51,7 +51,7 @@ function MaterialRow({
 }) {
   return (
     <li className="flex items-center gap-2 rounded-lg border border-border/50 bg-muted/20 px-3 py-2 text-sm">
-      <FileText className="h-4 w-4 shrink-0 text-sgvu-gold" />
+      {material.material_type === 'YOUTUBE' ? <ExternalLink className="h-4 w-4 shrink-0 text-sgvu-gold" /> : <FileText className="h-4 w-4 shrink-0 text-sgvu-gold" />}
       <span className="min-w-0 flex-1 truncate font-medium text-sgvu-navy">{material.title}</span>
       {material.published_sections && material.published_sections.length > 0 ? (
         <Badge
@@ -88,6 +88,8 @@ export function FacultyMaterialsTab({ courseId, workspace, onRefresh }: Props) {
   const [addingModule, setAddingModule] = useState(false);
   const [uploadModuleId, setUploadModuleId] = useState<string | null>(null);
   const [uploadTitle, setUploadTitle] = useState('');
+  const [uploadMode, setUploadMode] = useState<'file' | 'youtube'>('file');
+  const [youtubeUrl, setYoutubeUrl] = useState('');
   const [uploadFiles, setUploadFiles] = useState<File[]>([]);
   const [syllabusFile, setSyllabusFile] = useState<File | null>(null);
   const [syllabusUploading, setSyllabusUploading] = useState(false);
@@ -97,21 +99,28 @@ export function FacultyMaterialsTab({ courseId, workspace, onRefresh }: Props) {
   const [publishTargets, setPublishTargets] = useState<MaterialPublishTargetsResponse | null>(null);
   const [selectedAllocations, setSelectedAllocations] = useState<string[]>([]);
   const [loadingTargets, setLoadingTargets] = useState(false);
+  const [targetsError, setTargetsError] = useState(false);
 
   function closeUploadModal() {
     setUploadModuleId(null);
     setUploadFiles([]);
     setUploadTitle('');
+    setYoutubeUrl('');
+    setUploadMode('file');
     setPublishTargets(null);
     setSelectedAllocations([]);
+    setTargetsError(false);
   }
 
   async function openUploadModal(moduleId: string) {
     setUploadModuleId(moduleId);
     setUploadFiles([]);
     setUploadTitle('');
+    setYoutubeUrl('');
+    setUploadMode('file');
     setPublishTargets(null);
     setSelectedAllocations([]);
+    setTargetsError(false);
     setLoadingTargets(true);
     try {
       const data = await api.get<MaterialPublishTargetsResponse>(
@@ -121,6 +130,8 @@ export function FacultyMaterialsTab({ courseId, workspace, onRefresh }: Props) {
       setSelectedAllocations(data.targets.map((target) => target.allocation_id));
     } catch {
       setPublishTargets(null);
+      setTargetsError(true);
+      toast.error('Could not load teaching sections. Try reopening the material form.');
     } finally {
       setLoadingTargets(false);
     }
@@ -172,27 +183,34 @@ export function FacultyMaterialsTab({ courseId, workspace, onRefresh }: Props) {
 
   async function submitMaterial(e: FormEvent) {
     e.preventDefault();
-    if (!uploadModuleId || uploadFiles.length === 0 || !token) return;
+    if (!uploadModuleId || !token) return;
+    if (uploadMode === 'file' && uploadFiles.length === 0) return;
+    if (uploadMode === 'youtube' && (!uploadTitle.trim() || !youtubeUrl.trim())) return;
     if (isFacultyDemoSmokeId(uploadModuleId) || isFacultyDemoEntityId(courseId)) {
-      toast.success(`${uploadFiles.length} material${uploadFiles.length === 1 ? '' : 's'} uploaded (demo)`);
+      toast.success(uploadMode === 'youtube' ? 'Video link added (demo)' : `${uploadFiles.length} material${uploadFiles.length === 1 ? '' : 's'} uploaded (demo)`);
       closeUploadModal();
       return;
     }
-    const form = new FormData();
-    uploadFiles.forEach((file) => form.append('files', file));
-    if (uploadTitle.trim() && uploadFiles.length === 1) {
-      form.append('title', uploadTitle.trim());
-    }
-    form.append('material_type', 'NOTES');
-    if (publishTargets?.cross_section_available && selectedAllocations.length > 0) {
-      form.append('allocation_ids', JSON.stringify(selectedAllocations));
-    }
     setUploading(true);
     try {
-      await postMultipart(`/api/academics/faculty/courses/modules/${uploadModuleId}/materials`, token, form);
-      toast.success(
-        `${uploadFiles.length} material${uploadFiles.length === 1 ? '' : 's'} uploaded — students notified`,
-      );
+      if (uploadMode === 'youtube') {
+        await api.post(`/api/academics/faculty/courses/modules/${uploadModuleId}/materials/link`, {
+          title: uploadTitle.trim(),
+          url: youtubeUrl.trim(),
+          allocation_ids: selectedAllocations,
+        });
+        toast.success('YouTube link added');
+      } else {
+        const form = new FormData();
+        uploadFiles.forEach((file) => form.append('files', file));
+        if (uploadTitle.trim() && uploadFiles.length === 1) form.append('title', uploadTitle.trim());
+        form.append('material_type', 'NOTES');
+        if (selectedAllocations.length > 0) {
+          form.append('allocation_ids', JSON.stringify(selectedAllocations));
+        }
+        await postMultipart(`/api/academics/faculty/courses/modules/${uploadModuleId}/materials`, token, form);
+        toast.success(`${uploadFiles.length} material${uploadFiles.length === 1 ? '' : 's'} uploaded`);
+      }
       closeUploadModal();
       onRefresh();
     } catch (err) {
@@ -203,7 +221,7 @@ export function FacultyMaterialsTab({ courseId, workspace, onRefresh }: Props) {
   }
 
   async function deleteMaterial(materialId: string) {
-    if (!confirm('Delete this file? Students will no longer be able to download it.')) return;
+    if (!confirm('Delete this material? Students will no longer be able to access it.')) return;
     if (isFacultyDemoSmokeId(materialId)) {
       toast.success('Material deleted (demo)');
       return;
@@ -408,10 +426,10 @@ export function FacultyMaterialsTab({ courseId, workspace, onRefresh }: Props) {
 
       {uploadModuleId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-md overflow-hidden rounded-xl border border-border/60 bg-card shadow-xl">
+          <div className="flex max-h-[calc(100dvh-2rem)] w-full max-w-md flex-col overflow-hidden rounded-xl border border-border/60 bg-card shadow-xl">
             <div className="flex items-center justify-between border-b border-border/50 bg-muted/30 px-5 py-4">
               <div>
-                <p className="text-sm font-bold text-sgvu-navy">Upload notes</p>
+                <p className="text-sm font-bold text-sgvu-navy">Add course material</p>
                 {uploadModule ? (
                   <p className="text-xs text-muted-foreground">
                     Unit {uploadModule.module_number}: {uploadModule.title}
@@ -427,7 +445,11 @@ export function FacultyMaterialsTab({ courseId, workspace, onRefresh }: Props) {
                 <X className="h-4 w-4" />
               </button>
             </div>
-            <form onSubmit={submitMaterial} className="space-y-4 p-5">
+            <form onSubmit={submitMaterial} className="min-h-0 space-y-4 overflow-y-auto p-5">
+              <div className="flex gap-2" role="group" aria-label="Material type">
+                <Button type="button" variant={uploadMode === 'file' ? 'default' : 'outline'} onClick={() => setUploadMode('file')}>Upload file</Button>
+                <Button type="button" variant={uploadMode === 'youtube' ? 'default' : 'outline'} onClick={() => setUploadMode('youtube')}>YouTube link</Button>
+              </div>
               <div className="space-y-1.5">
                 <label className="text-xs font-medium text-muted-foreground">Title</label>
                 <Input
@@ -435,10 +457,15 @@ export function FacultyMaterialsTab({ courseId, workspace, onRefresh }: Props) {
                   value={uploadTitle}
                   onChange={(e) => setUploadTitle(e.target.value)}
                 />
-                <p className="text-xs text-muted-foreground">
-                  Used only for a single file. Multiple files keep their filenames as titles.
-                </p>
+                <p className="text-xs text-muted-foreground">{uploadMode === 'file' ? 'Used only for a single file. Multiple files keep their filenames as titles.' : 'Give the video a title students will recognize.'}</p>
               </div>
+              {uploadMode === 'youtube' ? (
+                <div className="space-y-1.5">
+                  <label htmlFor="youtube-material-url" className="text-xs font-medium text-muted-foreground">YouTube video URL</label>
+                  <Input id="youtube-material-url" type="url" placeholder="https://www.youtube.com/watch?v=..." value={youtubeUrl} onChange={(e) => setYoutubeUrl(e.target.value)} required />
+                  <p className="text-xs text-muted-foreground">Only direct YouTube video links are accepted.</p>
+                </div>
+              ) : (
               <div className="space-y-1.5">
                 <label className="text-xs font-medium text-muted-foreground">Files</label>
                 <div
@@ -478,6 +505,7 @@ export function FacultyMaterialsTab({ courseId, workspace, onRefresh }: Props) {
                   PDF, PPT, or Word doc · Max 10MB · Notifies enrolled students
                 </p>
               </div>
+              )}
               {publishTargets?.cross_section_available ? (
                 <div className="space-y-2 rounded-xl border border-sgvu-gold/30 bg-sgvu-gold/5 p-3">
                   <p className="text-xs font-semibold text-sgvu-navy">
@@ -524,14 +552,14 @@ export function FacultyMaterialsTab({ courseId, workspace, onRefresh }: Props) {
                 <Button
                   type="submit"
                   disabled={
-                    uploadFiles.length === 0 ||
-                    uploading ||
+                    (uploadMode === 'file' ? uploadFiles.length === 0 : !uploadTitle.trim() || !youtubeUrl.trim()) ||
+                    uploading || loadingTargets || targetsError ||
                     (publishTargets?.cross_section_available === true && selectedAllocations.length === 0)
                   }
                   className="gap-1.5"
                 >
                   <Upload className="h-4 w-4" />
-                  {uploading ? 'Uploading…' : `Upload ${uploadFiles.length || ''}`}
+                  {uploading ? 'Saving…' : uploadMode === 'youtube' ? 'Add video' : `Upload ${uploadFiles.length || ''}`}
                 </Button>
                 <Button type="button" variant="outline" onClick={closeUploadModal}>
                   Cancel
