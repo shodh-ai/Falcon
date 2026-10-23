@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuthedApi } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
@@ -108,6 +108,7 @@ export default function StaffProfileVerificationsPage() {
   const [busy, setBusy] = useState(false);
   const [previewDoc, setPreviewDoc] = useState("");
   const [correctionPrepared, setCorrectionPrepared] = useState(false);
+  const decisionInFlight = useRef(false);
   const load = useCallback(() => api.get<Row[]>("/api/hr/staff-profile-reviews")
     .then((data) => { setRows(data); setError(""); })
     .catch((cause) => setError(cause instanceof Error ? cause.message : "Could not load staff profiles. Please retry."))
@@ -160,10 +161,40 @@ export default function StaffProfileVerificationsPage() {
       setBusy(false);
     }
   };
-  const decide = async (action: "approve" | "return" | "verify-documents") => {
-    if (!selected) return;
+  const reviewChanged = (before: Detail, after: Detail) =>
+    before.review.revision !== after.review.revision ||
+    before.review.status !== after.review.status ||
+    before.review.recovery_required !== after.review.recovery_required ||
+    before.review.document_review_status !== after.review.document_review_status;
+  const replaceChangedReview = (detail: Detail) => {
+    setSelected(detail);
+    setReviewedFields([]); setReviewedDocs([]); setFields([]); setDocuments([]);
+    setCorrectionPrepared(false);
+    setError("This review has changed. The latest profile is now shown and the old selections have been cleared. Check its current status before making a decision. Your correction note is retained.");
+  };
+  const refreshReview = async () => {
+    if (!selected || busy) return;
     setBusy(true);
     try {
+      const detail = await api.get<Detail>(`/api/hr/staff-profile-reviews/${selected.review.review_id}`);
+      if (reviewChanged(selected, detail)) replaceChangedReview(detail);
+      else { setSelected(detail); setError(""); }
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not refresh this review. Your selections are retained.");
+    } finally { setBusy(false); }
+  };
+  const decide = async (action: "approve" | "return" | "verify-documents") => {
+    if (!selected || decisionInFlight.current) return;
+    decisionInFlight.current = true;
+    setBusy(true);
+    try {
+      // Do not submit a decision from a modal opened before a faculty update,
+      // another HR decision or an operational recovery transition.
+      const latest = await api.get<Detail>(`/api/hr/staff-profile-reviews/${selected.review.review_id}`);
+      if (reviewChanged(selected, latest)) {
+        replaceChangedReview(latest);
+        return;
+      }
       const result = await api.post<{ status?: string; email_status?: string }>(
         `/api/hr/staff-profile-reviews/${selected.review.review_id}/${action}`,
         action === "return"
@@ -202,6 +233,7 @@ export default function StaffProfileVerificationsPage() {
           : "Could not save this decision. Please retry.",
       );
     } finally {
+      decisionInFlight.current = false;
       setBusy(false);
     }
   };
@@ -225,7 +257,7 @@ export default function StaffProfileVerificationsPage() {
   const recoveryReview = reviewing && selected?.review.recovery_required && !correcting;
   const inspectingDocs = documentReview || recoveryReview;
   const changeMode = (mode: "CHECK" | "CORRECT") => {
-    if (mode === reviewMode) return;
+    if (busy || mode === reviewMode) return;
     if (mode === "CORRECT" && !correctionPrepared) {
       // Only infer gaps after HR actually started a checklist. Untouched
       // profiles must never turn into a request to correct every field.
@@ -406,6 +438,10 @@ export default function StaffProfileVerificationsPage() {
               <Badge variant="outline" className="w-fit">
                 {STATUS[selected.review.status] ?? selected.review.status}
               </Badge>
+              <Button size="sm" variant="outline" disabled={busy} onClick={() => void refreshReview()}>Refresh this review</Button>
+              {selected.review.status === "RETURNED_FOR_CORRECTION" && (
+                <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm">Waiting for the faculty member to complete and resubmit the form. HR approval becomes available after resubmission.</p>
+              )}
               {reviewing && (
                 <div className="space-y-3 rounded-lg border bg-blue-50 p-3 text-sm">
                   <p>{selected.review.recovery_required ? "Recovery submission: inspect the saved details and all four documents before approval. Documents cannot be deferred for this recovery review." : "Profile details and documents are separate decisions. Approving details restores account access; documents stay pending and are not marked verified."}</p>
@@ -413,6 +449,7 @@ export default function StaffProfileVerificationsPage() {
                     <Button disabled={busy} size="sm" variant={reviewMode === "CHECK" ? "default" : "outline"} aria-pressed={reviewMode === "CHECK"} onClick={() => changeMode("CHECK")}>Review for approval</Button>
                     <Button disabled={busy} size="sm" variant={reviewMode === "CORRECT" ? "default" : "outline"} aria-pressed={reviewMode === "CORRECT"} onClick={() => changeMode("CORRECT")}>Request corrections</Button>
                   </div>
+                  <p className="text-xs text-muted-foreground">These buttons choose the review mode; they do not submit a decision. Complete the checks or correction note, then use the final action at the bottom.</p>
                   {correcting && <p role="status">Correction draft — not sent yet. Unchecked checklist items were carried over where a review had started. Confirm the targets, write a correction note, then click Send correction request &amp; email below.</p>}
                 </div>
               )}
@@ -446,8 +483,8 @@ export default function StaffProfileVerificationsPage() {
                     </p>
                   )}
                   {reviewing && <div className="flex flex-wrap gap-2">
-                    <Button size="sm" variant="outline" onClick={() => correcting ? setFields(Object.keys(FIELDS)) : setReviewedFields(Object.keys(FIELDS))}>{correcting ? "Select all correction fields" : "Select all details"}</Button>
-                    <Button size="sm" variant="outline" onClick={() => correcting ? setFields([]) : setReviewedFields([])}>Clear all details</Button>
+                    <Button size="sm" disabled={busy} variant="outline" onClick={() => correcting ? setFields(Object.keys(FIELDS)) : setReviewedFields(Object.keys(FIELDS))}>{correcting ? "Select all correction fields" : "Select all details"}</Button>
+                    <Button size="sm" disabled={busy} variant="outline" onClick={() => correcting ? setFields([]) : setReviewedFields([])}>Clear all details</Button>
                   </div>}
                   <dl className="grid gap-2 sm:grid-cols-2">
                     {Object.entries(FIELDS).map(([key, title]) => (
@@ -458,6 +495,7 @@ export default function StaffProfileVerificationsPage() {
                               className="mr-2"
                               aria-label={`${correcting ? "Request correction" : "Reviewed and correct"}: ${title}`}
                               type="checkbox"
+                              disabled={busy}
                               checked={(correcting ? fields : reviewedFields).includes(key)}
                               onChange={() => correcting ? toggle(fields, setFields, key) : toggle(reviewedFields, setReviewedFields, key)}
                             />
@@ -475,8 +513,8 @@ export default function StaffProfileVerificationsPage() {
                   <h2 className="pt-2 font-semibold">Documents</h2>
                   {reviewing && !correcting && !recoveryReview && <p className="text-xs text-amber-800">No document checkboxes are required for details-only approval. These documents will remain pending.</p>}
                   {(correcting || inspectingDocs) && <div className="flex flex-wrap gap-2">
-                    <Button size="sm" variant="outline" onClick={() => inspectingDocs ? setReviewedDocs(Object.keys(DOCS)) : setDocuments(Object.keys(DOCS))}>{inspectingDocs ? "Select all inspected documents" : "Select all replacement requests"}</Button>
-                    <Button size="sm" variant="outline" onClick={() => inspectingDocs ? setReviewedDocs([]) : setDocuments([])}>Clear all documents</Button>
+                    <Button size="sm" disabled={busy} variant="outline" onClick={() => inspectingDocs ? setReviewedDocs(Object.keys(DOCS)) : setDocuments(Object.keys(DOCS))}>{inspectingDocs ? "Select all inspected documents" : "Select all replacement requests"}</Button>
+                    <Button size="sm" disabled={busy} variant="outline" onClick={() => inspectingDocs ? setReviewedDocs([]) : setDocuments([])}>Clear all documents</Button>
                   </div>}
                   {Object.entries(DOCS).map(([key, title]) => {
                     const doc = selected.documents.find(
@@ -493,6 +531,7 @@ export default function StaffProfileVerificationsPage() {
                               className="mr-2"
                               aria-label={`${inspectingDocs ? "Inspected document" : "Request replacement"}: ${title}`}
                               type="checkbox"
+                              disabled={busy}
                               checked={(inspectingDocs ? reviewedDocs : documents).includes(key)}
                               onChange={() =>
                                 inspectingDocs ? toggle(reviewedDocs, setReviewedDocs, key) : toggle(documents, setDocuments, key)
@@ -509,6 +548,7 @@ export default function StaffProfileVerificationsPage() {
                         {doc && (
                           <Button
                             size="sm"
+                            disabled={busy}
                             variant={previewDoc === key ? "default" : "outline"}
                             onClick={() => {
                               setPreviewDoc(key);
@@ -530,7 +570,7 @@ export default function StaffProfileVerificationsPage() {
                   </h2>
                   {previewDoc ? (
                     <StaffDocumentPreview
-                      key={`${selected.review.user_id}:${previewDoc}`}
+                      key={`${selected.review.user_id}:${selected.review.revision}:${previewDoc}:${selected.documents.find(doc => doc.doc_type === previewDoc)?.file_path ?? ""}`}
                       userId={selected.review.user_id}
                       docType={previewDoc}
                       title={DOCS[previewDoc] ?? "Submitted document"}
@@ -548,6 +588,7 @@ export default function StaffProfileVerificationsPage() {
                   <textarea
                     className="mt-2 block min-h-24 w-full rounded-lg border p-3 font-normal"
                     value={reason}
+                    disabled={busy}
                     onChange={(event) => setReason(event.target.value)}
                     placeholder="Explain what needs to be corrected. This note will be emailed to the faculty member."
                   />
@@ -557,13 +598,15 @@ export default function StaffProfileVerificationsPage() {
                   </span>
                 </label>
               )}
-              {reviewing && !correcting && <p className="text-sm text-muted-foreground">{reviewedFields.length} of {Object.keys(FIELDS).length} details checked. {recoveryReview ? `${reviewedDocs.length} of ${Object.keys(DOCS).length} documents inspected.` : "Documents will remain pending."}</p>}
+              <DialogFooter className="sticky -bottom-6 flex-col gap-3 border-t bg-background py-4 sm:flex-col sm:items-stretch">
+              {reviewing && !correcting && <p id="review-check-progress" aria-live="polite" className="text-sm text-muted-foreground">{reviewedFields.length} of {Object.keys(FIELDS).length} details checked. {recoveryReview ? `${reviewedDocs.length} of ${Object.keys(DOCS).length} documents inspected.` : "Documents will remain pending."} {reviewedFields.length !== Object.keys(FIELDS).length || Boolean(recoveryReview && reviewedDocs.length !== Object.keys(DOCS).length) ? "Complete these checks to enable approval." : "All checks selected. Use the approval button to submit your decision."}</p>}
+              {correcting && <p id="correction-check-progress" className="text-sm text-muted-foreground">Select at least one correction and enter a note to enable Request corrections &amp; email.</p>}
               {error && (
                 <p role="alert" className="text-sm text-red-700">
                   {error}
                 </p>
               )}
-              <DialogFooter className="sticky -bottom-6 border-t bg-background py-4 sm:justify-between">
+              <div className="flex flex-wrap justify-between gap-3">
                 <Button
                   variant="outline"
                   disabled={busy}
@@ -581,6 +624,7 @@ export default function StaffProfileVerificationsPage() {
                         !reason.trim() ||
                         (!fields.length && !documents.length)
                       }
+                      aria-describedby="correction-check-progress"
                       onClick={() => void decide("return")}
                     >
                       {busy ? "Sending correction request…" : "Send correction request & email"}
@@ -590,6 +634,7 @@ export default function StaffProfileVerificationsPage() {
                       disabled={
                         busy || reviewedFields.length !== Object.keys(FIELDS).length || Boolean(recoveryReview && reviewedDocs.length !== Object.keys(DOCS).length)
                       }
+                      aria-describedby="review-check-progress"
                       onClick={() => void decide("approve")}
                     >
                       {recoveryReview ? "Approve profile and documents" : "Approve details — documents pending"}
@@ -598,6 +643,7 @@ export default function StaffProfileVerificationsPage() {
                   </div>
                 )}
                 {documentReview && <Button disabled={busy || reviewedDocs.length !== Object.keys(DOCS).length} onClick={() => void decide("verify-documents")}>Verify inspected documents</Button>}
+              </div>
               </DialogFooter>
             </>
           )}
