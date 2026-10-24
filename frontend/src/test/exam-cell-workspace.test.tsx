@@ -1,42 +1,56 @@
 import { render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { ExamCellWorkspace } from '@/components/exam-cell/ExamCellWorkspace';
-import { examCellPortal } from '@/lib/navigation';
+import type { ReactNode } from 'react';
+import ExamCellLayout from '@/app/(portals)/exam-cell/layout';
 
-const route = vi.hoisted(() => ({ pathname: '/exam-cell/schedule' }));
-vi.mock('next/navigation', () => ({ usePathname: () => route.pathname }));
+const auth = vi.hoisted(() => ({
+  user: { role: 'ExamCell', primaryRole: 'ExamCell', roles: ['ExamCell'] },
+  isAuthenticated: true,
+  isLoading: false,
+}));
+const router = vi.hoisted(() => ({ replace: vi.fn() }));
+vi.mock('next/navigation', () => ({
+  usePathname: () => '/exam-cell/schedule',
+  useRouter: () => router,
+}));
+vi.mock('@/context/AuthContext', () => ({ useAuth: () => auth }));
+vi.mock('@/context/ModuleRuntimeContext', () => ({
+  useModuleRuntime: () => ({ manifest: null, loading: false }),
+}));
+vi.mock('@/lib/exam-cell/dev-context', () => ({
+  ExamCellDevProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
+}));
+vi.mock('@/components/exam-cell/ExamCellDevBanner', () => ({ ExamCellDevBanner: () => null }));
+vi.mock('@/components/layout/GenericPortalShell', () => ({
+  GenericPortalShell: ({ children, portal }: { children: ReactNode; portal: string }) => (
+    <main data-testid="portal-shell" data-portal={portal}>{children}</main>
+  ),
+}));
 
-describe('Examination Cell workspaces', () => {
-  beforeEach(() => {
-    route.pathname = '/exam-cell/schedule';
+beforeEach(() => {
+  auth.user = { role: 'ExamCell', primaryRole: 'ExamCell', roles: ['ExamCell'] };
+});
+
+describe('restored Examination Cell page organization', () => {
+  it('renders existing page content without injected section tabs', () => {
+    render(<ExamCellLayout><h1>Master Exam Schedule</h1><form aria-label="Existing schedule form" /></ExamCellLayout>);
+    expect(screen.getByTestId('portal-shell')).toHaveAttribute('data-portal', 'exam-cell');
+    expect(screen.getByRole('heading', { name: 'Master Exam Schedule' })).toBeTruthy();
+    expect(screen.getByRole('form', { name: 'Existing schedule form' })).toBeTruthy();
+    expect(screen.queryByRole('navigation')).toBeNull();
   });
 
-  it.each(examCellPortal.navGroups.flatMap((group) => group.items.map((item) => [group.title, item.href])))('preserves %s workflow %s and its active tab', (title, href) => {
-    route.pathname = `${href}/details`;
-    render(<ExamCellWorkspace><h1>Existing workflow</h1></ExamCellWorkspace>);
-    const nav = screen.getByRole('navigation', { name: `${title} pages` });
-    expect(nav.querySelectorAll('[aria-current="page"]')).toHaveLength(1);
-    expect(nav.querySelector('[aria-current="page"]')).toHaveAttribute('href', href);
-    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
-    expect(screen.getByRole('heading', { name: 'Existing workflow' })).toBeTruthy();
-  });
-  it('opens planning deep links with related pages as tabs and keeps page content', () => {
-    render(<ExamCellWorkspace><h1>Schedule form</h1></ExamCellWorkspace>);
-    expect(screen.getByRole('heading', { name: 'Schedule form' })).toBeTruthy();
-    const links = screen.getByRole('navigation', { name: 'Exam Planning pages' });
-    expect(links.querySelector('[aria-current="page"]')).toHaveAttribute('href', '/exam-cell/schedule');
-    expect(screen.getByRole('link', { name: 'Examination Calendar' })).toHaveAttribute('href', '/exam-cell/calendar');
-    expect(screen.getByRole('link', { name: 'Deadlines' })).toHaveAttribute('href', '/exam-cell/deadlines');
+  it('preserves native workflow tabs inside an existing page', () => {
+    render(<ExamCellLayout><div role="tablist" aria-label="Documents"><button role="tab">Repository</button></div></ExamCellLayout>);
+    expect(screen.getByRole('tablist', { name: 'Documents' })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: 'Repository' })).toBeTruthy();
+    expect(screen.queryByRole('navigation')).toBeNull();
   });
 
-  it('preserves specialized approval and account pages in their workspace', () => {
-    route.pathname = '/exam-cell/approvals/grade-change';
-    const { rerender } = render(<ExamCellWorkspace>Approvals</ExamCellWorkspace>);
-    expect(screen.getByRole('navigation', { name: 'Marks & Results pages' }).querySelector('[aria-current="page"]'))
-      .toHaveAttribute('href', '/exam-cell/approvals/grade-change');
-    route.pathname = '/exam-cell/profile';
-    rerender(<ExamCellWorkspace>Account details</ExamCellWorkspace>);
-    expect(screen.getByRole('navigation', { name: 'Master Data & Settings pages' })).toBeTruthy();
-    expect(screen.getByRole('link', { name: 'Settings' })).toHaveAttribute('href', '/exam-cell/settings');
+  it('still prevents a student from opening the staff page', () => {
+    auth.user = { role: 'Student', primaryRole: 'Student', roles: ['Student'] };
+    render(<ExamCellLayout><h1>Restricted schedule</h1></ExamCellLayout>);
+    expect(screen.getByRole('heading', { name: '403 Forbidden' })).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: 'Restricted schedule' })).toBeNull();
   });
 });

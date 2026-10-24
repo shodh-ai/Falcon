@@ -7,7 +7,8 @@ import {
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import type { Response } from 'express';
-import { accessSync, constants } from 'fs';
+import { realpathSync } from 'fs';
+import { relative, sep } from 'path';
 import { ObjectStorageService } from '../../storage/object-storage.service';
 import {
   HR_DOCUMENT_CATEGORIES,
@@ -17,7 +18,9 @@ import {
   openDocumentReadStream,
   parseTenantStorageKey,
   resolveDocumentDiskPath,
+  uploadRoot,
 } from './utils/document-file-path.util';
+import { hrUploadOwner } from '../../uploads/hr-document-upload.util';
 
 const PRESIGNED_TTL_SECONDS = 900;
 
@@ -74,7 +77,7 @@ export class HrDocumentVaultService {
     userId: string,
     uploadedBy: string,
     dto: { document_type: string; file_url: string; file_name?: string },
-    options?: { autoVerify?: boolean },
+    options?: { autoVerify?: boolean; requireUploaderOwnership?: boolean },
   ) {
     const docType = dto.document_type?.trim().toUpperCase();
     if (!docType) throw new BadRequestException('document_type is required');
@@ -96,12 +99,17 @@ export class HrDocumentVaultService {
       );
     }
 
-    try {
-      if (key && this.storage.isEnabled()) await this.storage.assertObjectExists(key);
-      else if (localFile) accessSync(localFile, constants.R_OK);
-      else throw new Error('File unavailable');
-    } catch {
-      throw new BadRequestException('The uploaded file is missing or unreadable. Upload it again before saving the document.');
+    if (options?.requireUploaderOwnership) {
+      const canonicalKey =
+        key ??
+        (localFile
+          ? relative(realpathSync(uploadRoot()), localFile).split(sep).join('/')
+          : '');
+      if (hrUploadOwner(canonicalKey) !== uploadedBy) {
+        throw new ForbiddenException(
+          'Upload this document from your own account before adding it to your vault',
+        );
+      }
     }
 
     const status = options?.autoVerify ? 'VERIFIED' : 'PENDING';
