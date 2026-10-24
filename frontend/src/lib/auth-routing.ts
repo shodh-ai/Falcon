@@ -317,6 +317,7 @@ const hrPathModules: Array<{ prefix: string; module: string }> = [
   { prefix: '/hr/offboarding', module: 'offboarding' },
   { prefix: '/hr/policies', module: 'policies' },
   { prefix: '/hr/appraisals', module: 'directory' },
+  { prefix: '/hr/appraisals/policies', module: 'policies' },
   { prefix: '/hr/promotions', module: 'directory' },
   { prefix: '/hr/grievances', module: 'dashboard' },
 ];

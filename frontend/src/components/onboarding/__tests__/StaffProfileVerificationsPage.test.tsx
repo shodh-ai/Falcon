@@ -31,6 +31,23 @@ describe("Individual HR profile approval with deferred documents", () => {
     fireEvent.click(d.getByRole("button", { name: "Clear all details" }));
     expect(d.getAllByRole("checkbox").some((c) => (c as HTMLInputElement).checked)).toBe(false);
   });
+  it("does not clear checked details when the current review mode is clicked again", async () => {
+    const d = await open();
+    fireEvent.click(d.getByRole("button", { name: "Select all details" }));
+    fireEvent.click(d.getByRole("button", { name: "Review for approval", exact: true }));
+    expect(d.getByRole("button", { name: "Approve details — documents pending" })).toBeEnabled();
+    expect(d.getAllByRole("checkbox").every(c => (c as HTMLInputElement).checked)).toBe(true);
+  });
+  it("does not erase a correction selection or note when its active mode is clicked again", async () => {
+    const d = await open();
+    fireEvent.click(d.getByRole("button", { name: "Request corrections", exact: true }));
+    fireEvent.click(d.getByRole("checkbox", { name: "Request correction: Mobile number" }));
+    fireEvent.change(d.getByRole("textbox", { name: /Correction note/ }), { target: { value: "Correct the mobile number" } });
+    fireEvent.click(d.getByRole("button", { name: "Request corrections", exact: true }));
+    expect(d.getByRole("checkbox", { name: "Request correction: Mobile number" })).toBeChecked();
+    expect(d.getByRole("textbox", { name: /Correction note/ })).toHaveValue("Correct the mobile number");
+    expect(d.getByRole("button", { name: "Send correction request & email" })).toBeEnabled();
+  });
   it("explicitly approves details without claiming document verification", async () => {
     const d = await open();
     fireEvent.click(d.getByRole("button", { name: "Select all details" }));
@@ -116,6 +133,43 @@ describe("Individual HR profile approval with deferred documents", () => {
     fireEvent.click(d.getByRole("button", { name: "Approve details — documents pending" }));
     expect(await d.findByRole("alert")).toHaveTextContent("Review is no longer pending");
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+  it("refreshes a stale review before posting and never submits the outdated approval", async () => {
+    const d = await open();
+    fireEvent.click(d.getByRole("button", { name: "Select all details" }));
+    row = { ...row, status: "RETURNED_FOR_CORRECTION", revision: 2, recovery_required: true };
+    fireEvent.click(d.getByRole("button", { name: "Approve details — documents pending" }));
+    expect(await d.findByRole("alert")).toHaveTextContent("This review has changed");
+    expect(d.getByText(/Waiting for the faculty member to complete and resubmit/)).toBeInTheDocument();
+    expect(d.queryByRole("button", { name: /Approve profile|Approve details/ })).not.toBeInTheDocument();
+    expect(mocks.post).not.toHaveBeenCalled();
+  });
+  it("retains checkboxes across an unchanged manual refresh", async () => {
+    const d = await open();
+    fireEvent.click(d.getByRole("button", { name: "Select all details" }));
+    fireEvent.click(d.getByRole("button", { name: "Refresh this review" }));
+    await waitFor(() => expect(d.getByRole("button", { name: "Refresh this review" })).toBeEnabled());
+    expect(d.getByRole("button", { name: "Approve details — documents pending" })).toBeEnabled();
+    expect(d.getAllByRole("checkbox").every(c => (c as HTMLInputElement).checked)).toBe(true);
+  });
+  it("clears old attestations when the faculty submission revision changes", async () => {
+    const d = await open();
+    fireEvent.click(d.getByRole("button", { name: "Select all details" }));
+    row = { ...row, revision: 2 };
+    fireEvent.click(d.getByRole("button", { name: "Refresh this review" }));
+    expect(await d.findByRole("alert")).toHaveTextContent("old selections have been cleared");
+    expect(d.getByRole("button", { name: "Approve details — documents pending" })).toBeDisabled();
+    expect(d.getAllByRole("checkbox").some(c => (c as HTMLInputElement).checked)).toBe(false);
+    expect(d.getByText(/Complete these checks to enable approval/)).toBeInTheDocument();
+  });
+  it("preserves work and does not post a decision if its freshness check fails", async () => {
+    const d = await open();
+    fireEvent.click(d.getByRole("button", { name: "Select all details" }));
+    mocks.get.mockRejectedValueOnce(new Error("Cannot refresh the current review"));
+    fireEvent.click(d.getByRole("button", { name: "Approve details — documents pending" }));
+    expect(await d.findByRole("alert")).toHaveTextContent("Cannot refresh");
+    expect(d.getAllByRole("checkbox").every(c => (c as HTMLInputElement).checked)).toBe(true);
+    expect(mocks.post).not.toHaveBeenCalled();
   });
   it("keeps deferred documents in a separate queue and rejects unavailable originals", async () => {
     row = { ...pending, status: "APPROVED", document_review_status: "PENDING", recovery_required: false };
