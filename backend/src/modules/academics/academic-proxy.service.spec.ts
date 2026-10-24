@@ -62,6 +62,21 @@ describe('date-specific substitute class', () => {
       .rejects.toThrow('must accept');
   });
 
+  it('requires independent approval when HOD nominated the substitute', async () => {
+    const { service } = setup((sql) => {
+      if (sql.includes('FROM academic_proxy_requests p') && sql.includes('FOR UPDATE OF p')) return [{
+        proxy_id: REQUEST, status: 'PENDING_HOD_APPROVAL', accepted_at: new Date().toISOString(),
+        requested_by_user_id: OWNER, faculty_dept_id: 7, absent_faculty_id: SUBSTITUTE,
+        proxy_faculty_id: OWNER, timetable_id: SLOT, course_id: slot.course_id,
+        proxy_date: '2026-10-26',
+      }];
+      if (sql.includes('SELECT 1 FROM users h')) return [{ one: 1 }];
+      return [];
+    });
+    await expect(service.actOnProxyRequest(OWNER, TENANT, REQUEST, 'APPROVE'))
+      .rejects.toThrow('cannot approve their own request');
+  });
+
   it('prevents a different faculty member from accepting the offer', async () => {
     const { service } = setup((sql) => sql.includes('FROM academic_proxy_requests') && sql.includes('FOR UPDATE')
       ? [{ proxy_faculty_id: SUBSTITUTE, status: 'PENDING_SUBSTITUTE_ACCEPTANCE' }] : []);

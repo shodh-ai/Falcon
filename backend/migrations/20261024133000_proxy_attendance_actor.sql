@@ -5,6 +5,7 @@ ALTER TABLE course_attendance_logs
 
 ALTER TABLE academic_proxy_requests
   ADD COLUMN IF NOT EXISTS accepted_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS requested_by_user_id UUID REFERENCES users(user_id) ON DELETE SET NULL,
   ADD COLUMN IF NOT EXISTS decided_by_user_id UUID REFERENCES users(user_id) ON DELETE SET NULL,
   ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
 

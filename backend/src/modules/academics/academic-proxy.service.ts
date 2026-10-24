@@ -70,6 +70,7 @@ export class AcademicProxyService {
       date_of_proxy: string;
       reason?: string;
     },
+    requestedByUserId = absentFacultyId,
   ) {
     const date = this.requireDate(dto.date_of_proxy);
     const row = await this.dataSource.transaction(async (manager) => {
@@ -108,11 +109,11 @@ export class AcademicProxyService {
       const rows = await manager.query(
         `INSERT INTO academic_proxy_requests (
            tenant_id, timetable_id, absent_faculty_id, proxy_faculty_id, course_id,
-           date_of_proxy, reason, status
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,'PENDING_SUBSTITUTE_ACCEPTANCE')
+           date_of_proxy, reason, requested_by_user_id, status
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'PENDING_SUBSTITUTE_ACCEPTANCE')
          RETURNING *`,
         [tenantId, dto.timetable_id, absentFacultyId, dto.proxy_faculty_id,
-          slot.course_id, date, dto.reason?.trim() || null],
+          slot.course_id, date, dto.reason?.trim() || null, requestedByUserId],
       );
       return rows[0];
     });
@@ -216,7 +217,7 @@ export class AcademicProxyService {
     if (!faculty.some((row) => row.user_id === dto.absent_faculty_id)) {
       throw new ForbiddenException('HOD can arrange cover only for their department');
     }
-    return this.createProxyRequest(dto.absent_faculty_id, tenantId, dto);
+    return this.createProxyRequest(dto.absent_faculty_id, tenantId, dto, hodUserId);
   }
 
   async listDepartmentLecturesForHod(
@@ -281,14 +282,21 @@ export class AcademicProxyService {
       return updated;
     });
     if (action === 'ACCEPT') {
-      const [owner] = await this.dataSource.query<Array<{ hod_user_id: string | null }>>(
-        `SELECT d.hod_user_id FROM users u
+      const [owner] = await this.dataSource.query<Array<{
+        hod_user_id: string | null; dean_user_id: string | null; requested_by_user_id: string | null;
+      }>>(
+        `SELECT d.hod_user_id,s.dean_user_id,p.requested_by_user_id
+         FROM academic_proxy_requests p
+         JOIN users u ON u.user_id=p.absent_faculty_id AND u.tenant_id=p.tenant_id
          LEFT JOIN departments d ON d.dept_id=u.dept_id AND d.tenant_id=u.tenant_id
-         WHERE u.tenant_id=$1 AND u.user_id=$2`,
-        [tenantId, row.absent_faculty_id],
+         LEFT JOIN schools s ON s.school_id=d.school_id
+         WHERE p.tenant_id=$1 AND p.proxy_id=$2::uuid`,
+        [tenantId, proxyId],
       );
-      if (owner?.hod_user_id) this.notify.approvalRequired({
-        tenantId, userId: owner.hod_user_id,
+      const approverId = owner?.requested_by_user_id === owner?.hod_user_id
+        ? owner?.dean_user_id : owner?.hod_user_id;
+      if (approverId) this.notify.approvalRequired({
+        tenantId, userId: approverId,
         title: 'Substitute class awaits approval',
         message: 'The proposed substitute accepted. Review the dated class and approve or reject.',
         actionLink: '/hod/approvals/proxy',
@@ -313,7 +321,14 @@ export class AcademicProxyService {
         ...(hod[0]?.dept_id ? [hod[0].dept_id] : []),
       ]),
     );
-    if (!deptIds.length) return [];
+    const [actor] = await this.dataSource.query<Array<{ role_name: string }>>(
+      `SELECT r.role_name FROM users u JOIN roles r ON r.role_id=u.role_id
+       WHERE u.tenant_id=$1 AND u.user_id=$2 AND u.is_active=true`,
+      [tenantId,hodUserId],
+    );
+    if (!actor || !['HOD','Dean','SuperAdmin'].includes(actor.role_name)) {
+      throw new ForbiddenException('Academic approver role required');
+    }
 
     return this.dataSource.query(
       `SELECT p.proxy_id, p.date_of_proxy, p.status, p.reason,
@@ -323,12 +338,16 @@ export class AcademicProxyService {
        FROM academic_proxy_requests p
        INNER JOIN users af ON af.user_id = p.absent_faculty_id
        INNER JOIN users pf ON pf.user_id = p.proxy_faculty_id
+       LEFT JOIN departments d ON d.dept_id=af.dept_id AND d.tenant_id=p.tenant_id
+       LEFT JOIN schools s ON s.school_id=d.school_id
        LEFT JOIN academic_timetables t ON t.timetable_id = p.timetable_id
        LEFT JOIN academic_courses c ON c.course_id = p.course_id
        WHERE p.tenant_id = $1 AND p.status = 'PENDING_HOD_APPROVAL'
-         AND af.dept_id = ANY($2::int[])
+         AND ($3::boolean OR af.dept_id = ANY($2::int[])
+           OR ($4::boolean AND s.dean_user_id=$5::uuid))
        ORDER BY p.date_of_proxy ASC`,
-      [tenantId, deptIds],
+      [tenantId, deptIds, actor.role_name === 'SuperAdmin',
+        actor.role_name === 'Dean', hodUserId],
     );
   }
 
@@ -345,6 +364,7 @@ export class AcademicProxyService {
         faculty_dept_id: number; absent_faculty_id: string; proxy_faculty_id: string;
         timetable_id: string; course_id: string; date_of_proxy: string; proxy_date: string;
         absent_name: string; proxy_name: string; status: string; accepted_at: string | null;
+        requested_by_user_id: string | null;
       }>>(
         `SELECT p.*, p.date_of_proxy::text AS proxy_date,
                 af.dept_id AS faculty_dept_id, af.name AS absent_name, pf.name AS proxy_name
@@ -357,15 +377,21 @@ export class AcademicProxyService {
       if (!current) throw new NotFoundException('Proxy request not found');
       if (current.status !== 'PENDING_HOD_APPROVAL') throw new BadRequestException('Request is not awaiting HOD approval');
       const [scope] = await manager.query(
-        `SELECT 1 FROM users h
+        `SELECT 1 FROM users h JOIN roles r ON r.role_id=h.role_id
+         LEFT JOIN departments d ON d.tenant_id=h.tenant_id AND d.dept_id=$3::int
+         LEFT JOIN schools s ON s.school_id=d.school_id
          WHERE h.user_id=$1 AND h.tenant_id=$2
-           AND ($3::int=h.dept_id OR EXISTS (
-             SELECT 1 FROM departments d WHERE d.tenant_id=$2 AND d.hod_user_id=$1 AND d.dept_id=$3::int
-           ))`,
+           AND h.is_active=true AND r.role_name IN ('HOD','Dean','SuperAdmin')
+           AND (r.role_name='SuperAdmin'
+             OR (r.role_name='Dean' AND s.dean_user_id=$1)
+             OR (r.role_name='HOD' AND (d.hod_user_id=$1 OR h.dept_id=$3::int)))`,
         [hodUserId, tenantId, current.faculty_dept_id],
       );
       if (!scope) throw new ForbiddenException('HOD can act only on requests from their department');
       if (action === 'APPROVE') {
+        if (current.requested_by_user_id === hodUserId) {
+          throw new ForbiddenException('The HOD who proposed cover cannot approve their own request');
+        }
         if (!current.accepted_at) throw new BadRequestException('Substitute must accept before HOD approval');
         await manager.query(`SELECT pg_advisory_xact_lock(hashtext($1))`,
           [`proxy:${tenantId}:${current.timetable_id}:${current.proxy_date}`]);
