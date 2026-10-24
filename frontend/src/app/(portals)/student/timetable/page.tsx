@@ -31,6 +31,7 @@ type TimetableSlot = {
   course_name: string;
   room: string | null;
   faculty_name: string | null;
+  substitute_faculty_name?: string | null;
   section: string | null;
   day_of_week: number;
   start_time: string;
@@ -165,7 +166,7 @@ function SlotButton({
         </div>
         <p className="mt-1.5 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
           <span className="inline-flex items-center gap-1"><MapPin className="h-3.5 w-3.5" />{room}</span>
-          {slot.faculty_name && <span>Faculty: {slot.faculty_name}</span>}
+          {slot.faculty_name && <span>{slot.substitute_faculty_name ? 'Substitute' : 'Faculty'}: {slot.faculty_name}</span>}
         </p>
       </div>
     </button>
@@ -394,7 +395,7 @@ export default function TimetablePage() {
                 </div>
                 {selectedSlot.faculty_name && (
                   <div>
-                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Faculty</p>
+                    <p className="text-xs uppercase tracking-wide text-muted-foreground">{selectedSlot.substitute_faculty_name ? 'Substitute faculty' : 'Faculty'}</p>
                     <p className="flex items-center gap-2 font-medium">
                       <User className="h-4 w-4" />
                       {selectedSlot.faculty_name}

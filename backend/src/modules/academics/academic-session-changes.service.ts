@@ -37,6 +37,13 @@ type Leg = MoveInput & {
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const TIME = /^([01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/;
+const campusToday = () => {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(new Date());
+  const part = (type: string) => parts.find((row) => row.type === type)?.value;
+  return `${part('year')}-${part('month')}-${part('day')}`;
+};
 
 @Injectable()
 export class AcademicSessionChangesService {
@@ -96,7 +103,7 @@ export class AcademicSessionChangesService {
     if (!UUID.test(input.timetable_id || '')) throw new BadRequestException('Choose a valid timetable slot');
     const sourceDate = this.date(input.source_date);
     const targetDate = this.date(input.target_date);
-    const today = new Date().toISOString().slice(0, 10);
+    const today = campusToday();
     if (sourceDate < today || targetDate < today) {
       throw new BadRequestException('Past class sessions cannot be rescheduled');
     }
@@ -232,6 +239,13 @@ export class AcademicSessionChangesService {
     for (const target of targets) {
       const ownStudents = await roster(target);
       if (!ownStudents.size) throw new BadRequestException('Cannot verify a clash-free move until the class roster is mapped');
+      const onLeave = await manager.query(
+        `SELECT 1 FROM staff_leave_requests WHERE tenant_id=$1 AND staff_user_id=$2
+           AND status IN ('HOD_APPROVED','HR_APPROVED')
+           AND start_date<=$3::date AND end_date>=$3::date LIMIT 1`,
+        [tenantId,target.faculty_user_id,target.date],
+      );
+      if (onLeave.length) throw new BadRequestException('Faculty is on approved leave at the proposed date');
       for (const other of [...existing, ...targets.filter((row) => row !== target)]) {
         if (target.date !== other.date || target.start_time >= other.end_time || target.end_time <= other.start_time) continue;
         if (target.faculty_user_id === other.faculty_user_id) {
@@ -403,7 +417,7 @@ export class AcademicSessionChangesService {
         const legs = rows.map((row) => ({
           ...row, source_date: row.source_date_text, target_date: row.target_date_text,
         }));
-        const today = new Date().toISOString().slice(0, 10);
+        const today = campusToday();
         if (legs.some((leg) => leg.source_date < today || leg.target_date < today)) {
           throw new BadRequestException('This class change is now past due; create a new request');
         }

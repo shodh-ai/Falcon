@@ -167,6 +167,13 @@ export class AcademicProxyService {
       [tenantId, candidateId, absentFacultyId],
     );
     if (!candidate) throw new BadRequestException('Substitute must be an active faculty member in the same department');
+    const onLeave = await manager.query(
+      `SELECT 1 FROM staff_leave_requests WHERE tenant_id=$1 AND staff_user_id=$2
+         AND status IN ('HOD_APPROVED','HR_APPROVED')
+         AND start_date<=$3::date AND end_date>=$3::date LIMIT 1`,
+      [tenantId,candidateId,date],
+    );
+    if (onLeave.length) throw new BadRequestException('Substitute faculty is on approved leave that day');
     const conflict = await manager.query(
       `SELECT 1 FROM academic_timetables t
        WHERE t.tenant_id=$1 AND t.faculty_user_id=$2

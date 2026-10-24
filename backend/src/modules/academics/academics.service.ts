@@ -485,6 +485,20 @@ export class AcademicsService {
         room: move.target_room,
       });
     }
+    const covers = baseSlots.length ? await this.courseEnrollments.manager.query<Array<{
+      timetable_id: string; session_date: string; substitute_name: string;
+    }>>(
+      `SELECT p.timetable_id,p.date_of_proxy::text AS session_date,
+              u.name AS substitute_name
+       FROM academic_proxy_requests p
+       JOIN users u ON u.user_id=p.proxy_faculty_id AND u.tenant_id=p.tenant_id
+       WHERE p.tenant_id=$1 AND p.status='APPROVED'
+         AND p.timetable_id=ANY($2::uuid[])
+         AND p.date_of_proxy BETWEEN $3::date AND $4::date`,
+      [tenantId,baseSlots.map((slot) => slot.timetable_id),weekStart,weekEnd],
+    ) : [];
+    const coverNames = new Map(covers.map((cover) =>
+      [`${cover.timetable_id}|${cover.session_date}`,cover.substitute_name]));
     const logs = await this.courseEnrollments.manager.query(
       `SELECT cal.date::text AS date, cal.course_id, cal.timetable_id, cal.attendance_data
        FROM course_attendance_logs cal
@@ -534,7 +548,10 @@ export class AcademicsService {
         }
       }
 
-      return { ...slot, session_date: sessionDate, attendance_status };
+      return { ...slot,
+        faculty_name: coverNames.get(`${slot.timetable_id}|${sessionDate}`) ?? slot.faculty_name,
+        substitute_faculty_name: coverNames.get(`${slot.timetable_id}|${sessionDate}`) ?? null,
+        session_date: sessionDate, attendance_status };
     });
 
     return {

@@ -70,6 +70,13 @@ describe('dated class changes', () => {
       .rejects.toThrow('Student group has another class');
   });
 
+  it('rejects a move onto approved faculty leave', async () => {
+    const { service } = setup((sql) => sql.includes('FROM staff_leave_requests')
+      ? [{ one: 1 }] : basic(sql));
+    await expect(service.propose(OWNER, TENANT, 'RESCHEDULE', [move], 'Make-up class'))
+      .rejects.toThrow('approved leave');
+  });
+
   it('creates a pending dated move without altering the recurring timetable', async () => {
     const { service, manager } = setup(basic);
     const result = await service.propose(OWNER, TENANT, 'RESCHEDULE', [move], 'Room change');

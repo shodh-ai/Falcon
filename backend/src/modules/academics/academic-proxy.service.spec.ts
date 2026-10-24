@@ -48,6 +48,18 @@ describe('date-specific substitute class', () => {
     expect(manager.query.mock.calls.some(([sql]) => String(sql).includes('INSERT INTO academic_proxy_requests'))).toBe(false);
   });
 
+  it('rejects a substitute who is on approved leave', async () => {
+    const { service } = setup((sql) => {
+      if (sql.includes('FROM academic_timetables t') && sql.includes('t.timetable_id=$1::uuid')) return [slot];
+      if (sql.includes('SELECT proxy.user_id')) return [{ user_id: SUBSTITUTE }];
+      if (sql.includes('FROM staff_leave_requests')) return [{ one: 1 }];
+      return [];
+    });
+    await expect(service.createProxyRequest(OWNER, TENANT, {
+      timetable_id: SLOT, proxy_faculty_id: SUBSTITUTE, date_of_proxy: '2026-10-26',
+    })).rejects.toThrow('approved leave');
+  });
+
   it('requires the nominated substitute to accept before HOD approval', async () => {
     const { service } = setup((sql) => {
       if (sql.includes('FROM academic_proxy_requests p') && sql.includes('FOR UPDATE OF p')) return [{
