@@ -23,10 +23,12 @@ type Colleague = { user_id: string; name: string; email: string };
 export function ProxyTeachingDialog({
   startDate,
   endDate,
+  reason = 'Leave — alternate teaching arrangement',
   onDone,
 }: {
   startDate: string;
   endDate: string;
+  reason?: string;
   onDone?: () => void;
 }) {
   const api = useAuthedApi();
@@ -57,7 +59,7 @@ export function ProxyTeachingDialog({
   }, [api, startDate, endDate]);
 
   if (loading) return <p className="text-sm text-muted-foreground">Checking scheduled lectures…</p>;
-  if (!lectures.length) return null;
+  if (!lectures.length) return <p className="mt-2 text-sm text-muted-foreground">No scheduled class found for this date.</p>;
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -81,7 +83,7 @@ export function ProxyTeachingDialog({
           timetable_id: lec.timetable_id,
           proxy_faculty_id: proxyId,
           date_of_proxy: lec.lecture_date,
-          reason: 'Leave — alternate teaching arrangement',
+          reason,
         });
       }
       toast.success('Alternate teaching arrangements submitted for HOD approval');

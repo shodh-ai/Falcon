@@ -30,7 +30,7 @@ function setup(includeSecondVisible = false) {
   const enrollmentRepo = { find: jest.fn().mockResolvedValue(enrollments) };
   const manager = {
     getRepository: jest.fn().mockReturnValue(enrollmentRepo),
-    query: jest.fn(async (sql: string) => {
+    query: jest.fn(async (sql: string): Promise<unknown[]> => {
       if (sql.includes('SELECT t.section')) return [{ section: 'A', is_practical: false }];
       if (sql.includes('FROM academic_course_allocations')) {
         return [{ program_name: 'MTECH CSE', semester: 'III', academic_year: academicYear(date) }];
@@ -47,7 +47,7 @@ function setup(includeSecondVisible = false) {
     }),
   };
   const dataSource = {
-    query: jest.fn(async (sql: string) => sql.includes('SELECT t.section')
+    query: jest.fn(async (sql: string): Promise<unknown[]> => sql.includes('SELECT t.section')
       ? [{ section: 'A', faculty_user_id: 'faculty-1', is_practical: false }]
       : []),
     transaction: jest.fn(async (work: (tx: typeof manager) => Promise<unknown>) => work(manager)),
@@ -64,7 +64,7 @@ function setup(includeSecondVisible = false) {
     {} as never,
   );
   jest.spyOn(service as never, 'recalculateCourseAttendancePercents' as never).mockResolvedValue([] as never);
-  return { service, manager, date };
+  return { service, manager, dataSource, date };
 }
 
 describe('Faculty attendance uses the same scoped roster for reading and saving', () => {
@@ -107,6 +107,36 @@ describe('Faculty attendance uses the same scoped roster for reading and saving'
     expect(manager.query).not.toHaveBeenCalledWith(
       expect.stringContaining('INSERT INTO course_attendance_logs'),
       expect.anything(),
+    );
+  });
+
+  it('records an approved substitute as actor while retaining the original timetable owner', async () => {
+    const { service, manager, dataSource, date } = setup();
+    const read = dataSource.query.getMockImplementation()!;
+    dataSource.query.mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT absent_faculty_id FROM academic_proxy_requests')) {
+        return [{ absent_faculty_id: 'faculty-1' }];
+      }
+      return read(sql);
+    });
+    const withinTransaction = manager.query.getMockImplementation()!;
+    manager.query.mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT absent_faculty_id FROM academic_proxy_requests')) {
+        return [{ absent_faculty_id: 'faculty-1' }];
+      }
+      if (sql.includes('SELECT proxy_faculty_id FROM academic_proxy_requests')) {
+        return [{ proxy_faculty_id: 'substitute-1' }];
+      }
+      return withinTransaction(sql);
+    });
+    const result = await service.saveCourseAttendanceLog('substitute-1', 'tenant-1', {
+      course_id: 'course-1', timetable_id: 'slot-1', date,
+      attendance_data: [{ student_id: qaStudent, status: 'PRESENT' }],
+    });
+    expect(result.saved).toBe(1);
+    expect(manager.query).toHaveBeenCalledWith(
+      expect.stringContaining('marked_by_user_id'),
+      expect.arrayContaining(['faculty-1', 'substitute-1']),
     );
   });
 });

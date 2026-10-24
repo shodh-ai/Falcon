@@ -1878,6 +1878,66 @@ export class AcademicsController {
     );
   }
 
+  @Patch('faculty/proxy-requests/:proxyId/offer')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  respondToProxyOffer(
+    @Req() req: { user: AuthUser },
+    @Param('proxyId') proxyId: string,
+    @Body() body: { action: 'ACCEPT' | 'DECLINE' },
+  ) {
+    return this.academicProxy.actOnProxyOffer(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      proxyId,
+      body.action,
+    );
+  }
+
+  @Get('hod/proxy/faculty')
+  @Roles('HOD', 'Dean', 'SuperAdmin')
+  hodProxyFaculty(@Req() req: { user: AuthUser }) {
+    return this.academicProxy.listDepartmentFacultyForHod(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+    );
+  }
+
+  @Get('hod/proxy/lectures')
+  @Roles('HOD', 'Dean', 'SuperAdmin')
+  hodProxyLectures(
+    @Req() req: { user: AuthUser },
+    @Query('faculty_id') facultyId: string,
+    @Query('start_date') startDate: string,
+    @Query('end_date') endDate: string,
+  ) {
+    return this.academicProxy.listDepartmentLecturesForHod(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      facultyId,
+      startDate,
+      endDate,
+    );
+  }
+
+  @Post('hod/proxy-requests')
+  @Roles('HOD', 'Dean', 'SuperAdmin')
+  createHodProxyRequest(
+    @Req() req: { user: AuthUser },
+    @Body() body: {
+      absent_faculty_id: string;
+      timetable_id: string;
+      proxy_faculty_id: string;
+      date_of_proxy: string;
+      reason?: string;
+    },
+  ) {
+    return this.academicProxy.createProxyRequestByHod(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      body,
+    );
+  }
+
   @Get('hod/approvals/proxy-requests')
   @Roles('HOD', 'Dean', 'SuperAdmin')
   hodProxyApprovals(@Req() req: { user: AuthUser }) {
