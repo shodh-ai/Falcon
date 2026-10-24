@@ -76,6 +76,22 @@ export class AcademicSessionChangesService {
     return actor;
   }
 
+  private async assertDeanDepartments(manager: EntityManager, tenantId: string,
+    deanId: string, departmentIds: Array<number | null>) {
+    const expected = [...new Set(departmentIds.filter((id): id is number => id != null).map(Number))];
+    if (departmentIds.some((id) => id == null)) {
+      throw new ForbiddenException('All classes must belong to the Dean’s school');
+    }
+    const rows = await manager.query<Array<{ dept_id: number }>>(
+      `SELECT d.dept_id FROM departments d JOIN schools s ON s.school_id=d.school_id
+       WHERE d.tenant_id=$1 AND d.dept_id=ANY($2::int[]) AND s.dean_user_id=$3::uuid`,
+      [tenantId,expected,deanId],
+    );
+    if (rows.length !== expected.length) {
+      throw new ForbiddenException('Dean can manage only classes in their school');
+    }
+  }
+
   private async loadSlot(manager: EntityManager, tenantId: string, input: MoveInput): Promise<Leg> {
     if (!UUID.test(input.timetable_id || '')) throw new BadRequestException('Choose a valid timetable slot');
     const sourceDate = this.date(input.source_date);
@@ -259,6 +275,9 @@ export class AcademicSessionChangesService {
           actor.role_name === 'HOD') {
         throw new ForbiddenException('HOD can move only classes in their department');
       }
+      if (actor.role_name === 'Dean') {
+        await this.assertDeanDepartments(manager, tenantId, actorId, legs.map((leg) => leg.faculty_dept_id));
+      }
       if (moveType === 'SWAP') {
         const [a, b] = legs;
         const [first, second] = inputs;
@@ -333,11 +352,16 @@ export class AcademicSessionChangesService {
        FROM academic_class_moves m
        JOIN academic_courses c ON c.course_id=m.course_id AND c.tenant_id=m.tenant_id
        JOIN users u ON u.user_id=m.original_faculty_id AND u.tenant_id=m.tenant_id
+       LEFT JOIN departments d ON d.tenant_id=m.tenant_id AND d.dept_id=u.dept_id
+       LEFT JOIN schools s ON s.school_id=d.school_id
        WHERE m.tenant_id=$1 AND m.status='PENDING_HOD_APPROVAL'
        GROUP BY m.change_group_id,m.move_type,m.reason,m.requested_by_user_id
-       HAVING $3::boolean OR BOOL_AND(u.dept_id=$2::int)
+       HAVING $3::boolean OR BOOL_AND(
+         ($4::boolean AND s.dean_user_id=$5::uuid)
+         OR (NOT $4::boolean AND u.dept_id=$2::int))
        ORDER BY MIN(m.created_at)`,
-      [tenantId,actor.dept_id,actor.role_name !== 'HOD'],
+      [tenantId,actor.dept_id,actor.role_name === 'SuperAdmin',
+        actor.role_name === 'Dean',hodId],
     );
   }
 
@@ -371,6 +395,9 @@ export class AcademicSessionChangesService {
       }
       if (actor.role_name === 'HOD' && rows.some((row) => Number(row.faculty_dept_id) !== Number(actor.dept_id))) {
         throw new ForbiddenException('HOD can approve only their department classes');
+      }
+      if (actor.role_name === 'Dean') {
+        await this.assertDeanDepartments(manager, tenantId, hodId, rows.map((row) => row.faculty_dept_id));
       }
       if (action === 'APPROVE') {
         const legs = rows.map((row) => ({

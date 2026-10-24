@@ -101,4 +101,15 @@ describe('dated class changes', () => {
     await expect(service.decide(HOD, TENANT, GROUP, 'APPROVE'))
       .rejects.toBeInstanceOf(ForbiddenException);
   });
+
+  it('does not let a Dean propose changes in another school', async () => {
+    const { service, manager } = setup((sql) => {
+      if (sql.includes('FROM users u JOIN roles r')) return [{ dept_id: 2, role_name: 'Dean' }];
+      if (sql.includes('FROM departments d JOIN schools s')) return [];
+      return basic(sql);
+    });
+    await expect(service.propose(HOD, TENANT, 'RESCHEDULE', [move], 'Move'))
+      .rejects.toThrow('only classes in their school');
+    expect(manager.query.mock.calls.some(([sql]) => String(sql).includes('INSERT INTO academic_class_moves'))).toBe(false);
+  });
 });
