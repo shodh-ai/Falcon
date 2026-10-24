@@ -74,6 +74,8 @@ export class AcademicProxyService {
   ) {
     const date = this.requireDate(dto.date_of_proxy);
     const row = await this.dataSource.transaction(async (manager) => {
+      await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))',
+        [`class-move:${tenantId}:${date}`]);
       await manager.query(`SELECT pg_advisory_xact_lock(hashtext($1))`,
         [`proxy:${tenantId}:${dto.timetable_id}:${date}`]);
       const [slot] = await manager.query<Array<{
@@ -99,6 +101,12 @@ export class AcademicProxyService {
         [tenantId, dto.timetable_id, date],
       );
       if (existing.length) throw new BadRequestException('This class already has a live substitute request');
+      const moved = await manager.query(
+        `SELECT 1 FROM academic_class_moves WHERE tenant_id=$1 AND source_timetable_id=$2::uuid
+           AND source_date=$3::date AND status IN ('PENDING_HOD_APPROVAL','APPROVED') LIMIT 1`,
+        [tenantId,dto.timetable_id,date],
+      );
+      if (moved.length) throw new BadRequestException('This class already has a pending or approved time change');
       const recorded = await manager.query(
         `SELECT 1 FROM course_attendance_logs
          WHERE tenant_id=$1 AND timetable_id=$2::uuid AND date=$3::date LIMIT 1`,
@@ -167,12 +175,21 @@ export class AcademicProxyService {
          AND (t.valid_from IS NULL OR t.valid_from<=$3::date)
          AND (t.valid_to IS NULL OR t.valid_to>=$3::date)
          AND t.start_time<$6::time AND t.end_time>$5::time
+         AND NOT EXISTS (SELECT 1 FROM academic_class_moves m
+           WHERE m.tenant_id=t.tenant_id AND m.source_timetable_id=t.timetable_id
+             AND m.source_date=$3::date AND m.status='APPROVED')
        UNION ALL
        SELECT 1 FROM academic_proxy_requests p
        JOIN academic_timetables t ON t.timetable_id=p.timetable_id AND t.tenant_id=p.tenant_id
        WHERE p.tenant_id=$1 AND p.proxy_faculty_id=$2 AND p.date_of_proxy=$3::date
          AND p.timetable_id<>$4::uuid AND p.status='APPROVED'
          AND t.start_time<$6::time AND t.end_time>$5::time
+       UNION ALL
+       SELECT 1 FROM academic_class_moves m
+       WHERE m.tenant_id=$1 AND m.original_faculty_id=$2
+         AND m.target_date=$3::date AND m.source_timetable_id<>$4::uuid
+         AND m.status='APPROVED'
+         AND m.target_start_time<$6::time AND m.target_end_time>$5::time
        LIMIT 1`,
       [tenantId, candidateId, date, slot.timetable_id, slot.start_time, slot.end_time],
     );
@@ -393,8 +410,16 @@ export class AcademicProxyService {
           throw new ForbiddenException('The HOD who proposed cover cannot approve their own request');
         }
         if (!current.accepted_at) throw new BadRequestException('Substitute must accept before HOD approval');
+        await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))',
+          [`class-move:${tenantId}:${current.proxy_date}`]);
         await manager.query(`SELECT pg_advisory_xact_lock(hashtext($1))`,
           [`proxy:${tenantId}:${current.timetable_id}:${current.proxy_date}`]);
+        const moved = await manager.query(
+          `SELECT 1 FROM academic_class_moves WHERE tenant_id=$1 AND source_timetable_id=$2::uuid
+             AND source_date=$3::date AND status IN ('PENDING_HOD_APPROVAL','APPROVED') LIMIT 1`,
+          [tenantId,current.timetable_id,current.proxy_date],
+        );
+        if (moved.length) throw new BadRequestException('Resolve the class move before approving substitution');
         const [slot] = await manager.query<Array<{
           timetable_id: string; start_time: string; end_time: string;
         }>>(

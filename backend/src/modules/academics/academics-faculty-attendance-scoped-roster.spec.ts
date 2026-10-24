@@ -32,6 +32,10 @@ function setup(includeSecondVisible = false) {
     getRepository: jest.fn().mockReturnValue(enrollmentRepo),
     query: jest.fn(async (sql: string): Promise<unknown[]> => {
       if (sql.includes('SELECT t.section')) return [{ section: 'A', is_practical: false }];
+      if (sql.includes('SELECT t.day_of_week')) return [{
+        day_of_week: new Date(`${date}T00:00:00Z`).getUTCDay() || 7,
+        valid_from: null, valid_to: null, source_date: null, target_date: null,
+      }];
       if (sql.includes('FROM academic_course_allocations')) {
         return [{ program_name: 'MTECH CSE', semester: 'III', academic_year: academicYear(date) }];
       }

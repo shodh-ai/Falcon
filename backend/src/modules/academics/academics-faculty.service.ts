@@ -272,6 +272,11 @@ export class AcademicsFacultyService {
            WHERE p.tenant_id=t.tenant_id AND p.timetable_id=t.timetable_id
              AND p.date_of_proxy=days.date AND p.status='APPROVED'
          )
+         AND NOT EXISTS (
+           SELECT 1 FROM academic_class_moves m
+           WHERE m.tenant_id=t.tenant_id AND m.source_timetable_id=t.timetable_id
+             AND m.source_date=days.date AND m.status='APPROVED'
+         )
        LEFT JOIN academic_courses c ON c.course_id = t.course_id AND c.tenant_id = t.tenant_id
        UNION ALL
        SELECT days.date::text, t.timetable_id::text, t.course_id, c.course_code, c.course_name,
@@ -289,6 +294,20 @@ export class AcademicsFacultyService {
          AND (t.valid_from IS NULL OR t.valid_from<=days.date)
          AND (t.valid_to IS NULL OR t.valid_to>=days.date)
        JOIN academic_courses c ON c.course_id=t.course_id AND c.tenant_id=t.tenant_id
+       UNION ALL
+       SELECT m.target_date::text, t.timetable_id::text, t.course_id, c.course_code, c.course_name,
+         m.target_start_time, m.target_end_time, m.target_room, t.section,
+         EXISTS (SELECT 1 FROM course_attendance_logs cal
+           WHERE cal.tenant_id=m.tenant_id AND cal.course_id=m.course_id
+             AND cal.faculty_user_id=m.original_faculty_id
+             AND cal.timetable_id=m.source_timetable_id AND cal.date=m.target_date)
+       FROM academic_class_moves m
+       JOIN academic_timetables t ON t.timetable_id=m.source_timetable_id AND t.tenant_id=m.tenant_id
+       JOIN academic_courses c ON c.course_id=m.course_id AND c.tenant_id=m.tenant_id
+       WHERE m.tenant_id=$1 AND m.original_faculty_id=$2
+         AND m.target_date BETWEEN $4::date AND ($4::date + 6)
+         AND m.status='APPROVED'
+         AND m.course_id IN (SELECT course_id FROM faculty_courses)
        UNION ALL
        SELECT days.date::text, 'held:' || e.source_key, e.course_id, c.course_code, c.course_name,
          (e.entry->>'start')::time, (e.entry->>'end')::time, e.entry->>'room', e.entry->>'batch', false
@@ -375,6 +394,11 @@ export class AcademicsFacultyService {
            WHERE p.tenant_id=t.tenant_id AND p.timetable_id=t.timetable_id
              AND p.date_of_proxy=$5::date AND p.status='APPROVED'
          )
+         AND NOT EXISTS (
+           SELECT 1 FROM academic_class_moves m
+           WHERE m.tenant_id=t.tenant_id AND m.source_timetable_id=t.timetable_id
+             AND m.source_date=$5::date AND m.status='APPROVED'
+         )
        UNION ALL
        SELECT t.timetable_id::text, t.course_id, c.course_code, c.course_name,
          t.room, t.start_time, t.end_time, t.section,
@@ -393,6 +417,21 @@ export class AcademicsFacultyService {
        JOIN academic_courses c ON c.course_id=t.course_id AND c.tenant_id=t.tenant_id
        WHERE p.tenant_id=$1 AND p.proxy_faculty_id=$2
          AND p.date_of_proxy=$5::date AND p.status='APPROVED'
+       UNION ALL
+       SELECT t.timetable_id::text, m.course_id, c.course_code, c.course_name,
+         m.target_room, m.target_start_time, m.target_end_time, t.section,
+         (UPPER(c.course_code) ~ '(P|LAB)$' OR c.course_name ILIKE '%practical%'
+           OR c.course_name ILIKE '%lab%') AS is_practical,
+         EXISTS (SELECT 1 FROM course_attendance_logs cal
+           WHERE cal.tenant_id=m.tenant_id AND cal.course_id=m.course_id
+             AND cal.faculty_user_id=m.original_faculty_id
+             AND cal.timetable_id=m.source_timetable_id AND cal.date=m.target_date) AS has_saved_attendance
+       FROM academic_class_moves m
+       JOIN academic_timetables t ON t.timetable_id=m.source_timetable_id AND t.tenant_id=m.tenant_id
+       JOIN academic_courses c ON c.course_id=m.course_id AND c.tenant_id=m.tenant_id
+       WHERE m.tenant_id=$1 AND m.original_faculty_id=$2
+         AND m.target_date=$5::date AND m.status='APPROVED'
+         AND m.course_id IN (SELECT course_id FROM faculty_courses)
        UNION ALL
        SELECT 'held:' || e.source_key, e.course_id, c.course_code,c.course_name,e.entry->>'room',
          (e.entry->>'start')::time,(e.entry->>'end')::time,e.entry->>'batch',e.entry->>'session_type'='LAB',false
@@ -1255,6 +1294,34 @@ export class AcademicsFacultyService {
     }
     await this.dataSource.transaction(async (manager) => {
       if (timetableId) {
+        await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))',
+          [`class-move:${tenantId}:${date}`]);
+        const [effective] = await manager.query<Array<{
+          day_of_week: number; valid_from: string | null; valid_to: string | null;
+          source_date: string | null; target_date: string | null;
+        }>>(
+          `SELECT t.day_of_week,t.valid_from::text AS valid_from,t.valid_to::text AS valid_to,
+                  m.source_date::text AS source_date,m.target_date::text AS target_date
+           FROM academic_timetables t
+           LEFT JOIN academic_class_moves m ON m.tenant_id=t.tenant_id
+             AND m.source_timetable_id=t.timetable_id AND m.status='APPROVED'
+             AND (m.source_date=$4::date OR m.target_date=$4::date)
+           WHERE t.tenant_id=$1 AND t.timetable_id=$2::uuid AND t.course_id=$3
+             AND t.deleted_at IS NULL LIMIT 1`,
+          [tenantId,timetableId,dto.course_id,date],
+        );
+        if (!effective) throw new ForbiddenException('Selected class is no longer scheduled');
+        const isoDay = new Date(`${date}T00:00:00Z`).getUTCDay() || 7;
+        if (effective.source_date === date && effective.target_date !== date) {
+          throw new ForbiddenException('This class was moved to another date');
+        }
+        if (effective.target_date !== date && (
+          Number(effective.day_of_week) !== isoDay ||
+          (effective.valid_from && String(effective.valid_from).slice(0,10) > date) ||
+          (effective.valid_to && String(effective.valid_to).slice(0,10) < date)
+        )) {
+          throw new ForbiddenException('Attendance must use the scheduled class date');
+        }
         await manager.query(
           `SELECT pg_advisory_xact_lock(hashtext($1))`,
           [`proxy:${tenantId}:${timetableId}:${date}`],

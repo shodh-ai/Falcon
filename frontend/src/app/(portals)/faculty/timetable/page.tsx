@@ -37,6 +37,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useTeachingDepartment } from '@/components/faculty/TeachingDepartmentContext';
 import { withTeachingDeptId } from '@/lib/faculty/teaching-departments';
 import { ProxyTeachingDialog } from '@/components/faculty/ProxyTeachingDialog';
+import { SessionChangePanel } from '@/components/faculty/SessionChangePanel';
 import {
   isEmptyArray,
   isFacultyDemoSmokeId,
@@ -576,6 +577,8 @@ export default function FacultyTimetablePage() {
           </div>)}
         </div>
       </FacultyPanel>}
+
+      {!isObserver && <SessionChangePanel slots={schedule.filter((slot) => !slot.awaiting_confirmation)} />}
 
       <FacultyPanel title="Teaching progress by course" count={stats?.courses.length ?? 0}>
         {!stats || stats.courses.length === 0 ? (

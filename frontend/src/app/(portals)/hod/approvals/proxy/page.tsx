@@ -22,6 +22,12 @@ type Row = {
 type Faculty = { user_id: string; name: string; email: string };
 type Lecture = { timetable_id: string; course_code: string; course_name: string;
   lecture_date: string; start_time: string; end_time: string };
+type MoveGroup = {
+  change_group_id: string; move_type: string; reason: string; legs: number;
+  requested_by_user_id: string;
+  sessions: Array<{ course_code: string; source_date: string; target_date: string;
+    target_start_time: string; target_end_time: string; target_room: string | null }>;
+};
 
 export default function HodProxyApprovalsPage() {
   const api = useAuthedApi();
@@ -35,6 +41,7 @@ export default function HodProxyApprovalsPage() {
   const [substituteId, setSubstituteId] = useState('');
   const [reason, setReason] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [moves, setMoves] = useState<MoveGroup[]>([]);
 
   useEffect(() => {
     void api
@@ -49,6 +56,22 @@ export default function HodProxyApprovalsPage() {
       .then((data) => setFaculty(Array.isArray(data) ? data : []))
       .catch(() => toast.error('Could not load department faculty'));
   }, [api]);
+
+  useEffect(() => {
+    void api.get<MoveGroup[]>('/api/academics/session-changes/hod/pending')
+      .then((data) => setMoves(Array.isArray(data) ? data : []))
+      .catch(() => toast.error('Could not load pending class changes'));
+  }, [api]);
+
+  async function decideMove(groupId: string, action: 'APPROVE' | 'REJECT') {
+    try {
+      await api.patch(`/api/academics/session-changes/hod/${groupId}`, { action });
+      toast.success(action === 'APPROVE' ? 'Class change approved and published to calendars' : 'Class change rejected');
+      setMoves(await api.get<MoveGroup[]>('/api/academics/session-changes/hod/pending'));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not decide class change');
+    }
+  }
 
   useEffect(() => {
     if (!sourceFacultyId || !coverDate) return;
@@ -151,6 +174,23 @@ export default function HodProxyApprovalsPage() {
           },
         ]}
       />
+      <section className="mt-6 space-y-3 rounded-xl border bg-white p-4" aria-label="Date-specific class changes">
+        <div>
+          <h2 className="font-semibold text-sgvu-navy">Reschedules, swaps and reshuffles</h2>
+          <p className="text-sm text-muted-foreground">Each group is decided together. Approval checks faculty, room and student availability and recorded attendance. The proposer cannot approve their own request.</p>
+        </div>
+        {moves.length === 0 ? <p className="text-sm text-muted-foreground">No class changes awaiting approval.</p> : moves.map((move) => <div key={move.change_group_id} className="rounded-lg border p-3 space-y-2 text-sm">
+          <p className="font-semibold">{move.move_type} · {move.legs} {move.legs === 1 ? 'class' : 'classes'}</p>
+          <p>{move.reason}</p>
+          {move.sessions.map((session, index) => <p key={index} className="text-muted-foreground">
+            {session.course_code}: {String(session.source_date).slice(0, 10)} → {String(session.target_date).slice(0, 10)} {String(session.target_start_time).slice(0, 5)}–{String(session.target_end_time).slice(0, 5)} · {session.target_room || 'Room TBA'}
+          </p>)}
+          <div className="flex gap-2">
+            <Button size="sm" onClick={() => void decideMove(move.change_group_id, 'APPROVE')}>Approve all</Button>
+            <Button size="sm" variant="outline" onClick={() => void decideMove(move.change_group_id, 'REJECT')}>Reject all</Button>
+          </div>
+        </div>)}
+      </section>
     </HodPageFrame>
   );
 }
