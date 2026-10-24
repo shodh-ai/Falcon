@@ -135,6 +135,7 @@ const ROUTES: Array<{ moduleKey: BusinessModuleKey; prefixes: string[] }> = [
       "/hod/hr",
       "/hod/me",
       "/dean/me",
+      "/exam-cell/me",
       "/president/hr",
       "/ess",
       "/hr",

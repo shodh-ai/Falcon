@@ -37,9 +37,10 @@ export function withFacultyDemoFallback<T>(
   live: T | null | undefined,
   demo: T,
   isEmpty?: (value: T) => boolean,
+  allowDemoFallback = true,
 ): T {
   if (live != null && !(isEmpty?.(live) ?? false)) return live;
-  if (isFacultyDemoModeEnabled()) return demo;
+  if (allowDemoFallback && isFacultyDemoModeEnabled()) return demo;
   if (live != null) return live;
   return live as T;
 }

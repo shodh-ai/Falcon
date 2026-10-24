@@ -77,13 +77,17 @@ export function HrAttendanceCalendar(props: Props) {
   const [loading, setLoading] = useState(true);
   const [selfData, setSelfData] = useState<CalendarPayload | null>(null);
   const [matrixData, setMatrixData] = useState<MatrixPayload | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [retry, setRetry] = useState(0);
 
   useEffect(() => {
     setLoading(true);
+    setLoadError(null);
     if (props.mode === 'self') {
       void authedApi
         .get<CalendarPayload>(`/api/hr/attendance/calendar?month=${month}`)
         .then(setSelfData)
+        .catch((error) => { setSelfData(null); setLoadError(error instanceof Error ? error.message : 'Attendance could not be loaded'); })
         .finally(() => setLoading(false));
       return;
     }
@@ -91,8 +95,9 @@ export function HrAttendanceCalendar(props: Props) {
     void matrixApi
       .get(`/api/hr/attendance/matrix?month=${month}`)
       .then((data) => setMatrixData(data as MatrixPayload))
+      .catch((error) => { setMatrixData(null); setLoadError(error instanceof Error ? error.message : 'Attendance could not be loaded'); })
       .finally(() => setLoading(false));
-  }, [authedApi, entityId, entityReady, matrixApi, month, props.mode]);
+  }, [authedApi, entityId, entityReady, matrixApi, month, props.mode, retry]);
 
   const { year, monthNum, daysInMonth, leading } = monthMeta(month);
   const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -116,6 +121,10 @@ export function HrAttendanceCalendar(props: Props) {
 
   const calendarBody = (
     <>
+      {loadError && <div role="alert" className="space-y-3 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+        <p>Attendance could not be loaded. {loadError}</p>
+        <Button type="button" variant="outline" onClick={() => setRetry((value) => value + 1)}>Retry</Button>
+      </div>}
       {loading && (
         <div className="flex justify-center py-8">
           <Loader2 className="h-6 w-6 animate-spin text-sgvu-navy" />

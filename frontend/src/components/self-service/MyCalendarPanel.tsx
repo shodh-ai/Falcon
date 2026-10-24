@@ -5,6 +5,7 @@ import { CalendarDays, Palmtree, Briefcase } from 'lucide-react';
 import { FacultyPanel, FacultyEmptyState, FacultyInlineLoading } from '@/components/faculty';
 import { HrAttendanceCalendar } from '@/components/hr/HrAttendanceCalendar';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { useAuthedApi } from '@/lib/api';
 import {
   formatWorkforceDate,
@@ -35,14 +36,17 @@ function statusBadgeVariant(status: string): 'default' | 'secondary' | 'destruct
   return 'outline';
 }
 
-export function MyCalendarPanel() {
+export function MyCalendarPanel({ allowDemoFallback = true }: { allowDemoFallback?: boolean } = {}) {
   const api = useAuthedApi();
   const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
   const [data, setData] = useState<CalendarData | null>(null);
   const [metaLoading, setMetaLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [retry, setRetry] = useState(0);
 
   useEffect(() => {
     setMetaLoading(true);
+    setLoadError(null);
     const demoCalendar = (): CalendarData => {
       const hr = facultyDemoHrToday() as {
         shift?: { shift_name?: string; start?: string; end?: string; start_time?: string; end_time?: string };
@@ -80,12 +84,17 @@ export function MyCalendarPanel() {
             live,
             demoCalendar(),
             (v) => !v || ((v.holidays?.length ?? 0) === 0 && (v.leaves?.length ?? 0) === 0),
+            allowDemoFallback,
           ),
         ),
       )
-      .catch(() => setData(withFacultyDemoFallback(null, demoCalendar())))
+      .catch((error) => {
+        const fallback = withFacultyDemoFallback(null, demoCalendar(), undefined, allowDemoFallback);
+        setData(fallback);
+        if (!fallback) setLoadError(error instanceof Error ? error.message : 'Failed to load holidays and leave');
+      })
       .finally(() => setMetaLoading(false));
-  }, [api, month]);
+  }, [api, month, allowDemoFallback, retry]);
 
   const monthLabel = new Date(`${month}-01T12:00:00`).toLocaleDateString('en-IN', {
     month: 'long',
@@ -97,6 +106,10 @@ export function MyCalendarPanel() {
 
   return (
     <div className="space-y-4">
+      {loadError && <div role="alert" className="space-y-3 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+        <p>Holidays and leave could not be loaded. {loadError}</p>
+        <Button type="button" variant="outline" onClick={() => setRetry((value) => value + 1)}>Retry</Button>
+      </div>}
       <FacultyPanel
         title="Attendance calendar"
         description={

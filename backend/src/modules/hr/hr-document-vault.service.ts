@@ -7,6 +7,8 @@ import {
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import type { Response } from 'express';
+import { realpathSync } from 'fs';
+import { relative, sep } from 'path';
 import { ObjectStorageService } from '../../storage/object-storage.service';
 import {
   HR_DOCUMENT_CATEGORIES,
@@ -16,7 +18,9 @@ import {
   openDocumentReadStream,
   parseTenantStorageKey,
   resolveDocumentDiskPath,
+  uploadRoot,
 } from './utils/document-file-path.util';
+import { hrUploadOwner } from '../../uploads/hr-document-upload.util';
 
 const PRESIGNED_TTL_SECONDS = 900;
 
@@ -73,7 +77,7 @@ export class HrDocumentVaultService {
     userId: string,
     uploadedBy: string,
     dto: { document_type: string; file_url: string; file_name?: string },
-    options?: { autoVerify?: boolean },
+    options?: { autoVerify?: boolean; requireUploaderOwnership?: boolean },
   ) {
     const docType = dto.document_type?.trim().toUpperCase();
     if (!docType) throw new BadRequestException('document_type is required');
@@ -91,6 +95,19 @@ export class HrDocumentVaultService {
       throw new BadRequestException(
         "Document must reference an uploaded file in this tenant's secure storage",
       );
+    }
+
+    if (options?.requireUploaderOwnership) {
+      const canonicalKey =
+        key ??
+        (localFile
+          ? relative(realpathSync(uploadRoot()), localFile).split(sep).join('/')
+          : '');
+      if (hrUploadOwner(canonicalKey) !== uploadedBy) {
+        throw new ForbiddenException(
+          'Upload this document from your own account before adding it to your vault',
+        );
+      }
     }
 
     const status = options?.autoVerify ? 'VERIFIED' : 'PENDING';

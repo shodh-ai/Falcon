@@ -5,6 +5,7 @@ import {
   runtimeModuleForPath,
   type RuntimeModuleManifest,
 } from "@/lib/launch-modules";
+import { examCellPortal } from '@/lib/navigation';
 
 const manifest: RuntimeModuleManifest = {
   revision: "r1",
@@ -42,6 +43,19 @@ const manifest: RuntimeModuleManifest = {
 };
 
 describe("runtime module launch filtering", () => {
+  it('gates Exam Cell employee pages with HR while keeping examination workflows separate', () => {
+    for (const href of ['/exam-cell/me/workforce', '/exam-cell/me/payslips', '/exam-cell/me/documents']) {
+      expect(resolvePathModule(href)).toBe('hrms_ess');
+    }
+    expect(resolvePathModule('/exam-cell/attendance-exemptions')).toBe('examinations_credentials');
+    const disabled: RuntimeModuleManifest = { ...manifest, modules: [...manifest.modules, {
+      moduleKey: 'hrms_ess', displayName: 'HR', state: 'OFF', available: false,
+      revision: 1, sourceScope: 'TENANT', updatedAt: null,
+    }] };
+    const filtered = filterPortalConfigForLaunchModules(examCellPortal, disabled);
+    expect(filtered.navGroups.flatMap(group => group.items).some(item => item.href.startsWith('/exam-cell/me/'))).toBe(false);
+    expect(filtered.navGroups.flatMap(group => group.items).some(item => item.href === '/exam-cell/results')).toBe(true);
+  });
   it("owns LMS routes independently from the broader SIS suite", () => {
     expect(resolvePathModule("/student/courses/abc")).toBe("lms_learning");
     expect(resolvePathModule("/faculty/courses/abc")).toBe("lms_learning");

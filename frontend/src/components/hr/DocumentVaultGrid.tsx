@@ -20,6 +20,7 @@ type Props = {
   userId?: string;
   mode: 'hr' | 'ess';
   onRefresh?: () => void;
+  allowDemoFallback?: boolean;
 };
 
 type VaultApi = {
@@ -34,15 +35,17 @@ function statusVariant(status: string): 'default' | 'secondary' | 'destructive' 
   return 'secondary';
 }
 
-function DocumentVaultGridInner({ userId, mode, api }: Props & { api: VaultApi }) {
+function DocumentVaultGridInner({ userId, mode, api, allowDemoFallback = true }: Props & { api: VaultApi }) {
   const { token } = useAuth();
   const [vault, setVault] = useState<VaultResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [uploadType, setUploadType] = useState('AADHAAR');
   const [uploading, setUploading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const path =
         mode === 'hr' && userId
@@ -55,6 +58,7 @@ function DocumentVaultGridInner({ userId, mode, api }: Props & { api: VaultApi }
             data,
             facultyDemoEssDocuments() as VaultResponse,
             (v) => !v?.documents?.length,
+            allowDemoFallback,
           ),
         );
       } else {
@@ -65,18 +69,24 @@ function DocumentVaultGridInner({ userId, mode, api }: Props & { api: VaultApi }
         const demo = withFacultyDemoFallback(
           null,
           facultyDemoEssDocuments() as VaultResponse,
+          undefined,
+          allowDemoFallback,
         );
         setVault(demo);
         if (!demo?.documents?.length) {
-          toast.error(e instanceof Error ? e.message : 'Failed to load documents');
+          const message = e instanceof Error ? e.message : 'Failed to load documents';
+          setLoadError(message);
+          toast.error(message);
         }
       } else {
-        toast.error(e instanceof Error ? e.message : 'Failed to load documents');
+        const message = e instanceof Error ? e.message : 'Failed to load documents';
+        setLoadError(message);
+        toast.error(message);
       }
     } finally {
       setLoading(false);
     }
-  }, [api, mode, userId]);
+  }, [api, mode, userId, allowDemoFallback]);
 
   useEffect(() => {
     void load();
@@ -135,6 +145,7 @@ function DocumentVaultGridInner({ userId, mode, api }: Props & { api: VaultApi }
     try {
       const formData = new FormData();
       formData.append('file', file);
+      formData.append('purpose', 'HR_DOCUMENT');
       const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? '';
       const uploadRes = await fetch(`${apiUrl}/uploads/single`, {
         method: 'POST',
@@ -166,6 +177,12 @@ function DocumentVaultGridInner({ userId, mode, api }: Props & { api: VaultApi }
   }
 
   if (loading) return <p className="text-sm text-muted-foreground">Loading document vault…</p>;
+  if (loadError) return (
+    <div role="alert" className="space-y-3 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+      <p>Documents could not be loaded. {loadError}</p>
+      <Button type="button" variant="outline" onClick={() => void load()}>Retry</Button>
+    </div>
+  );
   if (!vault) return null;
 
   const groupOrder = ['Identity', 'Academic', 'Financial', 'HR Letters', 'Other'];
@@ -268,9 +285,9 @@ function DocumentVaultGridInner({ userId, mode, api }: Props & { api: VaultApi }
   );
 }
 
-function EssDocumentVaultGrid() {
+function EssDocumentVaultGrid({ allowDemoFallback }: { allowDemoFallback?: boolean }) {
   const api = useAuthedApi();
-  return <DocumentVaultGridInner mode="ess" api={api} />;
+  return <DocumentVaultGridInner mode="ess" api={api} allowDemoFallback={allowDemoFallback} />;
 }
 
 function HrEmployeeDocumentVaultGrid({ userId }: { userId?: string }) {
@@ -278,9 +295,9 @@ function HrEmployeeDocumentVaultGrid({ userId }: { userId?: string }) {
   return <DocumentVaultGridInner mode="hr" userId={userId} api={api} />;
 }
 
-export function DocumentVaultGrid({ userId, mode }: Props) {
+export function DocumentVaultGrid({ userId, mode, allowDemoFallback }: Props) {
   if (mode === 'ess') {
-    return <EssDocumentVaultGrid />;
+    return <EssDocumentVaultGrid allowDemoFallback={allowDemoFallback} />;
   }
   return <HrEmployeeDocumentVaultGrid userId={userId} />;
 }
