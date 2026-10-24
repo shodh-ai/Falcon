@@ -14,6 +14,11 @@ that still require dependencies, isolated infrastructure, or GitHub execution.
 - Fresh locked dependency installation succeeded: backend 1,013 packages,
   frontend 863 packages, tests 533 packages. npm emitted deprecation warnings;
   these installation results are not a security audit.
+- GitHub's push response reported 212 existing default-branch dependency alerts
+  (13 critical, 129 high, 63 moderate, 7 low). They were not independently audited
+  or remediated in this workflow change; review the repository's
+  [Dependabot alerts](https://github.com/shodh-ai/Falcon/security/dependabot)
+  before releases. No dependency version or security check was weakened.
 - GitHub `develop` was created at the same base SHA, and branch protections were
   applied to `main` and `develop` during setup. These account changes are separate
   from the local validation results below.
