@@ -122,6 +122,7 @@ const ROUTES: Array<{ moduleKey: BusinessModuleKey; prefixes: string[] }> = [
   {
     moduleKey: "examinations_credentials",
     prefixes: [
+      "/hod/academics/end-term-results",
       "/admin/certificates",
       "/admin/degree-eligibility",
       "/exam-cell",

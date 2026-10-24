@@ -10,6 +10,8 @@ const openSession = {
   declared_at: null,
   entry_open_at: null,
   entry_close_at: null,
+  owner_department_id: 9,
+  max_marks: 40,
 };
 
 function setup(
@@ -26,13 +28,18 @@ function setup(
   const marks = (options.types ?? ['END_TERM']).map((exam_type, i) => ({
     mark_id: `mark-${i}`,
     exam_type,
+    student_user_id: 'student-a',
+    marks_obtained: 30,
+    max_marks: 40,
     status: options.status ?? 'DRAFT',
   }));
   const manager = {
     query: jest.fn(async (sql: string, _params?: unknown[]) => {
-      if (sql.includes('SELECT mark_id, exam_type FROM academic_marks')) {
+      if (sql.includes('SELECT mark_id, exam_type, student_user_id')) {
         return marks.filter((row) => row.status === 'DRAFT');
       }
+      if (sql.includes('FROM student_course_enrollments e')) return [{ student_user_id: 'student-a', dept_id: 9, tenant_id: tenantId }];
+      if (sql.includes("status IN ('PENDING_COE','PUBLISHED')")) return [];
       if (sql.includes('FROM exam_result_sessions')) {
         return options.session === null ? [] : [options.session ?? openSession];
       }
@@ -42,7 +49,7 @@ function setup(
         if (options.failWrite) throw new Error('write failed');
         const changed = marks.filter((row) => row.status === 'DRAFT');
         for (const row of changed) {
-          row.status = row.exam_type === 'QUIZ' ? 'PUBLISHED' : 'PENDING_COE';
+          row.status = ['ETE', 'END_TERM'].includes(row.exam_type) ? 'PENDING_COE' : 'PUBLISHED';
         }
         return [changed, changed.length];
       }
@@ -81,8 +88,8 @@ function setup(
 }
 
 describe('Faculty bulk marks submission security', () => {
-  it.each(['END_TERM', 'ETE', 'CAT1', 'MT1', 'GA1'])(
-    'submits %s for Exam Cell rather than publishing or notifying students',
+  it.each(['END_TERM', 'ETE'])(
+    'submits %s for HOD and Exam Cell rather than publishing or notifying students',
     async (examType) => {
       const { submit, marks, notify, manager, db } = setup({
         types: [examType],
@@ -98,13 +105,13 @@ describe('Faculty bulk marks submission security', () => {
       expect(db.transaction).toHaveBeenCalledTimes(1);
       expect(manager.query).toHaveBeenCalledWith(
         expect.stringContaining('FOR UPDATE'),
-        [tenantId, courseId, examType],
+        [tenantId, courseId, facultyId, ['mark-0']],
       );
       const update = manager.query.mock.calls.find(([sql]) =>
         sql.includes('UPDATE academic_marks'),
       )!;
       expect(update[0]).toContain(
-        "CASE WHEN exam_type = 'QUIZ' THEN 'PUBLISHED' ELSE 'PENDING_COE' END",
+        "CASE WHEN exam_type IN ('ETE', 'END_TERM') THEN 'PENDING_COE' ELSE 'PUBLISHED' END",
       );
       expect(update[0]).toContain(
         "status = 'DRAFT' AND mark_id = ANY($4::uuid[])",
@@ -113,6 +120,16 @@ describe('Faculty bulk marks submission security', () => {
       expect(db.query.mock.calls.some(([sql]) => sql.includes('UPDATE'))).toBe(
         false,
       );
+    },
+  );
+
+  it.each(['CAT1', 'MT1', 'GA1', 'QUIZ'])(
+    'publishes %s directly without an Exam Cell session',
+    async (examType) => {
+      const { submit, marks, notify } = setup({ types: [examType], session: null });
+      await expect(submit()).resolves.toMatchObject({ published: 1, submitted: 0, status: 'PUBLISHED' });
+      expect(marks[0].status).toBe('PUBLISHED');
+      expect(notify.marksPublished).toHaveBeenCalledTimes(1);
     },
   );
 
@@ -140,7 +157,9 @@ describe('Faculty bulk marks submission security', () => {
       types: ['QUIZ', 'END_TERM'],
       session,
     });
-    await expect(submit()).rejects.toBeInstanceOf(BadRequestException);
+    await expect(submit()).rejects.toBeInstanceOf(
+      _label === 'already declared' ? ForbiddenException : BadRequestException,
+    );
     expect(marks.every((row) => row.status === 'DRAFT')).toBe(true);
     expect(
       manager.query.mock.calls.some(([sql]) =>
@@ -159,12 +178,9 @@ describe('Faculty bulk marks submission security', () => {
     expect(notify.marksPublished).not.toHaveBeenCalled();
   });
 
-  it('allows existing ETE direct entry to be submitted, never published, without a session', async () => {
+  it('does not submit ETE without an Exam Cell session', async () => {
     const { submit, notify } = setup({ types: ['ETE'], session: null });
-    await expect(submit()).resolves.toMatchObject({
-      published: 0,
-      submitted: 1,
-    });
+    await expect(submit()).rejects.toBeInstanceOf(BadRequestException);
     expect(notify.marksPublished).not.toHaveBeenCalled();
   });
 

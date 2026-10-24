@@ -11,6 +11,7 @@ describe('result publication security', () => {
     session?: Record<string, unknown> | null;
     marks?: Array<Record<string, unknown>>;
     approval?: boolean;
+    hodApproval?: boolean;
     failWhen?: (sql: string) => boolean;
     events?: string[];
   } = {}) {
@@ -36,12 +37,16 @@ describe('result publication security', () => {
                 grading_policy_id: null,
                 pass_marks: 40,
                 max_marks: 100,
+                owner_department_id: 7,
                 declared_at: null,
               },
             ];
       }
       if (sql.includes('FROM exam_result_dean_approval_requests')) {
         return options.approval === false ? [] : [{ status: 'APPROVED', request_summary: { input_hash: currentHash } }];
+      }
+      if (sql.includes('FROM exam_result_hod_decisions')) {
+        return options.hodApproval === false ? [] : [{ decision: 'APPROVED', input_hash: currentHash, department_id: 7 }];
       }
       if (sql.includes('FROM exam_audit_logs')) {
         return [{ action: 'RESULT_COE_AUDIT_PASSED', new_value: { input_hash: currentHash } }];
@@ -158,14 +163,20 @@ describe('result publication security', () => {
     expect(notify.examResultsPublished).not.toHaveBeenCalled();
   });
 
-  it('requires Dean approval before any marks are published', async () => {
-    const { service, managerQuery, notify } = createService({ approval: false });
+  it('requires concerned HOD approval before end-semester marks are published', async () => {
+    const { service, managerQuery, notify } = createService({ hodApproval: false });
 
     await expect(
       service.declareSession(tenantId, sessionId, actorUserId, {}),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(managerQuery.mock.calls.some(([sql]) => sql.includes('UPDATE academic_marks'))).toBe(false);
     expect(notify.examResultsPublished).not.toHaveBeenCalled();
+  });
+
+  it('does not accept Dean approval as a substitute for the concerned HOD', async () => {
+    const { service } = createService({ approval: true, hodApproval: false });
+    await expect(service.declareSession(tenantId, sessionId, actorUserId, {}))
+      .rejects.toThrow('HOD approval');
   });
 
   it('rejects a session outside the authenticated tenant scope', async () => {

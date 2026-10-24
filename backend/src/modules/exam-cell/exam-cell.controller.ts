@@ -794,6 +794,14 @@ export class ExamCellController {
     return this.resultControl.listCourses(this.tenant(req));
   }
 
+  @Get('result-control/courses/:courseId/end-term-departments')
+  listEndTermDepartments(
+    @Req() req: { user: AuthUser },
+    @Param('courseId', new ParseUUIDPipe()) courseId: string,
+  ) {
+    return this.resultControl.listEndTermDepartments(this.tenant(req), courseId);
+  }
+
   @Get('result-control/grading-policies')
   listGradingPolicies() {
     return this.resultControl.listGradingPolicies();
