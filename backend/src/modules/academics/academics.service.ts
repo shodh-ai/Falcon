@@ -450,6 +450,55 @@ export class AcademicsService {
     }
 
     const weekEnd = weekDates[weekDates.length - 1]?.date ?? weekStart;
+    const moves = baseSlots.length ? await this.courseEnrollments.manager.query<Array<{
+      source_timetable_id: string;
+      source_date: string;
+      target_date: string;
+      target_start_time: string;
+      target_end_time: string;
+      target_room: string | null;
+    }>>(
+      `SELECT source_timetable_id,source_date::text AS source_date,
+              target_date::text AS target_date,target_start_time,target_end_time,target_room
+       FROM academic_class_moves
+       WHERE tenant_id=$1 AND status='APPROVED'
+         AND source_timetable_id=ANY($2::uuid[])
+         AND (source_date BETWEEN $3::date AND $4::date
+           OR target_date BETWEEN $3::date AND $4::date)`,
+      [tenantId,baseSlots.map((slot) => slot.timetable_id),weekStart,weekEnd],
+    ) : [];
+    const movedSources = new Set(moves.map((move) => `${move.source_timetable_id}|${move.source_date}`));
+    const datedSlots = baseSlots
+      .map((slot) => ({ ...slot,
+        session_date: weekDates.find((day) => day.day_of_week === slot.day_of_week)?.date ?? null,
+      }))
+      .filter((slot) => !movedSources.has(`${slot.timetable_id}|${slot.session_date}`));
+    for (const move of moves) {
+      if (move.target_date < weekStart || move.target_date > weekEnd) continue;
+      const original = baseSlots.find((slot) => slot.timetable_id === move.source_timetable_id);
+      if (!original) continue;
+      datedSlots.push({ ...original,
+        session_date: move.target_date,
+        day_of_week: new Date(`${move.target_date}T00:00:00Z`).getUTCDay() || 7,
+        start_time: this.normalizeTime(move.target_start_time),
+        end_time: this.normalizeTime(move.target_end_time),
+        room: move.target_room,
+      });
+    }
+    const covers = baseSlots.length ? await this.courseEnrollments.manager.query<Array<{
+      timetable_id: string; session_date: string; substitute_name: string;
+    }>>(
+      `SELECT p.timetable_id,p.date_of_proxy::text AS session_date,
+              u.name AS substitute_name
+       FROM academic_proxy_requests p
+       JOIN users u ON u.user_id=p.proxy_faculty_id AND u.tenant_id=p.tenant_id
+       WHERE p.tenant_id=$1 AND p.status='APPROVED'
+         AND p.timetable_id=ANY($2::uuid[])
+         AND p.date_of_proxy BETWEEN $3::date AND $4::date`,
+      [tenantId,baseSlots.map((slot) => slot.timetable_id),weekStart,weekEnd],
+    ) : [];
+    const coverNames = new Map(covers.map((cover) =>
+      [`${cover.timetable_id}|${cover.session_date}`,cover.substitute_name]));
     const logs = await this.courseEnrollments.manager.query(
       `SELECT cal.date::text AS date, cal.course_id, cal.timetable_id, cal.attendance_data
        FROM course_attendance_logs cal
@@ -476,9 +525,8 @@ export class AcademicsService {
       }
     }
 
-    const slots = baseSlots.map((slot) => {
-      const sessionDate =
-        weekDates.find((d) => d.day_of_week === slot.day_of_week)?.date ?? null;
+    const slots = datedSlots.map((slot) => {
+      const sessionDate = slot.session_date;
       let attendance_status: 'PRESENT' | 'ABSENT' | 'PENDING' | null = null;
 
       if (sessionDate && this.isSessionDone(sessionDate, slot.end_time)) {
@@ -500,14 +548,17 @@ export class AcademicsService {
         }
       }
 
-      return { ...slot, session_date: sessionDate, attendance_status };
+      return { ...slot,
+        faculty_name: coverNames.get(`${slot.timetable_id}|${sessionDate}`) ?? slot.faculty_name,
+        substitute_faculty_name: coverNames.get(`${slot.timetable_id}|${sessionDate}`) ?? null,
+        session_date: sessionDate, attendance_status };
     });
 
     return {
       week_start: weekStart,
       week_dates: weekDates,
       pending_practical_batches: pendingPracticalBatches,
-      conflict_count: conflictCount,
+      conflict_count: countStudentTimetableConflicts(datedSlots),
       slots,
     };
   }
