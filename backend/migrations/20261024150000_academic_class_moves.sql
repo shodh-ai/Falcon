@@ -33,3 +33,13 @@ CREATE INDEX IF NOT EXISTS academic_class_moves_projection
 
 CREATE INDEX IF NOT EXISTS academic_class_moves_group
   ON academic_class_moves (tenant_id, change_group_id);
+
+-- The API uses a restricted role in production. Grant only ordinary access to
+-- this business table; the migration ledger and schema remain administrator-owned.
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'falcon_runtime') THEN
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE academic_class_moves TO falcon_runtime;
+  END IF;
+END;
+$$;
