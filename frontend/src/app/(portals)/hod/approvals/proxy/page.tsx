@@ -51,8 +51,7 @@ export default function HodProxyApprovalsPage() {
   }, [api]);
 
   useEffect(() => {
-    setTimetableId('');
-    if (!sourceFacultyId || !coverDate) { setLectures([]); return; }
+    if (!sourceFacultyId || !coverDate) return;
     let cancelled = false;
     void api.get<Lecture[]>(`/api/academics/hod/proxy/lectures?faculty_id=${encodeURIComponent(sourceFacultyId)}&start_date=${coverDate}&end_date=${coverDate}`)
       .then((data) => { if (!cancelled) setLectures(Array.isArray(data) ? data : []); })
@@ -108,11 +107,15 @@ export default function HodProxyApprovalsPage() {
       </div>
       <div className="mb-5 grid gap-3 rounded-xl border bg-white p-4 sm:grid-cols-2">
         <p className="sm:col-span-2 font-semibold text-sgvu-navy">Arrange a substitute</p>
-        <Select aria-label="Original faculty" value={sourceFacultyId} onChange={(event) => setSourceFacultyId(event.target.value)}>
+        <Select aria-label="Original faculty" value={sourceFacultyId} onChange={(event) => {
+          setSourceFacultyId(event.target.value); setTimetableId(''); setLectures([]);
+        }}>
           <option value="">Select original faculty</option>
           {faculty.map((person) => <option key={person.user_id} value={person.user_id}>{person.name} ({person.email})</option>)}
         </Select>
-        <Input aria-label="Class date" type="date" value={coverDate} onChange={(event) => setCoverDate(event.target.value)} />
+        <Input aria-label="Class date" type="date" value={coverDate} onChange={(event) => {
+          setCoverDate(event.target.value); setTimetableId(''); setLectures([]);
+        }} />
         <Select aria-label="Class slot" value={timetableId} onChange={(event) => setTimetableId(event.target.value)}>
           <option value="">Select scheduled class</option>
           {lectures.map((lecture) => <option key={`${lecture.timetable_id}-${lecture.lecture_date}`} value={lecture.timetable_id}>
