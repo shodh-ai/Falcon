@@ -6,7 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, In, Repository } from 'typeorm';
+import { DataSource, EntityManager, In, Repository } from 'typeorm';
 import { mkdirSync, writeFileSync } from 'fs';
 import { extname } from 'path';
 import { v4 as uuidv4 } from 'uuid';
@@ -420,18 +420,24 @@ export class AcademicsFacultyService {
     tenantId: string,
     timetableId?: string,
     date?: string,
+    manager?: EntityManager,
   ) {
+    // Attendance writes resolve the same roster inside their transaction.
+    // A course can have enrollments outside this faculty's programme/section;
+    // validating writes against all course enrollments rejects a complete UI roster.
+    const db = manager ?? this.dataSource;
+    const enrollmentRepo = manager?.getRepository(StudentCourseEnrollment) ?? this.enrollmentRepo;
     // A previously recorded sheet is an immutable roster snapshot. The original
     // actor retains read access even when their current allocation is superseded.
     if (timetableId && date && this.isAttendanceLocked(date)) {
-      const [saved] = await this.dataSource.query(`SELECT cal.attendance_data FROM course_attendance_logs cal
+      const [saved] = await db.query(`SELECT cal.attendance_data FROM course_attendance_logs cal
         JOIN academic_timetables t ON t.timetable_id=cal.timetable_id AND t.tenant_id=cal.tenant_id
         WHERE cal.tenant_id=$1 AND cal.course_id=$2 AND cal.faculty_user_id=$3
           AND cal.timetable_id=$4::uuid AND cal.date=$5::date AND t.faculty_user_id=$3`,
         [tenantId,courseId,facultyUserId,timetableId,date]);
       if (Array.isArray(saved?.attendance_data)) {
         const ids = saved.attendance_data.map((entry: {student_id:string})=>entry.student_id);
-        return this.dataSource.query(`SELECT u.user_id AS student_id,u.name,${ROLL_NUMBER_SQL} AS roll_number,
+        return db.query(`SELECT u.user_id AS student_id,u.name,${ROLL_NUMBER_SQL} AS roll_number,
           u.official_email AS email,NULL::text AS section_code FROM users u LEFT JOIN student_profiles sp ON sp.user_id=u.user_id
           WHERE u.tenant_id=$1 AND u.user_id=ANY($2::uuid[]) ORDER BY u.user_id`,[tenantId,ids]);
       }
@@ -444,7 +450,7 @@ export class AcademicsFacultyService {
     let sectionCode: string | null = null;
     let theorySectionCode: string | null = null;
     if (timetableId) {
-      const [slot] = await this.dataSource.query<
+      const [slot] = await db.query<
         Array<{ section: string | null; is_practical: boolean }>
       >(
         `SELECT t.section,
@@ -468,7 +474,7 @@ export class AcademicsFacultyService {
       if (slot.is_practical && !sectionCode) return [];
     }
 
-    const rows = await this.enrollmentRepo.find({
+    const rows = await enrollmentRepo.find({
       where: {
         tenant_id: tenantId,
         course_id: courseId,
@@ -486,7 +492,7 @@ export class AcademicsFacultyService {
     // A course identity can be allocated to multiple programmes and sections.
     // Owning one allocation must not expose the other programme's students.
     // Preserve timetable-only legacy courses, which have no allocation facts.
-    const allocations = await this.dataSource.query<Array<{
+    const allocations = await db.query<Array<{
       program_name: string | null;
       semester: string | null;
       academic_year: string;
@@ -503,7 +509,7 @@ export class AcademicsFacultyService {
     let scopedRows = rows;
     if (allocations.length) {
       const profileRows = rows.length
-        ? await this.dataSource.query<Array<{
+        ? await db.query<Array<{
             user_id: string;
             program: string | null;
             status: string | null;
@@ -543,20 +549,20 @@ export class AcademicsFacultyService {
 
     let allowedIds: Set<string> | null = null;
     if (sectionCode) {
-      const [batch] = await this.dataSource.query<Array<{ batch_id: string }>>(
+      const [batch] = await db.query<Array<{ batch_id: string }>>(
         `SELECT batch_id FROM academic_practical_batches
          WHERE tenant_id = $1 AND course_id = $2 AND section_code = $3`,
         [tenantId, courseId, sectionCode],
       );
       if (batch) {
-        const members = await this.dataSource.query<Array<{ student_user_id: string }>>(
+        const members = await db.query<Array<{ student_user_id: string }>>(
           `SELECT student_user_id FROM academic_practical_batch_members
            WHERE batch_id = $1 AND removed_at IS NULL`,
           [batch.batch_id],
         );
         allowedIds = new Set(members.map((member) => member.student_user_id));
       } else {
-        const assigned = await this.dataSource.query<Array<{ student_user_id: string }>>(
+        const assigned = await db.query<Array<{ student_user_id: string }>>(
           `SELECT student_user_id FROM academic_practical_batch_members
            WHERE tenant_id = $1 AND course_id = $2 AND removed_at IS NULL`,
           [tenantId, courseId],
@@ -569,7 +575,7 @@ export class AcademicsFacultyService {
       // A saved session is a historical snapshot: editing a batch today must
       // not change who appears on that older attendance sheet.
       if (date && timetableId) {
-        const [saved] = await this.dataSource.query<Array<{ attendance_data: Array<{ student_id: string }> }>>(
+        const [saved] = await db.query<Array<{ attendance_data: Array<{ student_id: string }> }>>(
           `SELECT attendance_data FROM course_attendance_logs
            WHERE tenant_id = $1 AND course_id = $2 AND timetable_id = $3::uuid
              AND date = $4::date LIMIT 1`,
@@ -582,7 +588,7 @@ export class AcademicsFacultyService {
 
     const rollById = new Map<string, string>();
     if (visibleRows.length) {
-      const profileRows = await this.dataSource.query<
+      const profileRows = await db.query<
         Array<{ user_id: string; roll_number: string }>
       >(
         `SELECT u.user_id, ${ROLL_NUMBER_SQL} AS roll_number
@@ -1189,31 +1195,18 @@ export class AcademicsFacultyService {
       // Batch edits and attendance saves share this lock; neither can validate
       // against a roster that changes before its transaction commits.
       await manager.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`practical:${tenantId}:${dto.course_id}`]);
-      const [configured] = section ? await manager.query<Array<{ batch_id: string }>>(
-        `SELECT batch_id FROM academic_practical_batches
-         WHERE tenant_id = $1 AND course_id = $2 AND section_code = $3`,
-        [tenantId, dto.course_id, section],
-      ) : [];
-      const rosterRows = configured
-        ? await manager.query<Array<{ student_user_id: string }>>(
-            `SELECT m.student_user_id FROM academic_practical_batch_members m
-             JOIN student_course_enrollments e ON e.tenant_id = m.tenant_id
-               AND e.course_id = m.course_id AND e.student_user_id = m.student_user_id
-             WHERE m.batch_id = $1 AND m.removed_at IS NULL
-               AND e.status IN ('ENROLLED', 'COMPLETED', 'FAILED')`,
-            [configured.batch_id],
-          )
-        : await manager.query<Array<{ student_user_id: string }>>(
-            `SELECT e.student_user_id FROM student_course_enrollments e
-             WHERE e.tenant_id = $1 AND e.course_id = $2
-               AND e.status IN ('ENROLLED', 'COMPLETED', 'FAILED')
-               AND ($3::varchar IS NULL OR (e.section_code = $3::varchar AND NOT EXISTS (
-                 SELECT 1 FROM academic_practical_batch_members m
-                 WHERE m.tenant_id = e.tenant_id AND m.course_id = e.course_id
-                   AND m.student_user_id = e.student_user_id AND m.removed_at IS NULL)))`,
-            [tenantId, dto.course_id, section],
-          );
-      const roster = new Set(rosterRows.map((row) => row.student_user_id));
+      // Reuse the exact read-side programme, semester, section and practical
+      // batch scoping. The old write query demanded every enrollment in the
+      // course, including students deliberately hidden from this faculty.
+      const rosterRows = await this.getCourseStudents(
+        dto.course_id,
+        effectiveFacultyId,
+        tenantId,
+        timetableId ?? undefined,
+        date,
+        manager,
+      );
+      const roster = new Set<string>(rosterRows.map((row) => row.student_id));
       const submitted = dto.attendance_data.map((row) => row.student_id);
       const duplicate = submitted.find((id, index) => submitted.indexOf(id) !== index);
       if (duplicate) throw new BadRequestException('Attendance contains duplicate students');
