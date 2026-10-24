@@ -64,12 +64,10 @@ export function DegreeConvocationPanel() {
   const [checkout, setCheckout] = useState<{ demandId: string; order: PaymentOrder } | null>(null);
   const financeEnabled = isLaunchModuleEnabled('finance');
 
-  const load = useCallback(async (): Promise<boolean> => {
-    try {
-      const [evResult, mineResult] = await Promise.allSettled([
+  const load = useCallback((): Promise<boolean> => Promise.allSettled([
         certApi.activeEvent(),
         certApi.myApplications(),
-      ]);
+      ]).then(([evResult, mineResult]) => {
 
       const eventFailed = evResult.status === 'rejected';
       const appsFailed = mineResult.status === 'rejected';
@@ -101,11 +99,10 @@ export function DegreeConvocationPanel() {
         );
       }
       return true;
-    } catch (e) {
+    }).catch((e: unknown) => {
       setLoadError(e instanceof Error ? e.message : 'Could not load certificate services');
       return false;
-    }
-  }, [certApi]);
+    }), [certApi]);
 
   useEffect(() => {
     void load().finally(() => setLoading(false));

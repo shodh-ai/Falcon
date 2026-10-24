@@ -56,7 +56,7 @@ describe('Leave and on-duty final review routes', () => {
 
   it('accepts an on-duty case returned by the leave review group', async () => {
     const listHrReviewPending = jest.fn()
-      .mockResolvedValueOnce([{ leave_id: 'od-id', request_type: 'ON_DUTY' }])
+      .mockResolvedValueOnce([{ leave_id: 'od-id', request_type: 'ON_DUTY', can_review: true }])
       .mockResolvedValueOnce([]);
     const actOnTeamRequest = jest.fn().mockResolvedValue({ status: 'HR_APPROVED' });
     const controller = Object.assign(Object.create(HrController.prototype), {

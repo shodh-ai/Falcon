@@ -3,10 +3,13 @@ import { GatewayPaymentService } from './gateway-payment.service';
 
 describe('GatewayPaymentService', () => {
   const prev = { ...process.env };
+  const originalFetch = Object.getOwnPropertyDescriptor(global, 'fetch');
 
   afterEach(() => {
     process.env = { ...prev };
     jest.restoreAllMocks();
+    if (originalFetch) Object.defineProperty(global, 'fetch', originalFetch);
+    else delete (global as { fetch?: typeof fetch }).fetch;
   });
 
   it('rejects mock payments without ALLOW_MOCK_PAYMENTS (any NODE_ENV)', async () => {
@@ -139,7 +142,7 @@ describe('GatewayPaymentService', () => {
     process.env.NODE_ENV = 'production';
     process.env.RAZORPAY_KEY_ID = 'rzp_test_unit_key';
     process.env.RAZORPAY_KEY_SECRET = 'unit-secret-never-sent';
-    jest.spyOn(global, 'fetch').mockImplementation((url) =>
+    Object.defineProperty(global, 'fetch', { configurable: true, writable: true, value: jest.fn((url: RequestInfo | URL) =>
       Promise.resolve({
         ok: true,
         status: 200,
@@ -161,7 +164,7 @@ describe('GatewayPaymentService', () => {
               : { ...payment, ...overrides },
           ),
       } as Response),
-    );
+    ) });
     return new GatewayPaymentService();
   }
   it('accepts only a captured matching INR payment from the server response', async () => {

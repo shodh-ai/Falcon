@@ -67,7 +67,7 @@ export function AppSidebar({
         className={cn(
           'relative shrink-0',
           collapsed
-            ? 'flex h-16 items-center justify-center px-2'
+            ? 'flex min-h-24 flex-col items-center justify-start gap-1 px-2 pt-1'
             : cn(
                 'flex flex-col items-center px-3 py-3 text-center',
                 isExecutivePortal && 'min-h-[116px] justify-center py-4',
@@ -85,14 +85,14 @@ export function AppSidebar({
             </p>
           </div>
         )}
-        {collapsed && <FalconLogo size={36} compact className="mx-auto" />}
+        {collapsed && <FalconLogo size={28} compact className="mx-auto" />}
         <Button
           variant="ghost"
           size="icon"
           onClick={onToggleCollapse}
           className={cn(
-            'absolute hidden shrink-0 text-white hover:bg-white/10 lg:flex',
-            collapsed ? 'right-1 top-2' : 'right-1 top-2',
+            'hidden shrink-0 text-white hover:bg-white/10 lg:flex',
+            collapsed ? 'relative h-8 w-8' : 'absolute right-1 top-2',
           )}
           aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         >

@@ -17,13 +17,17 @@ export default function Page() {
   const api = useAuthedApi();
   const ops = useMemo(() => createOperationsApi(api), [api]);
   const [rows, setRows] = useState<PurchaseOrderRow[]>([]);
+  const [vendors, setVendors] = useState<Record<string, string>>({});
 
   useEffect(() => {
     void ops
       .purchaseOrders()
       .then((list) => setRows(Array.isArray(list) ? list : []))
       .catch(() => toast.error('Load failed'));
-  }, [ops]);
+    void api.get<Array<{ vendor_id: string; business_name: string }>>('/finance/vendors')
+      .then((list) => setVendors(Object.fromEntries(list.map((v) => [v.vendor_id, v.business_name]))))
+      .catch(() => setVendors({}));
+  }, [api, ops]);
 
   return (
     <div className="space-y-4 p-6">
@@ -37,10 +41,18 @@ export default function Page() {
       {rows.map((r) => (
         <Card key={r.po_id}>
           <CardContent className="space-y-2 pt-4 text-sm">
-            <p className="font-medium">{r.description}</p>
-            <p>
-              ₹{formatPoAmount(r.amount)} · {r.status}
-            </p>
+            <details>
+              <summary className="cursor-pointer font-medium">{r.description} · ₹{formatPoAmount(r.amount)} · {r.status} <span className="text-xs font-normal underline">View details</span></summary>
+              <dl className="mt-3 grid gap-1 text-muted-foreground sm:grid-cols-2">
+                <div>PO ID: {r.po_id}</div>
+                <div>Vendor: {r.vendor_id ? vendors[r.vendor_id] ?? `Vendor ${r.vendor_id}` : 'Not linked'}</div>
+                <div>Created: {r.created_at ? new Date(r.created_at).toLocaleString('en-IN') : 'Not recorded'}</div>
+                <div>Requested by: {r.requested_by ?? 'Not recorded'}</div>
+                <div>Approved by: {r.approved_by ?? 'Not recorded'}</div>
+                <div>Approved at: {r.approved_at ? new Date(r.approved_at).toLocaleString('en-IN') : 'Not recorded'}</div>
+                <div>Source: {r.source_system ?? 'Legacy'}</div>
+              </dl>
+            </details>
             <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
               <span className="font-mono">PO ID: {r.po_id}</span>
               <Button

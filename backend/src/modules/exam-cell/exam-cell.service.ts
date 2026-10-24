@@ -12,6 +12,7 @@ import { AdmitCardPdfService } from '../exams/pdf/admit-card-pdf.service';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 import { NotificationEvents } from '../../core/notifications/notification.events';
 import { AttendanceEligibilityService } from '../attendance-policy/attendance-eligibility.service';
+import { ResultControlService } from './result-control.service';
 import * as fs from 'fs';
 import * as path from 'path';
 import { randomUUID } from 'crypto';
@@ -56,6 +57,7 @@ export class ExamCellService {
     private readonly notify: NotificationEmitterService,
     private readonly events: EventEmitter2,
     private readonly attendanceEligibility: AttendanceEligibilityService,
+    private readonly resultControl: ResultControlService,
   ) {}
 
   private async queryOrEmpty<T extends Record<string, unknown>>(
@@ -107,7 +109,6 @@ export class ExamCellService {
       [ufmOpen],
       [duties],
       [invigilatorsToday],
-      [publishedResults],
       [pendingResultSessions],
       [hallTicketsGenerated],
       [studentsEligible],
@@ -179,12 +180,6 @@ export class ExamCellService {
         [tenantId, today],
       ),
       this.queryOrEmpty<{ c: number }>(
-        `SELECT COUNT(*)::int AS c FROM student_exam_reports ser
-         JOIN exam_result_sessions ers ON ers.session_id = ser.session_id
-         WHERE ers.tenant_id = $1 AND ser.tenant_id = $1 AND ers.declared_at IS NOT NULL`,
-        [tenantId],
-      ),
-      this.queryOrEmpty<{ c: number }>(
         `SELECT COUNT(*)::int AS c FROM exam_result_sessions
          WHERE tenant_id = $1 AND declared_at IS NULL`,
         [tenantId],
@@ -212,18 +207,23 @@ export class ExamCellService {
       ),
     ]);
 
-    const resultStats = await this.queryOrEmpty<{
-      label: string;
-      count: number;
-    }>(
+    // Outcomes are report records, not workflow stages or unique students.
+    // Use the same declaration boundary as published student result history.
+    // Do not turn a broken reporting query into an apparently empty chart.
+    const resultStats = await this.db.query<
+      Array<{ label: string; count: number }>
+    >(
       `SELECT COALESCE(br.result_status, ser.result_status) AS label, COUNT(*)::int AS count
        FROM student_exam_reports ser
-       JOIN exam_result_sessions ers ON ers.session_id = ser.session_id AND ers.tenant_id = ser.tenant_id
+       JOIN exam_result_sessions ers
+         ON ers.session_id = ser.session_id AND ers.tenant_id = ser.tenant_id
        LEFT JOIN exam_backlog_current_results br ON br.source_report_id = ser.report_id
          AND br.tenant_id = ser.tenant_id AND br.student_user_id = ser.student_user_id
          AND br.semester = ers.semester AND br.selected_attempt_id IS NOT NULL
-       WHERE ers.tenant_id = $1 AND ser.tenant_id = $1 AND ers.declared_at IS NOT NULL
-       GROUP BY COALESCE(br.result_status, ser.result_status)`,
+       WHERE ser.tenant_id = $1
+         AND ser.declared_at IS NOT NULL AND ers.declared_at IS NOT NULL
+       GROUP BY COALESCE(br.result_status, ser.result_status)
+       ORDER BY label`,
       [tenantId],
     );
 
@@ -246,7 +246,7 @@ export class ExamCellService {
       open_ufm_cases: ufmOpen?.c ?? 0,
       invigilation_duties_published: duties?.c ?? 0,
       invigilators_assigned_today: invigilatorsToday?.c ?? 0,
-      published_results: publishedResults?.c ?? 0,
+      published_results: resultStats.reduce((total, row) => total + row.count, 0),
       result_status_chart: resultStats,
     };
   }
@@ -1897,6 +1897,38 @@ export class ExamCellService {
        FROM academic_marks
        WHERE tenant_id = $1 AND course_id = $2 AND exam_type = $3 AND status = 'PENDING_COE'`,
       [tenantId, courseId, examType],
+    );
+  }
+
+  /** Loop 4: COE publishes results → notify all students in batch */
+  async publishResults(
+    tenantId: string,
+    dto: { course_id: string; exam_type: string; batch_semester?: number },
+    actorUserId: string,
+  ) {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(dto.course_id)) {
+      throw new BadRequestException('A valid course ID is required');
+    }
+    const session = await this.resultControl.getSessionForCourse(
+      tenantId,
+      dto.course_id,
+      dto.exam_type,
+      dto.batch_semester,
+    );
+    if (!session) {
+      throw new BadRequestException(
+        'Result session not found; use the Result Control Centre workflow',
+      );
+    }
+    if (dto.batch_semester != null && Number(session.semester) !== dto.batch_semester) {
+      throw new BadRequestException('Result session semester does not match the requested batch');
+    }
+
+    return this.resultControl.declareSession(
+      tenantId,
+      session.session_id,
+      actorUserId,
+      { declaration_note: 'Published via legacy results endpoint' },
     );
   }
 

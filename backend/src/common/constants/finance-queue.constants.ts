@@ -3,6 +3,7 @@ export const FINANCE_BULK_DEMAND_QUEUE = 'finance-bulk-demand';
 export type FinanceBulkDemandJob = {
   jobId: string;
   tenantId: string;
+  requestedBy?: string;
   templateId?: string;
   program?: string;
   semester?: number;

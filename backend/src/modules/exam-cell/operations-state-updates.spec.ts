@@ -67,6 +67,8 @@ describe.each(cases)('$name persistence response', ({ run }) => {
       {} as never,
       audit as never,
       {} as never,
+
+      {} as never,
     );
     const enterprise = new ExamCellEnterpriseService(
       db as never,

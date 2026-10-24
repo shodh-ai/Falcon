@@ -1123,7 +1123,7 @@ export class ExamCellEnterpriseService {
       detail?: string;
     }> = [];
 
-    const reg = await this.queryOrEmpty<{ status: string; created_at: string }>(
+    const reg = await this.db.query<Array<{ status: string; created_at: string }>>(
       `SELECT status, created_at FROM exam_semester_registrations
        WHERE tenant_id = $1 AND student_user_id = $2 ORDER BY created_at DESC LIMIT 1`,
       [tenantId, studentUserId],
@@ -1154,10 +1154,10 @@ export class ExamCellEnterpriseService {
       at: admit?.created_at ?? null,
     });
 
-    const attendance = await this.queryOrEmpty<{
+    const attendance = await this.db.query<Array<{
       status: string;
       marked_at: string;
-    }>(
+    }>>(
       `SELECT status, marked_at FROM exam_day_attendance
        WHERE tenant_id = $1 AND student_user_id = $2 ORDER BY marked_at DESC LIMIT 1`,
       [tenantId, studentUserId],
@@ -1169,24 +1169,27 @@ export class ExamCellEnterpriseService {
     });
 
     const [result] = await this.db.query(
-      `SELECT ser.result_status AS status, ser.declared_at AS occurred_at FROM student_exam_reports ser
-       JOIN exam_result_sessions ers ON ers.session_id = ser.session_id
-       WHERE ser.student_user_id = $1 AND ers.tenant_id = $2 AND ser.tenant_id = $2
-       ORDER BY ser.declared_at DESC LIMIT 1`,
+      `SELECT ser.result_status AS status, ser.declared_at
+       FROM student_exam_reports ser
+       JOIN exam_result_sessions ers
+         ON ers.session_id = ser.session_id AND ers.tenant_id = ser.tenant_id
+       WHERE ser.student_user_id = $1 AND ser.tenant_id = $2
+         AND ser.declared_at IS NOT NULL AND ers.declared_at IS NOT NULL
+       ORDER BY ser.declared_at DESC, ser.report_id DESC LIMIT 1`,
       [studentUserId, tenantId],
     );
     events.push({
       stage: 'Result',
       status: result?.status ?? 'PENDING',
-      at: result?.occurred_at ?? null,
+      at: result?.declared_at ?? null,
     });
 
     const [reval] = await this.db.query(
-      `SELECT status, created_at FROM exam_applications
-       WHERE tenant_id = $1 AND student_user_id = $2
-         AND application_type = 'RE_EVALUATION'
-       ORDER BY created_at DESC LIMIT 1`,
-      [tenantId, studentUserId],
+      `SELECT a.status, a.created_at FROM exam_applications a
+       JOIN users u ON u.user_id = a.student_user_id
+       WHERE a.student_user_id = $1 AND u.tenant_id = $2 AND a.application_type = 'RE_EVALUATION'
+       ORDER BY a.created_at DESC LIMIT 1`,
+      [studentUserId, tenantId],
     );
     if (reval) {
       events.push({
@@ -1379,42 +1382,39 @@ export class ExamCellEnterpriseService {
   /* ── 14. Advanced Analytics ── */
 
   async advancedAnalytics(tenantId: string, semester: number) {
-    const resultScope = `FROM academic_exam_results r
-         LEFT JOIN academic_courses c ON c.course_id = r.course_id AND c.tenant_id = r.tenant_id
-         LEFT JOIN exam_backlog_current_results br ON br.source_result_id = r.result_id
-           AND br.tenant_id = r.tenant_id AND br.student_user_id = r.student_user_id
-           AND br.semester = $2 AND br.selected_attempt_id IS NOT NULL
-         LEFT JOIN academic_subjects sub ON sub.subject_id = r.subject_id
-           OR (r.subject_id IS NULL AND sub.subject_code = c.course_code)
-         WHERE r.tenant_id = $1 AND r.status = 'PUBLISHED'
-           AND EXISTS (
-             SELECT 1 FROM student_course_enrollments e
-             JOIN academic_courses enrolled_course
-               ON enrolled_course.course_id = e.course_id AND enrolled_course.tenant_id = e.tenant_id
-             WHERE e.tenant_id = r.tenant_id AND e.student_user_id = r.student_user_id
-               AND e.semester = $2
-               AND (e.course_id = r.course_id
-                 OR (r.course_id IS NULL AND enrolled_course.course_code = sub.subject_code))
-           )`;
-    const [gradeDist, subjectAnalysis, facultyPerf, passFail] =
-      await Promise.all([
-        this.db.query<Array<Record<string, unknown>>>(
-          `SELECT COALESCE(br.grade, r.grade) AS grade, COUNT(*)::int AS count
-         ${resultScope}
-         GROUP BY COALESCE(br.grade, r.grade) ORDER BY grade`,
-          [tenantId, semester],
-        ),
-        this.db.query<Array<Record<string, unknown>>>(
-          `SELECT sub.subject_code, sub.subject_name,
-                AVG(COALESCE(br.marks_obtained, r.marks_obtained))::numeric(6,2) AS avg_marks,
-                COUNT(*)::int AS students
-         ${resultScope}
-         GROUP BY sub.subject_code, sub.subject_name
-         ORDER BY avg_marks DESC LIMIT 15`,
-          [tenantId, semester],
-        ),
-        this.db.query<Array<Record<string, unknown>>>(
-          `SELECT u.name, COUNT(am.mark_id)::int AS submissions
+    const [gradeDist, subjectAnalysis, facultyPerf, passFail] = await Promise.all([
+      this.db.query(
+        `SELECT COALESCE(br.grade, ser.grade) AS grade, COUNT(*)::int AS count
+         FROM student_exam_reports ser
+         JOIN exam_result_sessions ers
+           ON ers.session_id = ser.session_id AND ers.tenant_id = ser.tenant_id
+         LEFT JOIN exam_backlog_current_results br ON br.source_report_id = ser.report_id
+           AND br.tenant_id = ser.tenant_id AND br.student_user_id = ser.student_user_id
+           AND br.semester = ers.semester AND br.selected_attempt_id IS NOT NULL
+         WHERE ser.tenant_id = $1 AND ers.semester = $2
+           AND ser.declared_at IS NOT NULL AND ers.declared_at IS NOT NULL
+         GROUP BY COALESCE(br.grade, ser.grade) ORDER BY grade`,
+        [tenantId, semester],
+      ),
+      this.db.query(
+        `SELECT c.course_code AS subject_code, c.course_name AS subject_name,
+                AVG(COALESCE(br.marks_obtained, ser.marks_obtained))::float8 AS avg_marks,
+                COUNT(DISTINCT ser.student_user_id)::int AS students
+         FROM student_exam_reports ser
+         JOIN exam_result_sessions ers
+           ON ers.session_id = ser.session_id AND ers.tenant_id = ser.tenant_id
+         LEFT JOIN exam_backlog_current_results br ON br.source_report_id = ser.report_id
+           AND br.tenant_id = ser.tenant_id AND br.student_user_id = ser.student_user_id
+           AND br.semester = ers.semester AND br.selected_attempt_id IS NOT NULL
+         JOIN academic_courses c ON c.course_id = ser.course_id AND c.tenant_id = ser.tenant_id
+         WHERE ser.tenant_id = $1 AND ers.semester = $2
+           AND ser.declared_at IS NOT NULL AND ers.declared_at IS NOT NULL
+         GROUP BY c.course_id, c.course_code, c.course_name
+         ORDER BY avg_marks DESC, c.course_code LIMIT 15`,
+        [tenantId, semester],
+      ),
+      this.db.query(
+        `SELECT u.name, COUNT(am.mark_id)::int AS submissions
          FROM academic_marks am
          JOIN users u ON u.user_id = am.uploaded_by AND u.tenant_id = am.tenant_id
          WHERE am.tenant_id = $1 AND am.status != 'DRAFT'
@@ -1423,22 +1423,23 @@ export class ExamCellEnterpriseService {
              WHERE e.tenant_id = am.tenant_id AND e.student_user_id = am.student_user_id
                AND e.course_id = am.course_id AND e.semester = $2
            )
-         GROUP BY u.name ORDER BY submissions DESC LIMIT 10`,
-          [tenantId, semester],
-        ),
-        this.db.query<Array<Record<string, unknown>>>(
-          `SELECT COALESCE(br.result_status, ser.result_status) AS label, COUNT(*)::int AS count
-       FROM student_exam_reports ser
-       JOIN exam_result_sessions ers ON ers.session_id = ser.session_id
-       LEFT JOIN exam_backlog_current_results br ON br.source_report_id = ser.report_id
-         AND br.tenant_id = ser.tenant_id AND br.student_user_id = ser.student_user_id
-         AND br.semester = ers.semester AND br.selected_attempt_id IS NOT NULL
-       WHERE ers.tenant_id = $1 AND ser.tenant_id = $1 AND ers.semester = $2
-         AND ers.declared_at IS NOT NULL
-       GROUP BY COALESCE(br.result_status, ser.result_status)`,
-          [tenantId, semester],
-        ),
-      ]);
+         GROUP BY u.user_id, u.name ORDER BY submissions DESC, u.name LIMIT 10`,
+        [tenantId, semester],
+      ),
+      this.db.query(
+        `SELECT COALESCE(br.result_status, ser.result_status) AS label, COUNT(*)::int AS count
+         FROM student_exam_reports ser
+         JOIN exam_result_sessions ers
+           ON ers.session_id = ser.session_id AND ers.tenant_id = ser.tenant_id
+         LEFT JOIN exam_backlog_current_results br ON br.source_report_id = ser.report_id
+           AND br.tenant_id = ser.tenant_id AND br.student_user_id = ser.student_user_id
+           AND br.semester = ers.semester AND br.selected_attempt_id IS NOT NULL
+         WHERE ser.tenant_id = $1 AND ers.semester = $2
+           AND ser.declared_at IS NOT NULL AND ers.declared_at IS NOT NULL
+         GROUP BY COALESCE(br.result_status, ser.result_status) ORDER BY label`,
+        [tenantId, semester],
+      ),
+    ]);
 
     return {
       semester,

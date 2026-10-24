@@ -22,6 +22,8 @@ function setup(students = ['synthetic-student']) {
     {} as never,
     { log } as never,
     { dispatch } as never,
+
+    {} as never,
   );
   return { service, query, dispatch, log };
 }

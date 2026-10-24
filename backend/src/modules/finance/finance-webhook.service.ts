@@ -106,6 +106,21 @@ export class FinanceWebhookService {
       return { received: true, processed: false, reason: 'missing_payment_id' };
     }
 
+    // Resolve the book from the recorded demand/user, not merely from a
+    // provider note. Tenant-scoped dashboards must never mix payments.
+    const transactionTenantRows = demandId
+      ? await this.dataSource.query(
+          `SELECT tenant_id FROM finance_fee_demands WHERE demand_id=$1 LIMIT 1`,
+          [demandId],
+        )
+      : studentUserId
+        ? await this.dataSource.query(
+            `SELECT tenant_id FROM users WHERE user_id=$1 LIMIT 1`,
+            [studentUserId],
+          )
+        : [];
+    const transactionTenantId = transactionTenantRows[0]?.tenant_id ?? (tenantIdFromNotes || null);
+
     const existing = await this.transactions.findOne({
       where: { gateway_payment_id: paymentId },
     });
@@ -116,6 +131,7 @@ export class FinanceWebhookService {
     let txn = existing;
     if (!txn) {
       txn = this.transactions.create({
+        tenant_id: transactionTenantId,
         gateway: provider.toUpperCase() as Transaction['gateway'],
         gateway_payment_id: paymentId,
         gateway_order_id: orderId || null,
@@ -145,6 +161,7 @@ export class FinanceWebhookService {
     }
 
     txn.status = 'SUCCESS';
+    txn.tenant_id = txn.tenant_id ?? transactionTenantId;
     txn.gateway_payload = dto.payload;
     txn.direction = txn.direction ?? 'IN';
     txn.txn_kind = txn.txn_kind ?? (feeHead ? `FEE_${feeHead}` : 'FEE_PAYMENT');

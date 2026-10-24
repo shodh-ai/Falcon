@@ -1,4 +1,5 @@
 import { ExamCellController } from './exam-cell.controller';
+import { ExamCellService } from './exam-cell.service';
 const course = '11111111-1111-4111-8111-111111111111';
 const req = {
   user: { user_id: 'actor', tenant_id: 'tenant', role: 'ExamCell' },
@@ -11,8 +12,17 @@ function fixture() {
     .fn()
     .mockResolvedValue({ declared: 1, session_id: 'session' });
   const unsafePublish = jest.fn();
+  const examCell = new ExamCellService(
+    { query: unsafePublish } as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    { getSessionForCourse, declareSession } as never,
+  );
   const controller = new ExamCellController(
-    { publishResults: unsafePublish } as never,
+    examCell,
     { getSessionForCourse, declareSession } as never,
     {} as never,
     {} as never,
@@ -33,12 +43,12 @@ describe('Legacy publication API', () => {
         exam_type: 'END_TERM',
         batch_semester: 4,
       }),
-    ).resolves.toMatchObject({ published: 1 });
+    ).resolves.toMatchObject({ declared: 1 });
     expect(f.declareSession).toHaveBeenCalledWith(
       'tenant',
       'session',
       'actor',
-      {},
+      { declaration_note: 'Published via legacy results endpoint' },
     );
     expect(f.unsafePublish).not.toHaveBeenCalled();
   });

@@ -1,10 +1,12 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { FinancePageHeader, formatInr } from '@/components/finance/FinancePageHeader';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { useAuthedApi } from '@/lib/api';
+import { useAuth } from '@/context/AuthContext';
 
 type Dashboard = {
   todays_collection: number;
@@ -15,8 +17,17 @@ type Dashboard = {
     utilization_percent: number;
     allocated_amount: string;
     utilized_amount: string;
+    encumbered_amount: string;
+    financial_year: string;
   }>;
-  recent_transactions: Array<{ transaction_id: string; amount: string; payment_mode?: string; created_at: string }>;
+  recent_transactions: Array<{
+    transaction_id: string;
+    amount: string;
+    payment_mode?: string;
+    created_at: string;
+    payment_source?: string;
+    payment_purpose?: string;
+  }>;
   procurement?: {
     cleared_invoice_count: number;
     procurement_invoice_count: number;
@@ -37,6 +48,7 @@ type Dashboard = {
 
 export default function FinanceDashboardPage() {
   const api = useAuthedApi();
+  const { user } = useAuth();
   const [data, setData] = useState<Dashboard | null>(null);
 
   useEffect(() => {
@@ -49,6 +61,11 @@ export default function FinanceDashboardPage() {
         title="Finance Dashboard"
         description="Real-time cash flow: gateway collections, outstanding dues, and departmental budget utilization."
       />
+      {user?.email?.toLowerCase() === 'finance@mygyanvihar.com' && (
+        <Link href="/finance/demo-book" className="block rounded-lg border-2 border-amber-500 bg-amber-50 p-4 text-sm font-semibold text-amber-950 underline underline-offset-2">
+          Open SGVU Finance demo book — synthetic invoices, expenses, payments and journals (not official records)
+        </Link>
+      )}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Card>
           <CardContent className="p-4">
@@ -57,10 +74,10 @@ export default function FinanceDashboardPage() {
             <p className="text-xs text-muted-foreground">{data?.transaction_count_today ?? 0} successful payments</p>
           </CardContent>
         </Card>
-        <Card>
-          <CardContent className="p-4">
+        <Card className="min-w-0">
+          <CardContent className="min-w-0 p-4">
             <p className="text-xs text-muted-foreground">Total outstanding dues</p>
-            <p className="text-3xl font-black text-sgvu-navy">{formatInr(data?.total_outstanding)}</p>
+            <p className="min-w-0 break-words text-[clamp(1.25rem,2vw,1.875rem)] font-black leading-tight tabular-nums text-sgvu-navy" style={{ overflowWrap: 'anywhere' }}>{formatInr(data?.total_outstanding)}</p>
           </CardContent>
         </Card>
         <Card>
@@ -83,16 +100,20 @@ export default function FinanceDashboardPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           {(data?.budget_utilization ?? []).map((row) => (
-            <div key={row.department} className="space-y-1">
+            <div key={`${row.department}-${row.financial_year}`} className="space-y-1">
               <div className="flex justify-between text-sm">
-                <span>{row.department ?? 'General'}</span>
-                <span className="text-muted-foreground">{row.utilization_percent}% used</span>
+                <span>{row.department ?? 'General'} · {row.financial_year}</span>
+                <span className="text-muted-foreground">{row.utilization_percent}% utilized or committed</span>
               </div>
+              <p className="text-xs text-muted-foreground">Allocated {formatInr(row.allocated_amount)} · Spent {formatInr(row.utilized_amount)} · Committed {formatInr(row.encumbered_amount)} · Available {formatInr(Math.max(0, Number(row.allocated_amount) - Number(row.utilized_amount) - Number(row.encumbered_amount)))}</p>
               <Progress value={Math.min(100, Number(row.utilization_percent))} />
             </div>
           ))}
           {!data?.budget_utilization?.length && (
-            <p className="text-sm text-muted-foreground">Allocate budgets under Budget Allocation to see utilization bars.</p>
+            <div className="space-y-2 text-sm text-muted-foreground">
+              <p>No departmental budgets have been allocated yet. Utilization will appear here after allocation.</p>
+              <Link href="/finance/budgets" className="inline-flex font-semibold text-sgvu-navy underline underline-offset-2 hover:text-sgvu-gold">Open Budget Allocation</Link>
+            </div>
           )}
         </CardContent>
       </Card>
@@ -132,12 +153,19 @@ export default function FinanceDashboardPage() {
         </CardHeader>
         <CardContent className="space-y-2 text-sm">
           {(data?.recent_transactions ?? []).map((t) => (
-            <div key={t.transaction_id} className="flex justify-between border-b py-2">
-              <span className="font-mono text-xs">{t.transaction_id.slice(0, 8)}…</span>
-              <span>{formatInr(t.amount)}</span>
-              <span className="text-muted-foreground">{t.payment_mode ?? '—'}</span>
-            </div>
+            <details key={t.transaction_id} className="group border-b py-2">
+              <summary className="flex cursor-pointer flex-wrap items-center justify-between gap-2 font-medium">
+                <span>{t.payment_purpose ?? 'Payment'} <span className="text-muted-foreground">· {t.payment_source ?? 'Other'}</span></span>
+                <span>{formatInr(t.amount)}</span>
+              </summary>
+              <dl className="mt-2 grid gap-1 text-xs text-muted-foreground sm:grid-cols-2">
+                <div><dt className="inline font-semibold">Transaction ID: </dt><dd className="inline break-all font-mono">{t.transaction_id}</dd></div>
+                <div><dt className="inline font-semibold">Method: </dt><dd className="inline">{t.payment_mode ?? 'Not recorded'}</dd></div>
+                <div><dt className="inline font-semibold">Recorded: </dt><dd className="inline">{new Date(t.created_at).toLocaleString('en-IN')}</dd></div>
+              </dl>
+            </details>
           ))}
+          {!data?.recent_transactions?.length && <p className="text-sm text-muted-foreground">No successful payments recorded yet.</p>}
         </CardContent>
       </Card>
     </div>

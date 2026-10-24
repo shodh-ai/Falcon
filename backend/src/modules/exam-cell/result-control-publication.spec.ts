@@ -53,6 +53,9 @@ describe('Result Control publication atomicity', () => {
       if (reportFails && sql.includes('INSERT INTO student_exam_reports')) {
         return Promise.reject(new Error('report write failed'));
       }
+      if (sql.includes('UPDATE exam_result_sessions') && sql.includes('SET declared_at = NOW()')) {
+        return Promise.resolve([{ session_id: 'session' }]);
+      }
       return Promise.resolve([]);
     });
     const query = jest.fn().mockResolvedValue([{}]);

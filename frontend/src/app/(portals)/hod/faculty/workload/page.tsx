@@ -35,13 +35,16 @@ type Row = {
   scheduled_hours: number;
   course_count: number;
   unscheduled_course_count: number;
+  pending_sessions?: number;
+  pending_minutes?: number;
   workload_status:
     | 'OVERLOADED'
     | 'UNDERUTILIZED'
     | 'BALANCED'
     | 'NO_TEACHING_LOAD'
     | 'NO_ACTIVE_ALLOCATION'
-    | 'SCHEDULE_MISSING';
+    | 'SCHEDULE_MISSING'
+    | 'AWAITING_CONFIRMATION';
   load_declaration_status: 'NO_TEACHING_LOAD' | 'AVAILABLE_FOR_ALLOCATION' | null;
   load_declaration_reason: string | null;
   load_declaration_revision: number;
@@ -76,9 +79,10 @@ function StatusTag({ status }: { status: Row['workload_status'] }) {
         status === 'NO_TEACHING_LOAD' && 'border-blue-200 bg-blue-50 text-blue-700',
         status === 'NO_ACTIVE_ALLOCATION' && 'border-slate-200 bg-slate-50 text-slate-600',
         status === 'SCHEDULE_MISSING' && 'border-amber-200 bg-amber-50 text-amber-700',
+        status === 'AWAITING_CONFIRMATION' && 'border-amber-200 bg-amber-50 text-amber-700',
       )}
     >
-      {status.replace('_', ' ')}
+      {status.replaceAll('_', ' ')}
     </span>
   );
 }
@@ -296,6 +300,7 @@ export default function HodFacultyWorkloadPage() {
             render: (r) => (
               <div>
                 <p>{formatDuration(r.scheduled_minutes, r.scheduled_hours)}</p>
+                {!!r.pending_sessions && <p className="text-xs font-normal text-amber-700">{r.pending_sessions} held sessions · {formatDuration(r.pending_minutes)} excluded</p>}
                 <p className="text-xs font-normal text-muted-foreground">
                   {r.assigned_load_credits} assigned credits
                 </p>

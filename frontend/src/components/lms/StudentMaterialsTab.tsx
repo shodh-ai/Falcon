@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { BookOpen, ChevronDown, FileText } from 'lucide-react';
+import { BookOpen, ChevronDown, ExternalLink, FileText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -24,6 +24,10 @@ function DownloadRow({
   token: string | null;
   compact?: boolean;
 }) {
+  const youtubeUrl = material.material_type === 'YOUTUBE' &&
+    /^https:\/\/www\.youtube\.com\/watch\?v=[A-Za-z0-9_-]{11}$/.test(material.external_url ?? '')
+      ? material.external_url
+      : null;
   return (
     <div
       className={cn(
@@ -32,13 +36,17 @@ function DownloadRow({
       )}
     >
       <div className="flex min-w-0 items-center gap-2 text-sm">
-        <FileText className="h-4 w-4 shrink-0 text-sgvu-navy" />
+        {youtubeUrl ? <ExternalLink className="h-4 w-4 shrink-0 text-sgvu-navy" /> : <FileText className="h-4 w-4 shrink-0 text-sgvu-navy" />}
         <span className="truncate font-medium">{material.title}</span>
         {!compact ? (
           <span className="shrink-0 text-xs text-muted-foreground">({material.material_type})</span>
         ) : null}
       </div>
-      <Button
+      {youtubeUrl ? (
+        <Button asChild size="sm" variant="outline" className="shrink-0">
+          <a href={youtubeUrl} target="_blank" rel="noopener noreferrer">Watch video</a>
+        </Button>
+      ) : <Button
         size="sm"
         variant="outline"
         className="shrink-0"
@@ -52,7 +60,7 @@ function DownloadRow({
         }
       >
         Download
-      </Button>
+      </Button>}
     </div>
   );
 }

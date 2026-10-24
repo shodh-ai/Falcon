@@ -6,6 +6,7 @@ import {
   Headers,
   Param,
   ParseIntPipe,
+  ParseUUIDPipe,
   Patch,
   Post,
   Put,
@@ -32,6 +33,7 @@ import {
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles, Public } from '../../common/decorators/roles.decorator';
+import { requireTenantId } from '../../common/utils/require-tenant-id';
 import { AcademicsService } from './academics.service';
 import { AcademicsFacultyService } from './academics-faculty.service';
 import { AssignmentsService } from './assignments.service';
@@ -189,6 +191,17 @@ export class AcademicsController {
       deptId,
       date,
     );
+  }
+
+  @Get('faculty/attendance/week')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  async getFacultyAttendanceWeek(
+    @Req() req: { user: AuthUser },
+    @Query('deptId') deptIdRaw?: string,
+    @Query('start') start?: string,
+  ) {
+    const deptId = await this.resolveFacultyDeptId(req, deptIdRaw);
+    return this.facultyAcademics.getFacultyAttendanceWeek(req.user.user_id, this.resolveTenantId(req.user), deptId, start);
   }
 
   @Get('faculty/attendance/missing')
@@ -432,6 +445,19 @@ export class AcademicsController {
     );
   }
 
+  @Delete('faculty/assignments/:assignmentId')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  deleteFacultyAssignment(
+    @Param('assignmentId') assignmentId: string,
+    @Req() req: { user: AuthUser },
+  ) {
+    return this.assignments.deleteFacultyAssignment(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      assignmentId,
+    );
+  }
+
   @Get('faculty/assignments/:assignmentId/submissions')
   @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
   listAssignmentSubmissions(
@@ -571,19 +597,28 @@ export class AcademicsController {
     if (!isSelf && !isStaff) {
       throw new ForbiddenException('You can only view your own results');
     }
-    return this.academics.listResultsForStudent(userId, req.user.tenant_id);
+    return this.marksHistoryService.getPublishedExamReports(
+      this.resolveTenantId(req.user),
+      userId,
+    );
   }
 
   @Get('student/dashboard-summary')
   @Roles('Student')
   studentDashboardSummary(@Req() req: { user: AuthUser }) {
-    return this.academics.getStudentDashboardSummary(req.user.user_id);
+    return this.academics.getStudentDashboardSummary(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+    );
   }
 
   @Get('dashboard/metrics')
   @Roles('Student')
   dashboardMetrics(@Req() req: { user: AuthUser }) {
-    return this.academics.getDashboardMetrics(req.user.user_id);
+    return this.academics.getDashboardMetrics(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+    );
   }
 
   @Get('dashboard/timetable/today')
@@ -2900,6 +2935,21 @@ export class AcademicsController {
     );
   }
 
+  @Post('faculty/courses/modules/:moduleId/materials/link')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  addYouTubeMaterial(
+    @Param('moduleId') moduleId: string,
+    @Req() req: { user: AuthUser },
+    @Body() body: { title?: string; url?: string; allocation_ids?: string | string[] },
+  ) {
+    return this.courseLms.addYouTubeMaterial(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      moduleId,
+      body,
+    );
+  }
+
   @Post('faculty/courses/modules/:moduleId/complete')
   @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
   @UseInterceptors(courseMaterialInterceptor())
@@ -2950,9 +3000,17 @@ export class AcademicsController {
     );
     const file = await this.courseLms.streamMaterialDownload(material);
     res.setHeader('Content-Type', file.mimeType);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition');
+    const asciiFallback = `course-material${file.filename.match(/\.[a-z0-9]+$/i)?.[0] ?? ''}`;
+    const encodedFilename = encodeURIComponent(file.filename).replace(
+      /[!'()*]/g,
+      (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`,
+    );
     res.setHeader(
       'Content-Disposition',
-      `attachment; filename="${file.filename}"`,
+      `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encodedFilename}`,
     );
     return file.stream.pipe(res);
   }
@@ -2975,6 +3033,29 @@ export class AcademicsController {
       'Content-Disposition',
       `attachment; filename="${file.filename}"`,
     );
+    return file.stream.pipe(res);
+  }
+
+  @Get('student/assignments/:assignmentId/submission/download')
+  @Roles('Student')
+  async downloadStudentSubmission(
+    @Param('assignmentId', ParseUUIDPipe) assignmentId: string,
+    @Req() req: { user: AuthUser },
+    @Res() res: Response,
+  ) {
+    const submission = await this.assignments.getSubmissionForStudentDownload(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      assignmentId,
+    );
+    const file = await this.assignments.streamSubmissionFile(submission);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader(
+      'Content-Disposition',
+      `inline; filename="${file.filename.replace(/["\r\n]/g, '_')}"`,
+    );
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
     return file.stream.pipe(res);
   }
 
@@ -3022,7 +3103,7 @@ export class AcademicsController {
   }
 
   private resolveTenantId(user: AuthUser) {
-    return user.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
+    return requireTenantId(user.tenant_id);
   }
 
   private auditMetaFromReq(req: {

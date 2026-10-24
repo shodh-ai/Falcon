@@ -15,7 +15,7 @@ describe('Faculty marks student enrollment boundary', () => {
       },
     );
     const service = new FacultyWorkspacesService(
-      { query } as never,
+      { query, transaction: async (work: (manager: { query: typeof query }) => unknown) => work({ query }) } as never,
       {} as never,
       {} as never,
       {} as never,
@@ -71,7 +71,7 @@ describe('Faculty marks after a previously declared component', () => {
         if (sql.includes('SELECT 1 AS ok')) return Promise.resolve([{ ok: 1 }]);
         if (sql.includes('SELECT * FROM exam_result_sessions'))
           return Promise.resolve([
-            { entry_status: 'OPEN', marks_locked: false, declared_at: null },
+            { entry_status: 'OPEN', marks_locked: false, declared_at: null, max_marks: 50 },
           ]);
         if (sql.includes('UNION ALL SELECT 1 FROM academic_exam_results'))
           return Promise.resolve(published ? [{ exists: 1 }] : []);
@@ -81,7 +81,7 @@ describe('Faculty marks after a previously declared component', () => {
       },
     );
     const service = new FacultyWorkspacesService(
-      { query } as never,
+      { query, transaction: async (work: (manager: { query: typeof query }) => unknown) => work({ query }) } as never,
       {} as never,
       {} as never,
       {} as never,
@@ -172,9 +172,11 @@ describe('Faculty bulk marks publication boundary', () => {
     const managerQuery = jest.fn((sql: string) => {
       if (sql.includes('SELECT mark_id, exam_type'))
         return Promise.resolve([
-          { mark_id: 'quiz', exam_type: 'QUIZ' },
-          { mark_id: 'end', exam_type: 'END_TERM' },
+          { mark_id: 'quiz', exam_type: 'QUIZ', student_user_id: 'student', marks_obtained: 5, max_marks: 10 },
+          { mark_id: 'end', exam_type: 'END_TERM', student_user_id: 'student', marks_obtained: 30, max_marks: 40 },
         ]);
+      if (sql.includes('FROM student_course_enrollments e'))
+        return Promise.resolve([{ student_user_id: 'student', dept_id: 9, tenant_id: 'tenant' }]);
       if (sql.includes('FROM academic_exam_results'))
         return Promise.resolve(
           options.legacyPublished ? [{ result_id: 'published' }] : [],
@@ -185,12 +187,14 @@ describe('Faculty bulk marks publication boundary', () => {
             entry_status: options.closed ? 'CLOSED' : 'OPEN',
             marks_locked: false,
             declared_at: null,
+            owner_department_id: 9,
+            max_marks: 40,
           },
         ]);
       if (sql.includes('UPDATE academic_marks'))
         return Promise.resolve([
-          { exam_type: 'QUIZ' },
-          { exam_type: 'END_TERM' },
+          { exam_type: 'QUIZ', status: 'PUBLISHED' },
+          { exam_type: 'END_TERM', status: 'PENDING_COE' },
         ]);
       return Promise.resolve([]);
     });
@@ -230,7 +234,7 @@ describe('Faculty bulk marks publication boundary', () => {
     expect(marksPublished).not.toHaveBeenCalled();
   });
 
-  it('publishes only quizzes and submits ordinary drafts to COE in one audited transaction', async () => {
+  it('publishes non-end-semester marks and submits END_TERM to HOD/Exam Cell in one audited transaction', async () => {
     const { service, managerQuery, transaction } = setup();
     await expect(
       service.publishAllCourseMarks('faculty', 'tenant', 'course'),
@@ -240,7 +244,7 @@ describe('Faculty bulk marks publication boundary', () => {
       sql.includes('UPDATE academic_marks'),
     )?.[0];
     expect(update).toContain(
-      "CASE WHEN exam_type = 'QUIZ' THEN 'PUBLISHED' ELSE 'PENDING_COE' END",
+      "CASE WHEN exam_type IN ('ETE', 'END_TERM') THEN 'PENDING_COE' ELSE 'PUBLISHED' END",
     );
     expect(update).toContain("AND status = 'DRAFT'");
     expect(

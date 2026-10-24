@@ -40,6 +40,9 @@ export class CourseMaterial extends BaseTenantEntity {
   @Column({ type: 'text', nullable: true })
   file_key: string | null;
 
+  @Column({ type: 'text', nullable: true })
+  external_url: string | null;
+
   @Column({ type: 'uuid', nullable: true })
   module_id: string | null;
 

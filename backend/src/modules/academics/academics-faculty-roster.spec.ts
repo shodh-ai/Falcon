@@ -67,7 +67,7 @@ describe('AcademicsFacultyService course roster', () => {
     expect(roster.map((student) => student.student_id)).toEqual(['student-b']);
     expect(dataSource.query).toHaveBeenCalledWith(
       expect.stringContaining('timetable_id = $2::uuid'),
-      ['tenant-1', 'timetable-1', 'course-1', 'faculty-1'],
+      ['tenant-1', 'timetable-1', 'course-1', 'faculty-1', expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/)],
     );
   });
 

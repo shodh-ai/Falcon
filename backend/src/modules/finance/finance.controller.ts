@@ -9,6 +9,7 @@ import {
   Query,
   Req,
   Res,
+  ServiceUnavailableException,
   UseGuards,
 } from '@nestjs/common';
 import type { Response } from 'express';
@@ -68,6 +69,12 @@ export class FinanceController {
     return this.finance.getDashboard(this.tenant(req));
   }
 
+  @Get('demo-book')
+  @Roles(...FINANCE_DESK)
+  demoBook(@Req() req: { user: AuthUser }) {
+    return this.accounts.getDemoBook(this.tenant(req), req.user.user_id);
+  }
+
   @Get('fee-templates')
   @Roles(...FINANCE_DESK)
   feeTemplates(@Req() req: { user: AuthUser }) {
@@ -88,8 +95,17 @@ export class FinanceController {
 
   @Get('demands')
   @Roles(...FINANCE_DESK)
-  listDemands(@Query('studentUserId') studentUserId?: string) {
-    return this.finance.listDemands(studentUserId);
+  listDemands(
+    @Req() req: { user: AuthUser },
+    @Query('studentUserId') studentUserId?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+  ) {
+    return this.finance.listDemands(
+      this.tenant(req), studentUserId,
+      limit && /^\d+$/.test(limit) ? Number(limit) : undefined,
+      offset && /^\d+$/.test(offset) ? Number(offset) : undefined,
+    );
   }
 
   @Post('demands')
@@ -107,12 +123,21 @@ export class FinanceController {
     @Req() req: { user: AuthUser },
     @Body() dto: Record<string, unknown>,
   ) {
-    const { job_id } = await this.accounts.createBulkJob(this.tenant(req), dto);
-    await this.bulkQueue.add('generate', {
-      jobId: job_id,
-      tenantId: this.tenant(req),
+    const { job_id } = await this.accounts.createBulkJob(this.tenant(req), {
       ...dto,
+      requested_by: req.user.user_id,
     });
+    try {
+      await this.bulkQueue.add('generate', {
+        ...dto,
+        jobId: job_id,
+        tenantId: this.tenant(req),
+        requestedBy: req.user.user_id,
+      });
+    } catch (error) {
+      await this.accounts.markBulkJobFailed(this.tenant(req), job_id, error);
+      throw new ServiceUnavailableException('Demand generation could not start; please retry.');
+    }
     return {
       queued: true,
       job_id,
@@ -123,8 +148,8 @@ export class FinanceController {
 
   @Get('demands/jobs/:jobId')
   @Roles(...FINANCE_DESK)
-  bulkJobStatus(@Param('jobId') jobId: string) {
-    return this.accounts.getBulkJob(jobId);
+  bulkJobStatus(@Req() req: { user: AuthUser }, @Param('jobId') jobId: string) {
+    return this.accounts.getBulkJob(this.tenant(req), jobId);
   }
 
   @Get('collections')
@@ -160,9 +185,16 @@ export class FinanceController {
   @Post('scholarships')
   @Roles(...FINANCE_DESK)
   applyScholarship(
+    @Req() req: { user: AuthUser },
     @Body() dto: { student_user_id?: string; discount_percent?: number },
   ) {
-    return this.finance.applyScholarship(dto);
+    return this.finance.applyScholarship(this.tenant(req), dto);
+  }
+
+  @Get('scholarships/student/:studentId')
+  @Roles(...FINANCE_DESK)
+  lookupScholarshipStudent(@Req() req: { user: AuthUser }, @Param('studentId') studentId: string) {
+    return this.finance.lookupScholarshipStudent(this.tenant(req), studentId);
   }
 
   @Get('fine-policies')
@@ -183,6 +215,12 @@ export class FinanceController {
     @Body() dto: Record<string, unknown>,
   ) {
     return this.accounts.createVendor(this.tenant(req), dto);
+  }
+
+  @Patch('vendors/:vendorId')
+  @Roles(...FINANCE_DESK)
+  updateVendor(@Req() req: { user: AuthUser }, @Param('vendorId') vendorId: string, @Body() dto: Record<string, unknown>) {
+    return this.accounts.updateVendor(this.tenant(req), vendorId, dto);
   }
 
   @Get('expense-heads')
@@ -219,7 +257,7 @@ export class FinanceController {
   }
 
   @Post('approvals/:approvalId/verify-otp')
-  @Roles('SuperAdmin', 'President', 'Chairman')
+  @Roles('CFO', 'SuperAdmin', 'President', 'Chairman')
   verifyApprovalOtp(
     @Req() req: { user: AuthUser },
     @Param('approvalId') approvalId: string,

@@ -519,7 +519,7 @@ export class FacultyProfileService {
   private async getWorkload(tenantId: string, userId: string) {
     const courses = await this.dataSource.query(
       `SELECT DISTINCT c.course_id, c.course_code, c.course_name, c.credits,
-              CASE WHEN c.course_name ILIKE '%lab%' OR c.course_code ILIKE '%L%' THEN 'Lab' ELSE 'Theory' END AS session_type
+              CASE WHEN c.course_name ILIKE '%practical%' OR UPPER(c.course_code) ~ '(P|LAB)$' THEN 'Practical' ELSE 'Theory' END AS session_type
        FROM academic_timetables t
        INNER JOIN academic_courses c ON c.course_id = t.course_id
        WHERE t.tenant_id = $1 AND t.faculty_user_id = $2 AND t.deleted_at IS NULL
@@ -535,6 +535,11 @@ export class FacultyProfileService {
        WHERE tenant_id = $1 AND faculty_user_id = $2 AND deleted_at IS NULL`,
       [tenantId, userId],
     );
+
+    const pending = await this.dataSource.query(`SELECT COUNT(*)::int AS sessions,
+      COALESCE(SUM(EXTRACT(EPOCH FROM ((e.entry->>'end')::time-(e.entry->>'start')::time))/60),0)::int AS minutes
+      FROM academic_timetable_source_entries e JOIN academic_timetable_publications p ON p.publication_id=e.publication_id
+      WHERE e.tenant_id=$1 AND $2::uuid=ANY(e.faculty_user_ids) AND e.state='HELD' AND p.state='ACTIVE' AND p.activated_on<=CURRENT_DATE`, [tenantId,userId]);
 
     const projectGuides = await this.dataSource.query(
       `SELECT g.guide_id, g.project_title, g.program AS project_type, u.name AS student_name
@@ -557,6 +562,8 @@ export class FacultyProfileService {
     return {
       courses,
       weekly_teaching_hours: Number(hoursRow[0]?.weekly_hours ?? 0),
+      pending_sessions: Number(pending[0]?.sessions ?? 0),
+      pending_minutes: Number(pending[0]?.minutes ?? 0),
       project_guides_count: projectGuides.length,
       project_guides: projectGuides,
       phd_scholars_count: phdScholars.length,

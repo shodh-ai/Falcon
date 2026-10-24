@@ -6,11 +6,19 @@ const nextConfig: NextConfig = {
   output: 'standalone',
   compress: true,
   poweredByHeader: false,
+  // Recovery query strings contain bearer tokens; keep them out of dev logs.
+  logging: {
+    incomingRequests: false,
+    fetches: { fullUrl: false },
+  },
   turbopack: {
     // Pin root to frontend/ — avoids picking up stray lockfiles (e.g. ~/package-lock.json)
     root: process.cwd(),
   },
   experimental: {
+    // CI/container builds start clean, so persisting the Turbopack build cache
+    // only consumes scarce disk space without speeding up the next build.
+    turbopackFileSystemCacheForBuild: false,
     // Keep production builds safe on the shared Coolify host. Without this,
     // Next.js sizes workers from host CPUs (nine workers on the current VPS),
     // which causes large simultaneous memory spikes while prerendering.

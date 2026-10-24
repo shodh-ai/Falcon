@@ -1,0 +1,191 @@
+FALCON fixed uploads ACL adoption — local review package
+
+No command in this package has been run against the host by its author.
+The Python tests are synthetic. A successful private Linux fixture on the SAME
+filesystem device, using the exact frozen helper and pinned local image, is a
+mandatory gate before adoption. The fixture report is root0600, retained locally,
+and bound by explicit SHA256 to adoption. No data or keys leave the host.
+
+Fixed identities / scope
+  Source: /data/coolify/applications/pmy0ybhwzco11kocu0zloqk0/uploads
+  API: UID/GID61001:61001; both must be absent from host NSS.
+  Existing backup: UID999:GID0; unchanged. NO namedUID999 ACL is added.
+  Existing source owner/group0:0, basic ACLs only, file0640/0644, dir0750/0755.
+  Existing owner, group and other ACCESS entries remain exact.
+  Add only namedAPI accessrw (files), rwx (dirs), explicit maskrw/rwx.
+  Directory SGID preserves original GID0 for future files/dirs.
+  Directory defaults: owner:rwx, API61001:rwx, originalgroup:r-x, mask:rwx,
+  other:---. Existing access-other remains unchanged; new defaults are private.
+  No source content writes, chown, deletion, default backup/credential change,
+  external service, generic setfacl --restore, or automatic permission undo.
+
+Required bridge release BEFORE any source ACL change
+  Fully deploy the reviewed ROOT prep image, and remove EVERY old application RW
+  consumer. The separately pinned existing administrative exception below is
+  checked explicitly, never inferred from a container name or ancestor path.
+  Launcher sets process.umask(0027) before app/storage/database checks.
+  Sole explicit persistent0640 stream requests0660 instead; ordinary writes
+  request0666. Without default ACL, effective0660&~0027 is0640 as previously.
+  With default ACL, request0660 leaves maskrw and APIrw; group0 staysr.
+  Existing persistent mkdir paths request default0777; no persistent filesystem
+  rename/chmod/copy-in/hardlink/symlink creators may be introduced unnoticed.
+  LMS unlink exists: a deleted/replaced captured name ABORTS adoption safely.
+  The helper checks all running local Docker RW binds overlapping SOURCE, exact
+  immutable image/revision, image-default CMD/entrypoint/cwd, no code bind
+  overrides, PID1 actual Umask0027 and root UID. This is not a source audit;
+  --source-review-confirmed acknowledges the independently reviewed bridge code.
+  The root prep image remains healthy/compatible after any partial adoption.
+
+Owner-controlled run sequence (examples are intentionally invalid placeholders)
+  Install one frozen root-owned helper without group/other write permission.
+  Verify its SHA256 before and after; do not edit during fixture/adoption.
+  Supply the actual uploads st_dev integer and inode from the protected baseline.
+  Supply LOCAL image ID sha256:<64hex> and full40hex source revision.
+  All evidence directories must be NEW direct children of root0700
+  /data/falcon-backups, named upload-acl-YYYYMMDDTHHMMSSZ-<12lowerhex>.
+
+  First: fixture (source is not accessed by this mode)
+    python3 /root/falcon-upload-acl-reviewed.py fixture
+      --expected-image sha256:REPLACE64HEX
+      --expected-device REPLACE_DEVICE_INTEGER
+      --expected-script-sha256 REPLACE_HELPER64HEX
+      --evidence-dir /data/falcon-backups/upload-acl-YYYYMMDDTHHMMSSZ-REPLACE12HEX
+
+  Fixture: root-only synthetic tree; forked API61001:GID61001 (no group0,
+  effective/permitted caps0) creates nested SGID/GID0 dirs, mode0640/default0666
+  files, and updates existing root-owned files. Backup999:GID0 reads those files
+  but cannot write/create/delete. Outsider999:GID999 cannot traverse. Explicit
+ 0600/0700 objects intentionally deny backup access and are flagged as unsupported.
+  A local pinned Node container additionally proves RO uploads mount + UID999:GID0,
+  all capability sets0, networknone, no pull, no ports,64MiB/.1CPU. Only generated
+  container name+label+immutable ID is cleaned; fixture/evidence dirs are retained.
+  Check result.json ok:true and compute its SHA256 on the host. No raw result data
+  beyond counts/flags should be sent off-host.
+
+  Second: audit source / save full original numeric getfacl before mutation
+    python3 /root/falcon-upload-acl-reviewed.py audit
+      --expected-image sha256:REPLACE64HEX --expected-revision REPLACE40HEX
+      --expected-device REPLACE_DEVICE_INTEGER --expected-inode REPLACE_INODE_INTEGER
+      --expected-script-sha256 REPLACE_HELPER64HEX --source-review-confirmed
+      --evidence-dir /data/falcon-backups/upload-acl-YYYYMMDDTHHMMSSZ-REPLACE12HEX
+  Audit does not change source metadata/content; it stores private numeric ACLs.
+
+  Third: adopt using a DIFFERENT new evidence directory and successful fixture
+    python3 /root/falcon-upload-acl-reviewed.py adopt
+      --expected-image sha256:REPLACE64HEX --expected-revision REPLACE40HEX
+      --expected-device REPLACE_DEVICE_INTEGER --expected-inode REPLACE_INODE_INTEGER
+      --expected-script-sha256 REPLACE_HELPER64HEX --source-review-confirmed
+      --fixture-report /data/falcon-backups/upload-acl-FIXTURE/result.json
+      --fixture-sha256 REPLACE_FIXTURE_RESULT64HEX
+      --evidence-dir /data/falcon-backups/upload-acl-YYYYMMDDTHHMMSSZ-REPLACE12HEX
+
+Implementation gates
+  Initial whole-tree numeric getfacl snapshot is fsynced root0600 before mutation.
+  Each inode's exact prior identity/mode/ACLs is durably journaled before changes.
+  Directory SGID is set first; exact access/default ACLs are then installed BEFORE
+  listing children. A child created in the SGID-before-default window may be new
+  basic02750 only, with a proven prepared parent. Later inherited ACLs require
+  that same parent provenance and exact known UID0/GID0 state. Existing complex
+  ACLs/defaults/SGID, links, special files, unexpected modes/owners/devices,
+  symlinks, nested mount IDs, replaced or vanished captured names fail closed.
+  O_PATH inert opens check type before reopening a held inode; all ACL changes use
+  fd-based Linux xattrs, not a mutable source pathname. Named root and mount ID
+  are rechecked. Additive creation is reconciled at most4 passes, max3000 entries,
+  maxdepth64, overall180sec plus bounded cleanup. Kernel D-state I/O cannot be
+  guaranteed instantly interruptible by any userspace timer.
+
+On failure / rollback plan
+  Do not deploy UID61001 after any failed or incomplete adoption. Keep the reviewed
+  root prep image and existing data live. Do not blindly rerun or clear ACLs: retain
+  the private journal/result for targeted review. No automated metadata rollback
+  is included, because concurrent additions/unlinks can make an exact prior tree
+  impossible to restore without forbidden ownership/data changes.
+  If a later nonroot IMAGE rollout fails, return to the compatible ROOT PREP image
+  while retaining these ACLs/SGID; no content or permission undo is needed for that
+  application rollback. Never return to an old explicit0640/root image after ACL
+  adoption because newly created files could mask future API write permission.
+  A permission-only undo is a separately reviewed root operation using ONLY this
+  own protected snapshot/journal: match named paths, mount IDs and unchanged inodes;
+  refuse new/missing/replaced/foreign-owner objects or unexpected metadata; restore
+  exact recorded access ACL/default absence and original directory SGID/mode, no
+  chown or content operations. To avoid a transient group0-write grant, set the
+  original BASIC ACL atomically (owner/group/other) rather than removing extended
+  ACL and leaving the widened mask mode in place. Then restore original mode/SGID.
+  Never feed raw getfacl headers to setfacl --restore: that can restore owners/flags.
+
+Content backup and permission recovery
+  The installed frozen backup worker uses BusyBox tar -czf, without POSIX ACL
+  xattr preservation. Its archive retains file bytes and basic numeric UID/GID/
+  mode metadata; it does NOT retain extended access ACLs or directory default
+  ACLs. Passing content hashes/archive checks therefore does not prove full
+  permission recovery. In particular, an archived mode's group bits can reflect
+  the ACL mask rather than the original group's effective permissions.
+  Retain the full numeric ACL snapshot, per-inode journal, final reviewed ACL
+  policy and fixture/adoption results separately in the protected owner-only
+  stage evidence. Do not treat that evidence as metadata embedded in each tar.
+
+  A future owner-authorized production restore needs a separately reviewed
+  permission-recovery procedure. Restore and inspect content in an isolated,
+  access-restricted tree first; reconstruct/review the known API UID61001 access,
+  original GID0 read-only access, directory SGID and default ACL policy there.
+  Match the restored content/ownership to the applicable protected evidence;
+  original source inode identities are not identities of the newly restored tree.
+  Before promotion, prove API reads/writes, backup999:GID0 reads with denied
+  writes, and outsider denial, including new nested files/directories. Review
+  effective ACL entries, not only ls mode bits. Never blindly run setfacl --restore
+  or replay a source journal onto a restored tree. No production restore is
+  performed or authorized by this document update. The content backups remain
+  useful; full restored-permission recovery remains a separate unproven gate.
+
+Limits to retain in handoff
+  This is not atomic against arbitrary privileged writers. Reviewed bridge creates
+  are compatible; observed unlinks/replacements abort. Future chmod/access-ACL
+  changes by API (nonmember of GID0) may clear SGID; rename-in does not inherit;
+  explicit0600/0700 masks backup read. None is silently repaired. No extra runtime
+  capability or group0 membership is introduced. Final UID61001 full-app validation
+  and a subsequent real backup integrity check are separate rollout gates.
+
+Explicit existing Coolify control-plane exception
+  The existing control plane has an RW ancestor bind but its routine UID9999
+  workers cannot traverse/write the actual root-owned uploads directory. To
+  acknowledge only this observed administrative container, audit/adopt may add:
+    --approved-control-plane-container 780b6fe7ae612e6b42c432d2ddb3bbd4f97a1099ad93dd0a066b1a4c55d2cee1
+    --approved-control-plane-image sha256:7c54f42d64c0d20fed4a8f4561df9018a561fecba9931ed3f64a4f3e0d34a3be
+  Both fields are optional together and hard-pinned to these reviewed IDs; no
+  generic name/path/image exception is accepted. The sole overlapping bind must
+  be exactly /data/coolify/applications ->
+  /var/www/html/storage/app/applications RW. ConfigUser must remain www-data.
+  All actual processes are checked before/after a fixed read-only PHP proof:
+  real/effective/saved/fs UID/GID9999, supplementary groups only9999, effective,
+  permitted, inheritable, ambient caps0. Process starttimes prevent PID reuse from
+  being mistaken for stable identity. Worker additions/removals are allowed only
+  with valid snapshots; the container leader/image/mounts must remain unchanged.
+  PHP default identity is independently checked, and lstat must see the SAME
+  source device/inode/rootUID0/GID0/directory type. Missing or shadowed paths
+  cannot pass false-denial checks. is_executable and is_writable must both be false;
+  there is no write or uploaded-file-content probe. All gates rerun before/after
+  adoption. Root-owned/non-writable host ancestor requirements remain unchanged.
+  Existing CapBnd/NoNewPrivs are recorded, not tightened. This container already
+  controls Docker and can request root operations by design; that administrative
+  authority is explicitly acknowledged, NOT prevented by this narrow DAC proof.
+  Replacing/upgrading it requires a newly reviewed pin, not an automatic bypass.
+  Any helper-code change invalidates prior exact-helper fixture evidence: rerun
+  fixture and use its new result SHA before adopting with the updated helper.
+
+Exact source-only ancestor pins
+  On this host /data/coolify and /data/coolify/applications are owned9999:0,
+  mode0700. The source-only walker accepts these two exact observed directories
+  ONLY with both explicit control-plane pins above:
+    /data/coolify: device2052, inode1333788866, owner9999:0, mode0700
+    /data/coolify/applications: device2052, inode1358954689, owner9999:0, mode0700
+  It can open only the fixed uploads source or its exact application parent,
+  never an evidence/config/backup path. All other host directory components keep
+  root-owner/non-writable requirements. Every component uses NOFOLLOW; held FDs,
+  named relationships and exact pin states are rechecked during each walk.
+  Initial source open and every named-source check use this walker, so the same
+  pins are checked before/after metadata adoption. The strict trusted_directory
+  used for protected/evidence paths is unchanged; there is no generic UID allowlist.
+  UID9999 can rename entries in its owned ancestors despite being unable to
+  traverse/write uploads itself. Observed replacements/state changes fail closed;
+  this is not atomic against that acknowledged administrative authority. No
+  ancestor ownership, mode, ACL or data is changed to make the check pass.

@@ -53,8 +53,12 @@ export class ExamsService {
   async listUpcomingSchedulesForStudent(
     tenantId: string | undefined,
     studentUserId: string,
+    semester?: number,
   ): Promise<ExamSchedule[]> {
     this.requireTenant(tenantId);
+    if (semester !== undefined && (!Number.isSafeInteger(semester) || semester <= 0)) {
+      throw new BadRequestException('Semester must be a positive integer');
+    }
     const today = new Date().toISOString().slice(0, 10);
     return this.schedules
       .createQueryBuilder('s')
@@ -67,9 +71,11 @@ export class ExamsService {
           JOIN academic_subjects enrolled_subject ON enrolled_subject.subject_code = c.course_code
           WHERE e.tenant_id = s.tenant_id
             AND e.student_user_id = :studentUserId
+            AND e.status = 'ENROLLED' AND e.deleted_at IS NULL
+            ${semester === undefined ? '' : 'AND e.semester = :semester'}
             AND enrolled_subject.subject_id = s.subject_id
         )`,
-        { studentUserId },
+        { studentUserId, ...(semester === undefined ? {} : { semester }) },
       )
       .andWhere('s.exam_date >= :today', { today })
       .orderBy('s.exam_date', 'ASC')
@@ -141,6 +147,7 @@ export class ExamsService {
        JOIN academic_subjects s ON s.subject_code = c.course_code AND s.subject_id = $3
          AND s.semester = e.semester
        WHERE e.tenant_id = $1 AND e.student_user_id = $2
+         AND e.status IN ('ENROLLED', 'COMPLETED', 'FAILED') AND e.deleted_at IS NULL
        LIMIT 1`,
         [tenantId, studentUserId, dto.subject_id],
       );

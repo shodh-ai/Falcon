@@ -6,9 +6,11 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
+import { requireTenantId } from '../../common/utils/require-tenant-id';
 import { HelpdeskTicket } from '../../entities/helpdesk-ticket.entity';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketStatusDto } from './dto/update-ticket-status.dto';
@@ -17,6 +19,7 @@ import {
   type ITicketProvider,
 } from './providers/ticket-provider.interface';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
+import { FalconNotificationsService } from '../../core/notifications/falcon-notifications.service';
 import {
   WorkflowRoutingService,
   type RoutedApprover,
@@ -54,14 +57,14 @@ export class TicketService {
     private readonly workflowNotify: WorkflowNotificationService,
     @InjectRepository(User) private readonly users: Repository<User>,
     private readonly campusScope: CampusScopeService,
+    @Optional() private readonly falconNotifications?: FalconNotificationsService,
   ) {}
 
   async createTicket(studentUserId: string, dto: CreateTicketDto) {
     const student = await this.users.findOne({
       where: { user_id: studentUserId },
     });
-    const tenantId =
-      student?.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
+    const tenantId = requireTenantId(student?.tenant_id);
 
     if (dto.category !== 'MENTORSHIP') {
       await assertNoPendingRow(this.tickets, {
@@ -186,6 +189,16 @@ export class TicketService {
       category: 'HELPDESK',
       requesterName: student?.name,
     });
+
+    void this.falconNotifications?.create({
+      tenantId,
+      userId: studentUserId,
+      category: 'HELPDESK',
+      title: `${dto.category === 'FACILITIES' ? 'Facilities request' : 'Helpdesk ticket'} submitted`,
+      message: `Request ${ticketRef} has been sent for review. Submission does not confirm a room booking or resolution.`,
+      actionLink: '/notifications',
+      intent: 'status_update',
+    }).catch((error: unknown) => this.logger.warn(`Submission notification failed: ${String(error)}`));
 
     return ticket;
   }
@@ -638,10 +651,7 @@ export class TicketService {
         const student = await this.users.findOne({
           where: { user_id: saved.student_user_id },
         });
-        const tenantId =
-          student?.tenant_id ??
-          saved.tenant_id ??
-          'a0000000-0000-4000-8000-000000000001';
+        const tenantId = requireTenantId(student?.tenant_id ?? saved.tenant_id);
         await this.notify.ticketReply({
           tenantId,
           userId: saved.student_user_id,
@@ -715,10 +725,7 @@ export class TicketService {
     // departments.hod_user_id link, or the user's own dept_id. Resolve the
     // same union used by the queue so a listed request can be approved.
     const deptIds = await this.resolveHodDepartmentIds(actor.userId);
-    if (
-      student.dept_id == null ||
-      !deptIds.includes(Number(student.dept_id))
-    ) {
+    if (student.dept_id == null || !deptIds.includes(Number(student.dept_id))) {
       throw new ForbiddenException('Ticket is outside your department scope');
     }
   }
@@ -778,8 +785,7 @@ export class TicketService {
       >(`SELECT tenant_id FROM users WHERE user_id = $1 LIMIT 1`, [
         ticket.student_user_id,
       ]);
-      const tenantId =
-        student[0]?.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
+      const tenantId = requireTenantId(student[0]?.tenant_id);
       this.notify.ticketReply({
         tenantId,
         userId: ticket.student_user_id,

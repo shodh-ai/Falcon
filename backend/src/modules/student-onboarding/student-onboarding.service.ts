@@ -1,11 +1,14 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
   ForbiddenException,
+  Optional,
   UnauthorizedException,
 } from '@nestjs/common';
 import { DataSource, QueryRunner } from 'typeorm';
+import { requireTenantId } from '../../common/utils/require-tenant-id';
 import * as bcrypt from 'bcrypt';
 import { HrFieldEncryptionService } from '../../common/crypto/hr-field-encryption.service';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
@@ -22,6 +25,7 @@ import {
   resolveOnboardingPortalKind,
   type OnboardingPortalKind,
 } from './onboarding-portal.util';
+import { StaffProfileReviewService } from './staff-profile-review.service';
 
 type OnboardingDocRow = {
   doc_id: string;
@@ -106,8 +110,6 @@ type ProfileBody = {
   specialization?: string;
 };
 
-const DEFAULT_TENANT_ID = 'a0000000-0000-4000-8000-000000000001';
-
 export type OnboardingAuditActor = {
   userId: string;
   role?: string;
@@ -124,11 +126,11 @@ export class StudentOnboardingService {
     private readonly crypto: HrFieldEncryptionService,
     private readonly enterpriseAudit: EnterpriseAuditService,
     private readonly campusScope: CampusScopeService,
+    @Optional() private readonly staffReviews?: StaffProfileReviewService,
   ) {}
 
   resolveTenantId(tenantId?: string | null) {
-    const value = tenantId?.trim();
-    return value || DEFAULT_TENANT_ID;
+    return requireTenantId(tenantId);
   }
 
   async getStatus(tenantId: string, userId: string) {
@@ -335,6 +337,9 @@ export class StudentOnboardingService {
     const kind = resolveOnboardingPortalKind(user.role_name);
 
     if (kind === 'staff') {
+      if (user.onboarding_status === 'COMPLETED') {
+        throw new ForbiddenException('Completed staff profiles can only be corrected through an HR review');
+      }
       return this.saveStaffProfile(tenant, userId, body);
     }
     return this.saveStudentProfile(tenant, userId, body);
@@ -354,6 +359,9 @@ export class StudentOnboardingService {
     }
 
     if (kind === 'staff') {
+      if (user.onboarding_status === 'COMPLETED') {
+        throw new ForbiddenException('Completed staff documents can only be replaced through an HR review');
+      }
       await this.dataSource.query(
         `INSERT INTO staff_onboarding_docs (tenant_id, staff_user_id, doc_type, file_path, status)
          VALUES ($1, $2, $3, $4, 'PENDING')
@@ -417,17 +425,30 @@ export class StudentOnboardingService {
       throw new BadRequestException(`Missing documents: ${missing.join(', ')}`);
     }
 
-    const submitted = await this.dataSource.query<Array<{ user_id: string }>>(
-      `UPDATE users
-       SET onboarding_status = 'PENDING_ADMIN_APPROVAL', updated_at = NOW()
-       WHERE user_id = $1 AND tenant_id = $2 AND onboarding_status = 'PENDING_DOCUMENTS'
-       RETURNING user_id`,
-      [userId, tenantId],
-    );
-    if (!submitted.length) {
-      throw new BadRequestException(
-        'Could not submit profile for verification',
-      );
+    const runner = this.dataSource.createQueryRunner();
+    await runner.connect();
+    await runner.startTransaction();
+    try {
+      const submitted = (await runner.query(
+        `UPDATE users
+         SET onboarding_status = 'PENDING_ADMIN_APPROVAL', updated_at = NOW()
+         WHERE user_id = $1 AND tenant_id = $2 AND onboarding_status = 'PENDING_DOCUMENTS'
+         RETURNING user_id`,
+        [userId, tenantId],
+      )) as Array<{ user_id: string }>;
+      if (!submitted.length) {
+        throw new BadRequestException('Could not submit profile for verification');
+      }
+      if (kind === 'staff') {
+        if (!this.staffReviews) throw new ConflictException('HR verification is unavailable');
+        await this.staffReviews.open(tenantId, userId, 'INITIAL', userId, runner);
+      }
+      await runner.commitTransaction();
+    } catch (error) {
+      await runner.rollbackTransaction();
+      throw error;
+    } finally {
+      await runner.release();
     }
 
     this.notifications.onboardingVerificationRequested({
@@ -668,6 +689,9 @@ export class StudentOnboardingService {
     actor?: OnboardingAuditActor,
     scopeUser?: ScopedAuthUser,
     expectedKind?: OnboardingPortalKind,
+    expectedReviewId?: string,
+    detailsOnly?: { reviewedFields: string[]; reason: string },
+    recoveryApproval?: { reviewedFields: string[]; reviewedDocuments: string[]; revision: number },
   ) {
     await this.assertVerificationCampus(scopeUser, targetUserId);
     const tenant = this.resolveTenantId(tenantId);
@@ -701,35 +725,86 @@ export class StudentOnboardingService {
       if (!user) throw new NotFoundException('User not found');
 
       const status = (user.onboarding_status ?? '').trim();
-      if (status === 'COMPLETED') {
-        throw new BadRequestException('User has already been approved');
+      const kind = verifiedKind;
+      const deferDocuments = kind === 'staff' && Boolean(detailsOnly);
+      const staffReview = kind === 'staff'
+        ? await this.staffReviews?.activeReview(tenant, targetUserId, qr, true)
+        : null;
+      let recoveryEvidence: unknown = null;
+      if (kind === 'staff') {
+        const roles = [...(scopeUser?.roles ?? []), scopeUser?.role ?? ''];
+        if (!roles.some((role) => role.toLowerCase() === 'hradmin')) {
+          throw new ForbiddenException('Only HR Admin may approve staff profiles');
+        }
+        if (scopeUser?.user_id === targetUserId) {
+          throw new ForbiddenException('Cannot approve your own profile');
+        }
+        if (!staffReview || staffReview.status !== 'PENDING_HR') {
+          throw new ConflictException('No staff profile is awaiting HR approval');
+        }
+        if (deferDocuments) {
+          this.staffReviews!.assertAllDetailsReviewed(detailsOnly!.reviewedFields);
+          if (typeof detailsOnly!.reason !== 'string' || !detailsOnly!.reason.trim()) throw new BadRequestException('Document deferral reason is required');
+        }
+        if (expectedReviewId && staffReview.review_id !== expectedReviewId) {
+          throw new ConflictException('Selected HR review is no longer current');
+        }
+        const snapshot = await this.staffReviews!.snapshot(tenant, targetUserId, qr);
+        if (snapshot.hash !== staffReview.submitted_snapshot_hash) {
+          throw new ConflictException('Staff profile changed since submission; resubmit for HR review');
+        }
+        if (staffReview.recovery_required) {
+          if (deferDocuments || !recoveryApproval) throw new BadRequestException('Recovery profiles require HR inspection of both details and documents');
+          if (recoveryApproval.revision !== staffReview.revision) throw new ConflictException('Recovery review changed; refresh before approving');
+          this.staffReviews!.assertAllDetailsReviewed(recoveryApproval.reviewedFields);
+          this.staffReviews!.assertAllDocumentsReviewed(recoveryApproval.reviewedDocuments);
+          recoveryEvidence = await this.staffReviews!.inspectRecoveryDocuments(tenant, snapshot.profile, snapshot.user.phone, snapshot.documentManifest);
+        }
+        const missing = getRequiredDocTypes('staff').filter(
+          (docType) => !snapshot.documentManifest.some((doc: { doc_type: string; file_path: string }) =>
+            doc.doc_type === docType && Boolean(doc.file_path)),
+        );
+        if (!deferDocuments && missing.length) throw new BadRequestException(`Missing documents: ${missing.join(', ')}`);
       }
-      if (status !== 'PENDING_ADMIN_APPROVAL') {
+      if (status !== 'PENDING_ADMIN_APPROVAL' && !(kind === 'staff' && status === 'COMPLETED')) {
         throw new BadRequestException(
           `User is not awaiting admin approval (current status: ${status || 'UNKNOWN'})`,
         );
       }
 
-      const kind = verifiedKind;
-      const updated = (await qr.query(
-        `UPDATE users
-         SET onboarding_status = 'COMPLETED', updated_at = NOW()
-         WHERE user_id = $1 AND tenant_id = $2 AND onboarding_status = 'PENDING_ADMIN_APPROVAL'
-         RETURNING user_id`,
-        [targetUserId, tenant],
-      )) as Array<{ user_id: string }>;
-      if (!updated.length) {
-        throw new BadRequestException('User is not awaiting admin approval');
+      if (status === 'PENDING_ADMIN_APPROVAL') {
+        const updated = (await qr.query(
+          `UPDATE users
+           SET onboarding_status = 'COMPLETED', updated_at = NOW()
+           WHERE user_id = $1 AND tenant_id = $2 AND onboarding_status = 'PENDING_ADMIN_APPROVAL'
+           RETURNING user_id`,
+          [targetUserId, tenant],
+        )) as Array<{ user_id: string }>;
+        if (!updated.length) throw new ConflictException('Staff onboarding changed during approval');
       }
 
       if (kind === 'staff') {
-        await qr.query(
+        if (!deferDocuments) await qr.query(
           `UPDATE staff_onboarding_docs
            SET status = 'APPROVED', admin_remarks = NULL
            WHERE staff_user_id = $1 AND tenant_id = $2`,
           [targetUserId, tenant],
         );
         await this.finalizeStaffOnboarding(tenant, targetUserId, qr);
+        await qr.query(
+          `UPDATE staff_profile_reviews
+           SET status = 'APPROVED', revision = revision + 1,
+               documents_deferred = $4,
+               decided_by = $3, decided_at = NOW(), updated_at = NOW()
+           WHERE tenant_id = $1 AND review_id = $2 AND status = 'PENDING_HR'`,
+          [tenant, staffReview!.review_id, actor?.userId ?? scopeUser?.user_id, deferDocuments],
+        );
+        await this.staffReviews!.appendEvent(
+          qr, { ...staffReview!, revision: staffReview!.revision + 1 },
+          staffReview!.recovery_required ? 'RECOVERY_APPROVED' : deferDocuments ? 'PROFILE_APPROVED_DOCUMENTS_DEFERRED' : 'APPROVED', actor?.userId ?? scopeUser?.user_id ?? null,
+          recoveryEvidence ? JSON.stringify({ inspected_documents: recoveryEvidence, reviewed_fields: recoveryApproval!.reviewedFields })
+            : deferDocuments ? JSON.stringify({ reason: detailsOnly!.reason.trim(), reviewed_fields: detailsOnly!.reviewedFields }) : null,
+        );
       } else {
         await qr.query(
           `UPDATE student_onboarding_docs
@@ -745,7 +820,7 @@ export class StudentOnboardingService {
         .dismissVerificationNotifications(tenant, targetUserId)
         .catch(() => undefined);
 
-      this.notifications.studentOnboardingApproved({
+      if (status !== 'COMPLETED') this.notifications.studentOnboardingApproved({
         tenantId: tenant,
         userId: targetUserId,
         studentName: user.name,
@@ -765,13 +840,13 @@ export class StudentOnboardingService {
           action: 'VERIFY_APPROVE',
           recordId: targetUserId,
           oldValue: { onboarding_status: status },
-          newValue: { onboarding_status: 'COMPLETED' },
+          newValue: { onboarding_status: 'COMPLETED', ...(kind === 'staff' ? { documents_deferred: deferDocuments } : {}) },
           ip: actor.ip,
           sessionId: actor.sessionId,
         });
       }
 
-      return { onboarding_status: 'COMPLETED' };
+      return { onboarding_status: 'COMPLETED', ...(kind === 'staff' ? { document_review_status: deferDocuments ? 'PENDING' : 'VERIFIED' } : {}) };
     } catch (error) {
       await qr.rollbackTransaction();
       throw error;

@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Get,
+  NotFoundException,
   Param,
   Post,
   Query,
@@ -484,7 +485,7 @@ export class StudentVerificationAdminController {
 @Controller('api/staff/verifications')
 @BelongsToModule('CORE')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('CampusAdmin', 'SuperAdmin')
+@Roles('CampusAdmin', 'SuperAdmin', 'HRAdmin')
 export class StaffVerificationController {
   constructor(
     private readonly onboarding: StudentOnboardingService,
@@ -577,6 +578,8 @@ export class StaffVerificationController {
   }
 
   @Post(':targetUserId/approve')
+  @BelongsToModule('CORE')
+  @Roles('HRAdmin')
   async approve(
     @Req()
     req: {
@@ -596,6 +599,7 @@ export class StaffVerificationController {
   }
 
   @Post(':targetUserId/reject')
+  @Roles('HRAdmin')
   async reject(
     @Req()
     req: {
@@ -606,14 +610,7 @@ export class StaffVerificationController {
     @Param('targetUserId') targetUserId: string,
     @Body() body: { remarks: string },
   ) {
-    return this.onboarding.reject(
-      await this.tenant(req),
-      targetUserId,
-      body.remarks,
-      auditActor(req),
-      req.user,
-      'staff',
-    );
+    throw new BadRequestException('Use the HR staff profile review to request targeted corrections');
   }
 
   @Get(':targetUserId/documents/:docType/preview')
@@ -648,9 +645,13 @@ export class StaffVerificationController {
 
     const uploadRoot = resolve(process.env.UPLOAD_PATH || './uploads');
     const resolvedPath = resolve(filePath);
-    if (!resolvedPath.startsWith(uploadRoot) || !existsSync(resolvedPath)) {
-      throw new BadRequestException('File not found');
+    if (!resolvedPath.startsWith(`${uploadRoot}/`) || !existsSync(resolvedPath)) {
+      throw new NotFoundException({
+        code: 'DOCUMENT_FILE_UNAVAILABLE',
+        message: 'The document record exists, but its original file is missing from storage. Restore the uploads backup or request a replacement upload from the faculty member.',
+      });
     }
+    res.setHeader('Cache-Control', 'private, no-store');
     res.setHeader('Content-Type', documentContentType(resolvedPath));
     res.setHeader(
       'Content-Disposition',

@@ -118,7 +118,18 @@ export default function ExamCellSessionsPage() {
 
   const columns: DataTableColumn<ExamSession>[] = [
     { key: 'name', header: 'Session', render: (r) => <div><p className="font-medium">{r.session_name}</p><p className="text-xs text-muted-foreground">{r.academic_year}</p></div> },
-    { key: 'cycle', header: 'Cycle', render: (r) => <Badge variant="outline">{r.cycle_type.replace(/_/g, ' ')}</Badge> },
+    {
+      key: 'cycle',
+      header: 'Cycle',
+      render: (r) => {
+        const cycleType = String(r.cycle_type ?? '').trim();
+        return (
+          <Badge variant="outline">
+            {cycleType ? cycleType.replace(/_/g, ' ') : '—'}
+          </Badge>
+        );
+      },
+    },
     { key: 'sem', header: 'Semester', render: (r) => r.semester ?? '—' },
     { key: 'program', header: 'Program', render: (r) => r.program_label ?? '—' },
     { key: 'dates', header: 'Dates', render: (r) => `${formatSessionDate(r.start_date)} → ${formatSessionDate(r.end_date)}` },

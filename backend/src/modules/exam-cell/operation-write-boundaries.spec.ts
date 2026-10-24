@@ -77,6 +77,8 @@ function setup(
     {} as never,
     audit,
     {} as never,
+
+    {} as never,
   );
   const enterprise = new ExamCellEnterpriseService(
     db as never,
@@ -196,6 +198,8 @@ describe('Tenant-owned operational references', () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never,
+
       {} as never,
     );
     await operations.listFormWindows('tenant');

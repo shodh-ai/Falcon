@@ -25,6 +25,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useAuthedApi } from '@/lib/api';
+import { validateMarksImport } from '@/lib/faculty/marks-import';
+import * as XLSX from 'xlsx';
 import { isEmptyArray, isFacultyDemoEntityId, withFacultyDemoFallback } from '@/lib/faculty-demo-mode';
 import { facultyDemoUnifiedMarks } from '@/lib/mock/faculty-portal-demo';
 import {
@@ -84,6 +86,9 @@ export default function FacultyGradingPage() {
   const [saving, setSaving] = useState(false);
   const submissionPending = useRef(false);
   const [rosterError, setRosterError] = useState<string | null>(null);
+  const importInput = useRef<HTMLInputElement>(null);
+  const [endTermSession, setEndTermSession] = useState<{ max_marks: number; entry_status: string; marks_locked: boolean; entry_open_at?: string | null; entry_close_at?: string | null } | null>(null);
+  const [bulkPreviewCount, setBulkPreviewCount] = useState(0);
 
   const courseOptions = useMemo(() => {
     const unique = new Map<string, (typeof courses)[number]>();
@@ -101,8 +106,14 @@ export default function FacultyGradingPage() {
     const columns = selectedComponentIds
       .map((id) => getGradingComponent(id))
       .filter((component): component is GradingComponent => Boolean(component));
-    return sortGradingComponents(columns);
-  }, [selectedComponentIds]);
+    return sortGradingComponents(columns.map((component) => component.id === 'ETE' && endTermSession
+      ? { ...component, max: Number(endTermSession.max_marks) }
+      : component));
+  }, [selectedComponentIds, endTermSession]);
+
+  const endTermEntryOpen = endTermSession?.entry_status === 'OPEN' && !endTermSession.marks_locked
+    && (!endTermSession.entry_open_at || Date.parse(endTermSession.entry_open_at) <= Date.now())
+    && (!endTermSession.entry_close_at || Date.parse(endTermSession.entry_close_at) >= Date.now());
 
   const componentsByGroup = useMemo(() => {
     return GRADING_COMPONENT_GROUPS.map((group) => ({
@@ -133,10 +144,60 @@ export default function FacultyGradingPage() {
   useEffect(() => {
     if (!courseId) {
       setSelectedComponentIds([]);
+      setEndTermSession(null);
       return;
     }
     setSelectedComponentIds(loadStoredComponents(courseId));
-  }, [courseId]);
+    setBulkPreviewCount(0);
+    let active = true;
+    void api.get<{ result_session: typeof endTermSession }>(
+      `/api/academics/faculty/workspaces/marks?courseId=${encodeURIComponent(courseId)}&examType=ETE`,
+    ).then((value) => { if (active) setEndTermSession(value.result_session ?? null); })
+      .catch(() => { if (active) setEndTermSession(null); });
+    return () => { active = false; };
+  }, [courseId, api]);
+
+  function downloadEndTermTemplate() {
+    if (!courseId || !rows.length || !endTermEntryOpen) return;
+    const worksheet = XLSX.utils.json_to_sheet(rows.map((row) => ({
+      student_user_id: row.student_user_id,
+      roll_number: row.roll_number,
+      student_name: row.name,
+      marks_obtained: '',
+    })));
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'End-term marks');
+    XLSX.writeFile(workbook, `${selectedCourse?.course_code ?? 'course'}-ETE-marks-template.xlsx`);
+  }
+
+  async function importEndTermSheet(file: File | undefined) {
+    if (!file) return;
+    try {
+      if (!endTermEntryOpen || !endTermSession) throw new Error('Exam Cell has not opened end-semester marks entry');
+      if (file.size > 5 * 1024 * 1024) throw new Error('Mark sheet must be 5 MB or smaller');
+      if (!/\.(xlsx|xls|csv)$/i.test(file.name)) throw new Error('Use an Excel or CSV mark sheet');
+      const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+      const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+      if (!worksheet) throw new Error('The mark sheet has no worksheet');
+      const records = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, { defval: '', raw: false });
+      const marks = validateMarksImport(records, rows, Number(endTermSession.max_marks));
+      const byId = new Map(marks.map((mark) => [mark.student_user_id, mark.marks_obtained]));
+      if (rows.some((row) => row.marks.ETE?.status === 'PENDING_COE' || row.marks.ETE?.status === 'PUBLISHED')) {
+        throw new Error('Some end-semester marks are already submitted or published; ask Exam Cell to reopen entry');
+      }
+      setRows((previous) => previous.map((row) => ({
+        ...row,
+        marks: { ...row.marks, ETE: { status: 'DRAFT', obtained: byId.get(row.student_user_id) ?? null } },
+      })));
+      setBulkPreviewCount(marks.length);
+      toast.success(`${marks.length} students matched exactly. Review the marks below, then save draft and submit.`);
+    } catch (error) {
+      setBulkPreviewCount(0);
+      toast.error(error instanceof Error ? error.message : 'Could not import mark sheet');
+    } finally {
+      if (importInput.current) importInput.current.value = '';
+    }
+  }
 
   const reloadMarks = useCallback(async () => {
     if (!courseId) return;
@@ -250,14 +311,14 @@ export default function FacultyGradingPage() {
     );
   }
 
-  async function saveDraft(options?: { silent?: boolean }): Promise<boolean> {
+  async function saveDraft(options?: { silent?: boolean; examTypes?: string[] }): Promise<boolean> {
     if (!courseId) return false;
     if (isFacultyDemoEntityId(courseId) || rows.some((r) => isFacultyDemoEntityId(r.student_user_id))) {
       toast.error('Demonstration marks cannot be saved to the database');
       return false;
     }
 
-    const manualColumns = activeColumns.filter((col) => !col.readOnly);
+    const manualColumns = activeColumns.filter((col) => !col.readOnly && (!options?.examTypes || options.examTypes.includes(col.id)));
     const entriesByExamType: Record<
       string,
       { student_user_id: string; marks_obtained: number }[]
@@ -288,14 +349,14 @@ export default function FacultyGradingPage() {
       if (!options?.silent) {
         toast.error('No new marks to save. Enter marks in the PE / GA / MTE / ETE columns first.');
       }
-      return false;
+      return Boolean(options?.silent);
     }
 
     setSaving(true);
     try {
       for (const examType of typesToSave) {
         const entries = entriesByExamType[examType];
-        const col = getGradingComponent(examType);
+        const col = activeColumns.find((column) => column.id === examType);
         await api.post('/api/academics/faculty/workspaces/marks/draft', {
           course_id: courseId,
           exam_type: examType,
@@ -305,6 +366,7 @@ export default function FacultyGradingPage() {
       }
 
       toast.success('Draft saved successfully');
+      setBulkPreviewCount(0);
       await reloadMarks();
       return true;
     } catch (e) {
@@ -315,30 +377,42 @@ export default function FacultyGradingPage() {
     }
   }
 
-  async function publishAll() {
+  async function publishSelected(endTerm: boolean) {
     if (!courseId || submissionPending.current) return;
+    if (endTerm && !endTermEntryOpen) {
+      toast.error('Exam Cell must open the ETE marks window first');
+      return;
+    }
     if (isFacultyDemoEntityId(courseId) || rows.some((r) => isFacultyDemoEntityId(r.student_user_id))) {
-      toast.error('Demonstration marks cannot be submitted to the database');
+      toast.error('Demonstration marks cannot be submitted');
+      return;
+    }
+    const examTypes = activeColumns
+      .filter((column) => !column.readOnly && (column.id === 'ETE') === endTerm)
+      .filter((column) => rows.some((row) => {
+        const mark = getMarkValue(row, column.id);
+        return mark?.obtained != null && mark.status !== 'PENDING_COE' && mark.status !== 'PUBLISHED';
+      }))
+      .map((column) => column.id);
+    if (!examTypes.length) {
+      toast.error('No draft marks to submit for this action');
       return;
     }
     submissionPending.current = true;
     setSaving(true);
     try {
-      if (!await saveDraft({ silent: true })) return;
-      setSaving(true);
-      const result = await api.post<{
-        published: number;
-        submitted?: number;
-        notified_count?: number;
-        status?: string;
-        message?: string;
-      }>(
-        `/api/academics/faculty/workspaces/course/${encodeURIComponent(courseId)}/publish-all`,
-      );
-      const published = Number(result.published ?? 0);
-      const submitted = Number(result.submitted ?? 0);
-      if (published + submitted === 0) toast.warning('No draft marks were submitted or published.');
-      else toast.success(result.message ?? `${submitted} marks submitted for Examination Cell review; ${published} quiz marks published.`);
+      if (!(await saveDraft({ silent: true, examTypes }))) return;
+      let count = 0;
+      for (const examType of examTypes) {
+        const result = await api.post<{ published: number }>(
+          '/api/academics/faculty/workspaces/marks/publish',
+          { course_id: courseId, exam_type: examType },
+        );
+        count += result.published ?? 0;
+      }
+      toast.success(endTerm
+        ? `${count} ETE marks submitted to the concerned HOD. Exam Cell must release them later.`
+        : `${count} internal marks published directly to students.`);
       await reloadMarks();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Submission failed');
@@ -348,10 +422,11 @@ export default function FacultyGradingPage() {
     }
   }
 
-  const isPublishable = rows.some((r) =>
+  const hasPublishable = (endTerm: boolean) => rows.some((r) =>
     activeColumns.some((col) => {
       const m = getMarkValue(r, col.id);
-      return !col.readOnly && m && m.obtained !== null && m.status !== 'PUBLISHED' && m.status !== 'PENDING_COE';
+      return !col.readOnly && (col.id === 'ETE') === endTerm && (!endTerm || endTermEntryOpen)
+        && m && m.obtained !== null && m.status !== 'PENDING_COE' && m.status !== 'PUBLISHED';
     }),
   );
 
@@ -359,7 +434,7 @@ export default function FacultyGradingPage() {
     <FacultyPageShell>
       <FacultyPageHeader
         title="Exams & Grades"
-        description="Enter component marks and submit them for Examination Cell review."
+        description="Weekly tests are synced automatically. Faculty publishes quizzes and internal marks directly; end-semester marks go to HOD review and Exam Cell release."
         meta={
           courseId ? (
             <>
@@ -441,7 +516,7 @@ export default function FacultyGradingPage() {
         </div>
         {courseId ? (
           <p className="mt-3 text-sm text-muted-foreground">
-            WT1 and WT2 are auto-synced from weekly tests. All other components are entered manually.
+            WT1 and WT2 are auto-synced. Exam Cell must open the ETE window before entry; other manual components can publish directly.
           </p>
         ) : null}
       </FacultyPanel>
@@ -452,6 +527,13 @@ export default function FacultyGradingPage() {
         description="Enter marks for selected manual components. WT columns are read-only (auto-synced)."
       >
         <div className="mb-4 flex flex-wrap justify-end gap-2">
+          {selectedComponentIds.includes('ETE') ? (
+            <>
+              <Button variant="outline" size="sm" disabled={!endTermEntryOpen || !rows.length || saving} onClick={downloadEndTermTemplate}>Download ETE template</Button>
+              <Button variant="outline" size="sm" disabled={!endTermEntryOpen || !rows.length || saving} onClick={() => importInput.current?.click()}>Import ETE Excel/CSV</Button>
+              <input ref={importInput} type="file" accept=".xlsx,.xls,.csv" className="hidden" aria-label="Import end-semester marks" onChange={(event) => void importEndTermSheet(event.target.files?.[0])} />
+            </>
+          ) : null}
           <Button
             variant="outline"
             size="sm"
@@ -463,13 +545,25 @@ export default function FacultyGradingPage() {
           </Button>
           <Button
             size="sm"
-            disabled={!courseId || saving || loading || !isPublishable || activeColumns.length === 0}
-            onClick={() => void publishAll()}
+            disabled={!courseId || saving || loading || !hasPublishable(false)}
+            onClick={() => void publishSelected(false)}
           >
             <Send className="mr-1 h-4 w-4" />
-            Submit All Draft Marks
+            Publish Internal Marks
+          </Button>
+          <Button
+            size="sm"
+            disabled={!courseId || saving || loading || !hasPublishable(true)}
+            onClick={() => void publishSelected(true)}
+          >
+            <Send className="mr-1 h-4 w-4" />
+            Submit ETE to HOD
           </Button>
         </div>
+        {selectedComponentIds.includes('ETE') && !endTermEntryOpen ? (
+          <p className="mb-4 rounded-lg border p-3 text-sm text-muted-foreground">End-semester marks entry is closed. Exam Cell must open a session for this course.</p>
+        ) : null}
+        {bulkPreviewCount > 0 ? <p className="mb-4 rounded-lg border p-3 text-sm">Imported {bulkPreviewCount} exact roster matches. Check the values below; importing has not submitted or published anything.</p> : null}
 
         {loading ? (
           <FacultyInlineLoading label="Loading roster…" />
@@ -519,7 +613,7 @@ export default function FacultyGradingPage() {
                               max={col.max}
                               className={`h-8 w-16 text-center ${isLocked || col.readOnly ? 'border-transparent bg-muted/50 text-muted-foreground' : ''}`}
                               value={m?.obtained ?? ''}
-                              disabled={saving || col.readOnly || isLocked}
+                              disabled={saving || col.readOnly || isLocked || (col.id === 'ETE' && !endTermEntryOpen)}
                               onChange={(e) => updateMark(row.student_user_id, col, e.target.value)}
                             />
                             {m?.status && m.status !== 'DRAFT' && (

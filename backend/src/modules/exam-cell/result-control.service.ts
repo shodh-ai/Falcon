@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -9,6 +10,7 @@ import { DataSource, type EntityManager } from 'typeorm';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 import { ExamCellAuditService } from './exam-cell-audit.service';
 import { resolveDeanDepartmentIds } from '../academics/dean-scope.util';
+import { isEndSemesterExamType } from '../academics/marks-publication-policy';
 import { invalidateOfficialTranscripts } from './official-transcript-revisions';
 import {
   computeGradeFromPercent,
@@ -42,6 +44,8 @@ type WorkflowSnapshot = {
   pass_marks: number | null;
   grading_policy_id: number | null;
   grading_rules: Record<string, unknown> | null;
+  owner_department_id: number | null;
+  entry_revision: number;
   entry_status: string;
   marks_locked: boolean;
   declared_at: Date | null;
@@ -76,7 +80,7 @@ export class ResultControlService {
     const sessions = await db.query<
       Array<Omit<WorkflowSnapshot, 'marks' | 'input_hash'>>
     >(
-      `SELECT s.session_id, s.course_id,c.course_code,c.course_name, s.exam_type, s.semester, s.max_marks, s.pass_marks,
+      `SELECT s.session_id, s.course_id,c.course_code,c.course_name, s.exam_type, s.semester, s.max_marks, s.pass_marks, s.owner_department_id, s.entry_revision,
               s.grading_policy_id, gp.rules AS grading_rules, s.entry_status, s.marks_locked, s.declared_at
        FROM exam_result_sessions s JOIN academic_courses c ON c.course_id=s.course_id AND c.tenant_id=s.tenant_id LEFT JOIN academic_grading_policies gp ON gp.policy_id=s.grading_policy_id
        WHERE s.tenant_id=$1 AND s.session_id=$2${lock ? ' FOR UPDATE OF s' : ''}`,
@@ -104,6 +108,8 @@ export class ResultControlService {
               session.pass_marks == null ? null : Number(session.pass_marks),
             grading_policy_id: session.grading_policy_id,
             grading_rules: session.grading_rules,
+            owner_department_id: session.owner_department_id,
+            entry_revision: session.entry_revision,
             marks: marks.map((m) => ({
               mark_id: m.mark_id,
               student_user_id: m.student_user_id,
@@ -274,11 +280,49 @@ export class ResultControlService {
       !!latest &&
       !latest.request_summary?.invalidated_at &&
       latest.request_summary?.input_hash === snapshot.input_hash;
+    const hodRows = isEndSemesterExamType(snapshot.exam_type)
+      ? await this.db.query<Array<{ decision: string; input_hash: string }>>(
+          `SELECT decision,input_hash FROM exam_result_hod_decisions
+           WHERE tenant_id=$1 AND session_id=$2
+           ORDER BY decided_at DESC,decision_id DESC LIMIT 1`,
+          [tenantId, sessionId],
+        )
+      : [];
+    const hodCurrent = hodRows[0]?.input_hash === snapshot.input_hash;
     return {
       coe_audit_status,
       dean_approved: current && latest.status === 'APPROVED',
       dean_approval_status: current ? latest.status : null,
+      hod_approved: hodCurrent && hodRows[0]?.decision === 'APPROVED',
+      hod_approval_status: hodCurrent ? hodRows[0]?.decision : null,
     };
+  }
+
+  /** Exam Cell must choose one department with an active HOD for an end-term session. */
+  async listEndTermDepartments(tenantId: string, courseId: string) {
+    return this.db.query<Array<{ dept_id: number; dept_name: string }>>(
+      `SELECT d.dept_id, d.dept_name
+       FROM departments d
+       JOIN users hod ON hod.user_id = d.hod_user_id
+         AND hod.tenant_id = $1 AND hod.is_active = TRUE AND hod.deleted_at IS NULL
+       WHERE d.deleted_at IS NULL
+         AND EXISTS (
+           SELECT 1 FROM student_course_enrollments e
+           JOIN users student ON student.user_id = e.student_user_id
+           WHERE e.tenant_id = $1 AND e.course_id = $2
+             AND e.deleted_at IS NULL AND e.status IN ('ENROLLED','COMPLETED','FAILED')
+             AND student.tenant_id = $1 AND student.dept_id = d.dept_id
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM student_course_enrollments e
+           JOIN users student ON student.user_id = e.student_user_id
+           WHERE e.tenant_id = $1 AND e.course_id = $2 AND e.deleted_at IS NULL
+             AND e.status IN ('ENROLLED','COMPLETED','FAILED')
+             AND (student.tenant_id IS DISTINCT FROM $1::uuid OR student.dept_id IS DISTINCT FROM d.dept_id)
+         )
+       ORDER BY d.dept_name`,
+      [tenantId, courseId],
+    );
   }
 
   async createSession(
@@ -291,11 +335,30 @@ export class ResultControlService {
       [dto.course_id, tenantId],
     );
     if (!courseRows[0]) throw new BadRequestException('Course not found');
+    if (isEndSemesterExamType(dto.exam_type)) {
+      if (!dto.owner_department_id) {
+        throw new BadRequestException('Select the concerned department before opening end-semester marks entry');
+      }
+      const departments = await this.listEndTermDepartments(tenantId, dto.course_id);
+      if (!departments.some((department) => department.dept_id === dto.owner_department_id)) {
+        throw new BadRequestException('The selected department has no eligible HOD and course scope');
+      }
+    }
 
     const rows = await this.db.transaction(async (tx) => {
       await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [
-        `result-session-config:${tenantId}:${dto.course_id}:${dto.exam_type}:${dto.semester ?? 4}`,
+        `result-session-config:${tenantId}:${dto.course_id}:${dto.exam_type}`,
       ]);
+      if (isEndSemesterExamType(dto.exam_type)) {
+        const ambiguous = await tx.query<Array<{ session_id: string }>>(
+          `SELECT session_id FROM exam_result_sessions
+           WHERE tenant_id=$1 AND course_id=$2 AND exam_type=$3 AND semester<>$4 LIMIT 1`,
+          [tenantId, dto.course_id, dto.exam_type, dto.semester ?? 4],
+        );
+        if (ambiguous[0]) {
+          throw new BadRequestException('This course already has another end-semester session. Use a distinct term-specific course identity before creating a new session.');
+        }
+      }
       const previous = await tx.query<Array<{ session_id: string }>>(
         'SELECT session_id FROM exam_result_sessions WHERE tenant_id=$1 AND course_id=$2 AND exam_type=$3 AND semester=$4 FOR UPDATE',
         [tenantId, dto.course_id, dto.exam_type, dto.semester ?? 4],
@@ -306,12 +369,13 @@ export class ResultControlService {
       if (before) this.assertUnpublished(before);
       const result = await tx.query<Array<{ session_id: string }>>(
         `INSERT INTO exam_result_sessions (
-         tenant_id, course_id, exam_type, semester, max_marks, pass_marks, grading_policy_id
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7)
+         tenant_id, course_id, exam_type, semester, max_marks, pass_marks, grading_policy_id, owner_department_id
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
        ON CONFLICT (tenant_id, course_id, exam_type, semester) DO UPDATE SET
          max_marks = EXCLUDED.max_marks,
          pass_marks = COALESCE(EXCLUDED.pass_marks, exam_result_sessions.pass_marks),
          grading_policy_id = COALESCE(EXCLUDED.grading_policy_id, exam_result_sessions.grading_policy_id),
+         owner_department_id = EXCLUDED.owner_department_id,
          updated_at = NOW()
        WHERE exam_result_sessions.declared_at IS NULL
        RETURNING *`,
@@ -323,6 +387,7 @@ export class ResultControlService {
           dto.max_marks ?? 100,
           dto.pass_marks ?? null,
           dto.grading_policy_id ?? null,
+          isEndSemesterExamType(dto.exam_type) ? dto.owner_department_id : null,
         ],
       );
       if (!result[0])
@@ -351,6 +416,13 @@ export class ResultControlService {
     dto: OpenResultEntryDto,
     actorUserId?: string,
   ) {
+    const session = await this.getSession(tenantId, sessionId);
+    if (isEndSemesterExamType(session.exam_type)) {
+      const departments = await this.listEndTermDepartments(tenantId, session.course_id);
+      if (!session.owner_department_id || !departments.some((department) => department.dept_id === session.owner_department_id)) {
+        throw new BadRequestException('Assign a concerned department with an active HOD and reconciled roster before opening end-semester marks entry');
+      }
+    }
     return this.mutateUnpublished(
       tenantId,
       sessionId,
@@ -426,6 +498,13 @@ export class ResultControlService {
     dto: ReopenResultEntryDto,
     actorUserId?: string,
   ) {
+    const session = await this.getSession(tenantId, sessionId);
+    if (isEndSemesterExamType(session.exam_type)) {
+      const departments = await this.listEndTermDepartments(tenantId, session.course_id);
+      if (!session.owner_department_id || !departments.some((department) => department.dept_id === session.owner_department_id)) {
+        throw new BadRequestException('End-semester marks require a current concerned department and HOD');
+      }
+    }
     return this.mutateUnpublished(
       tenantId,
       sessionId,
@@ -433,6 +512,7 @@ export class ResultControlService {
       async (tx) => {
         await tx.query(
           `UPDATE exam_result_sessions SET entry_status='OPEN',marks_locked=FALSE,marks_locked_at=NULL,
+        entry_revision=entry_revision+1,
         marks_locked_by=NULL,reopen_reason=$2,updated_at=NOW() WHERE session_id=$1 AND tenant_id=$3`,
           [sessionId, dto.reason.trim(), tenantId],
         );
@@ -634,6 +714,9 @@ export class ResultControlService {
     actorUserId: string,
   ) {
     const session = await this.getSession(tenantId, sessionId);
+    if (isEndSemesterExamType(session.exam_type)) {
+      throw new BadRequestException('End-semester results require the concerned department HOD, not Dean approval');
+    }
     let created = false;
     const request = await this.db.transaction(async (tx) => {
       const snapshot = await this.workflowSnapshot(
@@ -910,7 +993,18 @@ export class ResultControlService {
     });
   }
 
-  async getDeanResultApprovalHistory(tenantId: string, sessionId: string) {
+  async getDeanResultApprovalHistory(
+    tenantId: string,
+    deanUserId: string,
+    sessionId: string,
+    actorRole = 'Dean',
+  ) {
+    await this.assertDeanCanAccessResultSession(
+      tenantId,
+      deanUserId,
+      sessionId,
+      actorRole,
+    );
     return this.db
       .query(
         `SELECT h.*, u.name AS actor_name
@@ -921,6 +1015,39 @@ export class ResultControlService {
         [tenantId, sessionId],
       )
       .catch(() => []);
+  }
+
+  private async assertDeanCanAccessResultSession(
+    tenantId: string,
+    deanUserId: string,
+    sessionId: string,
+    actorRole: string,
+  ) {
+    if (actorRole.trim().toLowerCase() === 'superadmin') return;
+    const departmentIds = await resolveDeanDepartmentIds(this.db, deanUserId);
+    if (!departmentIds.length) {
+      throw new NotFoundException('Result approval record not found');
+    }
+    const rows = await this.db.query<Array<{ session_id: string }>>(
+      `SELECT s.session_id
+       FROM exam_result_sessions s
+       INNER JOIN academic_courses c ON c.course_id = s.course_id
+       WHERE s.tenant_id = $1
+         AND s.session_id = $2
+         AND EXISTS (
+           SELECT 1
+           FROM academic_timetables t
+           INNER JOIN users faculty ON faculty.user_id = t.faculty_user_id
+           WHERE t.course_id = c.course_id
+             AND t.tenant_id = s.tenant_id
+             AND faculty.dept_id = ANY($3::int[])
+         )
+       LIMIT 1`,
+      [tenantId, sessionId, departmentIds],
+    );
+    if (!rows[0]) {
+      throw new NotFoundException('Result approval record not found');
+    }
   }
 
   private async appendDeanApprovalHistory(
@@ -1013,21 +1140,224 @@ export class ResultControlService {
     return { updated, preview: processed.preview };
   }
 
+  async listHodEndTermSessions(tenantId: string, hodUserId: string) {
+    return this.db.query(
+      `SELECT s.session_id, s.course_id, s.exam_type, s.semester, s.max_marks,
+              s.entry_status, s.owner_department_id, c.course_code, c.course_name,
+              COUNT(m.mark_id)::int AS submitted_marks
+       FROM exam_result_sessions s
+       JOIN academic_courses c ON c.course_id = s.course_id AND c.tenant_id = s.tenant_id
+       JOIN departments d ON d.dept_id = s.owner_department_id AND d.hod_user_id = $2
+       JOIN users hod ON hod.user_id = d.hod_user_id AND hod.tenant_id = $1
+         AND hod.is_active = TRUE AND hod.deleted_at IS NULL
+       JOIN academic_marks m ON m.tenant_id = s.tenant_id AND m.course_id = s.course_id
+         AND m.exam_type = s.exam_type AND m.status = 'PENDING_COE'
+       WHERE s.tenant_id = $1 AND s.exam_type IN ('ETE', 'END_TERM')
+         AND s.declared_at IS NULL
+       GROUP BY s.session_id, c.course_code, c.course_name
+       ORDER BY c.course_code, s.semester`,
+      [tenantId, hodUserId],
+    );
+  }
+
+  private async assertHodOwnsSession(
+    db: WorkflowDatabase,
+    tenantId: string,
+    sessionId: string,
+    hodUserId: string,
+  ) {
+    const rows = await db.query<Array<{ department_id: number }>>(
+      `SELECT d.dept_id AS department_id
+       FROM exam_result_sessions s
+       JOIN departments d ON d.dept_id = s.owner_department_id
+       JOIN users hod ON hod.user_id = d.hod_user_id
+       WHERE s.tenant_id = $1 AND s.session_id = $2 AND d.hod_user_id = $3
+         AND hod.tenant_id = $1 AND hod.is_active = TRUE AND hod.deleted_at IS NULL
+         AND s.exam_type IN ('ETE', 'END_TERM') AND s.declared_at IS NULL`,
+      [tenantId, sessionId, hodUserId],
+    );
+    if (!rows[0]) throw new NotFoundException('End-semester review not found in your department');
+    return rows[0].department_id;
+  }
+
+  async getHodEndTermSession(tenantId: string, sessionId: string, hodUserId: string) {
+    const departmentId = await this.assertHodOwnsSession(this.db, tenantId, sessionId, hodUserId);
+    const snapshot = await this.workflowSnapshot(this.db, tenantId, sessionId);
+    const marks = await this.db.query(
+      `SELECT m.student_user_id, u.name AS student_name,
+              COALESCE(NULLIF(BTRIM(enrollment.roll_number),''),
+                NULLIF(BTRIM(sp.student_login_id),''), NULLIF(BTRIM(sp.prn_number),''),
+                m.student_user_id::text) AS roll_number,
+              m.marks_obtained,
+              m.max_marks, m.status, m.uploaded_by
+       FROM academic_marks m JOIN users u ON u.user_id = m.student_user_id
+       LEFT JOIN student_profiles sp ON sp.user_id = u.user_id
+       LEFT JOIN LATERAL (
+         SELECT e.roll_number FROM student_course_enrollments e
+         WHERE e.tenant_id=m.tenant_id AND e.course_id=m.course_id
+           AND e.student_user_id=m.student_user_id AND e.deleted_at IS NULL
+         ORDER BY e.semester DESC LIMIT 1
+       ) enrollment ON TRUE
+       WHERE m.tenant_id = $1 AND m.course_id = $2 AND m.exam_type = $3
+         AND u.tenant_id = $1 AND u.dept_id = $4
+         AND m.status = 'PENDING_COE'
+       ORDER BY u.name, m.student_user_id`,
+      [tenantId, snapshot.course_id, snapshot.exam_type, departmentId],
+    );
+    const latest = await this.db.query<Array<{ decision: string; input_hash: string }>>(
+      `SELECT decision, input_hash FROM exam_result_hod_decisions
+       WHERE tenant_id = $1 AND session_id = $2
+       ORDER BY decided_at DESC, decision_id DESC LIMIT 1`,
+      [tenantId, sessionId],
+    );
+    return {
+      session_id: sessionId,
+      course_code: snapshot.course_code,
+      course_name: snapshot.course_name,
+      exam_type: snapshot.exam_type,
+      semester: snapshot.semester,
+      max_marks: snapshot.max_marks,
+      input_hash: snapshot.input_hash,
+      decision: latest[0]?.input_hash === snapshot.input_hash ? latest[0].decision : null,
+      marks,
+    };
+  }
+
+  async decideHodEndTermSession(
+    tenantId: string,
+    sessionId: string,
+    hodUserId: string,
+    decision: 'APPROVED' | 'REJECTED',
+    expectedHash: string,
+    comment?: string,
+  ) {
+    if (!/^[a-f0-9]{64}$/.test(expectedHash)) throw new BadRequestException('A current review snapshot is required');
+    if (decision === 'REJECTED' && !comment?.trim()) throw new BadRequestException('Give a reason for rejection');
+    const outcome = await this.db.transaction(async (tx) => {
+      const snapshot = await this.workflowSnapshot(tx, tenantId, sessionId, true);
+      const departmentId = await this.assertHodOwnsSession(tx, tenantId, sessionId, hodUserId);
+      const ambiguous = await tx.query<Array<{ session_id: string }>>(
+        `SELECT session_id FROM exam_result_sessions WHERE tenant_id=$1 AND course_id=$2
+         AND exam_type=$3 AND session_id<>$4 LIMIT 1`,
+        [tenantId, snapshot.course_id, snapshot.exam_type, sessionId],
+      );
+      if (ambiguous[0]) throw new BadRequestException('Multiple sessions share these marks; Exam Cell must reconcile the course identity');
+      this.assertUnpublished(snapshot);
+      if (snapshot.input_hash !== expectedHash) throw new BadRequestException('Marks changed; refresh before deciding');
+      const pending = snapshot.marks.filter((mark) => mark.status === 'PENDING_COE');
+      if (!pending.length) throw new BadRequestException('No faculty-submitted marks to review');
+      if (pending.some((mark) => Number(mark.max_marks) !== Number(snapshot.max_marks) ||
+        !Number.isFinite(Number(mark.marks_obtained)) ||
+        Number(mark.marks_obtained) < 0 || Number(mark.marks_obtained) > Number(snapshot.max_marks))) {
+        throw new BadRequestException('Submitted marks do not match this session maximum');
+      }
+      const roster = await tx.query<Array<{ student_user_id: string }>>(
+        `SELECT e.student_user_id FROM student_course_enrollments e
+         JOIN users student ON student.user_id = e.student_user_id
+         WHERE e.tenant_id = $1 AND e.course_id = $2 AND e.deleted_at IS NULL
+           AND e.status IN ('ENROLLED','COMPLETED','FAILED')
+           AND student.tenant_id = $1 AND student.dept_id = $3
+         FOR UPDATE OF e`,
+        [tenantId, snapshot.course_id, departmentId],
+      );
+      const rosterIds = new Set(roster.map((row) => row.student_user_id));
+      const outsideDepartment = await tx.query<Array<{ student_user_id: string }>>(
+        `SELECT e.student_user_id FROM student_course_enrollments e
+         JOIN users student ON student.user_id = e.student_user_id
+         WHERE e.tenant_id=$1 AND e.course_id=$2 AND e.deleted_at IS NULL
+           AND e.status IN ('ENROLLED','COMPLETED','FAILED')
+           AND (student.tenant_id IS DISTINCT FROM $1::uuid OR student.dept_id IS DISTINCT FROM $3)
+         LIMIT 1`,
+        [tenantId, snapshot.course_id, departmentId],
+      );
+      if (outsideDepartment[0]) {
+        throw new BadRequestException('Cross-department or invalid-tenant course roster needs Exam Cell reconciliation before HOD approval');
+      }
+      if (!rosterIds.size || pending.length !== rosterIds.size ||
+          pending.some((mark) => !rosterIds.has(mark.student_user_id))) {
+        throw new BadRequestException('Every enrolled student must have one submitted end-semester mark before HOD review');
+      }
+      const ownMarks = await tx.query<Array<{ mark_id: string }>>(
+        `SELECT mark_id FROM academic_marks WHERE tenant_id=$1 AND course_id=$2
+         AND exam_type=$3 AND uploaded_by=$4 AND status='PENDING_COE' LIMIT 1`,
+        [tenantId, snapshot.course_id, snapshot.exam_type, hodUserId],
+      );
+      if (ownMarks[0] && decision === 'APPROVED') {
+        throw new ForbiddenException('A faculty member cannot approve their own end-semester marks');
+      }
+      const existing = await tx.query<Array<{ decision_id: string; decision: string }>>(
+        `SELECT decision_id, decision FROM exam_result_hod_decisions
+         WHERE tenant_id=$1 AND session_id=$2 AND input_hash=$3
+         ORDER BY decided_at DESC, decision_id DESC LIMIT 1`,
+        [tenantId, sessionId, snapshot.input_hash],
+      );
+      if (existing[0]?.decision === decision) return { ...existing[0], status: decision, input_hash: snapshot.input_hash, course_code: snapshot.course_code, idempotent: true };
+      if (existing[0]) {
+        throw new BadRequestException('This mark-sheet revision already has a HOD decision. Exam Cell must reopen and resubmit a changed revision.');
+      }
+      const rows = await tx.query<Array<{ decision_id: string }>>(
+        `INSERT INTO exam_result_hod_decisions
+           (tenant_id,session_id,department_id,input_hash,decision,decided_by,decision_comment)
+         VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING decision_id`,
+        [tenantId, sessionId, departmentId, snapshot.input_hash, decision, hodUserId, comment?.trim() ?? null],
+      );
+      await this.audit.log(tenantId, hodUserId, {
+        action: `RESULT_HOD_${decision}`,
+        resource_type: 'exam_result_session', resource_id: sessionId,
+        new_value: { department_id: departmentId, input_hash: snapshot.input_hash, comment: comment?.trim() ?? null },
+      }, tx);
+      return { decision_id: rows[0].decision_id, status: decision, input_hash: snapshot.input_hash, course_code: snapshot.course_code, idempotent: false };
+    });
+    if (!outcome.idempotent) {
+      try {
+        const officers = await this.db.query<Array<{ user_id: string }>>(
+          `SELECT DISTINCT u.user_id FROM users u
+           JOIN user_roles ur ON ur.user_id=u.user_id
+           JOIN roles r ON r.role_id=ur.role_id
+           WHERE u.tenant_id=$1 AND u.is_active=TRUE AND u.deleted_at IS NULL
+             AND LOWER(r.role_name) IN ('examcell','examadmin','deputycoe')`,
+          [tenantId],
+        );
+        for (const officer of officers) {
+          this.notify.approvalRequired({
+            tenantId,
+            userId: officer.user_id,
+            category: 'Results',
+            requestType: 'End-semester mark sheet',
+            requesterName: 'Department HOD',
+            title: decision === 'APPROVED'
+              ? `HOD approved ${outcome.course_code} marks for release`
+              : `HOD rejected ${outcome.course_code} marks`,
+            message: decision === 'APPROVED'
+              ? 'Run the final audit and release the end-semester results.'
+              : 'Reopen the entry window for faculty correction; the marks cannot be released.',
+            actionLink: '/exam-cell/results',
+          });
+        }
+      } catch {
+        // The append-only decision remains available in the Exam Cell queue.
+      }
+    }
+    return outcome;
+  }
+
   async declareSession(
     tenantId: string,
     sessionId: string,
     actorUserId: string,
     dto: DeclareResultSessionDto,
   ) {
-    const session = await this.getSession(tenantId, sessionId);
-    if (session.declared_at)
-      throw new BadRequestException('Results already declared');
-
-    const courseName = session.course_name ?? 'Course';
     const notifications: Array<
       Parameters<NotificationEmitterService['examResultsPublished']>[0]
     > = [];
-    const declared = await this.db.transaction(async (manager) => {
+    let publication: {
+      declared: number;
+      course_name: string;
+      exam_type: string;
+      session_id: string;
+    };
+    try {
+      publication = await this.db.transaction(async (manager) => {
       // Serialize declarations and roll back every student if a result/report
       // write fails, so students cannot see partially published marks.
       const snapshot = await this.workflowSnapshot(
@@ -1036,6 +1366,16 @@ export class ResultControlService {
         sessionId,
         true,
       );
+      const session = snapshot;
+      const courseName = session.course_name ?? 'Course';
+      if (isEndSemesterExamType(snapshot.exam_type)) {
+        const ambiguous = await manager.query<Array<{ session_id: string }>>(
+          `SELECT session_id FROM exam_result_sessions WHERE tenant_id=$1 AND course_id=$2
+           AND exam_type=$3 AND session_id<>$4 LIMIT 1`,
+          [tenantId, snapshot.course_id, snapshot.exam_type, sessionId],
+        );
+        if (ambiguous[0]) throw new BadRequestException('Multiple sessions share these marks; reconcile the course identity before release');
+      }
       this.assertUnpublished(snapshot);
       this.assertLocked(snapshot);
       await this.assertCurrentCoeAudit(
@@ -1057,14 +1397,26 @@ export class ResultControlService {
         [tenantId, sessionId],
       );
       const approved = approvals[0];
-      if (
+      if (isEndSemesterExamType(snapshot.exam_type)) {
+        const hod = await manager.query<Array<{ decision: string; input_hash: string; department_id: number }>>(
+          `SELECT decision,input_hash,department_id FROM exam_result_hod_decisions
+           WHERE tenant_id=$1 AND session_id=$2
+           ORDER BY decided_at DESC,decision_id DESC LIMIT 1 FOR UPDATE`,
+          [tenantId, sessionId],
+        );
+        if (!snapshot.owner_department_id || hod[0]?.department_id !== snapshot.owner_department_id ||
+            hod[0]?.decision !== 'APPROVED' || hod[0]?.input_hash !== snapshot.input_hash) {
+          throw new BadRequestException('Current concerned-department HOD approval is required for these exact end-semester marks before Exam Cell release');
+        }
+      } else if (
         approved?.status !== 'APPROVED' ||
         approved.request_summary?.invalidated_at ||
         approved.request_summary?.input_hash !== snapshot.input_hash
-      )
+      ) {
         throw new BadRequestException(
           'Current Dean approval is required for these exact marks and grading rules before publishing results',
         );
+      }
       const bands = parseGradeBands(snapshot.grading_rules);
       const passMarks =
         snapshot.pass_marks != null ? Number(snapshot.pass_marks) : null;
@@ -1161,11 +1513,12 @@ export class ResultControlService {
         });
       }
 
-      await manager.query(
+      const declaredSession = await manager.query<Array<{ session_id: string }>>(
         `UPDATE exam_result_sessions
        SET declared_at = NOW(), declared_by = $2, declaration_note = $3,
            entry_status = 'LOCKED', marks_locked = TRUE, updated_at = NOW()
-       WHERE session_id = $1 AND tenant_id = $4`,
+       WHERE session_id = $1 AND tenant_id = $4 AND declared_at IS NULL
+       RETURNING session_id`,
         [
           sessionId,
           actorUserId,
@@ -1173,6 +1526,9 @@ export class ResultControlService {
           tenantId,
         ],
       );
+      if (!declaredSession.length) {
+        throw new BadRequestException('Results already declared');
+      }
       await this.audit.log(
         tenantId,
         actorUserId,
@@ -1183,12 +1539,31 @@ export class ResultControlService {
           new_value: {
             declared: marks.length,
             input_hash: snapshot.input_hash,
+            outcome: 'SUCCESS',
           },
         },
         manager,
       );
-      return marks.length;
-    });
+      return {
+        declared: marks.length,
+        course_name: courseName,
+        exam_type: session.exam_type,
+        session_id: sessionId,
+      };
+      });
+    } catch (error) {
+      try {
+        await this.audit.log(tenantId, actorUserId, {
+          action: 'RESULT_DECLARATION_FAILED',
+          resource_type: 'exam_result_session',
+          resource_id: sessionId,
+          new_value: { outcome: 'FAILED' },
+        });
+      } catch {
+        // Preserve the original publication error if failure auditing is unavailable.
+      }
+      throw error;
+    }
 
     // Emit only after the database commit, so failures never send premature
     // publication alerts to students.
@@ -1201,12 +1576,7 @@ export class ResultControlService {
       );
     }
 
-    return {
-      declared,
-      course_name: courseName,
-      exam_type: session.exam_type,
-      session_id: sessionId,
-    };
+    return publication;
   }
 
   /** Keep legacy student results and Result Control reports in the same commit. */
@@ -1270,12 +1640,14 @@ export class ResultControlService {
     tenantId: string,
     courseId: string,
     examType: string,
+    semester?: number,
   ) {
     const rows = await this.db.query(
       `SELECT * FROM exam_result_sessions
        WHERE tenant_id = $1 AND course_id = $2 AND exam_type = $3
+         AND ($4::integer IS NULL OR semester = $4)
        ORDER BY created_at DESC LIMIT 1`,
-      [tenantId, courseId, examType],
+      [tenantId, courseId, examType, semester ?? null],
     );
     return rows[0] ?? null;
   }

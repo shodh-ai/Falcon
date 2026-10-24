@@ -55,6 +55,8 @@ function setup() {
         return Promise.resolve([{ session_id: 'session' }]);
       if (sql.includes('INSERT INTO exam_result_dean_approval_requests'))
         return Promise.resolve([{ request_id: 'request', status: 'PENDING' }]);
+      if (sql.includes('UPDATE exam_result_sessions') && sql.includes('SET declared_at = NOW()'))
+        return Promise.resolve([{ session_id: 'session' }]);
       return Promise.resolve([]);
     });
   const manager = { query };
@@ -182,7 +184,7 @@ describe('Result review binding', () => {
       'actor',
       expect.objectContaining({
         action: 'RESULT_DECLARED',
-        new_value: { declared: 1, input_hash: 'current-hash' },
+        new_value: expect.objectContaining({ declared: 1, input_hash: 'current-hash', outcome: 'SUCCESS' }),
       }),
       f.manager,
     );

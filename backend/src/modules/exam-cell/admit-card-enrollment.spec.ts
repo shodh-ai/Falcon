@@ -66,6 +66,8 @@ describe('Hall-ticket enrollment mapping', () => {
       { admitCardLocked: jest.fn() } as never,
       {} as never,
       {} as never,
+
+      {} as never,
     );
     jest.spyOn(service, 'getAdmitBlockReasons').mockResolvedValue([]);
     const result = await service.generateAdmitCards(

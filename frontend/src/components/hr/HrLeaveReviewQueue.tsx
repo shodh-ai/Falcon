@@ -31,6 +31,8 @@ type ReviewRow = {
   status: string;
   recorded_check_in?: string | null;
   recorded_check_out?: string | null;
+  review_stage?: 'FIRST_LEVEL' | 'FINAL_HR';
+  can_review?: boolean;
 };
 
 export function HrLeaveReviewQueue({ requestType }: { requestType: HrReviewRequestType }) {
@@ -38,8 +40,8 @@ export function HrLeaveReviewQueue({ requestType }: { requestType: HrReviewReque
   const { entityReady } = useHrEntity();
   const { data: rows = [], error, isLoading, mutate } = useHrSWR<ReviewRow[]>(
     ['hr-leave-review', requestType],
-    `/api/hr/leaves/review?request_type=${requestType}`,
-    { dedupingInterval: 0, revalidateOnMount: true },
+    `/api/hr/leaves/review?request_type=${requestType}${requestType === 'REGULARIZATION' ? '&include_first_level=true' : ''}`,
+    { dedupingInterval: 0, revalidateOnMount: true, refreshInterval: 30_000 },
   );
   const [actingId, setActingId] = useState<string | null>(null);
 
@@ -79,7 +81,7 @@ export function HrLeaveReviewQueue({ requestType }: { requestType: HrReviewReque
       <HrEmptyState
         icon={Inbox}
         title={`No pending ${requestType === 'LEAVE' ? 'leave or on-duty requests' : 'regularizations'}`}
-        description="No requests of this type currently await your final HR sign-off."
+        description={requestType === 'REGULARIZATION' ? 'No pending regularizations in your selected organization and scope.' : 'No requests of this type currently await your final HR sign-off.'}
       />
     );
   }
@@ -138,7 +140,11 @@ export function HrLeaveReviewQueue({ requestType }: { requestType: HrReviewReque
                   </p>
                 )}
               </div>
-              <div className="flex shrink-0 gap-2">
+              {row.review_stage === 'FIRST_LEVEL' ? (
+                <p className="max-w-xs text-sm text-muted-foreground">Awaiting first-level approval in Pending on Me.</p>
+              ) : row.can_review !== true ? (
+                <p className="max-w-xs text-sm text-muted-foreground">Awaiting an independent, assigned final HR reviewer.</p>
+              ) : <div className="flex shrink-0 gap-2">
                 <Button
                   size="sm"
                   disabled={actingId !== null}
@@ -154,7 +160,7 @@ export function HrLeaveReviewQueue({ requestType }: { requestType: HrReviewReque
                 >
                   Reject
                 </Button>
-              </div>
+              </div>}
             </CardContent>
           </Card>
         );

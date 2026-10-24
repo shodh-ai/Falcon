@@ -1,9 +1,16 @@
 import { fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ExamCalendar, type CalendarEvent } from '../ExamCalendar';
 
 const event = (id: string, date: string, source = 'CALENDAR'): CalendarEvent => ({
   event_id: id, title: id, event_date: date, event_type: 'DEADLINE', source,
+});
+
+const priorTimezone = process.env.TZ;
+beforeAll(() => { process.env.TZ = 'Asia/Kolkata'; });
+afterAll(() => {
+  if (priorTimezone === undefined) delete process.env.TZ;
+  else process.env.TZ = priorTimezone;
 });
 
 beforeEach(() => {

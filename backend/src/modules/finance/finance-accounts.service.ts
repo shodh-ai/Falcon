@@ -30,6 +30,50 @@ export class FinanceAccountsService {
     private readonly anomalyQueue: Queue<LeadershipAnomalyJob>,
   ) {}
 
+  async getDemoBook(tenantId: string, userId: string) {
+    const books = (await this.dataSource.query(
+      `SELECT b.book_id,b.code,b.title,b.created_at
+       FROM finance_demo_books b
+       JOIN users u ON u.user_id=b.owner_user_id AND u.tenant_id=b.tenant_id
+       JOIN tenants t ON t.tenant_id=b.tenant_id
+       WHERE b.tenant_id=$1 AND b.owner_user_id=$2 AND b.is_demo=true
+         AND t.subdomain='sgvu'
+         AND lower(u.official_email)='finance@mygyanvihar.com' AND u.is_active=true
+       ORDER BY b.created_at DESC LIMIT 1`,
+      [tenantId, userId],
+    )) as unknown as Array<{
+      book_id: string;
+      code: string;
+      title: string;
+      created_at: string;
+    }>;
+    if (!books.length) throw new NotFoundException('Demo book not available');
+    const book = books[0];
+    const records = (await this.dataSource.query(
+      `SELECT record_id,record_type,reference,description,amount::text AS amount,
+              status,occurred_on::text AS occurred_on,details
+       FROM finance_demo_records WHERE book_id=$1
+       ORDER BY occurred_on DESC,reference`,
+      [book.book_id],
+    )) as unknown as Array<{
+      record_id: string;
+      record_type: 'INVOICE' | 'EXPENSE' | 'PAYMENT' | 'JOURNAL';
+      reference: string;
+      description: string;
+      amount: string;
+      status: string;
+      occurred_on: string;
+      details: Record<string, unknown>;
+    }>;
+    return {
+      ...book,
+      demo_only: true,
+      disclaimer:
+        'SIMULATED DATA — not posted to the general ledger, not a payable, and not a settled payment.',
+      records,
+    };
+  }
+
   listTemplates(tenantId: string) {
     return this.dataSource.query(
       `SELECT * FROM finance_fee_templates WHERE tenant_id = $1 ORDER BY template_name`,
@@ -49,6 +93,17 @@ export class FinanceAccountsService {
       total_amount: number;
     },
   ) {
+    const name = dto.template_name?.trim();
+    const academicYear = dto.academic_year?.trim();
+    const amount = Number(dto.total_amount);
+    if (!name || name.length > 180)
+      throw new BadRequestException('Template name is required (maximum 180 characters)');
+    if (!academicYear || !/^\d{4}-\d{2}$/.test(academicYear))
+      throw new BadRequestException('Academic year must use YYYY-YY format');
+    if (!Number.isFinite(amount) || amount <= 0)
+      throw new BadRequestException('Total fee must be greater than zero');
+    if (dto.semester != null && (!Number.isInteger(dto.semester) || dto.semester < 1 || dto.semester > 12))
+      throw new BadRequestException('Semester must be between 1 and 12');
     return this.dataSource.query(
       `INSERT INTO finance_fee_templates
          (tenant_id, template_name, program_code, batch_year, academic_year, semester, fee_breakup, total_amount)
@@ -56,18 +111,25 @@ export class FinanceAccountsService {
        RETURNING *`,
       [
         tenantId,
-        dto.template_name,
+        name,
         dto.program_code ?? null,
         dto.batch_year ?? null,
-        dto.academic_year,
+        academicYear,
         dto.semester ?? null,
         JSON.stringify(dto.fee_breakup ?? {}),
-        dto.total_amount,
+        amount,
       ],
     );
   }
 
   async createBulkJob(tenantId: string, payload: Record<string, unknown>) {
+    if (typeof payload.template_id !== 'string' || !/^[0-9a-f-]{36}$/i.test(payload.template_id))
+      throw new BadRequestException('Select a fee template before generating demands');
+    const template = await this.dataSource.query(
+      `SELECT template_id FROM finance_fee_templates WHERE tenant_id=$1 AND template_id=$2 AND is_active=true`,
+      [tenantId, payload.template_id],
+    );
+    if (!template[0]) throw new NotFoundException('Fee template not found for this institution');
     const rows = await this.dataSource.query(
       `INSERT INTO finance_bulk_jobs (tenant_id, template_id, payload, status)
        VALUES ($1, $2, $3::jsonb, 'QUEUED')
@@ -77,10 +139,21 @@ export class FinanceAccountsService {
     return { job_id: (rows[0] as { job_id: string }).job_id };
   }
 
-  getBulkJob(jobId: string) {
-    return this.dataSource.query(
-      `SELECT * FROM finance_bulk_jobs WHERE job_id = $1`,
-      [jobId],
+  async getBulkJob(tenantId: string, jobId: string) {
+    const rows = await this.dataSource.query(
+      `SELECT job_id, template_id, status, generated_count, error_message, created_at, completed_at
+       FROM finance_bulk_jobs WHERE tenant_id = $1 AND job_id = $2`,
+      [tenantId, jobId],
+    );
+    if (!rows[0]) throw new NotFoundException('Demand generation job not found');
+    return rows[0];
+  }
+
+  async markBulkJobFailed(tenantId: string, jobId: string, error: unknown) {
+    await this.dataSource.query(
+      `UPDATE finance_bulk_jobs SET status='FAILED', error_message=$3, completed_at=NOW()
+       WHERE tenant_id=$1 AND job_id=$2`,
+      [tenantId, jobId, error instanceof Error ? error.message.slice(0, 500) : 'Demand generation failed'],
     );
   }
 
@@ -98,10 +171,16 @@ export class FinanceAccountsService {
       batch_year?: number;
     },
   ) {
+    await this.dataSource.query(
+      `UPDATE finance_bulk_jobs SET status='IN_PROGRESS', error_message=NULL WHERE tenant_id=$1 AND job_id=$2`,
+      [tenantId, jobId],
+    );
     let tuitionFee = Number(dto.tuition_fee ?? 85000);
     let developmentFee = Number(dto.development_fee ?? 15000);
     let academicYear = dto.academic_year ?? '2026-27';
     let semester = Number(dto.semester ?? 3);
+    let templateAmount: number | null = null;
+    let templateBreakup: Record<string, unknown> | null = null;
     const dueDate =
       dto.due_date ??
       new Date(Date.now() + 1000 * 60 * 60 * 24 * 30)
@@ -120,8 +199,8 @@ export class FinanceAccountsService {
         fee_breakup: Record<string, unknown>;
       };
       if (t) {
-        tuitionFee = Number(t.fee_breakup?.tuition_fee ?? t.total_amount);
-        developmentFee = Number(t.fee_breakup?.development_fee ?? 0);
+        templateAmount = Number(t.total_amount);
+        templateBreakup = t.fee_breakup ?? {};
         academicYear = t.academic_year;
         semester = t.semester ?? semester;
       }
@@ -131,9 +210,11 @@ export class FinanceAccountsService {
       `SELECT u.user_id
        FROM users u
        JOIN roles r ON r.role_id = u.role_id
+       JOIN student_profiles sp ON sp.user_id = u.user_id
        WHERE r.role_name = 'Student' AND u.tenant_id = $1
+         AND sp.current_semester = $2 AND sp.status = 'ACTIVE'
        ORDER BY u.name ASC`,
-      [tenantId],
+      [tenantId, semester],
     );
 
     let generated = 0;
@@ -146,7 +227,7 @@ export class FinanceAccountsService {
       );
       if (existing.length) continue;
 
-      const amount = tuitionFee + developmentFee;
+      const amount = templateAmount ?? tuitionFee + developmentFee;
       await this.dataSource.query(
         `INSERT INTO finance_fee_demands
            (tenant_id, student_user_id, fee_head, academic_year, semester, total_amount, paid_amount,
@@ -159,8 +240,8 @@ export class FinanceAccountsService {
           semester,
           amount,
           dueDate,
-          JSON.stringify({
-            program: dto.program ?? 'B.Tech',
+          JSON.stringify(templateBreakup ?? {
+            program: dto.program ?? null,
             tuition_fee: tuitionFee,
             development_fee: developmentFee,
           }),
@@ -194,7 +275,7 @@ export class FinanceAccountsService {
        FROM finance_transactions t
        LEFT JOIN users u ON u.user_id = t.student_user_id
        LEFT JOIN student_profiles sp ON sp.user_id = t.student_user_id
-       WHERE (t.tenant_id = $1 OR t.tenant_id IS NULL)
+       WHERE (t.tenant_id = $1 OR (t.tenant_id IS NULL AND u.tenant_id = $1))
          AND ($2::text IS NULL OR t.gateway_payment_id ILIKE $2 OR t.gateway_order_id ILIKE $2
               OR sp.enrollment_no ILIKE $2 OR u.name ILIKE $2)
        ORDER BY t.created_at DESC
@@ -205,7 +286,8 @@ export class FinanceAccountsService {
 
   listVendors(tenantId: string) {
     return this.dataSource.query(
-      `SELECT vendor_id, business_name, default_tds_rate, gstin, is_active
+      `SELECT vendor_id, business_name, contact_email, gstin, pan_number,
+              default_tds_rate, bank_account_no, ifsc_code, is_active
        FROM fin_vendors
        WHERE tenant_id = $1 AND COALESCE(is_active, true) = true
        ORDER BY business_name`,
@@ -214,6 +296,7 @@ export class FinanceAccountsService {
   }
 
   createVendor(tenantId: string, dto: Record<string, unknown>) {
+    const vendor = this.validatedVendor(dto);
     return this.dataSource.query(
       `INSERT INTO fin_vendors
          (tenant_id, business_name, contact_email, gstin, pan_number, default_tds_rate, bank_account_no, ifsc_code)
@@ -221,15 +304,55 @@ export class FinanceAccountsService {
        RETURNING *`,
       [
         tenantId,
-        dto.business_name,
-        dto.contact_email ?? null,
-        dto.gstin ?? null,
-        dto.pan_number ?? null,
-        dto.default_tds_rate ?? 0,
-        dto.bank_account_no ?? null,
-        dto.ifsc_code ?? null,
+        vendor.business_name,
+        vendor.contact_email,
+        vendor.gstin,
+        vendor.pan_number,
+        vendor.default_tds_rate,
+        vendor.bank_account_no,
+        vendor.ifsc_code,
       ],
     );
+  }
+
+  updateVendor(tenantId: string, vendorId: string, dto: Record<string, unknown>) {
+    if (!/^[0-9a-f-]{36}$/i.test(vendorId)) throw new BadRequestException('Valid vendor ID is required');
+    const vendor = this.validatedVendor(dto);
+    return this.dataSource.query(
+      `UPDATE fin_vendors SET business_name = $3, contact_email = $4, gstin = $5,
+         pan_number = $6, default_tds_rate = $7, bank_account_no = $8, ifsc_code = $9
+       WHERE tenant_id = $1 AND vendor_id = $2 AND is_active = true RETURNING *`,
+      [tenantId, vendorId, vendor.business_name, vendor.contact_email, vendor.gstin,
+        vendor.pan_number, vendor.default_tds_rate, vendor.bank_account_no, vendor.ifsc_code],
+    ).then((result: unknown) => {
+      const rows = Array.isArray(result) && Array.isArray(result[0]) ? result[0] : result as Array<Record<string, unknown>>;
+      if (!rows.length) throw new NotFoundException('Vendor not found in this institution');
+      return rows[0];
+    });
+  }
+
+  private validatedVendor(dto: Record<string, unknown>) {
+    const business_name = String(dto.business_name ?? '').trim();
+    const gstin = String(dto.gstin ?? '').trim().toUpperCase() || null;
+    const pan_number = String(dto.pan_number ?? '').trim().toUpperCase() || null;
+    const ifsc_code = String(dto.ifsc_code ?? '').trim().toUpperCase() || null;
+    const bank_account_no = String(dto.bank_account_no ?? '').trim() || null;
+    const contact_email = String(dto.contact_email ?? '').trim() || null;
+    const default_tds_rate = Number(dto.default_tds_rate ?? 0);
+    if (!business_name) throw new BadRequestException('Business name is required');
+    if (gstin && !/^\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(gstin))
+      throw new BadRequestException('GSTIN must be a valid 15-character identifier');
+    if (pan_number && !/^[A-Z]{5}\d{4}[A-Z]$/.test(pan_number))
+      throw new BadRequestException('PAN must be a valid 10-character identifier');
+    if (ifsc_code && !/^[A-Z]{4}0[A-Z0-9]{6}$/.test(ifsc_code))
+      throw new BadRequestException('IFSC must be a valid 11-character code');
+    if (bank_account_no && !/^\d{6,34}$/.test(bank_account_no))
+      throw new BadRequestException('Bank account number must contain 6 to 34 digits');
+    if (contact_email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contact_email))
+      throw new BadRequestException('Contact email is invalid');
+    if (!Number.isFinite(default_tds_rate) || default_tds_rate < 0 || default_tds_rate > 100)
+      throw new BadRequestException('TDS rate must be between 0 and 100 percent');
+    return { business_name, gstin, pan_number, ifsc_code, bank_account_no, contact_email, default_tds_rate };
   }
 
   listExpenseHeads(tenantId: string) {
@@ -268,7 +391,7 @@ export class FinanceAccountsService {
       approved_by?: string;
     },
   ) {
-    return this.dataSource.transaction(async (tx) => {
+    const result = await this.dataSource.transaction(async (tx) => {
       const vendors = await tx.query(
         `SELECT default_tds_rate, business_name FROM fin_vendors WHERE vendor_id = $1 AND tenant_id = $2`,
         [dto.vendor_id, tenantId],
@@ -362,14 +485,15 @@ export class FinanceAccountsService {
       );
       const invoiceId = (rows[0] as { invoice_id: string }).invoice_id;
 
+      let approvalId: string | null = null;
       if (requiresBoard) {
-        await this.approvals.createApprovalRequest({
+        approvalId = await this.approvals.createApprovalRequest({
           tenantId,
           entityType: 'VENDOR_INVOICE',
           entityId: invoiceId,
           requestedBy: String(dto.approved_by ?? 'SYSTEM'),
           amount: netPayable,
-        });
+        }, tx);
       }
 
       const period = dto.invoice_date.slice(0, 7);
@@ -481,8 +605,15 @@ export class FinanceAccountsService {
         total_amount: totalAmount,
         net_payable: netPayable,
         status,
+        approval_id: approvalId,
       };
     });
+    if (result.approval_id) {
+      void this.approvals.notifyFinanceApprovers(
+        tenantId, result.approval_id, 'VENDOR_INVOICE', result.net_payable,
+      );
+    }
+    return result;
   }
 
   async checkBudget(
@@ -603,14 +734,70 @@ export class FinanceAccountsService {
       allocated_amount: number;
     },
   ) {
-    return this.dataSource.query(
-      `INSERT INTO fin_budgets (tenant_id, department_id, financial_year, allocated_amount)
-       VALUES ($1, $2, $3, $4)
-       ON CONFLICT (tenant_id, department_id, financial_year)
-       DO UPDATE SET allocated_amount = EXCLUDED.allocated_amount
-       RETURNING *`,
-      [tenantId, dto.department_id, dto.financial_year, dto.allocated_amount],
-    );
+    const departmentId = Number(dto.department_id);
+    const amount = Number(dto.allocated_amount);
+    const fiscalYears = /^(\d{4})-(\d{4})$/.exec(dto.financial_year ?? '');
+    if (!Number.isSafeInteger(departmentId) || departmentId <= 0 ||
+        !fiscalYears || Number(fiscalYears[2]) !== Number(fiscalYears[1]) + 1 ||
+        !Number.isFinite(amount) || amount < 0 ||
+        !Number.isSafeInteger(Math.round(amount * 100)) ||
+        Math.abs(amount * 100 - Math.round(amount * 100)) > 0.00001)
+      throw new BadRequestException('Select a department, financial year and valid non-negative amount');
+    return this.dataSource.transaction(async (manager) => {
+      const department = await manager.query<Array<{ dept_id: number }>>(
+        `SELECT d.dept_id FROM departments d
+         WHERE d.dept_id = $1 AND d.deleted_at IS NULL
+           AND EXISTS (SELECT 1 FROM users u WHERE u.dept_id = d.dept_id AND u.tenant_id = $2 AND u.deleted_at IS NULL)`,
+        [departmentId, tenantId],
+      );
+      if (!department.length) throw new BadRequestException('Department not found in this institution');
+      const rows = await manager.query<Array<{ budget_id: string; utilized_amount: string; encumbered_amount: string; status: string }>>(
+        `SELECT budget_id, utilized_amount, encumbered_amount, status FROM fin_dept_budgets
+         WHERE tenant_id = $1 AND department_id = $2 AND financial_year = $3 FOR UPDATE`,
+        [tenantId, departmentId, dto.financial_year],
+      );
+      if (rows[0]?.status === 'LOCKED')
+        throw new BadRequestException('Locked budget cannot be edited here; submit a budget expansion for approval');
+      if (rows[0] && amount < Number(rows[0].utilized_amount) + Number(rows[0].encumbered_amount))
+        throw new BadRequestException('Allocation cannot fall below utilized and committed amounts');
+      if (rows[0]) {
+        const programs = await manager.query<Array<{ allocated: string }>>(
+          `SELECT COALESCE(SUM(allocated_amount), 0) AS allocated FROM fin_program_budgets
+           WHERE budget_id = $1 AND tenant_id = $2 AND deleted_at IS NULL`,
+          [rows[0].budget_id, tenantId],
+        );
+        if (amount < Number(programs[0]?.allocated ?? 0))
+          throw new BadRequestException('Allocation cannot fall below program budgets already assigned');
+      }
+      const university = await manager.query<Array<{ university_budget_id: string; total_allocated: string; status: string }>>(
+        `SELECT university_budget_id, total_allocated, status FROM fin_university_budgets
+         WHERE tenant_id = $1 AND financial_year = $2 FOR UPDATE`,
+        [tenantId, dto.financial_year],
+      );
+      if (!university.length)
+        throw new BadRequestException('Create the university budget in the Allocation Board first');
+      if (university[0].status === 'LOCKED')
+        throw new BadRequestException('Approved university budget is locked; submit a budget expansion for approval');
+      const other = await manager.query<Array<{ allocated: string }>>(
+        `SELECT COALESCE(SUM(allocated_amount), 0) AS allocated FROM fin_dept_budgets
+         WHERE tenant_id = $1 AND financial_year = $2 AND department_id IS DISTINCT FROM $3
+           AND deleted_at IS NULL`,
+        [tenantId, dto.financial_year, departmentId],
+      );
+      if (Number(other[0]?.allocated ?? 0) + amount > Number(university[0].total_allocated))
+        throw new BadRequestException('Department allocations would exceed the university budget cap');
+      return manager.query(
+        `INSERT INTO fin_dept_budgets
+           (tenant_id, department_id, financial_year, allocated_amount, university_budget_id, status)
+         VALUES ($1, $2, $3, $4, $5, 'DRAFT')
+         ON CONFLICT (tenant_id, department_id, financial_year)
+         DO UPDATE SET allocated_amount = EXCLUDED.allocated_amount,
+           university_budget_id = EXCLUDED.university_budget_id, deleted_at = NULL
+         WHERE fin_dept_budgets.status <> 'LOCKED'
+         RETURNING *`,
+        [tenantId, departmentId, dto.financial_year, amount, university[0].university_budget_id],
+      );
+    });
   }
 
   private parsePayrollMonth(month?: string) {

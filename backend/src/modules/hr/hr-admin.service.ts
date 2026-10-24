@@ -586,14 +586,16 @@ export class HrAdminService {
     const rows = await this.dataSource.query(
       `INSERT INTO hr_employee_appraisals (tenant_id, user_id, appraisal_year, auto_api_score, api_breakdown, calculated_at)
        VALUES ($1,$2,$3,$4,$5::jsonb,NOW())
-       ON CONFLICT (tenant_id, user_id, appraisal_year) DO UPDATE SET
-         auto_api_score = EXCLUDED.auto_api_score,
-         api_breakdown = EXCLUDED.api_breakdown,
-         calculated_at = NOW()
+       ON CONFLICT (tenant_id, user_id, appraisal_year) DO NOTHING
        RETURNING *`,
       [tenantId, userId, year, score, JSON.stringify(breakdown)],
     );
-    return rows[0];
+    if (rows[0]) return rows[0];
+    const existing = await this.dataSource.query(
+      'SELECT * FROM hr_employee_appraisals WHERE tenant_id=$1 AND user_id=$2 AND appraisal_year=$3',
+      [tenantId,userId,year],
+    );
+    return existing[0];
   }
 
   async listAppraisalsWithApi(
@@ -601,18 +603,8 @@ export class HrAdminService {
     year: number,
     entityId: number,
   ) {
-    const faculty = await this.dataSource.query(
-      `SELECT u.user_id, u.name, p.employee_id, r.role_name
-       FROM users u
-       JOIN roles r ON r.role_id = u.role_id
-       JOIN hr_employee_profiles p ON p.user_id = u.user_id AND p.tenant_id = u.tenant_id
-       WHERE u.tenant_id = $1 AND r.role_name IN ('Faculty', 'HOD', 'Dean')
-         ${this.entityCtx.entityFilterSql('p', 2)}`,
-      [tenantId, entityId],
-    );
-    for (const f of faculty) {
-      await this.calculateApiScore(tenantId, f.user_id, year);
-    }
+    // A GET must never recalculate/overwrite a reviewed historical assessment.
+    // Designation policy calculations are explicit and recorded separately.
     return this.dataSource.query(
       `SELECT a.*, u.name AS employee_name, p.employee_id
        FROM hr_employee_appraisals a

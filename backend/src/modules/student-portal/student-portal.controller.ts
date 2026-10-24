@@ -39,7 +39,7 @@ type AuthUser = { user_id: string; tenant_id?: string; roles?: string[] };
 
 @Controller('api/student')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('Student', 'Applicant')
+@Roles('Student')
 export class StudentPortalController {
   constructor(
     private readonly portal: StudentPortalService,
@@ -71,11 +71,13 @@ export class StudentPortalController {
   }
 
   @Get('profile')
+  @Roles('Student', 'Applicant')
   profile(@Req() req: { user: AuthUser }) {
     return this.portal.getMasterProfile(this.tenant(req), req.user.user_id);
   }
 
   @Patch('profile')
+  @Roles('Student', 'Applicant')
   updateProfile(
     @Req() req: { user: AuthUser },
     @Body() body: UpdateStudentProfileDto,
@@ -84,6 +86,7 @@ export class StudentPortalController {
   }
 
   @Get('profile/photo')
+  @Roles('Student', 'Applicant')
   async getProfilePhoto(@Req() req: { user: AuthUser }, @Res() res: Response) {
     const { stream, filePath } = await this.portal.openProfilePhotoStream(
       this.tenant(req),
@@ -102,6 +105,7 @@ export class StudentPortalController {
   }
 
   @Post('profile/photo')
+  @Roles('Student', 'Applicant')
   @UseInterceptors(
     FileInterceptor('file', {
       storage: memoryStorage(),
@@ -123,21 +127,25 @@ export class StudentPortalController {
   }
 
   @Get('campus-settings')
+  @Roles('Student', 'Applicant')
   campusSettings(@Req() req: { user: AuthUser }) {
     return this.portal.getCampusSettings(this.tenant(req));
   }
 
   @Get('documents')
+  @Roles('Student', 'Applicant')
   documents(@Req() req: { user: AuthUser }) {
     return this.portal.getDocumentVault(this.tenant(req), req.user.user_id);
   }
 
   @Get('admission-vault')
+  @Roles('Student', 'Applicant')
   admissionVault(@Req() req: { user: AuthUser }) {
     return this.portal.getAdmissionVault(this.tenant(req), req.user.user_id);
   }
 
   @Post('admission-documents')
+  @Roles('Student', 'Applicant')
   @UseInterceptors(
     FileInterceptor('file', {
       storage: memoryStorage(),
@@ -298,6 +306,7 @@ export class StudentPortalController {
   }
 
   @Post('profile/update-request')
+  @Roles('Student', 'Applicant')
   profileUpdateRequest(
     @Req() req: { user: AuthUser },
     @Body() body: ProfileUpdateRequestDto,

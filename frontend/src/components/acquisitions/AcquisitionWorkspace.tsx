@@ -327,6 +327,7 @@ export function AcquisitionWorkspace() {
                   This is the approved budget, program or grant that will fund
                   the request. You do not need to enter an ID.
                 </p>
+                {!fundingSources.length ? <p role="status" className="text-xs text-amber-800">No funding source is available for your current scope. Ask Finance to publish an approved budget, program or grant before saving.</p> : null}
               </div>
               <Textarea
                 className="md:col-span-2"
@@ -402,7 +403,7 @@ export function AcquisitionWorkspace() {
                         <option value="SERVICE">Service</option>
                       </select>
                     </label>
-                    <Input
+                    <label className="space-y-1 text-sm"><span className="font-medium">Quantity (whole items)</span><Input
                       type="number"
                       min="1"
                       step="1"
@@ -418,8 +419,8 @@ export function AcquisitionWorkspace() {
                         if (Number.isInteger(quantity) && quantity >= 0)
                           setLine(index, { quantity });
                       }}
-                    />
-                    <Input
+                    /></label>
+                    <label className="space-y-1 text-sm"><span className="font-medium">Estimated price per item (₹)</span><Input
                       type="number"
                       min="0"
                       aria-label="Price per unit"
@@ -430,7 +431,7 @@ export function AcquisitionWorkspace() {
                           estimated_unit_price: Number(e.target.value),
                         })
                       }
-                    />
+                    /></label>
                     <Textarea
                       className="md:col-span-4"
                       aria-label="Notes and General info (optional)"

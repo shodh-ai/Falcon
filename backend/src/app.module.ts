@@ -84,7 +84,10 @@ import { AssetRetirementModule } from './modules/asset-retirement/asset-retireme
 import { PhysicalIdentityModule } from './modules/physical-identity/physical-identity.module';
 import { AuditModule } from './core/audit/audit.module';
 import { RedisModule } from './core/redis/redis.module';
+import { redisConnectionOptions } from './core/redis/redis-connection.config';
 import { ImpersonationReadOnlyGuard } from './common/guards/impersonation-readonly.guard';
+import { FacultyReadOnlyInterceptor } from './common/interceptors/faculty-read-only.interceptor';
+import { StaffProfileFreezeInterceptor } from './common/interceptors/staff-profile-freeze.interceptor';
 import { TenantModule } from './tenant/tenant.module';
 import { StorageModule } from './storage/storage.module';
 import { MetricsModule } from './metrics/metrics.module';
@@ -102,53 +105,64 @@ import { DatabaseExceptionFilter } from './common/filters/database-exception.fil
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
+      // The startup boundary validates the injected environment before Nest.
+      // An image-local dotenv file must not redirect storage/database afterward.
+      ignoreEnvFile: process.env.NODE_ENV === 'production',
     }),
     EventEmitterModule.forRoot(),
     ScheduleModule.forRoot(),
     BullModule.forRootAsync({
       imports: [ConfigModule],
       useFactory: (configService: ConfigService) => ({
-        connection: {
-          host: configService.get('REDIS_HOST', '127.0.0.1'),
-          port: configService.get<number>('REDIS_PORT', 6379),
-          password: configService.get<string>('REDIS_PASSWORD') || undefined,
-        },
+        connection: redisConnectionOptions((key) =>
+          configService.get<unknown>(key),
+        ),
       }),
       inject: [ConfigService],
     }),
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
-      useFactory: (configService: ConfigService) => ({
-        type: 'postgres',
-        host: configService.get('DB_HOST', 'localhost'),
-        port: configService.get<number>('DB_PORT', 5432),
-        username: configService.get('DB_USERNAME', 'postgres'),
-        password: configService.get('DB_PASSWORD', 'postgres'),
-        database: configService.get('DB_DATABASE', 'university_governance'),
-        entities: Object.values(entities).filter(
-          (e) => typeof e === 'function',
-        ),
-        subscribers: [EntityScopeSubscriber, SystemAuditSubscriber],
-        synchronize:
-          configService.get<string>('DB_SYNCHRONIZE', 'false') === 'true',
-        logging:
-          configService.get('TYPEORM_LOGGING', 'false') === 'true'
-            ? ['query', 'error', 'warn']
-            : configService.get('NODE_ENV') === 'development',
-        maxQueryExecutionTime: Number(
-          configService.get('TYPEORM_SLOW_MS', '200'),
-        ),
-        extra: {
-          max: Number(configService.get('DB_POOL_MAX', '20')),
-          min: Number(configService.get('DB_POOL_MIN', '2')),
-          idleTimeoutMillis: Number(
-            configService.get('DB_POOL_IDLE_MS', '30000'),
+      useFactory: (configService: ConfigService) => {
+        if (
+          configService.get('NODE_ENV') === 'production' &&
+          configService.get<string>('DB_SYNCHRONIZE', 'false') !== 'false'
+        ) {
+          throw new Error(
+            'Production database schema synchronization is disabled',
+          );
+        }
+        return {
+          type: 'postgres',
+          host: configService.get('DB_HOST', 'localhost'),
+          port: configService.get<number>('DB_PORT', 5432),
+          username: configService.get('DB_USERNAME', 'postgres'),
+          password: configService.get('DB_PASSWORD', 'postgres'),
+          database: configService.get('DB_DATABASE', 'university_governance'),
+          entities: Object.values(entities).filter(
+            (e) => typeof e === 'function',
           ),
-          connectionTimeoutMillis: Number(
-            configService.get('DB_POOL_CONNECT_MS', '5000'),
+          subscribers: [EntityScopeSubscriber, SystemAuditSubscriber],
+          synchronize:
+            configService.get<string>('DB_SYNCHRONIZE', 'false') === 'true',
+          logging:
+            configService.get('TYPEORM_LOGGING', 'false') === 'true'
+              ? ['query', 'error', 'warn']
+              : configService.get('NODE_ENV') === 'development',
+          maxQueryExecutionTime: Number(
+            configService.get('TYPEORM_SLOW_MS', '200'),
           ),
-        },
-      }),
+          extra: {
+            max: Number(configService.get('DB_POOL_MAX', '20')),
+            min: Number(configService.get('DB_POOL_MIN', '2')),
+            idleTimeoutMillis: Number(
+              configService.get('DB_POOL_IDLE_MS', '30000'),
+            ),
+            connectionTimeoutMillis: Number(
+              configService.get('DB_POOL_CONNECT_MS', '5000'),
+            ),
+          },
+        };
+      },
       inject: [ConfigService],
     }),
     AuditModule,
@@ -239,6 +253,8 @@ import { DatabaseExceptionFilter } from './common/filters/database-exception.fil
     { provide: APP_FILTER, useClass: DatabaseExceptionFilter },
     { provide: APP_GUARD, useClass: ImpersonationReadOnlyGuard },
     { provide: APP_INTERCEPTOR, useClass: TenantContextInterceptor },
+    { provide: APP_INTERCEPTOR, useClass: StaffProfileFreezeInterceptor },
+    { provide: APP_INTERCEPTOR, useClass: FacultyReadOnlyInterceptor },
     { provide: APP_INTERCEPTOR, useClass: ModuleAvailabilityInterceptor },
     { provide: APP_INTERCEPTOR, useClass: TenantSchemaInterceptor },
     HrEntityScopeInterceptor,

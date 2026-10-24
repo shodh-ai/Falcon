@@ -4,11 +4,13 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { createHash, randomInt } from 'crypto';
-import { DataSource } from 'typeorm';
+import { DataSource, EntityManager } from 'typeorm';
 import { FinanceLedgerService } from './finance-ledger.service';
+import { FalconNotificationsService } from '../../core/notifications/falcon-notifications.service';
 
 const APPROVAL_THRESHOLD = 100000;
 const OTP_TTL_MINUTES = 10;
@@ -22,6 +24,7 @@ export class FinanceApprovalsService {
   constructor(
     @InjectDataSource() private readonly db: DataSource,
     private readonly ledger: FinanceLedgerService,
+    @Optional() private readonly notifications?: FalconNotificationsService,
   ) {}
 
   private tenantId(tenantId?: string) {
@@ -38,11 +41,11 @@ export class FinanceApprovalsService {
     entityId: string;
     requestedBy: string;
     amount: number;
-  }) {
+  }, manager?: EntityManager) {
     const { tenantId, entityType, entityId, requestedBy, amount } = params;
     if (amount < APPROVAL_THRESHOLD) return null;
 
-    const rows = await this.db.query(
+    const rows = await (manager ?? this.db).query(
       `INSERT INTO fin_approval_requests
          (tenant_id, entity_type, entity_id, requested_by, status, required_role, amount)
        VALUES ($1, $2, $3, $4, 'PENDING', 'CFO_OR_CHAIRMAN', $5)
@@ -52,7 +55,29 @@ export class FinanceApprovalsService {
       [tenantId, entityType, entityId, requestedBy, amount],
     );
 
-    return (rows[0] as { approval_id: string })?.approval_id ?? null;
+    const approvalId = (rows[0] as { approval_id: string })?.approval_id ?? null;
+    if (approvalId && !manager) void this.notifyFinanceApprovers(tenantId, approvalId, entityType, amount);
+    return approvalId;
+  }
+
+  async notifyFinanceApprovers(tenantId: string, approvalId: string, entityType: string, amount: number) {
+    if (!this.notifications) return;
+    try {
+      const users = await this.db.query<Array<{ user_id: string }>>(
+        `SELECT DISTINCT u.user_id FROM users u JOIN roles r ON r.role_id=u.role_id
+         WHERE u.tenant_id=$1 AND u.is_active=true
+           AND r.role_name IN ('CFO','Chairman','President','SuperAdmin')`,
+        [tenantId],
+      );
+      await Promise.all(users.map((user) => this.notifications!.create({
+        tenantId, userId: user.user_id, category: 'FINANCE',
+        title: `${entityType === 'PO' ? 'Purchase order' : 'Vendor invoice'} needs approval`,
+        message: `A ₹${amount.toLocaleString('en-IN')} request is waiting for an independent Finance decision. Reference: ${approvalId}.`,
+        actionLink: '/finance/ap-desk', intent: 'action_required',
+      })));
+    } catch (error) {
+      this.logger.warn(`Could not notify Finance approvers: ${String(error)}`);
+    }
   }
 
   async requestOtp(user: AuthUser, approvalId: string) {
@@ -92,12 +117,12 @@ export class FinanceApprovalsService {
 
     const role = String(user.role_name ?? '');
     const allowed =
-      role === 'Chairman' || role === 'President' || role === 'SuperAdmin';
+      role === 'CFO' || role === 'Chairman' || role === 'President' || role === 'SuperAdmin';
     if (!allowed) throw new ForbiddenException('Only CFO/Chairman can approve');
 
-    return this.db.transaction(async (tx) => {
+    const result = await this.db.transaction(async (tx) => {
       const approvals = await tx.query(
-        `SELECT approval_id, entity_type, entity_id, status
+        `SELECT approval_id, entity_type, entity_id, status, requested_by
          FROM fin_approval_requests
          WHERE tenant_id = $1 AND approval_id = $2
          FOR UPDATE`,
@@ -108,6 +133,7 @@ export class FinanceApprovalsService {
             entity_type: 'PO' | 'VENDOR_INVOICE';
             entity_id: string;
             status: string;
+            requested_by: string;
           }
         | undefined;
       if (!approval) throw new NotFoundException('Approval request not found');
@@ -193,7 +219,16 @@ export class FinanceApprovalsService {
         );
       }
 
-      return { ok: true, approval_id: approvalId };
+      return { ok: true, approval_id: approvalId, requested_by: approval.requested_by };
     });
+    if (this.notifications && /^[0-9a-f-]{36}$/i.test(result.requested_by)) {
+      void this.notifications.create({
+        tenantId, userId: result.requested_by, category: 'FINANCE',
+        title: 'Finance approval completed',
+        message: `Approval ${approvalId} was approved.`,
+        actionLink: '/finance/ap-desk', intent: 'status_update',
+      }).catch((error: unknown) => this.logger.warn(`Could not notify requester: ${String(error)}`));
+    }
+    return { ok: true, approval_id: approvalId };
   }
 }

@@ -33,8 +33,7 @@ import {
 } from 'fs';
 import { basename, relative, resolve, sep } from 'path';
 import type { Response } from 'express';
-import { EXAM_CELL_ACCESS_ROLES } from '../modules/exam-cell/exam-cell.constants';
-import { normalizeExamCellRole } from '../modules/exam-cell/exam-cell-rbac.util';
+import { UploadsService } from './uploads.service';
 import {
   isCurrentTranscript,
   TranscriptRevisionMetadata,
@@ -48,22 +47,7 @@ import {
 } from './hr-document-upload.util';
 
 /** Authenticated campus roles that may upload files through the shared endpoint. */
-const UPLOAD_ROLES = [
-  'Student',
-  'Faculty',
-  'HOD',
-  'Dean',
-  'SuperAdmin',
-  'Admin',
-  'IQAC',
-  'HR',
-  'HRAdmin',
-  'Registrar',
-  'President',
-  'ExamCell',
-  'Accountant',
-  'HostelAdmin',
-] as const;
+const UPLOAD_ROLES = SHARED_UPLOAD_ROLES;
 
 const ALLOWED_MIME_TYPES = [
   'application/pdf',
@@ -97,15 +81,7 @@ const multerOptions = {
   },
 };
 
-type AuthRequest = {
-  user?: {
-    user_id?: string;
-    tenant_id?: string;
-    role?: string;
-    primaryRole?: string;
-    roles?: string[];
-  };
-};
+type AuthRequest = { user?: UploadUser };
 
 @Controller(['uploads', 'api/uploads'])
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -113,7 +89,7 @@ type AuthRequest = {
 export class UploadsController {
   constructor(
     private readonly objectStorage: ObjectStorageService,
-    @InjectDataSource() private readonly db: DataSource,
+    private readonly uploads: UploadsService,
   ) {}
 
   @Post('single')
@@ -149,49 +125,47 @@ export class UploadsController {
     if (!files?.length) {
       throw new BadRequestException('No files uploaded');
     }
-    const tenantId = req.user?.tenant_id ?? 'unknown';
-    return Promise.all(files.map((f) => this.persistFile(f, tenantId)));
+    return Promise.all(files.map((f) => this.persistFile(f, req.user)));
   }
 
   @Get('download')
-  @Roles(...UPLOAD_ROLES, ...EXAM_CELL_ACCESS_ROLES)
+  @Roles(...UPLOAD_ROLES, 'Applicant')
   async downloadFile(
     @Query('path') filePath: string,
     @Query('key') objectKey: string,
     @Req() req: AuthRequest,
     @Res() res: Response,
   ) {
-    // Class-level JwtAuthGuard applies (Bearer, access_token query, or auth cookie).
+    // Class-level JwtAuthGuard applies before storage or ownership is inspected.
     if (!req.user) {
       throw new UnauthorizedException(
         'Authentication required to download files',
       );
     }
 
-    // Stored S3 URLs identify private objects, never public bearer URLs. Keep
-    // the configured bucket and normal tenant/document authorization in force.
-    if (filePath?.startsWith('s3://') && this.objectStorage.isEnabled()) {
+    const tenantId = requireTenantId(req.user.tenant_id);
+    const keyReference =
+      objectKey ||
+      (filePath?.startsWith('s3://') || filePath?.startsWith(`${tenantId}/`)
+        ? filePath
+        : undefined);
+    if (keyReference?.startsWith('s3://')) {
       let stored: URL;
       try {
-        stored = new URL(filePath);
+        stored = new URL(keyReference);
       } catch {
         throw new NotFoundException('File not found');
       }
       if (
         stored.hostname !== this.objectStorage.getBucketName() ||
-        stored.username ||
-        stored.password ||
-        stored.search ||
-        stored.hash
-      )
+        stored.username || stored.password || stored.search || stored.hash
+      ) {
         throw new NotFoundException('File not found');
-      objectKey = stored.pathname.slice(1);
+      }
     }
-
-    if (objectKey && this.objectStorage.isEnabled()) {
-      const tenantId = req.user.tenant_id;
-      // Object keys are tenant-prefixed by ObjectStorageService.buildKey
-      if (tenantId && !objectKey.startsWith(`${tenantId}/`)) {
+    if (keyReference && this.objectStorage.isEnabled()) {
+      const key = this.uploads.canonicalKey(keyReference, tenantId);
+      if (!key) {
         throw new NotFoundException('File not found');
       }
       this.assertPrivateHrUploadAccess(objectKey, req.user);
@@ -208,19 +182,18 @@ export class UploadsController {
       return stream.pipe(res);
     }
 
-    if (!filePath) {
+    if (!filePath && !objectKey) {
       throw new BadRequestException('File path or object key is required');
     }
 
-    const uploadRoot = resolve(process.env.UPLOAD_PATH || './uploads');
-    let resolvedPath = resolve(filePath);
-
-    if (filePath.startsWith('/uploads/')) {
-      resolvedPath = resolve(uploadRoot, filePath.replace(/^\/uploads\//, ''));
-    }
-
+    const uploadRoot = resolve(this.uploads.getUploadPath());
+    const key = this.uploads.canonicalKey(objectKey || filePath, tenantId);
+    if (!key) throw new NotFoundException('File not found');
+    const resolvedPath = resolve(uploadRoot, key);
+    const tenantRoot = resolve(uploadRoot, tenantId);
     if (
-      !resolvedPath.startsWith(`${uploadRoot}${sep}`) ||
+      !isFileWithinRoot(uploadRoot, resolvedPath) ||
+      !isFileWithinRoot(tenantRoot, resolvedPath) ||
       !existsSync(resolvedPath)
     ) {
       throw new NotFoundException('File not found');
@@ -251,84 +224,28 @@ export class UploadsController {
     await this.assertTranscriptAccess(resolvedPath, req.user);
     res.setHeader('Cache-Control', 'private, no-store');
 
-    res.setHeader(
-      'Content-Disposition',
-      `inline; filename="${basename(resolvedPath)}"`,
-    );
-    if (resolvedPath.endsWith('.pdf')) {
-      res.setHeader('Content-Type', 'application/pdf');
-    }
+    this.setDownloadHeaders(res, resolvedPath);
     return createReadStream(resolvedPath).pipe(res);
   }
 
-  private async assertTranscriptAccess(
-    path: string,
-    user: NonNullable<AuthRequest['user']>,
-  ) {
-    const transcriptFile = path.match(
-      /\/transcripts\/([0-9a-f-]{36})(?:-[0-9a-f]{32})?\.pdf$/i,
+  private setDownloadHeaders(res: Response, filePath: string): void {
+    const contentTypes: Record<string, string> = {
+      '.pdf': 'application/pdf',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.png': 'image/png',
+    };
+    res.setHeader(
+      'Content-Disposition',
+      `inline; filename="${basename(filePath)}"`,
     );
-    if (!transcriptFile) {
-      if (path.includes('/transcripts/'))
-        throw new NotFoundException('File not found');
-      return;
-    }
-
-    const transcriptId = transcriptFile[1];
-    if (
-      !user.tenant_id ||
-      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-        transcriptId,
-      )
-    ) {
-      throw new NotFoundException('File not found');
-    }
-    const rows = await this.db.query<
-      Array<{
-        transcript_id: string;
-        tenant_id: string;
-        student_user_id: string;
-        semester: number;
-        status: string;
-        metadata: TranscriptRevisionMetadata;
-        pdf_url: string;
-        verification_code: string;
-      }>
-    >(
-      `SELECT transcript_id, tenant_id, student_user_id, semester, status, metadata, pdf_url, verification_code FROM official_transcripts
-       WHERE tenant_id = $1 AND transcript_id = $2 AND pdf_url IS NOT NULL`,
-      [user.tenant_id, transcriptId],
+    res.setHeader(
+      'Content-Type',
+      contentTypes[extname(filePath).toLowerCase()] ??
+        'application/octet-stream',
     );
-    const roles = [...(user.roles ?? []), user.role, user.primaryRole];
-    const isExamStaff = roles.some((role) =>
-      EXAM_CELL_ACCESS_ROLES.some(
-        (staffRole) =>
-          normalizeExamCellRole(role) === normalizeExamCellRole(staffRole),
-      ),
-    );
-    if (
-      !rows[0] ||
-      (rows[0].student_user_id !== user.user_id && !isExamStaff)
-    ) {
-      throw new NotFoundException('File not found');
-    }
-    const record = rows[0];
-    let expectedKey: string;
-    if (!record.pdf_url) throw new NotFoundException('File not found');
-    if (record.pdf_url.startsWith('/uploads/'))
-      expectedKey = record.pdf_url.slice('/uploads/'.length);
-    else if (record.pdf_url.startsWith('s3://'))
-      expectedKey = new URL(record.pdf_url).pathname.slice(1);
-    else throw new NotFoundException('File not found');
-    const root = resolve(process.env.UPLOAD_PATH || './uploads');
-    const actualKey = path.startsWith(`${root}${sep}`)
-      ? relative(root, path).split(sep).join('/')
-      : path.replace(/^\/uploads\//, '');
-    if (
-      actualKey !== expectedKey ||
-      !(await isCurrentTranscript(this.db, record))
-    )
-      throw new NotFoundException('File not found');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Cache-Control', 'private, no-store');
   }
 
   private assertPrivateHrUploadAccess(
@@ -378,7 +295,7 @@ export class UploadsController {
       };
     }
 
-    const uploadPath = process.env.UPLOAD_PATH || './uploads';
+    const uploadPath = this.uploads.getUploadPath();
     const date = new Date();
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');

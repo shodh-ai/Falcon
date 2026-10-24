@@ -393,7 +393,9 @@ export class NotificationEventsListener {
     await this.emitFromPayload(payload.tenantId, payload.userId, msg);
   }
 
-  @OnEvent(NotificationEvents.OPERATIONS_LIBRARY_OVERDUE)
+  @OnEvent(NotificationEvents.OPERATIONS_LIBRARY_OVERDUE, {
+    suppressErrors: false,
+  })
   async onLibraryOverdue(payload: LibraryOverduePayload) {
     const msg = libraryOverdueMessage(payload, {
       title: payload.title,

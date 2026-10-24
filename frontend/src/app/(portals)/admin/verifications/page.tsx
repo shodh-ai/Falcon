@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { usePathname } from 'next/navigation';
+import Link from 'next/link';
 import { CheckCircle2, Eye, XCircle } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -201,7 +202,7 @@ export default function AdminStudentVerificationsPage() {
     }
   };
 
-  const canReview = detail?.person.onboarding_status === 'PENDING_ADMIN_APPROVAL';
+  const canReview = !staffMode && detail?.person.onboarding_status === 'PENDING_ADMIN_APPROVAL';
 
   const approve = async () => {
     if (!selectedId) return;
@@ -257,9 +258,12 @@ export default function AdminStudentVerificationsPage() {
           </h2>
           <p className="mt-1 text-sm text-muted-foreground">
             {staffMode
-              ? 'Campus Admin and Super Admin review faculty and staff onboarding submissions.'
+              ? 'Staff profiles are visible here; HR Admin now makes the final approval or requests targeted corrections.'
               : 'Review student onboarding submissions awaiting Admissions approval.'}
           </p>
+          {staffMode && <Link className="mt-2 inline-block text-sm text-blue-700 underline" href="/hr/staff-profile-verifications">
+            Open HR profile review queue
+          </Link>}
         </CardContent>
       </Card>
 

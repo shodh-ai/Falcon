@@ -120,10 +120,7 @@ export function ClubsChaptersPanel() {
   const [motivation, setMotivation] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  const load = useCallback(async () => {
-    const data = await eventsApi.listClubsDirectory();
-    setRows(data);
-  }, [eventsApi]);
+  const load = useCallback(() => eventsApi.listClubsDirectory().then(setRows), [eventsApi]);
 
   useEffect(() => {
     void load()

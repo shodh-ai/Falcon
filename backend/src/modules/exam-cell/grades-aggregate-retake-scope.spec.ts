@@ -49,6 +49,8 @@ describe('Course grade aggregate retake semester scope', () => {
         {} as never,
         {} as never,
         {} as never,
+
+        {} as never,
       );
       await expect(
         service.getGradesAggregateTable('tenant', semester, 'course'),

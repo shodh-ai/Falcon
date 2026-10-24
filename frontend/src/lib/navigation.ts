@@ -1,5 +1,6 @@
 import type { LucideIcon } from 'lucide-react';
 import type { BusinessModuleKey } from '@/lib/launch-modules';
+import { isStudentLibraryLaunched } from '@/lib/student-library-launch';
 import {
   LayoutDashboard,
   LayoutGrid,
@@ -578,7 +579,12 @@ export const studentPortal: PortalConfig = {
         { label: 'Fees & Payments', href: '/student/finance', icon: Wallet, keywords: ['fees', 'pay', 'dues', 'razorpay'] },
         { label: 'Campus Life', href: '/student/campus-life', icon: Bus, keywords: ['hostel', 'mess', 'gate pass', 'wallet', 'campus'] },
         { label: 'Transport', href: '/student/transport', icon: BusFront, keywords: ['bus', 'route', 'transport'] },
-        { label: 'Library — Coming Soon', href: '/student/library', icon: Library, keywords: ['library', 'books', 'fines'] },
+        {
+          label: isStudentLibraryLaunched() ? 'Library' : 'Library — Coming Soon',
+          href: '/student/library',
+          icon: Library,
+          keywords: ['library', 'books', 'fines'],
+        },
         { label: 'Events', href: '/student/falcon-events', icon: PartyPopper, keywords: ['falcon events', 'clubs', 'chapters', 'tickets', 'ncc', 'nss', 'fest', 'membership'], shortLabel: 'Events' },
         { label: 'Innovation Hub', href: '/student/e-cell', icon: Rocket, keywords: ['startup', 'pitch', 'incubation', 'grant'] },
         { label: 'Research', href: '/student/research', icon: FlaskConical, keywords: ['rnd', 'research', 'grant', 'paper', 'project'] },
@@ -619,7 +625,11 @@ export const studentPortal: PortalConfig = {
     { label: 'Fees & Payments', href: '/student/finance', icon: Wallet },
     { label: 'Campus Life', href: '/student/campus-life', icon: Bus },
     { label: 'Transport', href: '/student/transport', icon: BusFront },
-    { label: 'Library — Coming Soon', href: '/student/library', icon: Library },
+    {
+      label: isStudentLibraryLaunched() ? 'Library' : 'Library — Coming Soon',
+      href: '/student/library',
+      icon: Library,
+    },
     { label: 'Events', href: '/student/falcon-events', icon: PartyPopper },
     { label: 'Innovation Hub', href: '/student/e-cell', icon: Rocket },
     { label: 'Research', href: '/student/research', icon: FlaskConical },
@@ -792,6 +802,7 @@ export const hrPortal: PortalConfig = {
       title: 'Employee Master',
       items: [
         { label: 'Employee Directory', href: '/hr/directory', icon: Users, keywords: ['staff', '500', 'roster'], hrModule: 'directory' },
+        { label: 'Staff Profile Verification', href: '/hr/staff-profile-verifications', icon: UserCheck, keywords: ['faculty', 'HR', 'profile', 'verification'], roles: ['HR', 'HRAdmin', 'SuperAdmin', 'CampusAdmin'] },
         { label: 'KYC & Document Vault', href: '/hr/kyc', icon: FolderLock, keywords: ['pan', 'aadhaar', 'bank', 'encrypted'], hrModule: 'documents' },
       ],
     },
@@ -804,6 +815,7 @@ export const hrPortal: PortalConfig = {
         { label: 'Meetings', href: '/hr/meetings', icon: CalendarClock, keywords: ['schedule', 'minutes', 'agenda'] },
         { label: 'Leave Management', href: '/hr/leaves', icon: CalendarDays, keywords: ['cl', 'sl', 'el', 'maternity', 'approval', 'balances'], hrModule: 'leaves' },
         { label: 'Attendance Regularizations', href: '/hr/regularizations', icon: CalendarClock, keywords: ['missed punch', 'correction', 'approval'], hrModule: 'leaves' },
+        { label: 'Gate Passes', href: '/hr/gate-passes', icon: DoorOpen, keywords: ['exit', 'outpass', 'mid-duty', 'approval'], hrModule: 'leaves' },
       ],
     },
     {
@@ -827,6 +839,7 @@ export const hrPortal: PortalConfig = {
         { label: 'Offboarding & Exit', href: '/hr/offboarding', icon: DoorOpen, keywords: ['resignation', 'fnf', 'separation'], hrModule: 'offboarding' },
         { label: 'Recruitment (ATS)', href: '/hr/recruitment', icon: Briefcase, keywords: ['kanban', 'hired', 'interview'], hrModule: 'recruitment' },
         { label: 'Appraisals & API Scores', href: '/hr/appraisals', icon: Award, keywords: ['ugc', 'api', 'scopus', 'research'], hrModule: 'directory' },
+        { label: 'Designation API Policies', href: '/hr/appraisals/policies', icon: ListChecks, keywords: ['appraisal rules', 'weights', 'calculation', 'designation'], hrModule: 'policies', roles: ['HR','HRAdmin','SuperAdmin'] },
         { label: 'Promotions & Workflows', href: '/hr/promotions', icon: ArrowUpCircle, keywords: ['associate prof', 'professor', 'eligible'], hrModule: 'directory' },
       ],
     },
@@ -853,6 +866,7 @@ export const hrPortal: PortalConfig = {
     { label: 'Attendance & Biometrics', href: '/hr/attendance', icon: Timer, hrModule: 'attendance' },
     { label: 'Leave Management', href: '/hr/leaves', icon: CalendarDays, hrModule: 'leaves' },
     { label: 'Attendance Regularizations', href: '/hr/regularizations', icon: CalendarClock, hrModule: 'leaves' },
+    { label: 'Gate Passes', href: '/hr/gate-passes', icon: DoorOpen, hrModule: 'leaves' },
     { label: 'Salary Structures', href: '/hr/payroll/structures', icon: Wallet, hrModule: 'payroll' },
     { label: 'Payroll Processing', href: '/hr/payroll/processing', icon: Banknote, hrModule: 'payroll' },
     { label: 'Payslip Download Requests', href: '/hr/payroll/payslip-downloads', icon: FileDown, hrModule: 'payroll' },
@@ -925,6 +939,7 @@ export const hodPortal: PortalConfig = {
     {
       title: 'Examination',
       items: [
+        { label: 'End-Semester Marks Approval', href: '/hod/academics/end-term-results', icon: ClipboardCheck, keywords: ['exam', 'hod', 'end term', 'marks approval'] },
         { label: 'Result Analytics', href: '/hod/academics/result-analytics', icon: BarChart3, keywords: ['pass', 'fail', 'exam', 'grades'] },
         { label: 'Compiled Results', href: '/hod/dashboard?tab=results', icon: FileSpreadsheet, keywords: ['marks', 'grades', 'export', 'semester'] },
         { label: 'Grade Change Request', href: '/hod/academics/grade-change', icon: PenLine, keywords: ['grade change', 'request', 'sis'] },
@@ -991,6 +1006,7 @@ export const hodPortal: PortalConfig = {
     {
       title: 'Examination',
       items: [
+        { label: 'End-Semester Marks Approval', href: '/hod/academics/end-term-results', icon: ClipboardCheck, keywords: ['exam', 'end term', 'hod marks'] },
         { label: 'Result Analytics', href: '/hod/academics/result-analytics', icon: BarChart3, keywords: ['pass fail'] },
         { label: 'Compiled Results', href: '/hod/dashboard?tab=results', icon: FileSpreadsheet, keywords: ['compiled results'] },
         { label: 'Grade Change Request', href: '/hod/academics/grade-change', icon: PenLine, keywords: ['grade change', 'request'] },

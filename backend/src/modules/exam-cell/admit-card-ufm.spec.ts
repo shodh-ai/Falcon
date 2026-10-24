@@ -20,6 +20,8 @@ describe('Open UFM cases block both hall ticket entry points', () => {
       {} as never,
       {} as never,
       { evaluate: jest.fn().mockResolvedValue(attendance) } as never,
+
+      {} as never,
     );
     await expect(
       service.getAdmitBlockReasons('student', 'tenant'),

@@ -1,27 +1,30 @@
 'use client';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuthedApi } from '@/lib/api';
 import { createCompetitionsApi } from '@/lib/api/api.competitions';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/lib/notifications/falcon-toast';
 
+type Competition = { competition_id: string; title: string };
+type Bounty = { bounty_id: string; title: string; reward_inr: number | string; status: string; claimed_by_name?: string };
+
 export default function Page() {
   const api = useAuthedApi();
   const c = useMemo(() => createCompetitionsApi(api), [api]);
-  const [list, setList] = useState<any[]>([]);
-  const [bounties, setBounties] = useState<any[]>([]);
+  const [list, setList] = useState<Competition[]>([]);
+  const [bounties, setBounties] = useState<Bounty[]>([]);
 
-  const reloadBounties = () =>
+  const reloadBounties = useCallback(() =>
     c
       .bounties()
       .then(setBounties)
-      .catch(() => toast.error('Failed to load bounties'));
+      .catch(() => toast.error('Failed to load bounties')), [c]);
 
   useEffect(() => {
     void c.list().then(setList).catch(() => toast.error('Load failed'));
     void reloadBounties();
-  }, [c]);
+  }, [c, reloadBounties]);
 
   return (
     <div className="space-y-6 p-6">

@@ -162,7 +162,10 @@ export class NotificationEmitterService {
   }
 
   libraryOverdue(payload: LibraryOverduePayload) {
-    this.events.emit(NotificationEvents.OPERATIONS_LIBRARY_OVERDUE, payload);
+    return this.events.emitAsync(
+      NotificationEvents.OPERATIONS_LIBRARY_OVERDUE,
+      payload,
+    );
   }
 
   reservationReady(payload: LibraryReservationReadyPayload) {

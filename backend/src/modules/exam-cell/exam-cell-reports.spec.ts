@@ -1,6 +1,7 @@
 import { ExamCellOperationsService } from './exam-cell-operations.service';
 import { ExamCellService } from './exam-cell.service';
 import { ExamCellEnterpriseService } from './exam-cell-enterprise.service';
+import { SemesterResultsService } from './semester-results.service';
 
 describe('Persisted result reporting', () => {
   it('includes declared outcomes in the dashboard count and chart', async () => {
@@ -21,6 +22,8 @@ describe('Persisted result reporting', () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never,
+
       {} as never,
     );
     await expect(service.dashboard('tenant')).resolves.toMatchObject({
@@ -45,6 +48,7 @@ describe('Persisted result reporting', () => {
       {} as never,
       {} as never,
       {} as never,
+      new SemesterResultsService({ query } as never, {} as never),
     );
     await expect(service.getReportsSummary('tenant', 6)).resolves.toMatchObject(
       {
@@ -64,10 +68,10 @@ describe('Current grade-card report source', () => {
   it('loads rankers only from the actual published grade-card payload', async () => {
     const query = jest.fn((sql: string) =>
       Promise.resolve(
-        sql.includes('FROM grade_cards gc')
+        sql.includes('FROM grade_cards g')
           ? [
               {
-                name: 'Synthetic',
+                student_name: 'Synthetic',
                 enrollment_number: 'SYNTH-001',
                 cgpa: '10',
                 sgpa: '10',
@@ -82,19 +86,20 @@ describe('Current grade-card report source', () => {
       {} as never,
       {} as never,
       {} as never,
+      new SemesterResultsService({ query } as never, {} as never),
     );
     const report = await service.getReportsSummary('tenant', 9);
     expect(report.top_rankers).toEqual([
       {
         name: 'Synthetic',
         enrollment_number: 'SYNTH-001',
-        cgpa: '10',
-        sgpa: '10',
+        cgpa: 10,
+        sgpa: 10,
       },
     ]);
     expect(query).toHaveBeenCalledWith(
-      expect.stringContaining("gc.status = 'PUBLISHED'"),
-      ['tenant', 9],
+      expect.stringContaining("g.status = 'PUBLISHED'"),
+      ['tenant', 9, 10],
     );
     expect(
       query.mock.calls.some(([sql]) =>
@@ -129,6 +134,8 @@ describe('Advanced examination analytics', () => {
         return Promise.resolve([{ name: 'Synthetic faculty', submissions: 1 }]);
       }
       if (sql.includes('FROM student_exam_reports ser')) {
+        if (sql.includes('AS grade'))
+          return Promise.resolve([{ grade: 'A+', count: 1 }]);
         return Promise.resolve([{ label: 'PASS', count: 1 }]);
       }
       return Promise.resolve([{ grade: 'A+', count: 1 }]);
@@ -150,21 +157,19 @@ describe('Advanced examination analytics', () => {
     );
     const resultQueries = query.mock.calls
       .map(([sql]) => sql)
-      .filter((sql) => sql.includes('FROM academic_exam_results r'));
-    expect(resultQueries).toHaveLength(2);
+      .filter((sql) => sql.includes('FROM student_exam_reports ser'));
+    expect(resultQueries).toHaveLength(3);
     for (const sql of resultQueries) {
-      expect(sql).toContain("r.status = 'PUBLISHED'");
-      expect(sql).toContain('c.tenant_id = r.tenant_id');
-      expect(sql).toContain('sub.subject_code = c.course_code');
-      expect(sql).toContain('e.tenant_id = r.tenant_id');
-      expect(sql).toContain('e.course_id = r.course_id');
-      expect(sql).toContain('e.semester = $2');
-      expect(sql).toContain('AND EXISTS');
-      expect(sql).toContain('br.source_result_id = r.result_id');
-      expect(sql).toContain('br.tenant_id = r.tenant_id');
-      expect(sql).toContain('br.student_user_id = r.student_user_id');
+      expect(sql).toContain('ser.tenant_id = $1');
+      expect(sql).toContain('ers.tenant_id = ser.tenant_id');
+      expect(sql).toContain('ers.semester = $2');
+      expect(sql).toContain('ser.declared_at IS NOT NULL');
+      expect(sql).toContain('ers.declared_at IS NOT NULL');
+      expect(sql).toContain('br.source_report_id = ser.report_id');
+      expect(sql).toContain('br.tenant_id = ser.tenant_id');
+      expect(sql).toContain('br.student_user_id = ser.student_user_id');
       expect(sql).toContain(
-        'br.semester = $2 AND br.selected_attempt_id IS NOT NULL',
+        'br.semester = ers.semester AND br.selected_attempt_id IS NOT NULL',
       );
     }
     expect(query.mock.calls[2][0]).toContain('u.user_id = am.uploaded_by');
@@ -182,10 +187,10 @@ describe('Advanced examination analytics', () => {
     );
     expect(passFailSql).toContain('ers.declared_at IS NOT NULL');
     expect(query.mock.calls[0][0]).toContain(
-      'COALESCE(br.grade, r.grade) AS grade',
+      'COALESCE(br.grade, ser.grade) AS grade',
     );
     expect(query.mock.calls[1][0]).toContain(
-      'AVG(COALESCE(br.marks_obtained, r.marks_obtained))',
+      'AVG(COALESCE(br.marks_obtained, ser.marks_obtained))',
     );
   });
 
@@ -253,6 +258,8 @@ describe('Current retake report reconciliation', () => {
           {} as never,
           {} as never,
           {} as never,
+
+          {} as never,
         );
         await expect(service.dashboard('tenant')).resolves.toMatchObject({
           result_status_chart: [
@@ -267,6 +274,7 @@ describe('Current retake report reconciliation', () => {
           {} as never,
           {} as never,
           {} as never,
+          new SemesterResultsService({ query } as never, {} as never),
         );
         await expect(
           service.getReportsSummary('tenant', 12),

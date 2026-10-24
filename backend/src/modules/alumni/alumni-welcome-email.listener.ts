@@ -7,23 +7,16 @@ import {
   type AlumniConversionApprovedPayload,
 } from '../../core/notifications/notification.events';
 import { wrapFalconEmailHtml } from '../../common/email/falcon-email.template';
+import {
+  FALCON_EMAIL_FROM,
+  falconEmailTransportOptions,
+} from '../../common/email/falcon-email-sender';
 
 @Injectable()
 export class AlumniWelcomeEmailListener {
   private readonly logger = new Logger(AlumniWelcomeEmailListener.name);
-  private transporter: nodemailer.Transporter;
 
-  constructor(private readonly config: ConfigService) {
-    this.transporter = nodemailer.createTransport({
-      host: this.config.get('EMAIL_HOST'),
-      port: parseInt(this.config.get('EMAIL_PORT') || '587', 10),
-      secure: false,
-      auth: {
-        user: this.config.get('EMAIL_USER'),
-        pass: this.config.get('EMAIL_PASSWORD'),
-      },
-    });
-  }
+  constructor(private readonly config: ConfigService) {}
 
   @OnEvent(NotificationEvents.ALUMNI_CONVERSION_APPROVED)
   async onConversionApproved(payload: AlumniConversionApprovedPayload) {
@@ -45,22 +38,18 @@ export class AlumniWelcomeEmailListener {
     );
 
     try {
-      await this.transporter.sendMail({
-        from: this.config.get(
-          'EMAIL_FROM',
-          'Falcon Campus OS <noreply@falcon.local>',
-        ),
+      const transporter = nodemailer.createTransport(
+        falconEmailTransportOptions((key) => this.config.get<unknown>(key)),
+      );
+      await transporter.sendMail({
+        from: FALCON_EMAIL_FROM,
         to: payload.officialEmail,
         subject: `Congratulations ${firstName}! Welcome to the Falcon Alumni Network`,
         html,
       });
-      this.logger.log(
-        `Alumni conversion welcome email sent to ${payload.officialEmail}`,
-      );
-    } catch (err) {
-      this.logger.warn(
-        `Alumni welcome email failed for ${payload.officialEmail}: ${err}`,
-      );
+      this.logger.log('Alumni welcome email accepted by SMTP');
+    } catch {
+      this.logger.warn('Alumni welcome email failed (SMTP_FAILURE)');
     }
   }
 }

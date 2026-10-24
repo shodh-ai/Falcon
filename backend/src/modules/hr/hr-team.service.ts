@@ -17,6 +17,7 @@ import { HrWorkforceService } from './hr-workforce.service';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 import { CacheService } from '../../core/redis/cache.service';
 import { canAccessTeamApprovals } from './utils/reporting-officer.util';
+import { finalHrReviewSql, hrRequestScopeSql } from './hr-final-review.sql';
 
 export type TeamRequestTab =
   | 'LEAVE'
@@ -520,10 +521,14 @@ export class HrTeamService {
     >(
       `SELECT r.request_type, COUNT(*)::text AS count
        FROM staff_leave_requests r
+       LEFT JOIN hr_approval_workflow_steps hr_step
+         ON hr_step.workflow_id = r.workflow_id AND hr_step.step_order = r.current_step_order
        WHERE r.tenant_id = $1
          AND r.status = 'PENDING'
          AND r.current_approver_user_id = $2
          AND r.staff_user_id = ANY($3::uuid[])
+         AND NOT (r.request_type IN ('LEAVE', 'ON_DUTY', 'REGULARIZATION')
+           AND ${finalHrReviewSql('r', 'hr_step')})
        GROUP BY r.request_type`,
       [tenantId, managerId, userIds],
     );
@@ -627,11 +632,15 @@ export class HrTeamService {
        FROM staff_leave_requests r
        JOIN users u ON u.user_id = r.staff_user_id
        LEFT JOIN hr_employee_profiles p ON p.user_id = u.user_id AND p.tenant_id = r.tenant_id
+       LEFT JOIN hr_approval_workflow_steps hr_step
+         ON hr_step.workflow_id = r.workflow_id AND hr_step.step_order = r.current_step_order
        WHERE r.tenant_id = $1
          AND r.status = 'PENDING'
          AND r.current_approver_user_id = $2
          AND r.request_type = $3
          AND r.staff_user_id = ANY($4::uuid[])
+         AND NOT (r.request_type IN ('LEAVE', 'ON_DUTY', 'REGULARIZATION')
+           AND ${finalHrReviewSql('r', 'hr_step')})
        ORDER BY r.applied_at ASC`,
       [tenantId, managerId, tabKey, userIds],
     );
@@ -1013,22 +1022,31 @@ export class HrTeamService {
     };
   }
 
-  async listAllPendingForAdmin(tenantId: string, entityId?: number) {
-    const entityClause =
-      entityId != null ? ' AND (r.entity_id = $2 OR r.entity_id IS NULL)' : '';
-    const params: unknown[] = [tenantId];
-    if (entityId != null) params.push(entityId);
+  async listAllPendingForAdmin(tenantId: string, entityId: number, actorUserId: string) {
+    const params: unknown[] = [tenantId, entityId, actorUserId];
 
     const rows = await this.dataSource.query(
       `SELECT r.leave_id, r.request_type, r.leave_type, r.start_date, r.end_date,
               r.regularization_date, r.reason, r.status, r.applied_at, r.current_approver_user_id,
               u.name AS employee_name, p.employee_id,
-              approver.name AS approver_name
+              approver.name AS approver_name,
+              CASE WHEN ${finalHrReviewSql('r', 'hr_step')} THEN 'FINAL_HR' ELSE 'FIRST_LEVEL' END AS review_stage,
+              (r.staff_user_id <> $3 AND NOT EXISTS (
+                SELECT 1 FROM hr_staff_request_decisions prior
+                WHERE prior.tenant_id = r.tenant_id AND prior.leave_id = r.leave_id
+                  AND prior.actor_user_id = $3 AND prior.action = 'APPROVE'
+                  AND ${finalHrReviewSql('r', 'hr_step')}
+              )) AS can_override_approve,
+              (r.staff_user_id <> $3) AS can_override_reject
        FROM staff_leave_requests r
-       JOIN users u ON u.user_id = r.staff_user_id
+       JOIN users u ON u.user_id = r.staff_user_id AND u.tenant_id = r.tenant_id
        LEFT JOIN hr_employee_profiles p ON p.user_id = u.user_id AND p.tenant_id = r.tenant_id
        LEFT JOIN users approver ON approver.user_id = r.current_approver_user_id
-       WHERE r.tenant_id = $1 AND r.status IN ('PENDING', 'HOD_APPROVED')${entityClause}
+       LEFT JOIN hr_approval_workflow_steps hr_step
+         ON hr_step.workflow_id = r.workflow_id AND hr_step.step_order = r.current_step_order
+       WHERE r.tenant_id = $1 AND r.status IN ('PENDING', 'HOD_APPROVED')
+         AND COALESCE(r.entity_id, p.entity_id, u.entity_id) = $2
+         AND ${hrRequestScopeSql('r', 'p', 'u', '$3', true)}
        ORDER BY r.applied_at ASC`,
       params,
     );
@@ -1042,7 +1060,13 @@ export class HrTeamService {
     leaveId: string,
     action: 'APPROVE' | 'REJECT',
     comment?: string,
+    entityId?: number,
   ) {
+    if (entityId == null) throw new BadRequestException('An HR entity scope is required');
+    const pending = await this.listAllPendingForAdmin(tenantId, entityId, adminUserId);
+    if (!pending.items.some((row) => row.leave_id === leaveId)) {
+      throw new ForbiddenException('Request is outside your pending HR scope');
+    }
     return this.workforce.actOnTeamRequest(
       adminUserId,
       tenantId,

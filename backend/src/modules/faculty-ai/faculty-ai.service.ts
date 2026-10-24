@@ -54,47 +54,23 @@ export class FacultyAiService implements OnModuleInit {
   private async ensureSchema() {
     if (this.schemaReady) return;
     try {
+      // Schema ownership belongs to the deployment job. These read-only probes
+      // also detect an incomplete migration without giving the API DDL rights.
       await this.dataSource.query(`
-        CREATE TABLE IF NOT EXISTS faculty_ai_conversations (
-          conversation_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          tenant_id UUID NOT NULL,
-          faculty_user_id UUID NOT NULL,
-          title VARCHAR(200) NOT NULL DEFAULT 'New conversation',
-          prompt_type VARCHAR(80) NULL,
-          token_usage INT NOT NULL DEFAULT 0,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          deleted_at TIMESTAMPTZ NULL
-        );
+        SELECT conversation_id, tenant_id, faculty_user_id, title, prompt_type,
+               token_usage, created_at, updated_at, deleted_at
+        FROM faculty_ai_conversations WHERE FALSE
       `);
       await this.dataSource.query(`
-        CREATE INDEX IF NOT EXISTS idx_faculty_ai_conversations_owner
-          ON faculty_ai_conversations (tenant_id, faculty_user_id, updated_at DESC)
-          WHERE deleted_at IS NULL;
-      `);
-      await this.dataSource.query(`
-        CREATE TABLE IF NOT EXISTS faculty_ai_messages (
-          message_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          tenant_id UUID NOT NULL,
-          conversation_id UUID NOT NULL REFERENCES faculty_ai_conversations(conversation_id) ON DELETE CASCADE,
-          role VARCHAR(20) NOT NULL CHECK (role IN ('user', 'assistant', 'system')),
-          content TEXT NOT NULL,
-          prompt_type VARCHAR(80) NULL,
-          token_usage INT NOT NULL DEFAULT 0,
-          attachments JSONB NULL,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          deleted_at TIMESTAMPTZ NULL
-        );
-      `);
-      await this.dataSource.query(`
-        CREATE INDEX IF NOT EXISTS idx_faculty_ai_messages_thread
-          ON faculty_ai_messages (tenant_id, conversation_id, created_at)
-          WHERE deleted_at IS NULL;
+        SELECT message_id, tenant_id, conversation_id, role, content, prompt_type,
+               token_usage, attachments, created_at, deleted_at
+        FROM faculty_ai_messages WHERE FALSE
       `);
       this.schemaReady = true;
-    } catch (err) {
-      this.logger.warn(
-        `Faculty AI schema ensure failed: ${err instanceof Error ? err.message : err}`,
+    } catch {
+      throw new Error(
+        'Faculty AI schema is unavailable. Run node scripts/deploy-migrate.js ' +
+          'with deployment credentials and grant the API access before startup.',
       );
     }
   }

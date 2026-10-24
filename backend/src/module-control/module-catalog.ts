@@ -91,6 +91,9 @@ export const MODULE_CATALOGUE: readonly ModuleDefinition[] = [
     [
       '/api/admissions-crm',
       '/api/student/onboarding',
+      '/api/student/admission-vault',
+      '/api/student/admission-documents',
+      '/api/student/documents',
       '/api/admin/student-verifications',
       '/admissions',
     ],
@@ -146,10 +149,18 @@ export const MODULE_CATALOGUE: readonly ModuleDefinition[] = [
   definition(
     'examinations_credentials',
     'Examinations & Credentials',
-    ['/exam-cell', '/exams', '/student/exams', '/certificates'],
+    ['/exam-cell', '/exams', '/student/exams', '/certificates', '/hod/academics/end-term-results'],
     [
       '/api/exam-cell',
+      '/api/hod/end-term-results',
       '/api/academics/exams',
+      '/api/academics/marks/history',
+      '/api/academics/marksheet/download',
+      '/api/student/exam-desk',
+      '/api/student/transcripts',
+      '/api/student/marks',
+      '/api/student/results',
+      '/api/student/exit',
       '/api/certificate-automation',
       '/api/verify',
     ],
@@ -164,6 +175,7 @@ export const MODULE_CATALOGUE: readonly ModuleDefinition[] = [
       '/api/hr',
       '/api/staff/onboarding',
       '/api/staff/verifications',
+      '/api/staff/profile-review',
       '/api/attendance-policy',
     ],
     ['HRHead', 'Registrar'],
@@ -181,6 +193,7 @@ export const MODULE_CATALOGUE: readonly ModuleDefinition[] = [
     ],
     [
       '/api/finance',
+      '/api/student/finance',
       '/api/acquisitions/v1',
       '/api/procurements/v1',
       '/api/invoice-integrity/v1',
@@ -235,7 +248,7 @@ export const MODULE_CATALOGUE: readonly ModuleDefinition[] = [
     'library',
     'Library',
     ['/library', '/library-admin', '/student/library', '/faculty/library'],
-    ['/api/library', '/api/library-admin'],
+    ['/api/library', '/api/library-admin', '/api/student/library'],
     ['Librarian'],
   ),
   definition(
@@ -254,7 +267,7 @@ export const MODULE_CATALOGUE: readonly ModuleDefinition[] = [
     'transport',
     'Transport',
     ['/transport'],
-    ['/api/transport'],
+    ['/api/transport', '/api/student/transport'],
     ['TransportManager', 'COO'],
   ),
   definition(
@@ -283,7 +296,14 @@ export const MODULE_CATALOGUE: readonly ModuleDefinition[] = [
     'placements_alumni',
     'Placements & Alumni',
     ['/placement', '/placements', '/alumni'],
-    ['/api/placement', '/api/alumni', '/api/alumni-admin'],
+    [
+      '/api/placement',
+      '/api/alumni',
+      '/api/alumni-admin',
+      '/api/student/placements',
+      '/api/student/mentorship/alumni',
+      '/api/student/exit/alumni-register',
+    ],
     ['PlacementHead', 'AlumniHead'],
   ),
   definition(
@@ -297,7 +317,12 @@ export const MODULE_CATALOGUE: readonly ModuleDefinition[] = [
     'clinic_safety',
     'Clinic, Health & Safety',
     ['/clinic', '/student-safety', '/safety'],
-    ['/api/clinic', '/api/student-safety', '/api/demerits'],
+    [
+      '/api/clinic',
+      '/api/student-safety',
+      '/api/demerits',
+      '/api/student/discipline',
+    ],
     ['MedicalOfficer', 'COO'],
   ),
   definition(
@@ -309,6 +334,7 @@ export const MODULE_CATALOGUE: readonly ModuleDefinition[] = [
       '/api/labs',
       '/api/venue-bookings',
       '/api/campus-events',
+      '/api/student/extracurriculars',
       '/api/admin-ops',
       '/api/coo-ops',
       '/api/meetings',
@@ -326,6 +352,7 @@ export const MODULE_CATALOGUE: readonly ModuleDefinition[] = [
 ] as const;
 
 export const CORE_API_PREFIXES = [
+  '/health',
   '/api/auth',
   '/auth',
   '/api/tenants',
@@ -344,6 +371,8 @@ export const CORE_API_PREFIXES = [
   '/api/integrations',
   '/api/tasks',
   '/api/handover',
+  '/api/student/profile',
+  '/api/student/campus-settings',
   '/iam',
   '/settings',
   '/scheduler',

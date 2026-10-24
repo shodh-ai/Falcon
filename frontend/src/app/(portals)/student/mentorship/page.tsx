@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { CalendarClock, Loader2, UserRound } from 'lucide-react';
 import { StudentPageHeader } from '@/components/student/StudentPageHeader';
 import { StudentPageShell } from '@/components/student/StudentPageShell';
@@ -47,20 +47,19 @@ export default function StudentMentorshipPage() {
     { interaction_id: string; reason: string; start_date: string; end_date: string; status: string }[]
   >([]);
 
-  function loadLeaveRequests() {
+  const loadLeaveRequests = useCallback(() => {
     void api.get<typeof leaveRequests>('/api/academics/proctor/leave-requests/my').then(setLeaveRequests).catch(() => setLeaveRequests([]));
-  }
+  }, [api]);
 
-  function loadMeetings() {
+  const loadMeetings = useCallback(() => {
     void api.get<StudentMeeting[]>('/api/academics/proctor/meetings/my').then(setMeetings).catch(() => setMeetings([]));
-  }
+  }, [api]);
 
-  function loadMentor() {
-    setLoading(true);
-    setLoadError(null);
+  const loadMentor = useCallback(() => {
     void api
       .get<MentorAssignmentResponse | null>('/api/academics/proctor/me')
       .then((data) => {
+        setLoadError(null);
         setMentor(data ?? null);
         setLoading(false);
         if (data) {
@@ -82,12 +81,11 @@ export default function StudentMentorshipPage() {
         );
         setLoading(false);
       });
-  }
+  }, [api, loadMeetings, loadLeaveRequests]);
 
   useEffect(() => {
     loadMentor();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- load once per api client
-  }, [api]);
+  }, [loadMentor]);
 
   /** Parse a slot label (e.g. '10:00 AM') + a date string ('YYYY-MM-DD') into a Date. */
   function parseSlotDateTime(slot: string, dateStr: string): Date {

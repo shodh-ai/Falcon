@@ -37,6 +37,7 @@ import { ExamCellOperationsService } from './exam-cell-operations.service';
 import { ExamCellEnterpriseService } from './exam-cell-enterprise.service';
 import { ExamCellDevService } from './exam-cell-dev.service';
 import { OfficialTranscriptService } from './official-transcript.service';
+import { requireTenantId } from '../../common/utils/require-tenant-id';
 import { EXAM_CELL_ACCESS_ROLES } from './exam-cell.constants';
 import {
   assertExamCellAction,
@@ -395,41 +396,11 @@ export class ExamCellController {
     dto: { course_id: string; exam_type: string; batch_semester?: number },
   ) {
     this.requireAction(req, 'publish_results');
-    if (
-      !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(
-        dto.course_id ?? '',
-      ) ||
-      typeof dto.exam_type !== 'string' ||
-      !dto.exam_type.trim()
-    ) {
-      throw new BadRequestException(
-        'A valid course and examination type are required',
-      );
-    }
-    const tenantId = this.tenant(req);
-    const session = await this.resultControl.getSessionForCourse(
-      tenantId,
-      dto.course_id,
-      dto.exam_type,
-    );
-    if (!session)
-      throw new BadRequestException(
-        'Create and approve a Result Control session before publication',
-      );
-    if (
-      dto.batch_semester !== undefined &&
-      dto.batch_semester !== Number(session.semester)
-    )
-      throw new BadRequestException(
-        'The examination session semester does not match',
-      );
-    const result = await this.resultControl.declareSession(
-      tenantId,
-      session.session_id,
+    return this.examCell.publishResults(
+      this.tenant(req),
+      dto,
       req.user.user_id,
-      {},
     );
-    return { ...result, published: result.declared };
   }
 
   @Get('re-evaluations')
@@ -821,6 +792,14 @@ export class ExamCellController {
   @Get('result-control/courses')
   listResultCourses(@Req() req: { user: AuthUser }) {
     return this.resultControl.listCourses(this.tenant(req));
+  }
+
+  @Get('result-control/courses/:courseId/end-term-departments')
+  listEndTermDepartments(
+    @Req() req: { user: AuthUser },
+    @Param('courseId', new ParseUUIDPipe()) courseId: string,
+  ) {
+    return this.resultControl.listEndTermDepartments(this.tenant(req), courseId);
   }
 
   @Get('result-control/grading-policies')
@@ -1526,10 +1505,10 @@ export class ExamCellController {
   }
 
   private tenant(req: { user: AuthUser }) {
-    const tenantId = req.user?.tenant_id?.trim();
-    if (!tenantId)
-      throw new UnauthorizedException('Tenant context is required');
-    return tenantId;
+    if (!req.user.tenant_id?.trim()) {
+      throw new UnauthorizedException('Tenant claim is required');
+    }
+    return requireTenantId(req.user.tenant_id);
   }
 
   private assertLocalDevMode() {

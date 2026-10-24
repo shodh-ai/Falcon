@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   Logger,
@@ -272,6 +273,38 @@ export class AssignmentsService {
       tenantId,
     );
     return { ...saved, notified_count };
+  }
+
+  async deleteFacultyAssignment(
+    facultyUserId: string,
+    tenantId: string,
+    assignmentId: string,
+  ) {
+    const assignment = await this.assignments.findOne({
+      where: { tenant_id: tenantId, assignment_id: assignmentId },
+    });
+    if (!assignment) throw new NotFoundException('Assignment not found');
+    // Publishing faculty alone may withdraw an unsubmitted assignment. A
+    // co-teacher or HOD can manage dates, but cannot erase another author’s work.
+    if (assignment.faculty_user_id !== facultyUserId) {
+      throw new NotFoundException('Assignment not found');
+    }
+    const submissionCount = await this.submissions.count({
+      where: { tenant_id: tenantId, assignment_id: assignmentId },
+    });
+    if (submissionCount > 0) {
+      throw new ConflictException(
+        'This assignment has student submissions and cannot be deleted; keep it for grading and audit',
+      );
+    }
+    // Keep the academic and notification record for audit while removing the
+    // assignment from faculty/student lists and blocking new submissions.
+    const result = await this.assignments.softDelete({
+      tenant_id: tenantId,
+      assignment_id: assignmentId,
+    });
+    if (!result.affected) throw new NotFoundException('Assignment not found');
+    return { deleted: true, assignment_id: assignmentId };
   }
 
   /** Future-dated assignments: notify once start_date is reached. */
@@ -715,6 +748,56 @@ export class AssignmentsService {
       tenantId,
       submission.assignment,
     );
+    return submission;
+  }
+
+  async getSubmissionForStudentDownload(
+    studentUserId: string,
+    tenantId: string,
+    assignmentId: string,
+  ) {
+    // TypeORM ignores undefined where-values, so fail closed before querying.
+    if (!studentUserId || !tenantId || !assignmentId) {
+      throw new NotFoundException('Submission not found');
+    }
+    const submission = await this.submissions.findOne({
+      where: {
+        tenant_id: tenantId,
+        assignment_id: assignmentId,
+        student_user_id: studentUserId,
+      },
+      relations: ['assignment'],
+    });
+    // Never accept a student ID or a storage path supplied by the caller.
+    // The related assignment must also be active and in this tenant.
+    if (
+      !submission ||
+      submission.deleted_at ||
+      submission.tenant_id !== tenantId ||
+      submission.student_user_id !== studentUserId ||
+      submission.assignment_id !== assignmentId ||
+      !submission.assignment ||
+      submission.assignment.deleted_at ||
+      submission.assignment.tenant_id !== tenantId ||
+      submission.assignment.assignment_id !== assignmentId
+    ) {
+      throw new NotFoundException('Submission not found');
+    }
+
+    const enrollment = await this.enrollments.findOne({
+      where: {
+        tenant_id: tenantId,
+        student_user_id: studentUserId,
+        course_id: submission.assignment.course_id,
+        status: 'ENROLLED',
+      },
+    });
+    if (!enrollment || enrollment.deleted_at) {
+      throw new ForbiddenException('You are not enrolled in this course');
+    }
+    this.assertEnrollmentMatchesAssignment(submission.assignment, enrollment);
+
+    // Submission deadlines restrict uploads, not viewing an existing solution.
     return submission;
   }
 

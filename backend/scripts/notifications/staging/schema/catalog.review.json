@@ -1,0 +1,2127 @@
+{
+  "tables": [
+    "notification_staging_environment",
+    "tenants",
+    "tenant_subscriptions",
+    "roles",
+    "campuses",
+    "schools",
+    "departments",
+    "org_entities",
+    "users",
+    "user_roles",
+    "user_entity_access",
+    "hr_permissions",
+    "hr_access_controls",
+    "admin_login_history",
+    "admin_control_audit",
+    "falcon_notifications"
+  ],
+  "columns": [
+    {
+      "table": "notification_staging_environment",
+      "name": "id",
+      "type": "boolean",
+      "nullable": false,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "notification_staging_environment",
+      "name": "environment",
+      "type": "text",
+      "nullable": false,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "notification_staging_environment",
+      "name": "version",
+      "type": "integer",
+      "nullable": false,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "tenants",
+      "name": "tenant_id",
+      "type": "uuid",
+      "nullable": false,
+      "default": "gen_random_uuid",
+      "serial": false
+    },
+    {
+      "table": "tenants",
+      "name": "name",
+      "type": "character varying(255)",
+      "nullable": false,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "tenants",
+      "name": "subdomain",
+      "type": "character varying(63)",
+      "nullable": false,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "tenants",
+      "name": "custom_domain",
+      "type": "character varying(255)",
+      "nullable": true,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "tenants",
+      "name": "pg_schema",
+      "type": "character varying(63)",
+      "nullable": false,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "tenants",
+      "name": "primary_color",
+      "type": "character varying(7)",
+      "nullable": false,
+      "default": "'#08234a'",
+      "serial": false
+    },
+    {
+      "table": "tenants",
+      "name": "accent_color",
+      "type": "character varying(7)",
+      "nullable": false,
+      "default": "'#d6b65d'",
+      "serial": false
+    },
+    {
+      "table": "tenants",
+      "name": "logo_url",
+      "type": "character varying(512)",
+      "nullable": true,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "tenants",
+      "name": "settings",
+      "type": "jsonb",
+      "nullable": false,
+      "default": "'{}'",
+      "serial": false
+    },
+    {
+      "table": "tenants",
+      "name": "is_active",
+      "type": "boolean",
+      "nullable": false,
+      "default": "true",
+      "serial": false
+    },
+    {
+      "table": "tenants",
+      "name": "created_at",
+      "type": "timestamp without time zone",
+      "nullable": false,
+      "default": "now",
+      "serial": false
+    },
+    {
+      "table": "tenants",
+      "name": "updated_at",
+      "type": "timestamp without time zone",
+      "nullable": false,
+      "default": "now",
+      "serial": false
+    },
+    {
+      "table": "tenant_subscriptions",
+      "name": "subscription_id",
+      "type": "uuid",
+      "nullable": false,
+      "default": "gen_random_uuid",
+      "serial": false
+    },
+    {
+      "table": "tenant_subscriptions",
+      "name": "tenant_id",
+      "type": "uuid",
+      "nullable": false,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "tenant_subscriptions",
+      "name": "feature_key",
+      "type": "character varying(64)",
+      "nullable": false,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "tenant_subscriptions",
+      "name": "is_enabled",
+      "type": "boolean",
+      "nullable": false,
+      "default": "true",
+      "serial": false
+    },
+    {
+      "table": "tenant_subscriptions",
+      "name": "expires_at",
+      "type": "date",
+      "nullable": true,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "tenant_subscriptions",
+      "name": "created_at",
+      "type": "timestamp without time zone",
+      "nullable": false,
+      "default": "now",
+      "serial": false
+    },
+    {
+      "table": "tenant_subscriptions",
+      "name": "updated_at",
+      "type": "timestamp without time zone",
+      "nullable": false,
+      "default": "now",
+      "serial": false
+    },
+    {
+      "table": "roles",
+      "name": "role_id",
+      "type": "integer",
+      "nullable": false,
+      "default": "nextval'roles_role_id_seq'",
+      "serial": true
+    },
+    {
+      "table": "roles",
+      "name": "role_name",
+      "type": "character varying(50)",
+      "nullable": false,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "roles",
+      "name": "description",
+      "type": "text",
+      "nullable": true,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "roles",
+      "name": "created_at",
+      "type": "timestamp without time zone",
+      "nullable": false,
+      "default": "now",
+      "serial": false
+    },
+    {
+      "table": "roles",
+      "name": "updated_at",
+      "type": "timestamp without time zone",
+      "nullable": false,
+      "default": "now",
+      "serial": false
+    },
+    {
+      "table": "roles",
+      "name": "deleted_at",
+      "type": "timestamp with time zone",
+      "nullable": true,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "campuses",
+      "name": "campus_id",
+      "type": "integer",
+      "nullable": false,
+      "default": "nextval'campuses_campus_id_seq'",
+      "serial": true
+    },
+    {
+      "table": "campuses",
+      "name": "campus_name",
+      "type": "character varying(100)",
+      "nullable": false,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "campuses",
+      "name": "campus_code",
+      "type": "character varying(20)",
+      "nullable": true,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "campuses",
+      "name": "address",
+      "type": "text",
+      "nullable": true,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "campuses",
+      "name": "created_at",
+      "type": "timestamp without time zone",
+      "nullable": false,
+      "default": "now",
+      "serial": false
+    },
+    {
+      "table": "campuses",
+      "name": "updated_at",
+      "type": "timestamp without time zone",
+      "nullable": false,
+      "default": "now",
+      "serial": false
+    },
+    {
+      "table": "campuses",
+      "name": "deleted_at",
+      "type": "timestamp with time zone",
+      "nullable": true,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "schools",
+      "name": "school_id",
+      "type": "integer",
+      "nullable": false,
+      "default": "nextval'schools_school_id_seq'",
+      "serial": true
+    },
+    {
+      "table": "schools",
+      "name": "school_name",
+      "type": "character varying(150)",
+      "nullable": false,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "schools",
+      "name": "school_code",
+      "type": "character varying(20)",
+      "nullable": true,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "schools",
+      "name": "campus_id",
+      "type": "integer",
+      "nullable": true,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "schools",
+      "name": "created_at",
+      "type": "timestamp without time zone",
+      "nullable": false,
+      "default": "now",
+      "serial": false
+    },
+    {
+      "table": "schools",
+      "name": "updated_at",
+      "type": "timestamp without time zone",
+      "nullable": false,
+      "default": "now",
+      "serial": false
+    },
+    {
+      "table": "schools",
+      "name": "deleted_at",
+      "type": "timestamp with time zone",
+      "nullable": true,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "departments",
+      "name": "dept_id",
+      "type": "integer",
+      "nullable": false,
+      "default": "nextval'departments_dept_id_seq'",
+      "serial": true
+    },
+    {
+      "table": "departments",
+      "name": "dept_name",
+      "type": "character varying(100)",
+      "nullable": false,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "departments",
+      "name": "description",
+      "type": "text",
+      "nullable": true,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "departments",
+      "name": "hod_user_id",
+      "type": "uuid",
+      "nullable": true,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "departments",
+      "name": "school_id",
+      "type": "integer",
+      "nullable": true,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "departments",
+      "name": "created_at",
+      "type": "timestamp without time zone",
+      "nullable": false,
+      "default": "now",
+      "serial": false
+    },
+    {
+      "table": "departments",
+      "name": "updated_at",
+      "type": "timestamp without time zone",
+      "nullable": false,
+      "default": "now",
+      "serial": false
+    },
+    {
+      "table": "departments",
+      "name": "deleted_at",
+      "type": "timestamp with time zone",
+      "nullable": true,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "org_entities",
+      "name": "entity_id",
+      "type": "integer",
+      "nullable": false,
+      "default": "nextval'org_entities_entity_id_seq'",
+      "serial": true
+    },
+    {
+      "table": "org_entities",
+      "name": "tenant_id",
+      "type": "uuid",
+      "nullable": false,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "org_entities",
+      "name": "entity_code",
+      "type": "character varying(64)",
+      "nullable": false,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "org_entities",
+      "name": "entity_name",
+      "type": "character varying(255)",
+      "nullable": false,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "org_entities",
+      "name": "is_active",
+      "type": "boolean",
+      "nullable": false,
+      "default": "true",
+      "serial": false
+    },
+    {
+      "table": "org_entities",
+      "name": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now",
+      "serial": false
+    },
+    {
+      "table": "org_entities",
+      "name": "updated_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now",
+      "serial": false
+    },
+    {
+      "table": "users",
+      "name": "user_id",
+      "type": "uuid",
+      "nullable": false,
+      "default": "gen_random_uuid",
+      "serial": false
+    },
+    {
+      "table": "users",
+      "name": "tenant_id",
+      "type": "uuid",
+      "nullable": false,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "users",
+      "name": "name",
+      "type": "character varying(255)",
+      "nullable": false,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "users",
+      "name": "official_email",
+      "type": "character varying(255)",
+      "nullable": false,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "users",
+      "name": "role_id",
+      "type": "integer",
+      "nullable": true,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "users",
+      "name": "dept_id",
+      "type": "integer",
+      "nullable": true,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "users",
+      "name": "entity_id",
+      "type": "integer",
+      "nullable": true,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "users",
+      "name": "reporting_officer_id",
+      "type": "uuid",
+      "nullable": true,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "users",
+      "name": "google_id",
+      "type": "character varying(255)",
+      "nullable": true,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "users",
+      "name": "password_hash",
+      "type": "character varying(255)",
+      "nullable": true,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "users",
+      "name": "salary_base",
+      "type": "numeric(12,2)",
+      "nullable": true,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "users",
+      "name": "is_active",
+      "type": "boolean",
+      "nullable": false,
+      "default": "true",
+      "serial": false
+    },
+    {
+      "table": "users",
+      "name": "onboarding_status",
+      "type": "character varying(50)",
+      "nullable": true,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "users",
+      "name": "account_status",
+      "type": "character varying(32)",
+      "nullable": true,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "users",
+      "name": "phone",
+      "type": "character varying(20)",
+      "nullable": true,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "users",
+      "name": "expo_push_token",
+      "type": "character varying(255)",
+      "nullable": true,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "users",
+      "name": "onboarding_profile",
+      "type": "jsonb",
+      "nullable": true,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "users",
+      "name": "last_login_at",
+      "type": "timestamp with time zone",
+      "nullable": true,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "users",
+      "name": "created_at",
+      "type": "timestamp without time zone",
+      "nullable": false,
+      "default": "now",
+      "serial": false
+    },
+    {
+      "table": "users",
+      "name": "updated_at",
+      "type": "timestamp without time zone",
+      "nullable": false,
+      "default": "now",
+      "serial": false
+    },
+    {
+      "table": "users",
+      "name": "deleted_at",
+      "type": "timestamp with time zone",
+      "nullable": true,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "user_roles",
+      "name": "user_id",
+      "type": "uuid",
+      "nullable": false,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "user_roles",
+      "name": "role_id",
+      "type": "integer",
+      "nullable": false,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "user_roles",
+      "name": "is_primary",
+      "type": "boolean",
+      "nullable": false,
+      "default": "false",
+      "serial": false
+    },
+    {
+      "table": "user_roles",
+      "name": "deleted_at",
+      "type": "timestamp with time zone",
+      "nullable": true,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "user_entity_access",
+      "name": "access_id",
+      "type": "uuid",
+      "nullable": false,
+      "default": "gen_random_uuid",
+      "serial": false
+    },
+    {
+      "table": "user_entity_access",
+      "name": "user_id",
+      "type": "uuid",
+      "nullable": false,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "user_entity_access",
+      "name": "entity_id",
+      "type": "integer",
+      "nullable": false,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "user_entity_access",
+      "name": "granted_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now",
+      "serial": false
+    },
+    {
+      "table": "user_entity_access",
+      "name": "granted_by_user_id",
+      "type": "uuid",
+      "nullable": true,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "hr_permissions",
+      "name": "permission_id",
+      "type": "uuid",
+      "nullable": false,
+      "default": "gen_random_uuid",
+      "serial": false
+    },
+    {
+      "table": "hr_permissions",
+      "name": "tenant_id",
+      "type": "uuid",
+      "nullable": false,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "hr_permissions",
+      "name": "user_id",
+      "type": "uuid",
+      "nullable": false,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "hr_permissions",
+      "name": "capabilities",
+      "type": "jsonb",
+      "nullable": false,
+      "default": "'{}'",
+      "serial": false
+    },
+    {
+      "table": "hr_permissions",
+      "name": "updated_by_user_id",
+      "type": "uuid",
+      "nullable": true,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "hr_permissions",
+      "name": "updated_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now",
+      "serial": false
+    },
+    {
+      "table": "hr_access_controls",
+      "name": "access_id",
+      "type": "uuid",
+      "nullable": false,
+      "default": "gen_random_uuid",
+      "serial": false
+    },
+    {
+      "table": "hr_access_controls",
+      "name": "tenant_id",
+      "type": "uuid",
+      "nullable": false,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "hr_access_controls",
+      "name": "user_id",
+      "type": "uuid",
+      "nullable": false,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "hr_access_controls",
+      "name": "module_name",
+      "type": "character varying(64)",
+      "nullable": false,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "hr_access_controls",
+      "name": "can_view",
+      "type": "boolean",
+      "nullable": false,
+      "default": "false",
+      "serial": false
+    },
+    {
+      "table": "hr_access_controls",
+      "name": "can_edit",
+      "type": "boolean",
+      "nullable": false,
+      "default": "false",
+      "serial": false
+    },
+    {
+      "table": "hr_access_controls",
+      "name": "can_approve",
+      "type": "boolean",
+      "nullable": false,
+      "default": "false",
+      "serial": false
+    },
+    {
+      "table": "hr_access_controls",
+      "name": "can_delete",
+      "type": "boolean",
+      "nullable": false,
+      "default": "false",
+      "serial": false
+    },
+    {
+      "table": "hr_access_controls",
+      "name": "department_scope",
+      "type": "integer[]",
+      "nullable": true,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "hr_access_controls",
+      "name": "entity_scope",
+      "type": "integer[]",
+      "nullable": true,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "hr_access_controls",
+      "name": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now",
+      "serial": false
+    },
+    {
+      "table": "hr_access_controls",
+      "name": "updated_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now",
+      "serial": false
+    },
+    {
+      "table": "admin_login_history",
+      "name": "login_id",
+      "type": "uuid",
+      "nullable": false,
+      "default": "gen_random_uuid",
+      "serial": false
+    },
+    {
+      "table": "admin_login_history",
+      "name": "tenant_id",
+      "type": "uuid",
+      "nullable": false,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "admin_login_history",
+      "name": "user_id",
+      "type": "uuid",
+      "nullable": false,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "admin_login_history",
+      "name": "email",
+      "type": "character varying(255)",
+      "nullable": true,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "admin_login_history",
+      "name": "ip_address",
+      "type": "character varying(64)",
+      "nullable": true,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "admin_login_history",
+      "name": "user_agent",
+      "type": "text",
+      "nullable": true,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "admin_login_history",
+      "name": "success",
+      "type": "boolean",
+      "nullable": false,
+      "default": "true",
+      "serial": false
+    },
+    {
+      "table": "admin_login_history",
+      "name": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now",
+      "serial": false
+    },
+    {
+      "table": "admin_control_audit",
+      "name": "audit_id",
+      "type": "uuid",
+      "nullable": false,
+      "default": "gen_random_uuid",
+      "serial": false
+    },
+    {
+      "table": "admin_control_audit",
+      "name": "tenant_id",
+      "type": "uuid",
+      "nullable": false,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "admin_control_audit",
+      "name": "actor_user_id",
+      "type": "uuid",
+      "nullable": true,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "admin_control_audit",
+      "name": "action",
+      "type": "character varying(64)",
+      "nullable": false,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "admin_control_audit",
+      "name": "resource_type",
+      "type": "character varying(64)",
+      "nullable": false,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "admin_control_audit",
+      "name": "resource_id",
+      "type": "character varying(128)",
+      "nullable": true,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "admin_control_audit",
+      "name": "details",
+      "type": "jsonb",
+      "nullable": true,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "admin_control_audit",
+      "name": "ip_address",
+      "type": "character varying(64)",
+      "nullable": true,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "admin_control_audit",
+      "name": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now",
+      "serial": false
+    },
+    {
+      "table": "falcon_notifications",
+      "name": "notification_id",
+      "type": "uuid",
+      "nullable": false,
+      "default": "gen_random_uuid",
+      "serial": false
+    },
+    {
+      "table": "falcon_notifications",
+      "name": "tenant_id",
+      "type": "uuid",
+      "nullable": false,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "falcon_notifications",
+      "name": "user_id",
+      "type": "uuid",
+      "nullable": false,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "falcon_notifications",
+      "name": "category",
+      "type": "character varying(50)",
+      "nullable": false,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "falcon_notifications",
+      "name": "title",
+      "type": "character varying(255)",
+      "nullable": false,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "falcon_notifications",
+      "name": "message",
+      "type": "text",
+      "nullable": false,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "falcon_notifications",
+      "name": "action_link",
+      "type": "character varying(255)",
+      "nullable": true,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "falcon_notifications",
+      "name": "severity",
+      "type": "character varying(20)",
+      "nullable": false,
+      "default": "'info'",
+      "serial": false
+    },
+    {
+      "table": "falcon_notifications",
+      "name": "intent",
+      "type": "character varying(30)",
+      "nullable": false,
+      "default": "'info'",
+      "serial": false
+    },
+    {
+      "table": "falcon_notifications",
+      "name": "action_label",
+      "type": "character varying(100)",
+      "nullable": true,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "falcon_notifications",
+      "name": "metadata",
+      "type": "jsonb",
+      "nullable": true,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "falcon_notifications",
+      "name": "is_read",
+      "type": "boolean",
+      "nullable": false,
+      "default": "false",
+      "serial": false
+    },
+    {
+      "table": "falcon_notifications",
+      "name": "read_at",
+      "type": "timestamp with time zone",
+      "nullable": true,
+      "default": "",
+      "serial": false
+    },
+    {
+      "table": "falcon_notifications",
+      "name": "created_at",
+      "type": "timestamp with time zone",
+      "nullable": false,
+      "default": "now",
+      "serial": false
+    },
+    {
+      "table": "falcon_notifications",
+      "name": "deleted_at",
+      "type": "timestamp with time zone",
+      "nullable": true,
+      "default": "",
+      "serial": false
+    }
+  ],
+  "constraints": [
+    {
+      "table": "notification_staging_environment",
+      "name": "notification_stage_marker_pk",
+      "kind": "p",
+      "columns": [
+        "id"
+      ]
+    },
+    {
+      "table": "notification_staging_environment",
+      "name": "notification_stage_marker_id",
+      "kind": "c",
+      "expression": "id"
+    },
+    {
+      "table": "notification_staging_environment",
+      "name": "notification_stage_marker_environment",
+      "kind": "c",
+      "expression": "environment='falcon-notification-staging'"
+    },
+    {
+      "table": "notification_staging_environment",
+      "name": "notification_stage_marker_version",
+      "kind": "c",
+      "expression": "version=1"
+    },
+    {
+      "table": "tenants",
+      "name": "notification_stage_tenant_pk",
+      "kind": "p",
+      "columns": [
+        "tenant_id"
+      ]
+    },
+    {
+      "table": "tenants",
+      "name": "notification_stage_tenant_subdomain_uq",
+      "kind": "u",
+      "columns": [
+        "subdomain"
+      ]
+    },
+    {
+      "table": "tenant_subscriptions",
+      "name": "notification_stage_subscription_pk",
+      "kind": "p",
+      "columns": [
+        "subscription_id"
+      ]
+    },
+    {
+      "table": "tenant_subscriptions",
+      "name": "notification_stage_subscription_uq",
+      "kind": "u",
+      "columns": [
+        "tenant_id",
+        "feature_key"
+      ]
+    },
+    {
+      "table": "tenant_subscriptions",
+      "name": "notification_stage_subscription_tenant_fk",
+      "kind": "f",
+      "columns": [
+        "tenant_id"
+      ],
+      "reference": "tenants",
+      "referenceColumns": [
+        "tenant_id"
+      ],
+      "onDelete": "c",
+      "onUpdate": "a"
+    },
+    {
+      "table": "roles",
+      "name": "notification_stage_role_pk",
+      "kind": "p",
+      "columns": [
+        "role_id"
+      ]
+    },
+    {
+      "table": "roles",
+      "name": "notification_stage_role_name_uq",
+      "kind": "u",
+      "columns": [
+        "role_name"
+      ]
+    },
+    {
+      "table": "campuses",
+      "name": "notification_stage_campus_pk",
+      "kind": "p",
+      "columns": [
+        "campus_id"
+      ]
+    },
+    {
+      "table": "campuses",
+      "name": "notification_stage_campus_name_uq",
+      "kind": "u",
+      "columns": [
+        "campus_name"
+      ]
+    },
+    {
+      "table": "schools",
+      "name": "notification_stage_school_pk",
+      "kind": "p",
+      "columns": [
+        "school_id"
+      ]
+    },
+    {
+      "table": "schools",
+      "name": "notification_stage_school_campus_fk",
+      "kind": "f",
+      "columns": [
+        "campus_id"
+      ],
+      "reference": "campuses",
+      "referenceColumns": [
+        "campus_id"
+      ],
+      "onDelete": "a",
+      "onUpdate": "a"
+    },
+    {
+      "table": "departments",
+      "name": "notification_stage_department_pk",
+      "kind": "p",
+      "columns": [
+        "dept_id"
+      ]
+    },
+    {
+      "table": "departments",
+      "name": "notification_stage_department_name_uq",
+      "kind": "u",
+      "columns": [
+        "dept_name"
+      ]
+    },
+    {
+      "table": "departments",
+      "name": "notification_stage_department_school_fk",
+      "kind": "f",
+      "columns": [
+        "school_id"
+      ],
+      "reference": "schools",
+      "referenceColumns": [
+        "school_id"
+      ],
+      "onDelete": "n",
+      "onUpdate": "a"
+    },
+    {
+      "table": "org_entities",
+      "name": "notification_stage_entity_pk",
+      "kind": "p",
+      "columns": [
+        "entity_id"
+      ]
+    },
+    {
+      "table": "org_entities",
+      "name": "notification_stage_entity_code_uq",
+      "kind": "u",
+      "columns": [
+        "tenant_id",
+        "entity_code"
+      ]
+    },
+    {
+      "table": "org_entities",
+      "name": "notification_stage_entity_tenant_fk",
+      "kind": "f",
+      "columns": [
+        "tenant_id"
+      ],
+      "reference": "tenants",
+      "referenceColumns": [
+        "tenant_id"
+      ],
+      "onDelete": "c",
+      "onUpdate": "a"
+    },
+    {
+      "table": "users",
+      "name": "notification_stage_user_pk",
+      "kind": "p",
+      "columns": [
+        "user_id"
+      ]
+    },
+    {
+      "table": "users",
+      "name": "notification_stage_user_email_uq",
+      "kind": "u",
+      "columns": [
+        "official_email"
+      ]
+    },
+    {
+      "table": "users",
+      "name": "notification_stage_user_tenant_email_uq",
+      "kind": "u",
+      "columns": [
+        "tenant_id",
+        "official_email"
+      ]
+    },
+    {
+      "table": "users",
+      "name": "notification_stage_user_tenant_fk",
+      "kind": "f",
+      "columns": [
+        "tenant_id"
+      ],
+      "reference": "tenants",
+      "referenceColumns": [
+        "tenant_id"
+      ],
+      "onDelete": "a",
+      "onUpdate": "a"
+    },
+    {
+      "table": "users",
+      "name": "notification_stage_user_role_fk",
+      "kind": "f",
+      "columns": [
+        "role_id"
+      ],
+      "reference": "roles",
+      "referenceColumns": [
+        "role_id"
+      ],
+      "onDelete": "a",
+      "onUpdate": "a"
+    },
+    {
+      "table": "users",
+      "name": "notification_stage_user_department_fk",
+      "kind": "f",
+      "columns": [
+        "dept_id"
+      ],
+      "reference": "departments",
+      "referenceColumns": [
+        "dept_id"
+      ],
+      "onDelete": "a",
+      "onUpdate": "a"
+    },
+    {
+      "table": "users",
+      "name": "notification_stage_user_entity_fk",
+      "kind": "f",
+      "columns": [
+        "entity_id"
+      ],
+      "reference": "org_entities",
+      "referenceColumns": [
+        "entity_id"
+      ],
+      "onDelete": "a",
+      "onUpdate": "a"
+    },
+    {
+      "table": "users",
+      "name": "notification_stage_user_reporting_fk",
+      "kind": "f",
+      "columns": [
+        "reporting_officer_id"
+      ],
+      "reference": "users",
+      "referenceColumns": [
+        "user_id"
+      ],
+      "onDelete": "a",
+      "onUpdate": "a"
+    },
+    {
+      "table": "departments",
+      "name": "notification_stage_department_hod_fk",
+      "kind": "f",
+      "columns": [
+        "hod_user_id"
+      ],
+      "reference": "users",
+      "referenceColumns": [
+        "user_id"
+      ],
+      "onDelete": "n",
+      "onUpdate": "a"
+    },
+    {
+      "table": "user_roles",
+      "name": "notification_stage_user_role_pk",
+      "kind": "p",
+      "columns": [
+        "user_id",
+        "role_id"
+      ]
+    },
+    {
+      "table": "user_roles",
+      "name": "notification_stage_user_role_user_fk",
+      "kind": "f",
+      "columns": [
+        "user_id"
+      ],
+      "reference": "users",
+      "referenceColumns": [
+        "user_id"
+      ],
+      "onDelete": "c",
+      "onUpdate": "a"
+    },
+    {
+      "table": "user_roles",
+      "name": "notification_stage_user_role_role_fk",
+      "kind": "f",
+      "columns": [
+        "role_id"
+      ],
+      "reference": "roles",
+      "referenceColumns": [
+        "role_id"
+      ],
+      "onDelete": "c",
+      "onUpdate": "a"
+    },
+    {
+      "table": "user_entity_access",
+      "name": "notification_stage_entity_access_pk",
+      "kind": "p",
+      "columns": [
+        "access_id"
+      ]
+    },
+    {
+      "table": "user_entity_access",
+      "name": "notification_stage_entity_access_uq",
+      "kind": "u",
+      "columns": [
+        "user_id",
+        "entity_id"
+      ]
+    },
+    {
+      "table": "user_entity_access",
+      "name": "notification_stage_entity_access_user_fk",
+      "kind": "f",
+      "columns": [
+        "user_id"
+      ],
+      "reference": "users",
+      "referenceColumns": [
+        "user_id"
+      ],
+      "onDelete": "c",
+      "onUpdate": "a"
+    },
+    {
+      "table": "user_entity_access",
+      "name": "notification_stage_entity_access_entity_fk",
+      "kind": "f",
+      "columns": [
+        "entity_id"
+      ],
+      "reference": "org_entities",
+      "referenceColumns": [
+        "entity_id"
+      ],
+      "onDelete": "c",
+      "onUpdate": "a"
+    },
+    {
+      "table": "user_entity_access",
+      "name": "notification_stage_entity_access_grantor_fk",
+      "kind": "f",
+      "columns": [
+        "granted_by_user_id"
+      ],
+      "reference": "users",
+      "referenceColumns": [
+        "user_id"
+      ],
+      "onDelete": "n",
+      "onUpdate": "a"
+    },
+    {
+      "table": "hr_permissions",
+      "name": "notification_stage_hr_permission_pk",
+      "kind": "p",
+      "columns": [
+        "permission_id"
+      ]
+    },
+    {
+      "table": "hr_permissions",
+      "name": "notification_stage_hr_permission_uq",
+      "kind": "u",
+      "columns": [
+        "tenant_id",
+        "user_id"
+      ]
+    },
+    {
+      "table": "hr_permissions",
+      "name": "notification_stage_hr_permission_tenant_fk",
+      "kind": "f",
+      "columns": [
+        "tenant_id"
+      ],
+      "reference": "tenants",
+      "referenceColumns": [
+        "tenant_id"
+      ],
+      "onDelete": "c",
+      "onUpdate": "a"
+    },
+    {
+      "table": "hr_permissions",
+      "name": "notification_stage_hr_permission_user_fk",
+      "kind": "f",
+      "columns": [
+        "user_id"
+      ],
+      "reference": "users",
+      "referenceColumns": [
+        "user_id"
+      ],
+      "onDelete": "c",
+      "onUpdate": "a"
+    },
+    {
+      "table": "hr_permissions",
+      "name": "notification_stage_hr_permission_updater_fk",
+      "kind": "f",
+      "columns": [
+        "updated_by_user_id"
+      ],
+      "reference": "users",
+      "referenceColumns": [
+        "user_id"
+      ],
+      "onDelete": "n",
+      "onUpdate": "a"
+    },
+    {
+      "table": "hr_access_controls",
+      "name": "notification_stage_hr_control_pk",
+      "kind": "p",
+      "columns": [
+        "access_id"
+      ]
+    },
+    {
+      "table": "hr_access_controls",
+      "name": "notification_stage_hr_control_uq",
+      "kind": "u",
+      "columns": [
+        "tenant_id",
+        "user_id",
+        "module_name"
+      ]
+    },
+    {
+      "table": "hr_access_controls",
+      "name": "notification_stage_hr_control_tenant_fk",
+      "kind": "f",
+      "columns": [
+        "tenant_id"
+      ],
+      "reference": "tenants",
+      "referenceColumns": [
+        "tenant_id"
+      ],
+      "onDelete": "c",
+      "onUpdate": "a"
+    },
+    {
+      "table": "hr_access_controls",
+      "name": "notification_stage_hr_control_user_fk",
+      "kind": "f",
+      "columns": [
+        "user_id"
+      ],
+      "reference": "users",
+      "referenceColumns": [
+        "user_id"
+      ],
+      "onDelete": "c",
+      "onUpdate": "a"
+    },
+    {
+      "table": "admin_login_history",
+      "name": "notification_stage_login_pk",
+      "kind": "p",
+      "columns": [
+        "login_id"
+      ]
+    },
+    {
+      "table": "admin_login_history",
+      "name": "notification_stage_login_tenant_fk",
+      "kind": "f",
+      "columns": [
+        "tenant_id"
+      ],
+      "reference": "tenants",
+      "referenceColumns": [
+        "tenant_id"
+      ],
+      "onDelete": "a",
+      "onUpdate": "a"
+    },
+    {
+      "table": "admin_login_history",
+      "name": "notification_stage_login_user_fk",
+      "kind": "f",
+      "columns": [
+        "user_id"
+      ],
+      "reference": "users",
+      "referenceColumns": [
+        "user_id"
+      ],
+      "onDelete": "a",
+      "onUpdate": "a"
+    },
+    {
+      "table": "admin_control_audit",
+      "name": "notification_stage_audit_pk",
+      "kind": "p",
+      "columns": [
+        "audit_id"
+      ]
+    },
+    {
+      "table": "admin_control_audit",
+      "name": "notification_stage_audit_tenant_fk",
+      "kind": "f",
+      "columns": [
+        "tenant_id"
+      ],
+      "reference": "tenants",
+      "referenceColumns": [
+        "tenant_id"
+      ],
+      "onDelete": "a",
+      "onUpdate": "a"
+    },
+    {
+      "table": "admin_control_audit",
+      "name": "notification_stage_audit_actor_fk",
+      "kind": "f",
+      "columns": [
+        "actor_user_id"
+      ],
+      "reference": "users",
+      "referenceColumns": [
+        "user_id"
+      ],
+      "onDelete": "a",
+      "onUpdate": "a"
+    },
+    {
+      "table": "falcon_notifications",
+      "name": "notification_stage_notification_pk",
+      "kind": "p",
+      "columns": [
+        "notification_id"
+      ]
+    },
+    {
+      "table": "falcon_notifications",
+      "name": "notification_stage_notification_tenant_fk",
+      "kind": "f",
+      "columns": [
+        "tenant_id"
+      ],
+      "reference": "tenants",
+      "referenceColumns": [
+        "tenant_id"
+      ],
+      "onDelete": "a",
+      "onUpdate": "a"
+    },
+    {
+      "table": "falcon_notifications",
+      "name": "notification_stage_notification_user_fk",
+      "kind": "f",
+      "columns": [
+        "user_id"
+      ],
+      "reference": "users",
+      "referenceColumns": [
+        "user_id"
+      ],
+      "onDelete": "c",
+      "onUpdate": "a"
+    }
+  ],
+  "indexes": [
+    {
+      "table": "schools",
+      "name": "notification_stage_school_campus_idx",
+      "columns": [
+        "campus_id"
+      ],
+      "unique": false,
+      "options": [
+        0
+      ]
+    },
+    {
+      "table": "org_entities",
+      "name": "notification_stage_entity_tenant_idx",
+      "columns": [
+        "tenant_id"
+      ],
+      "unique": false,
+      "options": [
+        0
+      ]
+    },
+    {
+      "table": "users",
+      "name": "notification_stage_user_tenant_idx",
+      "columns": [
+        "tenant_id"
+      ],
+      "unique": false,
+      "options": [
+        0
+      ]
+    },
+    {
+      "table": "users",
+      "name": "notification_stage_user_role_idx",
+      "columns": [
+        "role_id"
+      ],
+      "unique": false,
+      "options": [
+        0
+      ]
+    },
+    {
+      "table": "users",
+      "name": "notification_stage_user_department_idx",
+      "columns": [
+        "dept_id"
+      ],
+      "unique": false,
+      "options": [
+        0
+      ]
+    },
+    {
+      "table": "users",
+      "name": "notification_stage_user_google_idx",
+      "columns": [
+        "google_id"
+      ],
+      "unique": false,
+      "options": [
+        0
+      ]
+    },
+    {
+      "table": "falcon_notifications",
+      "name": "notification_stage_notification_owner_idx",
+      "columns": [
+        "user_id",
+        "created_at"
+      ],
+      "unique": false,
+      "options": [
+        0,
+        0
+      ]
+    },
+    {
+      "table": "notification_staging_environment",
+      "name": "notification_stage_marker_pk",
+      "columns": [
+        "id"
+      ],
+      "unique": true,
+      "options": [
+        0
+      ]
+    },
+    {
+      "table": "tenants",
+      "name": "notification_stage_tenant_pk",
+      "columns": [
+        "tenant_id"
+      ],
+      "unique": true,
+      "options": [
+        0
+      ]
+    },
+    {
+      "table": "tenants",
+      "name": "notification_stage_tenant_subdomain_uq",
+      "columns": [
+        "subdomain"
+      ],
+      "unique": true,
+      "options": [
+        0
+      ]
+    },
+    {
+      "table": "tenant_subscriptions",
+      "name": "notification_stage_subscription_pk",
+      "columns": [
+        "subscription_id"
+      ],
+      "unique": true,
+      "options": [
+        0
+      ]
+    },
+    {
+      "table": "tenant_subscriptions",
+      "name": "notification_stage_subscription_uq",
+      "columns": [
+        "tenant_id",
+        "feature_key"
+      ],
+      "unique": true,
+      "options": [
+        0,
+        0
+      ]
+    },
+    {
+      "table": "roles",
+      "name": "notification_stage_role_pk",
+      "columns": [
+        "role_id"
+      ],
+      "unique": true,
+      "options": [
+        0
+      ]
+    },
+    {
+      "table": "roles",
+      "name": "notification_stage_role_name_uq",
+      "columns": [
+        "role_name"
+      ],
+      "unique": true,
+      "options": [
+        0
+      ]
+    },
+    {
+      "table": "campuses",
+      "name": "notification_stage_campus_pk",
+      "columns": [
+        "campus_id"
+      ],
+      "unique": true,
+      "options": [
+        0
+      ]
+    },
+    {
+      "table": "campuses",
+      "name": "notification_stage_campus_name_uq",
+      "columns": [
+        "campus_name"
+      ],
+      "unique": true,
+      "options": [
+        0
+      ]
+    },
+    {
+      "table": "schools",
+      "name": "notification_stage_school_pk",
+      "columns": [
+        "school_id"
+      ],
+      "unique": true,
+      "options": [
+        0
+      ]
+    },
+    {
+      "table": "departments",
+      "name": "notification_stage_department_pk",
+      "columns": [
+        "dept_id"
+      ],
+      "unique": true,
+      "options": [
+        0
+      ]
+    },
+    {
+      "table": "departments",
+      "name": "notification_stage_department_name_uq",
+      "columns": [
+        "dept_name"
+      ],
+      "unique": true,
+      "options": [
+        0
+      ]
+    },
+    {
+      "table": "org_entities",
+      "name": "notification_stage_entity_pk",
+      "columns": [
+        "entity_id"
+      ],
+      "unique": true,
+      "options": [
+        0
+      ]
+    },
+    {
+      "table": "org_entities",
+      "name": "notification_stage_entity_code_uq",
+      "columns": [
+        "tenant_id",
+        "entity_code"
+      ],
+      "unique": true,
+      "options": [
+        0,
+        0
+      ]
+    },
+    {
+      "table": "users",
+      "name": "notification_stage_user_pk",
+      "columns": [
+        "user_id"
+      ],
+      "unique": true,
+      "options": [
+        0
+      ]
+    },
+    {
+      "table": "users",
+      "name": "notification_stage_user_email_uq",
+      "columns": [
+        "official_email"
+      ],
+      "unique": true,
+      "options": [
+        0
+      ]
+    },
+    {
+      "table": "users",
+      "name": "notification_stage_user_tenant_email_uq",
+      "columns": [
+        "tenant_id",
+        "official_email"
+      ],
+      "unique": true,
+      "options": [
+        0,
+        0
+      ]
+    },
+    {
+      "table": "user_roles",
+      "name": "notification_stage_user_role_pk",
+      "columns": [
+        "user_id",
+        "role_id"
+      ],
+      "unique": true,
+      "options": [
+        0,
+        0
+      ]
+    },
+    {
+      "table": "user_entity_access",
+      "name": "notification_stage_entity_access_pk",
+      "columns": [
+        "access_id"
+      ],
+      "unique": true,
+      "options": [
+        0
+      ]
+    },
+    {
+      "table": "user_entity_access",
+      "name": "notification_stage_entity_access_uq",
+      "columns": [
+        "user_id",
+        "entity_id"
+      ],
+      "unique": true,
+      "options": [
+        0,
+        0
+      ]
+    },
+    {
+      "table": "hr_permissions",
+      "name": "notification_stage_hr_permission_pk",
+      "columns": [
+        "permission_id"
+      ],
+      "unique": true,
+      "options": [
+        0
+      ]
+    },
+    {
+      "table": "hr_permissions",
+      "name": "notification_stage_hr_permission_uq",
+      "columns": [
+        "tenant_id",
+        "user_id"
+      ],
+      "unique": true,
+      "options": [
+        0,
+        0
+      ]
+    },
+    {
+      "table": "hr_access_controls",
+      "name": "notification_stage_hr_control_pk",
+      "columns": [
+        "access_id"
+      ],
+      "unique": true,
+      "options": [
+        0
+      ]
+    },
+    {
+      "table": "hr_access_controls",
+      "name": "notification_stage_hr_control_uq",
+      "columns": [
+        "tenant_id",
+        "user_id",
+        "module_name"
+      ],
+      "unique": true,
+      "options": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "table": "admin_login_history",
+      "name": "notification_stage_login_pk",
+      "columns": [
+        "login_id"
+      ],
+      "unique": true,
+      "options": [
+        0
+      ]
+    },
+    {
+      "table": "admin_control_audit",
+      "name": "notification_stage_audit_pk",
+      "columns": [
+        "audit_id"
+      ],
+      "unique": true,
+      "options": [
+        0
+      ]
+    },
+    {
+      "table": "falcon_notifications",
+      "name": "notification_stage_notification_pk",
+      "columns": [
+        "notification_id"
+      ],
+      "unique": true,
+      "options": [
+        0
+      ]
+    }
+  ],
+  "sequences": [
+    "roles_role_id_seq",
+    "campuses_campus_id_seq",
+    "schools_school_id_seq",
+    "departments_dept_id_seq",
+    "org_entities_entity_id_seq"
+  ]
+}

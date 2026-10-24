@@ -7,6 +7,7 @@ import { Transaction } from '../../entities/transaction.entity';
 import { LateFinePolicy } from '../../entities/late-fine-policy.entity';
 import { CreateFeeDemandDto } from './dto/create-fee-demand.dto';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
+import { requireTenantId } from '../../common/utils/require-tenant-id';
 
 @Injectable()
 export class FinanceService {
@@ -21,14 +22,19 @@ export class FinanceService {
     private readonly notify: NotificationEmitterService,
   ) {}
 
-  listDemands(studentUserId?: string) {
+  listDemands(tenantId: string, studentUserId?: string, limit?: number, offset?: number) {
+    const paging = limit == null ? {} : {
+      take: Math.min(200, Math.max(1, Math.floor(limit))),
+      skip: Math.min(1_000_000, Math.max(0, Number.isFinite(offset) ? Math.floor(offset ?? 0) : 0)),
+    };
     if (studentUserId) {
       return this.demands.find({
-        where: { student_user_id: studentUserId },
+        where: { tenant_id: tenantId, student_user_id: studentUserId },
         order: { due_date: 'ASC' },
+        ...paging,
       });
     }
-    return this.demands.find({ order: { due_date: 'ASC' } });
+    return this.demands.find({ where: { tenant_id: tenantId }, order: { created_at: 'DESC' }, ...paging });
   }
 
   async createDemand(
@@ -36,11 +42,19 @@ export class FinanceService {
     tenantId: string,
     options?: { manager?: EntityManager; notify?: boolean },
   ) {
+    const scopedTenantId = requireTenantId(tenantId);
+    const manager = options?.manager ?? this.demands.manager;
+    const owners = await manager.query<Array<{ tenant_id: string }>>(
+      `SELECT tenant_id FROM users WHERE user_id = $1 AND tenant_id = $2 AND deleted_at IS NULL LIMIT 1`,
+      [dto.student_user_id, scopedTenantId],
+    );
+    if (owners[0]?.tenant_id !== scopedTenantId)
+      throw new BadRequestException('Student is not in this institution');
     const demands = options?.manager?.getRepository(FeeDemand) ?? this.demands;
     const saved = await demands.save(
-      demands.create({ ...dto, tenant_id: tenantId }),
+      demands.create({ ...dto, tenant_id: scopedTenantId }),
     );
-    if (options?.notify !== false) this.notifyDemandGenerated(saved, tenantId);
+    if (options?.notify !== false) this.notifyDemandGenerated(saved, scopedTenantId);
     return saved;
   }
 
@@ -59,27 +73,32 @@ export class FinanceService {
     const successfulToday = await this.transactions
       .createQueryBuilder('transaction')
       .where('transaction.status = :status', { status: 'SUCCESS' })
+      .andWhere('transaction.tenant_id = :tenantId', { tenantId })
       .andWhere('DATE(transaction.created_at) = :today', { today })
       .getMany();
     const openDemands = await this.demands
       .createQueryBuilder('demand')
       .where("demand.status NOT IN ('PAID', 'WAIVED')")
+      .andWhere('demand.tenant_id = :tenantId', { tenantId })
       .getMany();
-    const recentTransactions = await this.transactions.find({
-      where: { status: 'SUCCESS' },
-      order: { created_at: 'DESC' },
-      take: 8,
-    });
+    const recentTransactions = await this.transactions
+      .createQueryBuilder('transaction')
+      .leftJoinAndSelect('transaction.demand', 'demand', 'demand.tenant_id = :tenantId', { tenantId })
+      .where('transaction.status = :status', { status: 'SUCCESS' })
+      .andWhere('transaction.tenant_id = :tenantId', { tenantId })
+      .orderBy('transaction.created_at', 'DESC')
+      .take(8)
+      .getMany();
 
     const budgets = await this.demands.manager.query(
-      `SELECT b.budget_id, d.dept_name AS department,
-              b.allocated_amount, b.utilized_amount,
+      `SELECT b.budget_id, d.dept_name AS department, b.financial_year,
+              b.allocated_amount, b.utilized_amount, b.encumbered_amount,
               CASE WHEN b.allocated_amount > 0
-                THEN ROUND((b.utilized_amount / b.allocated_amount) * 100, 1)
+                THEN ROUND(((b.utilized_amount + b.encumbered_amount) / b.allocated_amount) * 100, 1)
                 ELSE 0 END AS utilization_percent
-       FROM fin_budgets b
+       FROM fin_dept_budgets b
        LEFT JOIN departments d ON d.dept_id = b.department_id
-       WHERE b.tenant_id = $1
+       WHERE b.tenant_id = $1 AND b.deleted_at IS NULL
        ORDER BY utilization_percent DESC
        LIMIT 12`,
       [tenantId],
@@ -155,7 +174,13 @@ export class FinanceService {
           Math.max(0, Number(row.total_amount) - Number(row.paid_amount ?? 0)),
         0,
       ),
-      recent_transactions: recentTransactions,
+      recent_transactions: recentTransactions.map(({ demand, ...row }) => ({
+        ...row,
+        payment_source: demand ? 'Student fees' : (row.ledger_category ?? row.txn_kind ?? 'Other').replace(/_/g, ' '),
+        payment_purpose: demand
+          ? `${demand.fee_head.replace(/_/g, ' ')} · ${demand.academic_year}${demand.semester ? ` · Semester ${demand.semester}` : ''}`
+          : row.txn_kind?.replace(/_/g, ' ') ?? 'Payment',
+      })),
       transaction_count_today: successfulToday.length,
       budget_utilization: budgets,
       procurement,
@@ -327,18 +352,26 @@ export class FinanceService {
     };
   }
 
-  async applyScholarship(dto: {
+  async applyScholarship(tenantId: string, dto: {
     student_user_id?: string;
     discount_percent?: number;
   }) {
-    if (!dto.student_user_id)
-      throw new BadRequestException('student_user_id is required');
-    const discountPercent = Number(dto.discount_percent ?? 50);
+    if (!dto.student_user_id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(dto.student_user_id))
+      throw new BadRequestException('Valid student_user_id is required');
+    const scopedTenantId = requireTenantId(tenantId);
+    const discountPercent = Number(dto.discount_percent);
+    if (!Number.isFinite(discountPercent) || discountPercent <= 0 || discountPercent > 100)
+      throw new BadRequestException('Discount must be greater than 0 and at most 100 percent');
+    const owners = await this.demands.manager.query<Array<{ user_id: string }>>(
+      `SELECT user_id FROM users WHERE user_id = $1 AND tenant_id = $2 AND deleted_at IS NULL LIMIT 1`,
+      [dto.student_user_id, scopedTenantId],
+    );
+    if (!owners.length) throw new BadRequestException('Student not found in this institution');
     const activeDemand = await this.demands.findOne({
       where: [
-        { student_user_id: dto.student_user_id, status: 'PENDING' },
-        { student_user_id: dto.student_user_id, status: 'PARTIALLY_PAID' },
-        { student_user_id: dto.student_user_id, status: 'OVERDUE' },
+        { tenant_id: scopedTenantId, student_user_id: dto.student_user_id, status: 'PENDING' },
+        { tenant_id: scopedTenantId, student_user_id: dto.student_user_id, status: 'PARTIALLY_PAID' },
+        { tenant_id: scopedTenantId, student_user_id: dto.student_user_id, status: 'OVERDUE' },
       ],
       order: { due_date: 'ASC' },
     });
@@ -346,24 +379,71 @@ export class FinanceService {
       throw new BadRequestException(
         'No active fee demand found for this student',
       );
+    if (activeDemand.fee_breakup?.scholarship_discount_percent != null)
+      throw new BadRequestException('Scholarship already applied to this demand; use an approved adjustment');
     const original = Number(activeDemand.total_amount);
-    activeDemand.total_amount = Number(
-      (original * (1 - discountPercent / 100)).toFixed(2),
+    const discounted = Number((original * (1 - discountPercent / 100)).toFixed(2));
+    if (discounted < Number(activeDemand.paid_amount))
+      throw new BadRequestException('Discounted demand cannot be less than the amount already paid');
+    // Conditional UPDATE makes the waiver single-use even if two operators
+    // submit concurrently or a payment changes the demand during review.
+    const result = await this.demands.manager.query<FeeDemand[] | [FeeDemand[], number]>(
+      `UPDATE finance_fee_demands
+       SET total_amount = $3,
+           fee_breakup = COALESCE(fee_breakup, '{}'::jsonb) ||
+             jsonb_build_object('scholarship_discount_percent', $4::numeric,
+                                'original_total_amount', $5::numeric),
+           updated_at = NOW()
+       WHERE demand_id = $1 AND tenant_id = $2 AND student_user_id = $6
+         AND deleted_at IS NULL
+         AND status IN ('PENDING', 'PARTIALLY_PAID', 'OVERDUE')
+         AND fee_breakup->>'scholarship_discount_percent' IS NULL
+         AND total_amount = $5 AND paid_amount = $7 AND paid_amount <= $3
+       RETURNING *`,
+      [activeDemand.demand_id, scopedTenantId, discounted, discountPercent,
+        original, dto.student_user_id, Number(activeDemand.paid_amount)],
     );
-    activeDemand.fee_breakup = {
-      ...(activeDemand.fee_breakup ?? {}),
-      scholarship_discount_percent: discountPercent,
-      original_total_amount: original,
-    };
-    return this.demands.save(activeDemand);
+    const updated = Array.isArray(result[0]) ? result[0] : result as FeeDemand[];
+    if (!updated.length)
+      throw new BadRequestException('Fee demand changed; refresh and review the scholarship before retrying');
+    return updated[0];
+  }
+
+  async lookupScholarshipStudent(tenantId: string, studentId: string) {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(studentId))
+      throw new BadRequestException('Valid student ID is required');
+    const rows = await this.demands.manager.query<Array<{ user_id: string; name: string; official_email: string | null; enrollment_no: string | null; program_name: string | null }>>(
+      `SELECT u.user_id, u.name, u.official_email, sp.enrollment_no,
+              COALESCE(sp.program_name, sp.batch) AS program_name
+       FROM users u LEFT JOIN student_profiles sp ON sp.user_id = u.user_id
+         AND sp.tenant_id = u.tenant_id AND sp.deleted_at IS NULL
+       WHERE u.user_id = $1 AND u.tenant_id = $2 AND u.deleted_at IS NULL LIMIT 1`,
+      [studentId, requireTenantId(tenantId)],
+    );
+    if (!rows.length) throw new BadRequestException('Student not found in this institution');
+    const demands = await this.demands.find({
+      where: [
+        { tenant_id: tenantId, student_user_id: studentId, status: 'PENDING' },
+        { tenant_id: tenantId, student_user_id: studentId, status: 'PARTIALLY_PAID' },
+        { tenant_id: tenantId, student_user_id: studentId, status: 'OVERDUE' },
+      ],
+      order: { due_date: 'ASC' },
+      take: 1,
+    });
+    return { student: rows[0], active_demand: demands[0] ?? null };
   }
 
   async getPendingDues(
     studentUserId: string,
-    tenantId: string,
+    tenantId?: string,
   ): Promise<FeeDemand[]> {
     const demands = await this.demands.find({
-      where: { student_user_id: studentUserId, tenant_id: tenantId },
+      where: {
+        student_user_id: studentUserId,
+        ...(tenantId === undefined
+          ? {}
+          : { tenant_id: requireTenantId(tenantId) }),
+      },
       order: { due_date: 'ASC' },
     });
     return demands.filter((d) => {

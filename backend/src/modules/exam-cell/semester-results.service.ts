@@ -217,9 +217,9 @@ export class SemesterResultsService {
               (g.payload->>'cgpa')::numeric AS cgpa,
               g.payload->>'result_stage' AS result_stage
        FROM grade_cards g
-       JOIN users u ON u.user_id = g.student_user_id
-       LEFT JOIN student_profiles sp ON sp.user_id = g.student_user_id
-       WHERE g.tenant_id = $1 AND g.semester = $2 AND g.status <> 'WITHHELD'
+       JOIN users u ON u.user_id = g.student_user_id AND u.tenant_id = g.tenant_id
+       LEFT JOIN student_profiles sp ON sp.user_id = g.student_user_id AND sp.tenant_id = g.tenant_id
+       WHERE g.tenant_id = $1 AND g.semester = $2 AND g.status = 'PUBLISHED'
        ORDER BY COALESCE((g.payload->>'rank')::int, 999999), u.name ASC
        LIMIT $3`,
       [tenantId, semester, Math.min(Math.max(Number(limit) || 10, 1), 100)],

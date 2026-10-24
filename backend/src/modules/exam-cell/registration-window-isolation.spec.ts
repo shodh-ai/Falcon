@@ -32,6 +32,8 @@ function setup(
     { getPendingDues: jest.fn().mockResolvedValue([]) } as never,
     {} as never,
     {} as never,
+
+    {} as never,
   );
   return { query, outside, service };
 }

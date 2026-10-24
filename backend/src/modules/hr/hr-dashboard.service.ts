@@ -3,7 +3,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { HrEntityContextService } from './hr-entity-context.service';
 import { pendingFnfClearanceSql } from './hr-offboarding-status';
-import { finalHrReviewSql } from './hr-final-review.sql';
+import { finalHrReviewSql, hrRequestScopeSql } from './hr-final-review.sql';
 
 @Injectable()
 export class HrDashboardService {
@@ -118,12 +118,10 @@ export class HrDashboardService {
     >(
       `SELECT COUNT(*)::text AS count FROM staff_leave_requests sl
        JOIN hr_employee_profiles p ON p.user_id = sl.staff_user_id AND p.tenant_id = sl.tenant_id
-       LEFT JOIN hr_approval_workflow_steps hr_step
-         ON hr_step.workflow_id = sl.workflow_id AND hr_step.step_order = sl.current_step_order
+       JOIN users u ON u.user_id = sl.staff_user_id AND u.tenant_id = sl.tenant_id
        WHERE sl.tenant_id = $1 AND sl.request_type = 'REGULARIZATION'
          AND sl.status IN ('PENDING', 'HOD_APPROVED')
-         AND sl.current_approver_user_id = $3
-         AND ${finalHrReviewSql('sl', 'hr_step')}${entityFilter}`,
+         AND ${hrRequestScopeSql('sl', 'p', 'u', '$3')}${entityFilter}`,
       [tenantId, entityId, approverUserId],
     );
 

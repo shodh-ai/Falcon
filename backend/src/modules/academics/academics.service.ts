@@ -43,6 +43,7 @@ import {
   type PendingPracticalBatch,
   selectStudentTimetableRows,
 } from './student-timetable-visibility';
+import { calculateStudentGradeSummary } from './student-grade-summary';
 
 type TimetableRange = {
   timetable_id?: string;
@@ -205,32 +206,29 @@ export class AcademicsService {
     return this.gradingPolicies.save(this.gradingPolicies.create(dto));
   }
 
-  async getStudentDashboardSummary(studentUserId: string) {
-    return this.getDashboardMetrics(studentUserId);
+  async getStudentDashboardSummary(studentUserId: string, tenantId: string) {
+    return this.getDashboardMetrics(studentUserId, tenantId);
   }
 
-  async getDashboardMetrics(studentUserId: string) {
+  async getDashboardMetrics(studentUserId: string, tenantId: string) {
     const enrollments = await this.courseEnrollments.find({
-      where: { student_user_id: studentUserId },
+      where: {
+        student_user_id: studentUserId,
+        tenant_id: tenantId,
+        course: { tenant_id: tenantId },
+      },
       relations: ['course'],
       order: { semester: 'ASC' },
     });
 
-    const completed = enrollments.filter(
-      (row) => row.status === 'COMPLETED' && row.grade_points !== null,
+    const completed = enrollments.filter((row) => row.status === 'COMPLETED');
+    const grades = calculateStudentGradeSummary(
+      enrollments.map((row) => ({
+        status: row.status,
+        grade_points: row.grade_points,
+        credits: row.course.credits,
+      })),
     );
-    const weightedGradePoints = completed.reduce(
-      (sum, row) => sum + Number(row.grade_points) * row.course.credits,
-      0,
-    );
-    const creditsCompleted = completed.reduce(
-      (sum, row) => sum + row.course.credits,
-      0,
-    );
-    const cgpa =
-      creditsCompleted > 0
-        ? Number((weightedGradePoints / creditsCompleted).toFixed(2))
-        : 0;
 
     const attendanceRows = enrollments.filter(
       (row) => row.attendance_percent !== null,
@@ -248,8 +246,9 @@ export class AcademicsService {
         : 0;
 
     return {
-      cgpa,
-      credits_completed: creditsCompleted,
+      cgpa: grades.gpa,
+      credits_completed: grades.earnedCredits,
+      credits_attempted: grades.attemptedCredits,
       credits_required: 160,
       attendance_percent: attendancePercent,
       completed_courses: completed.map((row) => this.toEnrollmentDto(row)),
@@ -1749,6 +1748,15 @@ export class AcademicsService {
           AND t.faculty_user_id = fc.faculty_user_id
           AND t.deleted_at IS NULL
          GROUP BY fc.tenant_id, fc.faculty_user_id
+       ), held_sessions AS (
+         SELECT e.tenant_id, faculty_id,
+           COUNT(*)::int AS pending_sessions,
+           SUM(EXTRACT(EPOCH FROM ((e.entry->>'end')::time-(e.entry->>'start')::time))/60)::int AS pending_minutes
+         FROM academic_timetable_source_entries e
+         JOIN academic_timetable_publications p ON p.publication_id=e.publication_id AND p.state='ACTIVE' AND p.activated_on<=CURRENT_DATE
+         CROSS JOIN LATERAL unnest(e.faculty_user_ids) faculty_id
+         WHERE e.tenant_id=$1 AND e.state='HELD' AND p.manifest->>'academic_year'=$3
+         GROUP BY e.tenant_id,faculty_id
        )
        SELECT u.user_id, u.name, u.official_email AS email, u.dept_id,
               d.dept_name,
@@ -1762,6 +1770,8 @@ export class AcademicsService {
               -- Keep this alias for existing consumers; it is credits, not hours.
               COALESCE(assigned.assigned_load_credits, 0)::int AS assigned_load_hours,
               COALESCE(scheduled.scheduled_minutes, 0)::numeric AS scheduled_minutes,
+              COALESCE(held_sessions.pending_sessions,0)::int AS pending_sessions,
+              COALESCE(held_sessions.pending_minutes,0)::int AS pending_minutes,
               (COALESCE(scheduled.scheduled_minutes, 0) / 60)::numeric AS scheduled_hours,
               (COALESCE(scheduled.scheduled_minutes, 0) / 60)::numeric AS hours_per_week,
               COALESCE(assigned.assigned_course_count, 0)::int AS course_count,
@@ -1773,6 +1783,7 @@ export class AcademicsService {
         AND scheduled.tenant_id = u.tenant_id
        LEFT JOIN assigned ON assigned.faculty_user_id = u.user_id
         AND assigned.tenant_id = u.tenant_id
+       LEFT JOIN held_sessions ON held_sessions.faculty_id=u.user_id AND held_sessions.tenant_id=u.tenant_id
        LEFT JOIN academic_faculty_load_declarations fld
          ON fld.tenant_id = u.tenant_id
         AND fld.faculty_user_id = u.user_id
@@ -1800,6 +1811,8 @@ export class AcademicsService {
       assigned_load_hours: Number(row.assigned_load_hours ?? 0),
       scheduled_hours: Number(row.scheduled_hours ?? 0),
       scheduled_minutes: Number(row.scheduled_minutes ?? 0),
+      pending_sessions: Number(row.pending_sessions ?? 0),
+      pending_minutes: Number(row.pending_minutes ?? 0),
       course_count: Number(row.course_count ?? 0),
       unscheduled_course_count: Number(row.unscheduled_course_count ?? 0),
       load_declaration_status: row.load_declaration_status ?? null,
@@ -1810,6 +1823,8 @@ export class AcademicsService {
       workload_status:
         row.load_declaration_status === 'NO_TEACHING_LOAD'
           ? 'NO_TEACHING_LOAD'
+          : Number(row.pending_sessions ?? 0) > 0
+          ? 'AWAITING_CONFIRMATION'
           : Number(row.unscheduled_course_count ?? 0) > 0
             ? 'SCHEDULE_MISSING'
             : Number(row.course_count ?? 0) === 0 &&
@@ -3249,7 +3264,8 @@ export class AcademicsService {
     const materialsCounts = await this.users.manager.query(
       `SELECT course_id, COUNT(*)::int AS count 
        FROM course_materials 
-       WHERE tenant_id = $1 AND faculty_user_id = ANY($2::uuid[]) 
+       WHERE tenant_id = $1 AND faculty_user_id = ANY($2::uuid[])
+         AND deleted_at IS NULL
        GROUP BY course_id`,
       [tenantId, facultyIds],
     );

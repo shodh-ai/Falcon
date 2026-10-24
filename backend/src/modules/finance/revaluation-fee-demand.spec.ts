@@ -11,6 +11,7 @@ describe('Revaluation demand ownership and transaction participation', () => {
 
   it('persists the explicit tenant with a generated demand', async () => {
     const demands = {
+      manager: { query: jest.fn().mockResolvedValue([{ tenant_id: 'tenant' }]) },
       create: jest.fn((value: object) => value),
       save: jest.fn((value: object) =>
         Promise.resolve({ ...value, demand_id: 'demand' }),
@@ -49,7 +50,7 @@ describe('Revaluation demand ownership and transaction participation', () => {
       { feeGenerated } as never,
     );
     await service.createDemand(input, 'tenant', {
-      manager: { getRepository: () => transactional } as never,
+      manager: { query: jest.fn().mockResolvedValue([{ tenant_id: 'tenant' }]), getRepository: () => transactional } as never,
       notify: false,
     });
     expect(transactional.save).toHaveBeenCalledWith(

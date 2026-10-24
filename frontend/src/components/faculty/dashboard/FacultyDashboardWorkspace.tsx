@@ -32,6 +32,7 @@ import { withTeachingDeptId } from '@/lib/faculty/teaching-departments';
 import { createMeetingsApi, type PortalMeetingRecord } from '@/lib/api/api.meetings';
 import { notificationsApi, type FalconNotification } from '@/lib/api/notifications';
 import { cn } from '@/lib/utils';
+import { FacultyObserverDashboard } from './FacultyObserverDashboard';
 
 type FacultyClass = {
   timetable_id: string;
@@ -43,6 +44,7 @@ type FacultyClass = {
   end_time: string;
   student_count: number;
   section?: string | null;
+  awaiting_confirmation?: boolean;
 };
 
 type MissingAttendanceAlert = {
@@ -475,6 +477,14 @@ function PendingTaskRow({ task }: { task: PendingTask }) {
 }
 
 export function FacultyDashboardWorkspace() {
+  const { user, isLoading } = useAuth();
+  if (isLoading || !user) return <FacultyInlineLoading label="Loading workspace…" />;
+  return user?.read_only_academic_view
+    ? <FacultyObserverDashboard />
+    : <StandardFacultyDashboardWorkspace />;
+}
+
+function StandardFacultyDashboardWorkspace() {
   const api = useAuthedApi();
   const { user, token } = useAuth();
   const { activeDeptId, loading: deptLoading } = useTeachingDepartment();
@@ -912,7 +922,7 @@ export function FacultyDashboardWorkspace() {
                                 : 'bg-emerald-100 text-emerald-700',
                             )}
                           >
-                            {needsMark ? 'Needs marking' : 'Attendance ready'}
+                            {c.awaiting_confirmation ? 'Awaiting department confirmation' : needsMark ? 'Needs marking' : 'Attendance ready'}
                           </span>
                         </div>
                         <p className="mt-0.5 font-semibold text-sgvu-navy">
@@ -925,7 +935,7 @@ export function FacultyDashboardWorkspace() {
                       </div>
                       <Button asChild size="sm" className={cn('shrink-0', dashActionClass)}>
                         <Link href={attendanceHref(c)}>
-                          {needsMark ? 'Mark attendance' : 'Open attendance'}
+                          {c.awaiting_confirmation ? 'Review held class' : needsMark ? 'Mark attendance' : 'Open attendance'}
                         </Link>
                       </Button>
                     </div>

@@ -17,7 +17,7 @@ function setup(populated = false, found = true) {
       if (sql.includes('FROM exam_day_attendance'))
         return Promise.resolve([{ status: 'PRESENT', marked_at: 'attended' }]);
       if (sql.includes('FROM student_exam_reports'))
-        return Promise.resolve([{ status: 'PASS', occurred_at: 'published' }]);
+        return Promise.resolve([{ status: 'PASS', declared_at: 'published' }]);
       if (sql.includes('FROM exam_applications'))
         return Promise.resolve([
           { status: 'COMPLETED', created_at: 'revalued' },
@@ -62,7 +62,7 @@ describe('Student examination timeline', () => {
     );
     expect(query).toHaveBeenCalledWith(
       expect.stringContaining(
-        'ser.result_status AS status, ser.declared_at AS occurred_at',
+        'ser.result_status AS status, ser.declared_at',
       ),
       ['student', 'tenant'],
     );

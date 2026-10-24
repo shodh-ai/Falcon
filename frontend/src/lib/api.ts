@@ -125,10 +125,12 @@ async function requestBlob(
   token: string | null,
   router: ReturnType<typeof useRouter>,
   path: string,
+  options?: { signal?: AbortSignal },
 ): Promise<Blob> {
   let response: Response;
   try {
     response = await fetch(`${getApiBaseUrl()}${path}`, {
+      signal: options?.signal,
       headers: {
         ...tenantHeaders(),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -247,7 +249,7 @@ export function useAuthedApi() {
     () => ({
       get: <T>(path: string, headers?: Record<string, string>) =>
         request<T>(token, router, path, 'GET', undefined, headers),
-      getBlob: (path: string) => requestBlob(token, router, path),
+      getBlob: (path: string, options?: { signal?: AbortSignal }) => requestBlob(token, router, path, options),
       post: <T>(
         path: string,
         body?: unknown,

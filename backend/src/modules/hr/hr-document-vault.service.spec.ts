@@ -37,6 +37,7 @@ describe('HrDocumentVaultService storage boundaries', () => {
         .fn()
         .mockResolvedValue('https://safe.example/signed'),
       getDownloadStream: jest.fn(),
+      assertObjectExists: jest.fn().mockResolvedValue(undefined),
     };
     return {
       service: new HrDocumentVaultService({ query } as never, storage as never),
@@ -90,6 +91,26 @@ describe('HrDocumentVaultService storage boundaries', () => {
       expect.stringContaining('INSERT INTO hr_employee_documents'),
       expect.arrayContaining(['/uploads/tenant-a/file.pdf']),
     );
+  });
+
+  it('does not create a document row for a missing or inaccessible object', async () => {
+    const { service, query, storage } = makeService();
+    storage.assertObjectExists.mockRejectedValue(new Error('NoSuchKey'));
+    await expect(service.uploadDocument(tenantId, 1, userId, userId, {
+      document_type: 'PAN', file_url: 's3://falcon-uploads/tenant-a/missing.pdf',
+    })).rejects.toThrow('Upload it again');
+    expect(query).not.toHaveBeenCalled();
+  });
+
+  it('resolves a legacy download key to the persisted local file when S3 is disabled', async () => {
+    mkdirSync(join(uploadPath, tenantId));
+    writeFileSync(join(uploadPath, tenantId, 'file.pdf'), 'document');
+    const { service, query, storage } = makeService(undefined, false);
+    await service.uploadDocument(tenantId, 1, userId, userId, {
+      document_type: 'PAN', file_url: '/api/uploads/download?key=tenant-a%2Ffile.pdf',
+    });
+    expect(storage.assertObjectExists).not.toHaveBeenCalled();
+    expect(query).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO'), expect.arrayContaining(['/uploads/tenant-a/file.pdf']));
   });
 
   it('rejects a stale local URL when the tenant upload directory is absent', async () => {

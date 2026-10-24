@@ -55,12 +55,13 @@ export function AppShell({ config, children, profileHref, headerExtra, contentMa
     getSidebarCollapsedServerSnapshot,
   );
   const pathname = usePathname();
-  const [mobileMenu, setMobileMenu] = useState({ pathname, open: false });
-  // Route changes invalidate only the drawer state; keeping it scoped to the
-  // current route also prevents an old open drawer returning on browser back.
-  if (mobileMenu.pathname !== pathname) setMobileMenu({ pathname, open: false });
-  const mobileOpen = mobileMenu.pathname === pathname && mobileMenu.open;
-  const setMobileOpen = (open: boolean) => setMobileMenu({ pathname, open });
+  const [mobileDrawer, setMobileDrawer] = useState({ pathname, open: false });
+  // Reset only the drawer state when navigation changes, before rendering it.
+  if (mobileDrawer.pathname !== pathname) {
+    setMobileDrawer({ pathname, open: false });
+  }
+  const mobileOpen = mobileDrawer.pathname === pathname && mobileDrawer.open;
+  const setMobileOpen = (open: boolean) => setMobileDrawer({ pathname, open });
   const { user } = useAuth();
   const { manifest } = useModuleRuntime();
   const launchConfig = useMemo(() => {

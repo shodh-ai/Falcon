@@ -4,6 +4,7 @@ import {
   S3Client,
   PutObjectCommand,
   GetObjectCommand,
+  HeadObjectCommand,
   HeadBucketCommand,
   CreateBucketCommand,
 } from '@aws-sdk/client-s3';
@@ -131,6 +132,12 @@ export class ObjectStorageService implements OnModuleInit {
       new GetObjectCommand({ Bucket: this.bucket, Key: key }),
     );
     return response.Body as Readable;
+  }
+
+  /** Confirm persistence before a business document record is registered. */
+  async assertObjectExists(key: string): Promise<void> {
+    if (!this.enabled) throw new Error('Object storage is not configured');
+    await this.client.send(new HeadObjectCommand({ Bucket: this.bucket, Key: key }));
   }
 
   async getPresignedDownloadUrl(

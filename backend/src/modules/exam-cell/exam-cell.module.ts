@@ -22,6 +22,7 @@ import { GradeCardVerificationService } from './grade-card-verification.service'
 import { GradeCardVerifyController } from './grade-card-verify.controller';
 import { BacklogService } from './backlog.service';
 import { BacklogStaffController, BacklogStudentController, BacklogFacultyController } from './backlog.controller';
+import { HodEndTermController } from './hod-endterm.controller';
 
 @Module({
   imports: [
@@ -39,6 +40,7 @@ import { BacklogStaffController, BacklogStudentController, BacklogFacultyControl
     BacklogStaffController,
     BacklogStudentController,
     BacklogFacultyController,
+    HodEndTermController,
   ],
   providers: [
     ExamCellService,

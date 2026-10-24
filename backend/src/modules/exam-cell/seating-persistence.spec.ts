@@ -70,6 +70,8 @@ function setup(capacity = 10, enrollmentStatus = 'ENROLLED') {
     {} as never,
     {} as never,
     {} as never,
+
+    {} as never,
   );
   return { service, outside, transaction, seats: () => committedSeats };
 }
@@ -142,6 +144,8 @@ describe('Published seating snapshot', () => {
       {} as never,
       {} as never,
       {} as never,
+
+      {} as never,
     );
     await service.publishSeatingPlans('tenant', 'schedule');
     expect(query).toHaveBeenCalledWith(
@@ -175,6 +179,8 @@ describe('Seat swap lock order', () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never,
+
       {} as never,
     );
     await service.swapSeatingAllocations('tenant', {

@@ -5,6 +5,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -19,6 +20,7 @@ import { LeaveBalance } from '../../entities/leave-balance.entity';
 import { StaffAttendance } from '../../entities/staff-attendance.entity';
 import { User } from '../../entities/user.entity';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
+import { FalconNotificationsService } from '../../core/notifications/falcon-notifications.service';
 import { WorkflowRoutingService } from '../../core/workflow/workflow-routing.service';
 import { WorkflowNotificationService } from '../../core/workflow/workflow-notification.service';
 import { AttendanceCalculationService } from './attendance-calculation.service';
@@ -30,7 +32,7 @@ import {
 } from '../../common/validators/workforce-request.validator';
 import { canAccessTeamApprovals } from './utils/reporting-officer.util';
 import { workforceStatusPathForRoles } from './utils/workforce-portal-links.util';
-import { finalHrReviewSql } from './hr-final-review.sql';
+import { finalHrReviewSql, hrRequestScopeSql } from './hr-final-review.sql';
 
 export type ApplyWorkforceRequestDto = {
   request_type: StaffRequestType;
@@ -91,6 +93,7 @@ export class HrWorkforceService {
     private readonly attendanceCalc: AttendanceCalculationService,
     private readonly hrWorkflow: HrWorkflowRoutingService,
     private readonly accessControl: HrAccessControlService,
+    @Optional() private readonly falconNotifications?: FalconNotificationsService,
   ) {}
 
   async getTodayWidget(userId: string) {
@@ -388,6 +391,16 @@ export class HrWorkforceService {
       );
     }
 
+    void this.falconNotifications?.create({
+      tenantId,
+      userId: staffUserId,
+      category: 'HR',
+      title: `${this.requestTypeLabel(requestType)} submitted`,
+      message: 'Your request is waiting for independent review. You will be notified when a decision is recorded.',
+      actionLink: '/notifications',
+      intent: 'status_update',
+    }).catch((error: unknown) => this.logger.warn(`Submission notification failed: ${String(error)}`));
+
     return saved;
   }
 
@@ -457,9 +470,13 @@ export class HrWorkforceService {
        FROM staff_leave_requests r
        JOIN users u ON u.user_id = r.staff_user_id
        LEFT JOIN departments d ON d.dept_id = u.dept_id
+       LEFT JOIN hr_approval_workflow_steps hr_step
+         ON hr_step.workflow_id = r.workflow_id AND hr_step.step_order = r.current_step_order
        WHERE r.tenant_id = $1
          AND r.status IN ('PENDING', 'HOD_APPROVED')
          AND r.current_approver_user_id = $2
+         AND NOT (r.request_type IN ('LEAVE', 'ON_DUTY', 'REGULARIZATION')
+           AND ${finalHrReviewSql('r', 'hr_step')})
          ${typeClause}
          ${clause}
        ORDER BY r.applied_at ASC`,
@@ -497,6 +514,7 @@ export class HrWorkforceService {
     entityId: number,
     approverUserId: string,
     requestType: 'LEAVE' | 'REGULARIZATION',
+    includeFirstLevel = false,
   ) {
     return this.dataSource.query<
       Array<{
@@ -517,6 +535,8 @@ export class HrWorkforceService {
         employee_id: string | null;
         recorded_check_in: Date | null;
         recorded_check_out: Date | null;
+        review_stage: 'FIRST_LEVEL' | 'FINAL_HR';
+        can_review: boolean;
       }>
     >(
       `SELECT r.leave_id, r.request_type, r.leave_type, r.start_date, r.end_date,
@@ -524,7 +544,14 @@ export class HrWorkforceService {
               r.reason, r.status, r.applied_at,
               r.current_step_order, u.name AS employee_name, p.employee_id,
               da.first_in_time AS recorded_check_in,
-              da.last_out_time AS recorded_check_out
+              da.last_out_time AS recorded_check_out,
+              CASE WHEN ${finalHrReviewSql('r', 'hr_step')} THEN 'FINAL_HR' ELSE 'FIRST_LEVEL' END AS review_stage,
+              COALESCE((${finalHrReviewSql('r', 'hr_step')} AND r.current_approver_user_id = $3
+                AND r.staff_user_id <> $3
+                AND ${hrRequestScopeSql('r', 'p', 'u', '$3', true)}
+                AND NOT EXISTS (SELECT 1 FROM hr_staff_request_decisions prior
+                  WHERE prior.tenant_id = r.tenant_id AND prior.leave_id = r.leave_id
+                    AND prior.action = 'APPROVE' AND prior.actor_user_id = $3)), false) AS can_review
        FROM staff_leave_requests r
        JOIN hr_employee_profiles p ON p.user_id = r.staff_user_id
          AND p.tenant_id = r.tenant_id
@@ -534,10 +561,12 @@ export class HrWorkforceService {
        LEFT JOIN hr_daily_attendance da ON da.user_id = r.staff_user_id
          AND da.date = r.regularization_date
        WHERE r.tenant_id = $1 AND p.entity_id = $2
-         AND r.current_approver_user_id = $3
          AND (r.request_type = $4 OR ($4 = 'LEAVE' AND r.request_type = 'ON_DUTY'))
          AND r.status IN ('PENDING', 'HOD_APPROVED')
-         AND ${finalHrReviewSql('r', 'hr_step')}
+         AND ${hrRequestScopeSql('r', 'p', 'u', '$3')}
+         AND ${includeFirstLevel && requestType === 'REGULARIZATION'
+           ? 'TRUE /* supervisory visibility; actions still require final HR assignment */'
+           : `r.current_approver_user_id = $3 AND ${finalHrReviewSql('r', 'hr_step')}`}
        ORDER BY r.applied_at ASC`,
       [tenantId, entityId, approverUserId, requestType],
     );
@@ -874,14 +903,23 @@ export class HrWorkforceService {
       relations: ['staff'],
     });
     if (!row) throw new NotFoundException('Request not found');
+    if (row.staff_user_id === reportingOfficerId) {
+      throw new ForbiddenException('You cannot approve or reject your own request');
+    }
+    if (action !== 'APPROVE' && action !== 'REJECT') {
+      throw new BadRequestException('action must be APPROVE or REJECT');
+    }
 
     const staff =
       row.staff ??
       (await this.users.findOne({ where: { user_id: row.staff_user_id } }));
     const roles = await this.users.manager.query(
-      `SELECT r.role_name FROM user_roles ur JOIN roles r ON r.role_id = ur.role_id WHERE ur.user_id = $1
-       UNION SELECT r.role_name FROM users u JOIN roles r ON r.role_id = u.role_id WHERE u.user_id = $1`,
-      [reportingOfficerId],
+      `SELECT r.role_name FROM user_roles ur JOIN roles r ON r.role_id = ur.role_id
+       JOIN users actor ON actor.user_id = ur.user_id
+       WHERE ur.user_id = $1 AND actor.tenant_id = $2 AND actor.is_active = true
+       UNION SELECT r.role_name FROM users u JOIN roles r ON r.role_id = u.role_id
+       WHERE u.user_id = $1 AND u.tenant_id = $2 AND u.is_active = true`,
+      [reportingOfficerId, tenantId],
     );
     // JWT/workspace roles can outlive a demotion. Approval power is checked
     // against the actor's current database roles at decision time.
@@ -927,6 +965,21 @@ export class HrWorkforceService {
       throw new BadRequestException('Request has already been processed');
     }
 
+    if (adminOverride) {
+      if (!comment || comment.trim().length < 10 || comment.trim().length > 2000) {
+        throw new BadRequestException('An override reason of 10–2000 characters is required');
+      }
+      const permitted = await this.dataSource.query<Array<{ leave_id: string }>>(
+        `SELECT r.leave_id FROM staff_leave_requests r
+         JOIN users u ON u.user_id = r.staff_user_id AND u.tenant_id = r.tenant_id
+         JOIN hr_employee_profiles p ON p.user_id = u.user_id AND p.tenant_id = r.tenant_id
+         WHERE r.tenant_id = $1 AND r.leave_id = $2
+           AND ${hrRequestScopeSql('r', 'p', 'u', '$3', true)}`,
+        [tenantId, leaveId, reportingOfficerId],
+      );
+      if (!permitted[0]) throw new ForbiddenException('Request is outside your HR approval scope');
+    }
+
     let overrideAuditParams: string[] | null = null;
     if (adminOverride) {
       const approverDesignationRow = row.current_approver_user_id
@@ -957,6 +1010,7 @@ export class HrWorkforceService {
       overrideAuditParams = [
         tenantId, employeeId, assignedApproverDesignation,
         bypassedByDesignation, actionType, requestType,
+        reportingOfficerId, leaveId, String(row.current_step_order), comment!.trim(),
       ];
     }
 
@@ -1114,8 +1168,8 @@ export class HrWorkforceService {
     await manager.query(
       `INSERT INTO hr_override_logs
          (tenant_id, employee_id, assigned_approver, bypassed_by,
-          type_of_action, type_of_request, date_and_time)
-       VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)`,
+          type_of_action, type_of_request, actor_user_id, leave_id, step_order, reason, date_and_time)
+       VALUES ($1, $2, $3, $4, $5, $6, $7::uuid, $8::uuid, $9::integer, $10, CURRENT_TIMESTAMP)`,
       params,
     );
   }

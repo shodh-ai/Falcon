@@ -60,6 +60,7 @@ describe("runtime module launch filtering", () => {
     expect(resolvePathModule("/student/courses/abc")).toBe("lms_learning");
     expect(resolvePathModule("/faculty/courses/abc")).toBe("lms_learning");
     expect(resolvePathModule("/student/academics")).toBe("sis_academics");
+    expect(resolvePathModule("/hod/academics/end-term-results")).toBe("examinations_credentials");
   });
   it("selects the most specific route owner", () => {
     expect(resolvePathModule("/finance/inventory/abc")).toBe(

@@ -43,6 +43,7 @@ import { FACULTY_DEMO_PROFILE } from '@/lib/mock/faculty-portal-demo';
 import { useAuthedApi } from '@/lib/api';
 import { getSubdomainFromClient } from '@/lib/tenant';
 import { FacultyPortfolioPanel } from '@/components/faculty/FacultyPortfolioPanel';
+import { formatTeachingDuration } from '@/lib/faculty/workload-duration';
 
 type ProfileTab = 'overview' | 'personal' | 'qualifications' | 'research' | 'portfolio' | 'workload' | 'documents';
 
@@ -114,6 +115,8 @@ type FacultyProfile = {
       session_type: string;
     }>;
     weekly_teaching_hours: number;
+    pending_sessions?: number;
+    pending_minutes?: number;
     project_guides_count: number;
     project_guides: Array<{
       guide_id: string;
@@ -912,7 +915,7 @@ export function FacultyProfilePage() {
       {tab === 'workload' && (
         <div className="space-y-5">
           <div className="grid gap-4 sm:grid-cols-3">
-            <FacultyStatCard label="Weekly teaching hours" value={profile.workload.weekly_teaching_hours} sub="from timetable" icon={BookOpen} />
+            <FacultyStatCard label="Weekly teaching time" value={profile.workload.weekly_teaching_hours ? formatTeachingDuration(profile.workload.weekly_teaching_hours) : 'Not scheduled'} sub={profile.workload.pending_sessions ? `${profile.workload.pending_sessions} sessions (${formatTeachingDuration((profile.workload.pending_minutes || 0) / 60)}) excluded: awaiting confirmation` : profile.workload.weekly_teaching_hours ? 'Sum of published scheduled class durations' : 'No published sessions; this is not a no-load declaration'} icon={BookOpen} />
             <FacultyStatCard label="B.Tech project guides" value={profile.workload.project_guides_count} />
             <FacultyStatCard label="PhD scholars" value={profile.workload.phd_scholars_count} />
           </div>

@@ -90,7 +90,9 @@ export class HrDocumentVaultService {
       tenantId,
       this.storage.getBucketName(),
     );
-    const localFile = resolveDocumentDiskPath(fileUrl, tenantId);
+    const localFile = resolveDocumentDiskPath(
+      key && !this.storage.isEnabled() ? `/uploads/${key}` : fileUrl, tenantId,
+    );
     if ((!key || !this.storage.isEnabled()) && !localFile) {
       throw new BadRequestException(
         "Document must reference an uploaded file in this tenant's secure storage",
@@ -134,7 +136,7 @@ export class HrDocumentVaultService {
         entityId,
         userId,
         docType,
-        key ? `s3://${this.storage.getBucketName()}/${key}` : fileUrl,
+        key && this.storage.isEnabled() ? `s3://${this.storage.getBucketName()}/${key}` : key ? `/uploads/${key}` : fileUrl,
         fileName,
         uploadedBy,
         status,

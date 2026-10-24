@@ -2,7 +2,7 @@ import Image from 'next/image';
 import { cn } from '@/lib/utils';
 
 const LOGO_PATH = '/logo.png';
-const LOGO_ASPECT = 2.75;
+const LOGO_ASPECT = 1409 / 736;
 
 type FalconLogoProps = {
   className?: string;
@@ -24,16 +24,16 @@ export function FalconLogo({
   if (compact) {
     return (
       <div
-        className={cn('relative inline-flex shrink-0 overflow-hidden', className)}
-        style={{ width: size, height: size }}
+        className={cn('relative inline-flex shrink-0 items-center justify-center', className)}
+        style={{ width: size + 16, height: size }}
       >
         <Image
           src={LOGO_PATH}
           alt="Falcon"
           fill
-          sizes={`${size}px`}
+          sizes={`${size + 16}px`}
           loading="eager"
-          className="scale-[2.15] object-cover object-[center_18%] drop-shadow-[0_2px_12px_rgba(214,182,93,0.35)]"
+          className="object-contain drop-shadow-[0_2px_12px_rgba(214,182,93,0.35)]"
         />
       </div>
     );

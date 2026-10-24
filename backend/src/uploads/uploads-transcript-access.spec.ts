@@ -2,6 +2,7 @@ import { NotFoundException } from '@nestjs/common';
 import { createReadStream } from 'fs';
 import type { Response } from 'express';
 import { UploadsController } from './uploads.controller';
+import { UploadsService } from './uploads.service';
 import {
   TranscriptSource,
   transcriptRevisionHash,
@@ -14,6 +15,14 @@ jest.mock('fs', () => ({
   existsSync: jest.fn().mockReturnValue(true),
   createReadStream: jest.fn(),
 }));
+
+function makeController(storage: unknown, db: unknown) {
+  const uploads = new UploadsService(
+    { get: (key: string) => key === 'UPLOAD_PATH' ? '/tmp/falcon-upload-test' : undefined } as never,
+    db as never,
+  );
+  return new UploadsController(storage as never, uploads);
+}
 
 describe('Official transcript download ownership', () => {
   const transcriptId = '11111111-1111-4111-8111-111111111111';
@@ -79,7 +88,7 @@ describe('Official transcript download ownership', () => {
     async (objectStorage) => {
       const getDownloadStream = jest.fn().mockResolvedValue({ pipe });
       const query = jest.fn().mockResolvedValue([{ student_user_id: 'owner' }]);
-      const controller = new UploadsController(
+      const controller = makeController(
         {
           isEnabled: () => objectStorage,
           getDownloadStream,
@@ -108,7 +117,7 @@ describe('Official transcript download ownership', () => {
     { user_id: 'staff', role: 'ExamCell' },
     { user_id: 'staff', role: 'Faculty', roles: ['DeputyCOE'] },
   ])('allows the owner or existing examination staff: %o', async (user) => {
-    const controller = new UploadsController(
+    const controller = makeController(
       { isEnabled: () => false } as never,
       {
         query: queryFor(),
@@ -124,7 +133,7 @@ describe('Official transcript download ownership', () => {
   });
 
   it('does not grant staff access to a transcript absent from their tenant', async () => {
-    const controller = new UploadsController(
+    const controller = makeController(
       { isEnabled: () => true } as never,
       { query: jest.fn().mockResolvedValue([]) } as never,
     );
@@ -143,7 +152,7 @@ describe('Official transcript download ownership', () => {
     'denies %s historical copies even to the owner and staff',
     async (status) => {
       for (const role of ['Student', 'ExamCell']) {
-        const controller = new UploadsController(
+        const controller = makeController(
           { isEnabled: () => false } as never,
           { query: queryFor({ ...issued, status }) } as never,
         );
@@ -168,7 +177,7 @@ describe('Official transcript download ownership', () => {
         has_open_ufm: change === 'open UFM',
         marks: source.marks.map((mark) => ({ ...mark, marks_obtained: 47 })),
       };
-      const controller = new UploadsController(
+      const controller = makeController(
         { isEnabled: () => false } as never,
         { query: queryFor(issued, current) } as never,
       );
@@ -186,7 +195,7 @@ describe('Official transcript download ownership', () => {
 
   it('rejects an orphaned retry file whose immutable key differs from the issued URL', async () => {
     const orphan = path.replace('.pdf', `-${'a'.repeat(32)}.pdf`);
-    const controller = new UploadsController(
+    const controller = makeController(
       { isEnabled: () => false } as never,
       { query: queryFor() } as never,
     );
@@ -203,7 +212,7 @@ describe('Official transcript download ownership', () => {
 
   it('streams a private S3 transcript URL through the configured bucket and protected checks', async () => {
     const getDownloadStream = jest.fn().mockResolvedValue({ pipe });
-    const controller = new UploadsController(
+    const controller = makeController(
       {
         isEnabled: () => true,
         getBucketName: () => 'synthetic-bucket',

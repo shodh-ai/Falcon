@@ -59,6 +59,8 @@ describe('Revaluation publication consistency', () => {
       notify as never,
       {} as never,
       {} as never,
+
+      {} as never,
     );
     jest.spyOn(service, 'getReEvaluation').mockResolvedValue(application);
     return { service, query, notify };

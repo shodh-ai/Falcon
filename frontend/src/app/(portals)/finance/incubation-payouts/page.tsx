@@ -52,19 +52,28 @@ export default function FinanceIncubationPayoutsPage() {
           <Card key={payout.disbursement_id}>
             <CardHeader className="flex flex-row items-start justify-between gap-4">
               <div>
-                <CardTitle className="text-lg">
-                  Disburse {formatInr(payout.amount)} to {payout.startup_name}
-                </CardTitle>
+                <CardTitle className="text-lg">{formatInr(payout.amount)} · {payout.startup_name}</CardTitle>
                 <p className="text-sm text-muted-foreground">
                   Student: {payout.student_name} · Approved by {payout.approved_by_label}
                 </p>
               </div>
-              <Badge>{payout.status}</Badge>
+              <Badge>{payout.status === 'POSTED' ? 'Posted; transfer unverified' : payout.status}</Badge>
             </CardHeader>
-            <CardContent className="grid gap-2 text-sm sm:grid-cols-2">
-              <p>Grant tag: {payout.grant_tag}</p>
-              <p>Requested: {new Date(payout.created_at).toLocaleString()}</p>
-              {payout.posted_at ? <p>Posted: {new Date(payout.posted_at).toLocaleString()}</p> : null}
+            <CardContent className="text-sm">
+              <details>
+                <summary className="cursor-pointer underline">View payout details</summary>
+                <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                  <p>Grant tag: {payout.grant_tag}</p>
+                  <p>Recipient: {payout.startup_name}</p>
+                  <p>Student: {payout.student_name}</p>
+                  <p>Approved by: {payout.approved_by_label}</p>
+                  <p>Requested: {new Date(payout.created_at).toLocaleString()}</p>
+                  <p>Posted: {payout.posted_at ? new Date(payout.posted_at).toLocaleString() : 'Not posted'}</p>
+                  <p>Payment method: Not recorded here</p>
+                  <p>Bank transfer reference: Not recorded here</p>
+                </div>
+                <p className="mt-2 text-muted-foreground">A posted grant request is not proof that funds reached the recipient. Confirm settlement against the Finance payment record or bank statement.</p>
+              </details>
             </CardContent>
           </Card>
         ))

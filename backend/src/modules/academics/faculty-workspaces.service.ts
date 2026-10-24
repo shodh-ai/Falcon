@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import * as crypto from 'crypto';
 import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
+import { DataSource, EntityManager } from 'typeorm';
 import { SaveMarksDraftDto } from './dto/save-marks-draft.dto';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 import { DeanAuditService } from './dean-audit.service';
@@ -16,7 +16,6 @@ import {
   GRADING_COMPONENT_IDS,
   getGradingComponentMax,
   isAutoSyncedExamType,
-  isFacultyDirectGradingType,
   isKnownExamType,
   normalizeExamTypeForSave,
 } from './grading-components';
@@ -24,6 +23,7 @@ import {
   ALLOCATION_WITH_DEPT_FROM,
   FacultyTeachingDepartmentsService,
 } from './faculty-teaching-departments.service';
+import { isEndSemesterExamType } from './marks-publication-policy';
 
 const LEGACY_EXAM_TYPES = [
   'CAT1',
@@ -675,14 +675,16 @@ export class FacultyWorkspacesService {
     if (hodDepartmentIds.length) {
       return this.dataSource.query(
         `SELECT
-           t.timetable_id,
+           t.timetable_id::text AS timetable_id,
            t.day_of_week,
            t.start_time,
            t.end_time,
            t.room,
+           t.section,
            c.course_id,
            c.course_code,
-           c.course_name
+           c.course_name,
+           false AS awaiting_confirmation
          FROM academic_timetables t
          INNER JOIN academic_courses c ON c.course_id = t.course_id AND c.tenant_id = t.tenant_id
          LEFT JOIN users u ON u.user_id = t.faculty_user_id
@@ -701,27 +703,48 @@ export class FacultyWorkspacesService {
              )
            )
            AND ($3::int IS NULL OR u.dept_id = $3)
-         ORDER BY t.day_of_week, t.start_time, c.course_code`,
+         UNION ALL
+         SELECT 'held:' || e.source_key,(e.entry->>'day')::int,(e.entry->>'start')::time,(e.entry->>'end')::time,
+           e.entry->>'room',e.entry->>'batch',c.course_id,c.course_code,c.course_name,true
+         FROM academic_timetable_source_entries e
+         JOIN academic_timetable_publications p ON p.publication_id=e.publication_id AND p.state='ACTIVE' AND p.activated_on<=CURRENT_DATE
+         JOIN academic_courses c ON c.course_id=e.course_id AND c.tenant_id=e.tenant_id
+         WHERE e.tenant_id=$1 AND e.state='HELD' AND EXISTS (
+           SELECT 1 FROM users u WHERE u.tenant_id=e.tenant_id AND u.user_id=ANY(e.faculty_user_ids)
+             AND u.dept_id=ANY($2::int[]) AND ($3::int IS NULL OR u.dept_id=$3))
+         ORDER BY day_of_week, start_time, course_code`,
         [tenantId, hodDepartmentIds, deptId ?? null],
       );
     }
     return this.dataSource.query(
       `WITH ${this.teachingDepartments.facultyCoursesCte(3)}
        SELECT
-         t.timetable_id,
+         t.timetable_id::text AS timetable_id,
          t.day_of_week,
          t.start_time,
          t.end_time,
          t.room,
+         t.section,
          c.course_id,
          c.course_code,
-         c.course_name
+         c.course_name,
+         false AS awaiting_confirmation
        FROM academic_timetables t
        INNER JOIN faculty_courses fc ON fc.course_id = t.course_id
        INNER JOIN academic_courses c ON c.course_id = t.course_id AND c.tenant_id = t.tenant_id
        WHERE t.tenant_id = $1
+         AND t.faculty_user_id = $2
          AND t.deleted_at IS NULL
-       ORDER BY t.day_of_week, t.start_time, c.course_code`,
+         AND (t.valid_from IS NULL OR t.valid_from <= CURRENT_DATE)
+       UNION ALL
+       SELECT 'held:' || e.source_key, (e.entry->>'day')::int,(e.entry->>'start')::time,(e.entry->>'end')::time,
+         e.entry->>'room',e.entry->>'batch',c.course_id,c.course_code,c.course_name,true
+       FROM academic_timetable_source_entries e
+       JOIN academic_timetable_publications p ON p.publication_id=e.publication_id AND p.state='ACTIVE' AND p.activated_on<=CURRENT_DATE
+       JOIN academic_courses c ON c.course_id=e.course_id AND c.tenant_id=e.tenant_id
+       WHERE e.tenant_id=$1 AND $2::uuid=ANY(e.faculty_user_ids) AND e.state='HELD'
+         AND e.course_id IN (SELECT course_id FROM faculty_courses)
+       ORDER BY day_of_week, start_time, course_code`,
       [tenantId, facultyUserId, deptId ?? null],
     );
   }
@@ -765,6 +788,7 @@ export class FacultyWorkspacesService {
          FROM academic_timetables t
          INNER JOIN faculty_courses fc ON fc.course_id = t.course_id
          WHERE t.tenant_id = $1
+           AND t.faculty_user_id = $2
            AND t.deleted_at IS NULL
        ),
        expected AS (
@@ -860,6 +884,7 @@ export class FacultyWorkspacesService {
          INNER JOIN faculty_courses fc ON fc.course_id = t.course_id
          INNER JOIN academic_courses c ON c.course_id = t.course_id AND c.tenant_id = t.tenant_id
          WHERE t.tenant_id = $1
+           AND t.faculty_user_id = $2
            AND t.deleted_at IS NULL
        ),
        course_expected AS (
@@ -971,9 +996,10 @@ export class FacultyWorkspacesService {
       [tenantId, courseId, examType],
     );
 
-    const maxMarksDefault =
-      rows.find((r: { max_marks: number | null }) => r.max_marks != null)
-        ?.max_marks ?? 50;
+    const maxMarksDefault = session?.max_marks != null
+      ? Number(session.max_marks)
+      : rows.find((r: { max_marks: number | null }) => r.max_marks != null)
+          ?.max_marks ?? getGradingComponentMax(examType) ?? 50;
     const draftCount = rows.filter(
       (r: { mark_status: string | null }) =>
         !r.mark_status || r.mark_status === 'DRAFT',
@@ -994,11 +1020,12 @@ export class FacultyWorkspacesService {
             : 'DRAFT';
 
     const entryAllowed =
-      examType === 'QUIZ' ||
+      !session?.declared_at &&
+      (!isEndSemesterExamType(examType) ||
       (!!session &&
         session.entry_status === 'OPEN' &&
         !session.marks_locked &&
-        !session.declared_at);
+        !session.declared_at));
 
     return {
       exam_type: examType,
@@ -1009,6 +1036,7 @@ export class FacultyWorkspacesService {
       result_session: session
         ? {
             session_id: session.session_id,
+            max_marks: Number(session.max_marks),
             entry_status: session.entry_status,
             marks_locked: session.marks_locked,
             entry_open_at: session.entry_open_at,
@@ -1060,20 +1088,23 @@ export class FacultyWorkspacesService {
       );
     }
     await this.assertFacultyOwnsCourse(facultyUserId, tenantId, dto.course_id);
-    const isDirectPublish = examType === 'QUIZ';
-    const needsExamCellSession =
-      !isDirectPublish && !isFacultyDirectGradingType(examType);
-
-    if (needsExamCellSession) {
-      const session = await this.getResultSession(
-        tenantId,
-        dto.course_id,
-        examType,
-      );
-      this.assertFacultyEntryAllowed(session);
+    const needsExamCellSession = isEndSemesterExamType(examType);
+    const existingSession = await this.getResultSession(tenantId, dto.course_id, examType);
+    if (existingSession?.declared_at) {
+      throw new ForbiddenException('Declared results are immutable');
     }
 
-    if (!isDirectPublish) {
+    let sessionMaxMarks: number | null = null;
+    if (needsExamCellSession) {
+      const session = existingSession;
+      this.assertFacultyEntryAllowed(session);
+      sessionMaxMarks = Number(session.max_marks);
+      if (Number(dto.max_marks) !== sessionMaxMarks) {
+        throw new BadRequestException(`End-semester marks must use the Exam Cell maximum of ${sessionMaxMarks}`);
+      }
+    }
+
+    if (needsExamCellSession) {
       const locked = await this.dataSource.query(
         `SELECT 1 FROM academic_marks
          WHERE tenant_id = $1 AND course_id = $2 AND exam_type = $3
@@ -1089,7 +1120,7 @@ export class FacultyWorkspacesService {
         );
       }
     }
-    const maxMarks = getGradingComponentMax(examType) ?? dto.max_marks;
+    const maxMarks = sessionMaxMarks ?? getGradingComponentMax(examType) ?? dto.max_marks;
     for (const entry of dto.entries) {
       if (entry.marks_obtained > maxMarks) {
         throw new BadRequestException(`Marks cannot exceed ${maxMarks}`);
@@ -1099,70 +1130,99 @@ export class FacultyWorkspacesService {
       }
     }
 
+    const studentIds = dto.entries.map((entry) => entry.student_user_id);
+    if (new Set(studentIds).size !== studentIds.length) {
+      throw new BadRequestException(
+        'Each student can appear only once in a marks submission',
+      );
+    }
+
     if (dto.entries.length > 0) {
-      const studentIds = dto.entries.map((entry) => entry.student_user_id);
-      if (new Set(studentIds).size !== studentIds.length) {
-        throw new BadRequestException(
-          'Duplicate student entries are not allowed',
+      await this.dataSource.transaction(async (manager) => {
+        if (needsExamCellSession) {
+          const session = await this.getResultSession(tenantId, dto.course_id, examType, manager);
+          this.assertFacultyEntryAllowed(session);
+          if (Number(session.max_marks) !== maxMarks) {
+            throw new BadRequestException('Exam Cell changed the end-semester maximum; refresh the mark sheet');
+          }
+          const submitted = await manager.query<Array<{ mark_id: string }>>(
+            `SELECT mark_id FROM academic_marks WHERE tenant_id=$1 AND course_id=$2
+             AND exam_type=$3 AND status IN ('PENDING_COE','PUBLISHED') LIMIT 1`,
+            [tenantId, dto.course_id, examType],
+          );
+          if (submitted[0]) throw new ForbiddenException('End-semester marks were already submitted');
+        }
+        const enrolledRows = await manager.query<
+          Array<{ student_user_id: string }>
+        >(
+          `SELECT DISTINCT e.student_user_id
+           FROM student_course_enrollments e
+           JOIN users u ON u.user_id = e.student_user_id AND u.tenant_id = e.tenant_id
+           WHERE e.tenant_id = $1
+             AND e.course_id = $2
+             AND e.status IN ('ENROLLED', 'COMPLETED', 'FAILED')
+             AND e.deleted_at IS NULL
+             AND e.student_user_id = ANY($3::uuid[])`,
+          [tenantId, dto.course_id, studentIds],
         );
-      }
-      const enrolled = await this.dataSource.query<
-        Array<{ student_user_id: string }>
-      >(
-        `SELECT DISTINCT e.student_user_id FROM student_course_enrollments e
-         JOIN users u ON u.user_id = e.student_user_id AND u.tenant_id = e.tenant_id
-         WHERE e.tenant_id = $1 AND e.course_id = $2 AND e.status IN ('ENROLLED', 'COMPLETED', 'FAILED')
-           AND e.student_user_id = ANY($3::uuid[])`,
-        [tenantId, dto.course_id, studentIds],
-      );
-      if (enrolled.length !== studentIds.length) {
-        throw new ForbiddenException(
-          'Marks may only be entered for students enrolled in this course and tenant',
+        const enrolledStudentIds = new Set(
+          enrolledRows.map((row) => row.student_user_id),
         );
-      }
-      const valuePlaceholders: string[] = [];
-      const params: unknown[] = [
-        tenantId,
-        dto.course_id,
-        examType,
-        maxMarks,
-        facultyUserId,
-      ];
-      let paramIdx = 6;
-      for (const entry of dto.entries) {
-        valuePlaceholders.push(
-          `($1, $${paramIdx++}, $2, $3, $${paramIdx++}, $4, $${paramIdx++}, 'DRAFT', $5, NOW())`,
+        if (studentIds.some((studentId) => !enrolledStudentIds.has(studentId))) {
+          throw new ForbiddenException(
+            'One or more students are not actively enrolled in this course',
+          );
+        }
+
+        const valuePlaceholders: string[] = [];
+        const params: unknown[] = [
+          tenantId,
+          dto.course_id,
+          examType,
+          maxMarks,
+          facultyUserId,
+        ];
+        let paramIdx = 6;
+        for (const entry of dto.entries) {
+          valuePlaceholders.push(
+            `($1, $${paramIdx++}, $2, $3, $${paramIdx++}, $4, $${paramIdx++}, 'DRAFT', $5, NOW())`,
+          );
+          params.push(
+            entry.student_user_id,
+            entry.marks_obtained,
+            entry.co_mapped ?? null,
+          );
+        }
+        await manager.query(
+          `INSERT INTO academic_marks (
+             tenant_id, student_user_id, course_id, exam_type, marks_obtained, max_marks,
+             co_mapped, status, uploaded_by, updated_at
+           ) VALUES ${valuePlaceholders.join(', ')}
+           ON CONFLICT (tenant_id, student_user_id, course_id, exam_type) DO UPDATE SET
+             marks_obtained = CASE
+               WHEN academic_marks.status IN ('PENDING_COE', 'PUBLISHED') THEN academic_marks.marks_obtained
+               ELSE EXCLUDED.marks_obtained
+             END,
+             max_marks = CASE
+               WHEN academic_marks.status IN ('PENDING_COE', 'PUBLISHED') THEN academic_marks.max_marks
+               ELSE EXCLUDED.max_marks
+             END,
+             co_mapped = CASE
+               WHEN academic_marks.status IN ('PENDING_COE', 'PUBLISHED') THEN academic_marks.co_mapped
+               ELSE EXCLUDED.co_mapped
+             END,
+             status = CASE
+               WHEN academic_marks.status IN ('PENDING_COE', 'PUBLISHED') THEN academic_marks.status
+               ELSE 'DRAFT'
+             END,
+             uploaded_by = CASE
+               WHEN academic_marks.status IN ('PENDING_COE', 'PUBLISHED') THEN academic_marks.uploaded_by
+               ELSE EXCLUDED.uploaded_by
+             END,
+             updated_at = NOW()`,
+          params,
         );
-        params.push(
-          entry.student_user_id,
-          entry.marks_obtained,
-          entry.co_mapped ?? null,
-        );
-      }
-      await this.dataSource.query(
-        `INSERT INTO academic_marks (
-           tenant_id, student_user_id, course_id, exam_type, marks_obtained, max_marks,
-           co_mapped, status, uploaded_by, updated_at
-         ) VALUES ${valuePlaceholders.join(', ')}
-         ON CONFLICT (tenant_id, student_user_id, course_id, exam_type) DO UPDATE SET
-           marks_obtained = CASE
-             WHEN academic_marks.status IN ('PENDING_COE', 'PUBLISHED') THEN academic_marks.marks_obtained
-             ELSE EXCLUDED.marks_obtained
-           END,
-           max_marks = EXCLUDED.max_marks,
-           co_mapped = CASE
-             WHEN academic_marks.status IN ('PENDING_COE', 'PUBLISHED') THEN academic_marks.co_mapped
-             ELSE EXCLUDED.co_mapped
-           END,
-           status = CASE
-             WHEN EXCLUDED.exam_type = 'QUIZ' THEN 'DRAFT'
-             WHEN academic_marks.status IN ('PENDING_COE', 'PUBLISHED') THEN academic_marks.status
-             ELSE 'DRAFT'
-           END,
-           uploaded_by = EXCLUDED.uploaded_by,
-           updated_at = NOW()`,
-        params,
-      );
+      });
     }
     return { saved: dto.entries.length, status: 'DRAFT' };
   }
@@ -1180,24 +1240,35 @@ export class FacultyWorkspacesService {
       throw new BadRequestException(`Invalid exam_type: ${examTypeInput}`);
     }
     await this.assertFacultyOwnsCourse(facultyUserId, tenantId, courseId);
-    const isDirectPublish = examType === 'QUIZ';
-    const needsExamCellSession =
-      !isDirectPublish && !isFacultyDirectGradingType(examType);
-    if (needsExamCellSession) {
-      const session = await this.getResultSession(tenantId, courseId, examType);
-      this.assertFacultyEntryAllowed(session);
+    const isDirectPublish = !isEndSemesterExamType(examType);
+    const existingSession = await this.getResultSession(tenantId, courseId, examType);
+    if (existingSession?.declared_at) {
+      throw new ForbiddenException('Declared results are immutable');
     }
+    const needsExamCellSession = !isDirectPublish;
     const targetStatus = isDirectPublish ? 'PUBLISHED' : 'PENDING_COE';
-    const statusCondition = isDirectPublish
-      ? `status IN ('DRAFT', 'PENDING_COE', 'PUBLISHED')`
-      : `status = 'DRAFT'`;
-    const result = await this.dataSource.query(
+    const update = (db: EntityManager | DataSource) => db.query(
       `UPDATE academic_marks
-       SET status = $5, updated_at = NOW()
-       WHERE tenant_id = $1 AND course_id = $2 AND exam_type = $3 AND uploaded_by = $4 AND ${statusCondition}
+       SET status = $5, published_at = CASE WHEN $5 = 'PUBLISHED' THEN NOW() ELSE NULL END, updated_at = NOW()
+       WHERE tenant_id = $1 AND course_id = $2 AND exam_type = $3 AND uploaded_by = $4 AND status = 'DRAFT'
        RETURNING mark_id`,
       [tenantId, courseId, examType, facultyUserId, targetStatus],
     );
+    const result = needsExamCellSession
+      ? await this.dataSource.transaction(async (manager) => {
+          const session = await this.getResultSession(tenantId, courseId, examType, manager);
+          this.assertFacultyEntryAllowed(session);
+          const drafts = await manager.query<Array<{ student_user_id: string; marks_obtained: number; max_marks: number }>>(
+            `SELECT student_user_id,marks_obtained,max_marks FROM academic_marks
+             WHERE tenant_id=$1 AND course_id=$2 AND exam_type=$3
+               AND uploaded_by=$4 AND status='DRAFT' FOR UPDATE`,
+            [tenantId, courseId, examType, facultyUserId],
+          );
+          await this.assertEndTermDraftComplete(manager, tenantId, courseId, examType,
+            Number(session.owner_department_id), Number(session.max_marks), drafts);
+          return update(manager);
+        })
+      : await update(this.dataSource);
 
     const courseRows = await this.dataSource.query<
       Array<{ course_name: string }>
@@ -1227,6 +1298,8 @@ export class FacultyWorkspacesService {
         courseName,
         examType,
       );
+    } else {
+      await this.notifyHodEndTermReview(tenantId, courseId, courseName, examType);
     }
 
     return {
@@ -1236,7 +1309,7 @@ export class FacultyWorkspacesService {
       notified_count,
       message:
         targetStatus === 'PENDING_COE'
-          ? 'Marks submitted to Exam Cell (PENDING_COE). Students are notified after COE publishes.'
+          ? 'End-semester marks submitted for department HOD approval. Students are notified after Exam Cell releases the result.'
           : 'Marks published to students.',
     };
   }
@@ -1248,63 +1321,85 @@ export class FacultyWorkspacesService {
   ) {
     await this.assertFacultyOwnsCourse(facultyUserId, tenantId, courseId);
 
-    // A bulk action follows the same publication boundary as individual submission.
-    // Preflight and update all draft components together; pending COE marks stay locked.
-    const counts = await this.dataSource.transaction(async (manager) => {
-      const drafts = await manager.query<
-        Array<{ mark_id: string; exam_type: string }>
+    const rows = await this.dataSource.transaction(async (manager) => {
+      const observedDrafts = await manager.query<
+        Array<{ mark_id: string; exam_type: string; student_user_id: string; marks_obtained: number; max_marks: number }>
       >(
-        `SELECT mark_id, exam_type FROM academic_marks
+        `SELECT mark_id, exam_type, student_user_id, marks_obtained, max_marks FROM academic_marks
          WHERE tenant_id = $1 AND course_id = $2 AND uploaded_by = $3
-           AND status = 'DRAFT' FOR UPDATE`,
+           AND status = 'DRAFT'`,
         [tenantId, courseId, facultyUserId],
       );
-      if (!drafts.length)
-        throw new BadRequestException('No draft marks are available to submit');
-      for (const examType of new Set(drafts.map((row) => row.exam_type))) {
-        if (!isKnownExamType(examType) || isAutoSyncedExamType(examType))
-          throw new BadRequestException(
-            'Auto-synced or unsupported components cannot be published manually',
-          );
-        if (examType === 'QUIZ') continue;
+      if (!observedDrafts.length) return [];
+
+      // End-semester marks alone require an Exam Cell window and later HOD approval.
+      // Lock sessions before marks, in a stable order, as declaration does.
+      const examTypes = [...new Set(observedDrafts.map((row) => row.exam_type))].sort();
+      for (const examType of examTypes) {
+        if (!isKnownExamType(examType) || isAutoSyncedExamType(examType)) {
+          throw new BadRequestException(`${examType} cannot be submitted manually`);
+        }
+        const session = await this.getResultSession(
+          tenantId,
+          courseId,
+          examType,
+          manager,
+        );
+        if (session?.declared_at) {
+          throw new ForbiddenException('Declared results are immutable');
+        }
+        if (!isEndSemesterExamType(examType)) continue;
         const published = await manager.query<Array<{ result_id: string }>>(
           `SELECT result_id FROM academic_exam_results WHERE tenant_id = $1
              AND course_id = $2 AND exam_type = $3 AND status = 'PUBLISHED' LIMIT 1`,
           [tenantId, courseId, examType],
         );
-        if (published[0])
+        if (published[0]) {
           throw new ForbiddenException(
             'Published examination results are locked; use the authorized reassessment workflow',
           );
-        if (!isFacultyDirectGradingType(examType)) {
-          const sessions = await manager.query<
-            Array<{
-              entry_status: string;
-              marks_locked: boolean;
-              declared_at: string | null;
-            }>
-          >(
-            `SELECT * FROM exam_result_sessions WHERE tenant_id = $1 AND course_id = $2
-               AND exam_type = $3 ORDER BY created_at DESC LIMIT 1 FOR UPDATE`,
-            [tenantId, courseId, examType],
-          );
-          this.assertFacultyEntryAllowed(sessions[0] ?? null);
         }
+        this.assertFacultyEntryAllowed(session);
       }
-      const rows = await manager.query<Array<{ exam_type: string }>>(
-        `UPDATE academic_marks SET status = CASE WHEN exam_type = 'QUIZ' THEN 'PUBLISHED' ELSE 'PENDING_COE' END,
-           published_at = CASE WHEN exam_type = 'QUIZ' THEN NOW() ELSE published_at END, updated_at = NOW()
-         WHERE tenant_id = $1 AND course_id = $2 AND uploaded_by = $3 AND status = 'DRAFT'
-         RETURNING exam_type`,
-        [tenantId, courseId, facultyUserId],
+
+      const drafts = await manager.query<Array<{ mark_id: string; exam_type: string; student_user_id: string; marks_obtained: number; max_marks: number }>>(
+        `SELECT mark_id, exam_type, student_user_id, marks_obtained, max_marks FROM academic_marks
+         WHERE tenant_id=$1 AND course_id=$2 AND uploaded_by=$3
+           AND status='DRAFT' AND mark_id=ANY($4::uuid[]) FOR UPDATE`,
+        [tenantId, courseId, facultyUserId, observedDrafts.map((row) => row.mark_id)],
       );
-      const changed = Array.isArray(rows[0])
-        ? (rows[0] as Array<{ exam_type: string }>)
-        : rows;
-      const published = changed.filter(
-        (row) => row.exam_type === 'QUIZ',
-      ).length;
-      const submitted = changed.length - published;
+      if (drafts.some((row) => !examTypes.includes(row.exam_type))) {
+        throw new BadRequestException('Draft components changed during submission; retry');
+      }
+      if (!drafts.length) return [];
+      for (const examType of examTypes.filter(isEndSemesterExamType)) {
+        const session = await this.getResultSession(tenantId, courseId, examType, manager);
+        await this.assertEndTermDraftComplete(manager, tenantId, courseId, examType,
+          Number(session.owner_department_id), Number(session.max_marks), drafts.filter((row) => row.exam_type === examType));
+      }
+
+      // Restrict the write to the validated drafts. Concurrent/repeated requests
+      // cannot republish submitted marks or generate another success notification.
+      const result = await manager.query(
+        `UPDATE academic_marks
+         SET status = CASE WHEN exam_type IN ('ETE', 'END_TERM') THEN 'PENDING_COE' ELSE 'PUBLISHED' END,
+             published_at = CASE WHEN exam_type IN ('ETE', 'END_TERM') THEN NULL ELSE NOW() END,
+             updated_at = NOW()
+         WHERE tenant_id = $1 AND course_id = $2 AND uploaded_by = $3
+           AND status = 'DRAFT' AND mark_id = ANY($4::uuid[])
+         RETURNING mark_id, exam_type, status`,
+        [
+          tenantId,
+          courseId,
+          facultyUserId,
+          drafts.map((row) => row.mark_id),
+        ],
+      );
+      const changed = (Array.isArray(result[0]) ? result[0] : result) as Array<{
+        mark_id: string;
+        exam_type: string;
+        status: string;
+      }>;
       await manager.query(
         `INSERT INTO system_audit_logs (table_name, record_id, action, old_value, new_value, changed_by_user_id)
          VALUES ('academic_marks', $1, 'UPDATE', $2::jsonb, $3::jsonb, $4)`,
@@ -1314,42 +1409,58 @@ export class FacultyWorkspacesService {
           JSON.stringify({
             action: 'FACULTY_BULK_MARKS_SUBMITTED',
             tenant_id: tenantId,
-            published,
-            submitted,
+            published: changed.filter((row) => row.status === 'PUBLISHED').length,
+            submitted: changed.filter((row) => row.status === 'PENDING_COE').length,
           }),
           facultyUserId,
         ],
       );
-      return { published, submitted };
+      return changed;
     });
+    const publishedRows = rows.filter((row) => row.status === 'PUBLISHED');
+    const submittedCount = rows.filter(
+      (row) => row.status === 'PENDING_COE',
+    ).length;
+
     const courseRows = await this.dataSource.query<
       Array<{ course_name: string }>
     >(
       `SELECT course_name FROM academic_courses WHERE course_id = $1 AND tenant_id = $2 LIMIT 1`,
       [courseId, tenantId],
     );
-    const notified_count =
-      counts.published > 0
-        ? await this.notifyMarksPublishedToStudents(
-            tenantId,
-            courseId,
-            courseRows[0]?.course_name ?? 'your course',
-            'QUIZ',
-          )
-        : 0;
+    const courseName = courseRows[0]?.course_name ?? 'your course';
+    const examTypes = [...new Set(publishedRows.map((r) => r.exam_type))];
+
+    let notified_count = 0;
+    for (const examType of examTypes) {
+      notified_count += await this.notifyMarksPublishedToStudents(
+        tenantId,
+        courseId,
+        courseName,
+        examType,
+      );
+    }
+    for (const examType of [...new Set(rows.filter((row) => row.status === 'PENDING_COE').map((row) => row.exam_type))]) {
+      await this.notifyHodEndTermReview(tenantId, courseId, courseName, examType);
+    }
+
     return {
-      ...counts,
+      published: publishedRows.length,
+      submitted: submittedCount,
       status:
-        counts.submitted > 0
-          ? counts.published > 0
-            ? 'MIXED'
-            : 'PENDING_COE'
-          : 'PUBLISHED',
+        submittedCount > 0
+          ? publishedRows.length > 0 ? 'MIXED' : 'PENDING_COE'
+          : publishedRows.length > 0
+            ? 'PUBLISHED'
+            : 'UNCHANGED',
       notified_count,
+      course_name: courseName,
       message:
-        counts.submitted > 0
-          ? `${counts.submitted} marks submitted to Examination Cell for review; ${counts.published} quiz marks published.`
-          : `${counts.published} quiz marks published.`,
+        submittedCount > 0
+          ? `Submitted ${submittedCount} end-semester marks for department HOD approval and Exam Cell release.${publishedRows.length > 0 ? ` Published ${publishedRows.length} other marks.` : ''}`
+          : publishedRows.length > 0
+            ? 'Marks published to students.'
+            : 'No draft marks to submit. Submitted end-semester marks await HOD approval and Exam Cell release.',
     };
   }
 
@@ -3421,6 +3532,39 @@ export class FacultyWorkspacesService {
     return rows[0];
   }
 
+  private async notifyHodEndTermReview(
+    tenantId: string,
+    courseId: string,
+    courseName: string,
+    examType: string,
+  ) {
+    try {
+      const rows = await this.dataSource.query<Array<{ user_id: string }>>(
+        `SELECT hod.user_id FROM exam_result_sessions s
+         JOIN departments d ON d.dept_id=s.owner_department_id
+         JOIN users hod ON hod.user_id=d.hod_user_id AND hod.tenant_id=s.tenant_id
+           AND hod.is_active=TRUE AND hod.deleted_at IS NULL
+         WHERE s.tenant_id=$1 AND s.course_id=$2 AND s.exam_type=$3
+           AND s.declared_at IS NULL LIMIT 1`,
+        [tenantId, courseId, examType],
+      );
+      if (rows[0]) {
+        this.notify.approvalRequired({
+          tenantId,
+          userId: rows[0].user_id,
+          category: 'Results',
+          requestType: 'End-semester mark sheet',
+          requesterName: 'Faculty',
+          title: `End-semester marks need your review — ${courseName}`,
+          message: `${examType} marks were submitted. Review the exact department roster before Exam Cell release.`,
+          actionLink: '/hod/academics/end-term-results',
+        });
+      }
+    } catch {
+      // Submission remains committed and discoverable in the HOD queue.
+    }
+  }
+
   private async notifyMarksPublishedToStudents(
     tenantId: string,
     courseId: string,
@@ -3476,17 +3620,63 @@ export class FacultyWorkspacesService {
     }
   }
 
+  private async assertEndTermDraftComplete(
+    manager: EntityManager,
+    tenantId: string,
+    courseId: string,
+    examType: string,
+    departmentId: number,
+    maxMarks: number,
+    drafts: Array<{ student_user_id: string; marks_obtained: number; max_marks: number }>,
+  ) {
+    if (!Number.isInteger(departmentId) || !Number.isFinite(maxMarks) || maxMarks <= 0) {
+      throw new BadRequestException('End-semester session has no valid concerned department or maximum');
+    }
+    const roster = await manager.query<Array<{ student_user_id: string; dept_id: number; tenant_id: string }>>(
+      `SELECT DISTINCT e.student_user_id, student.dept_id, student.tenant_id
+       FROM student_course_enrollments e
+       JOIN users student ON student.user_id=e.student_user_id
+       WHERE e.tenant_id=$1 AND e.course_id=$2 AND e.deleted_at IS NULL
+         AND e.status IN ('ENROLLED','COMPLETED','FAILED')`,
+      [tenantId, courseId],
+    );
+    const rosterIds = new Set(roster.map((row) => row.student_user_id));
+    const draftIds = new Set(drafts.map((row) => row.student_user_id));
+    if (!rosterIds.size || roster.some((row) => row.tenant_id !== tenantId || Number(row.dept_id) !== departmentId)) {
+      throw new BadRequestException('Course roster is not confined to the concerned department and tenant');
+    }
+    if (draftIds.size !== rosterIds.size || drafts.length !== rosterIds.size ||
+        drafts.some((row) => !rosterIds.has(row.student_user_id))) {
+      throw new BadRequestException('Enter one end-semester mark for every enrolled student before submitting to HOD');
+    }
+    if (drafts.some((row) => Number(row.max_marks) !== maxMarks ||
+        !Number.isFinite(Number(row.marks_obtained)) || Number(row.marks_obtained) < 0 ||
+        Number(row.marks_obtained) > maxMarks)) {
+      throw new BadRequestException('Draft marks must match the current Exam Cell maximum');
+    }
+    const prior = await manager.query<Array<{ mark_id: string }>>(
+      `SELECT mark_id FROM academic_marks WHERE tenant_id=$1 AND course_id=$2 AND exam_type=$3
+       AND status IN ('PENDING_COE','PUBLISHED') LIMIT 1`,
+      [tenantId, courseId, examType],
+    );
+    if (prior[0]) throw new ForbiddenException('This end-semester sheet was already submitted');
+  }
+
   private async getResultSession(
     tenantId: string,
     courseId: string,
     examType: string,
+    manager?: EntityManager,
   ) {
-    const rows = await this.dataSource.query(
+    const rows = await (manager ?? this.dataSource).query(
       `SELECT * FROM exam_result_sessions
        WHERE tenant_id = $1 AND course_id = $2 AND exam_type = $3
-       ORDER BY created_at DESC LIMIT 1`,
+       ORDER BY created_at DESC LIMIT 2${manager ? ' FOR UPDATE' : ''}`,
       [tenantId, courseId, examType],
     );
+    if (isEndSemesterExamType(examType) && rows.length > 1) {
+      throw new BadRequestException('Multiple end-semester sessions share this course identity; Exam Cell must reconcile them');
+    }
     return rows[0] ?? null;
   }
 

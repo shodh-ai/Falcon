@@ -11,6 +11,8 @@ describe('Schedule date-only API contract', () => {
       {} as never,
       {} as never,
       {} as never,
+
+      {} as never,
     );
     await service.listSchedules('tenant');
     await service.listSeatingAllocations('tenant');
@@ -29,6 +31,8 @@ describe('Schedule date-only API contract', () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never,
+
       {} as never,
     );
     await service.listTodayExams('tenant');

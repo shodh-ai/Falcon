@@ -45,6 +45,28 @@ describe('DeanFilterBar', () => {
       expect.objectContaining({ date_from: '2025-02-01' }),
     );
   });
+
+  it('preserves the other filters when the end date changes', () => {
+    const onChange = vi.fn();
+    render(
+      <DeanFilterBar
+        departments={[]}
+        value={{ date_from: '2025-01-01', date_to: '2025-06-30', status: 'PENDING' }}
+        onChange={onChange}
+        showStatus
+      />,
+    );
+
+    fireEvent.change(screen.getByDisplayValue('2025-06-30'), {
+      target: { value: '2025-07-31' },
+    });
+
+    expect(onChange).toHaveBeenCalledWith({
+      date_from: '2025-01-01',
+      date_to: '2025-07-31',
+      status: 'PENDING',
+    });
+  });
 });
 
 describe('buildDeanFilterQuery', () => {

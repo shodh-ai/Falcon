@@ -6,12 +6,15 @@ import { AuthService } from '../auth.service';
 import { resolveJwtSecret } from '../../common/config/jwt-secret';
 import { normalizeOnboardingStatusForWizard } from '../../modules/student-onboarding/onboarding-portal.util';
 import type { AuthTokenPayload } from '../interfaces/auth-provider.interface';
+import { InjectDataSource } from '@nestjs/typeorm';
+import { DataSource } from 'typeorm';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor(
     private configService: ConfigService,
     private authService: AuthService,
+    @InjectDataSource() private readonly db: DataSource,
   ) {
     super({
       jwtFromRequest: ExtractJwt.fromExtractors([
@@ -55,6 +58,30 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
 
     if (!user.is_active) {
       throw new UnauthorizedException('User account is inactive');
+    }
+
+    if (user.role?.role_name === 'FacultyReadOnly') {
+      // Read the binding on every authenticated request: disabling it takes
+      // effect immediately, and client-supplied claims cannot select a source.
+      const rows = await this.db.query(
+        `SELECT b.source_user_id FROM faculty_read_only_viewers b
+         JOIN users source ON source.user_id=b.source_user_id
+           AND source.tenant_id=b.tenant_id AND source.is_active=true AND source.deleted_at IS NULL
+         JOIN roles r ON r.role_id=source.role_id AND r.role_name='Faculty'
+         WHERE b.viewer_user_id=$1 AND b.tenant_id=$2 AND b.enabled=true
+           AND source.dept_id=$3`,
+        [user.user_id, payload.tenantId, user.dept_id],
+      );
+      if (rows.length !== 1) throw new UnauthorizedException('Academic observer access is disabled');
+      return {
+        user_id: user.user_id, email: user.email, name: user.name,
+        role: 'Faculty', roles: ['Faculty'], primaryRole: 'Faculty',
+        tenant_id: payload.tenantId, tenant_schema: payload.tenantSchema ?? 'public',
+        dept_id: user.dept_id, department: user.department?.dept_name,
+        onboarding_status: user.onboarding_status,
+        read_only_faculty_source_id: rows[0].source_user_id,
+        read_only_academic_view: true,
+      };
     }
 
     await this.authService.syncMultiHatWorkspaceRoles(user.user_id);

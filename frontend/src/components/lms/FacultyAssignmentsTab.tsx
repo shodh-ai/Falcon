@@ -1,7 +1,7 @@
 'use client';
 
 import { FormEvent, useEffect, useState } from 'react';
-import { ChevronRight, Edit3, Plus, X } from 'lucide-react';
+import { ChevronRight, Edit3, Plus, Trash2, X } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import {
   FacultyPanel,
@@ -22,7 +22,7 @@ type Props = {
 
 export function FacultyAssignmentsTab({ courseId }: Props) {
   const api = useAuthedApi();
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const [assignments, setAssignments] = useState<FacultyAssignment[]>([]);
   const [createOpen, setCreateOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -44,6 +44,7 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
   const [gradeMarks, setGradeMarks] = useState<Record<string, string>>({});
   const [returnRemarks, setReturnRemarks] = useState<Record<string, string>>({});
   const [returningId, setReturningId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [rosterError, setRosterError] = useState<string | null>(null);
 
@@ -233,6 +234,24 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
     }
   }
 
+  async function deleteAssignment(assignment: FacultyAssignment) {
+    if ((assignment.submission_count ?? 0) > 0) {
+      toast.error('This assignment has student submissions and must remain available for grading.');
+      return;
+    }
+    if (!window.confirm(`Delete “${assignment.title}”? Students will no longer see it.`)) return;
+    setDeletingId(assignment.assignment_id);
+    try {
+      await api.del(`/api/academics/faculty/assignments/${assignment.assignment_id}`);
+      toast.success('Assignment deleted');
+      await loadAssignments();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not delete assignment');
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
   const now = Date.now();
   const scheduledAssignments = assignments.filter((a) => new Date(a.start_date).getTime() > now);
   const activeAssignments = assignments.filter(
@@ -282,6 +301,19 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
                     <Edit3 className="h-3.5 w-3.5" />
                     Edit
                   </Button>
+                  {a.faculty_user_id === user?.user_id ? <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={deletingId === a.assignment_id || (a.submission_count ?? 0) > 0}
+                    title={(a.submission_count ?? 0) > 0 ? 'Cannot delete after a student has submitted' : 'Delete assignment'}
+                    aria-label={`Delete ${a.title}`}
+                    onClick={() => void deleteAssignment(a)}
+                    className="gap-1.5 text-red-600 hover:text-red-700"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    Delete
+                  </Button> : null}
                   <ChevronRight className="h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-sgvu-navy" />
                 </div>
               </div>

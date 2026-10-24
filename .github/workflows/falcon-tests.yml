@@ -2,11 +2,111 @@ name: Falcon CI
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main, develop, testing]
   pull_request:
-    branches: [main, develop]
+    branches: [main, develop, testing]
 
 jobs:
+  deployment-boundaries:
+    name: Storage and database deployment boundaries
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Check startup, storage refusal and host preflight decisions
+        run: |
+          node --test backend/scripts/storage-boundary.spec.cjs backend/scripts/resource-boundary.spec.cjs backend/scripts/runtime-start.spec.cjs backend/scripts/deploy-migrate.spec.cjs
+          node --test ops/deployment-safety/tests/recovery_upload_probe.spec.cjs
+          python3 -B -m unittest discover -s ops/deployment-safety/tests -v
+      - name: Prepare official disposable PostgreSQL 18 fixture image
+        run: |
+          docker pull postgres:18-alpine
+          echo "FALCON_TEST_PG_IMAGE=$(docker image inspect --format '{{.Id}}' postgres:18-alpine)" >> "$GITHUB_ENV"
+      - name: Prove runtime grants against isolated PostgreSQL
+        env:
+          FALCON_RUN_ISOLATED_SQL_TESTS: '1'
+          FALCON_TEST_DOCKER_SOCKET: /var/run/docker.sock
+        run: python3 -B -m unittest discover -s ops/deployment-safety/tests -p test_runtime_role.py -v
+
+  notification-security:
+    name: Notification and sender security
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      NODE_ENV: test
+      PORTAL_EMAIL_DELIVERY_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # Match the reviewed Linux notification staging artifact.
+          node-version: '22.23.3'
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install locked backend dependencies
+        run: npm ci --prefix backend
+
+      - name: Test read-only document reconciliation with synthetic data
+        run: node --test ops/deployment-safety/tests/document_reconciliation.spec.cjs ops/deployment-safety/tests/document_media_proof.spec.cjs
+
+      # These specs mock persistence, queues and SMTP. No application starts.
+      - name: Test notification and password-reset sender safeguards offline
+        working-directory: backend
+        run: |
+          npm test -- --runInBand --runTestsByPath \
+            src/core/notifications/notification-activation.spec.ts \
+            src/core/notifications/notification-cron.service.spec.ts \
+            src/core/notifications/notification-delivery.processor.spec.ts \
+            src/core/notifications/notification-delivery-policy.spec.ts \
+            src/core/notifications/notification-dispatch.service.spec.ts \
+            src/core/notifications/notification-email-body.spec.ts \
+            src/core/notifications/notification-message.catalog.spec.ts \
+            src/core/notifications/notification-outbox.service.spec.ts \
+            src/core/notifications/notification-outbox-index.spec.ts \
+            src/core/notifications/notification-readiness.spec.ts \
+            src/core/notifications/notification-worker-lifecycle.spec.ts \
+            src/core/notifications/notification-release.config.spec.ts \
+            src/core/notifications/notification-startup.spec.ts \
+            src/core/notifications/notifications.gateway.spec.ts \
+            src/core/notifications/notifications.service.spec.ts \
+            src/core/redis/redis-connection.config.spec.ts \
+            src/core/redis/redis.service.spec.ts \
+            src/notifications-staging/config.spec.ts \
+            src/notifications-staging/capture.spec.ts \
+            src/notifications-staging/module.spec.ts \
+            src/common/email/falcon-email-sender.spec.ts \
+            src/common/email/falcon-email-consumers.spec.ts \
+            src/auth/password-reset-sender.spec.ts \
+            src/auth/password-reset.security.spec.ts
+
+      - name: Validate notification staging preparation offline
+        working-directory: backend
+        run: |
+          node --test scripts/notifications/staging/preparation.spec.cjs
+          node --test scripts/notifications/staging/schema/preparation.spec.cjs
+          node --test scripts/healthcheck.spec.cjs
+          node --check scripts/notifications/staging/ingress.cjs
+          node --check scripts/notifications/staging/review-plan.cjs
+
+      - name: Verify deployment-owned Faculty AI schema readiness
+        working-directory: backend
+        run: npm test -- --runInBand --runTestsByPath src/modules/faculty-ai/faculty-ai-schema-readiness.spec.ts
+
+      - name: Typecheck backend without emitting files
+        working-directory: backend
+        run: npx --no-install tsc --noEmit --incremental false -p tsconfig.json
+
+      - name: Build backend without startup or migration hooks
+        working-directory: backend
+        run: npm run build --ignore-scripts
+
   ci:
     runs-on: ubuntu-latest
 
@@ -60,7 +160,32 @@ jobs:
 
       - name: Migrate test database
         working-directory: tests
+        env:
+          ALLOW_SCHEMA_BOOTSTRAP_SYNC: 'true'
         run: npm run db:migrate:test
+
+      - name: HR QA workflow, scoped queues, reports and document storage regressions
+        working-directory: backend
+        env:
+          # Specs create TEMP tables and roll back; no live HR data is used.
+          HR_QA_PG_URL: postgresql://postgres:postgres@localhost:5432/falcon_test
+        run: npm test -- --runInBand --testPathPatterns='modules/hr/.*spec.ts'
+
+      - name: HR QA frontend regressions
+        working-directory: frontend
+        run: >-
+          npm test -- src/components/hr/__tests__
+          src/components/layout/__tests__/QuickActionMenu.test.tsx
+          src/lib/__tests__/notification-display.test.ts
+          src/lib/__tests__/notification-display-extended.test.ts
+          src/lib/__tests__/quick-action-dates.test.ts
+          src/lib/__tests__/quick-action-access.test.ts
+
+      - name: Build backend and verify real document ZIP integrity
+        working-directory: backend
+        run: |
+          npm run build --ignore-scripts
+          node scripts/test-hr-document-export.cjs
 
       - name: Install Playwright browsers
         working-directory: tests
@@ -69,6 +194,25 @@ jobs:
       - name: Typecheck, lint, test, build
         working-directory: tests
         run: npm run test:ci
+
+      - name: Test HR correction email against PostgreSQL and TypeORM
+        working-directory: backend
+        run: node scripts/test-staff-review-email-driver.cjs
+
+      - name: Test HR gate pass and profile correction regressions
+        working-directory: backend
+        run: |
+          npm test -- --runInBand --runTestsByPath \
+            src/modules/hr/hr-gate-pass-review.spec.ts \
+            src/modules/student-onboarding/staff-profile-review.service.spec.ts \
+            src/modules/student-onboarding/staff-profile-review-notification.service.spec.ts
+          node scripts/test-hr-gate-pass-queues.cjs
+
+      - name: Test HR gate pass page and unchecked-document correction flow
+        working-directory: frontend
+        run: >-
+          npm test -- src/components/hr/__tests__/HrGatePassesPage.test.tsx
+          src/components/onboarding/__tests__/StaffProfileVerificationsPage.test.tsx
 
       - name: Upload coverage (unit)
         if: always()

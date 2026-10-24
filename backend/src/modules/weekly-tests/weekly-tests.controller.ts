@@ -13,6 +13,7 @@ import { WeeklyTestsService } from './weekly-tests.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { requireTenantId } from '../../common/utils/require-tenant-id';
 
 type AuthUser = { user_id: string; tenant_id?: string };
 
@@ -31,6 +32,8 @@ export class WeeklyTestsController {
       test_type: 'WT1' | 'WT2';
       question_paper_url: string;
       answer_key: string[];
+      question_count?: number;
+      max_marks?: number;
       start_time: string;
       end_time: string;
     },
@@ -127,6 +130,6 @@ export class WeeklyTestsController {
   }
 
   private tenant(req: { user: AuthUser }) {
-    return req.user.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
+    return requireTenantId(req.user.tenant_id);
   }
 }

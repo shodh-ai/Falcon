@@ -27,7 +27,10 @@ export default function FinanceAuditReportsPage() {
   return (
     <div className="mx-auto max-w-5xl space-y-4 p-4 md:p-6">
       <FinancePageHeader title="Audit Reports & Compliance" description="One-click CSV exports for your CA — Day Book, Trial Balance, GST & TDS." />
-      <Input type="month" value={period} onChange={(e) => setPeriod(e.target.value)} className="max-w-xs" />
+      <label className="block max-w-xs space-y-1 text-sm font-medium">GST and TDS reporting month (YYYY-MM)
+        <Input type="month" value={period} onChange={(e) => setPeriod(e.target.value)} />
+        <span className="block text-xs font-normal text-muted-foreground">Applies to GST and TDS exports. Day Book and Trial Balance export their full available range.</span>
+      </label>
       <div className="grid gap-4 sm:grid-cols-2">
         <Card>
           <CardHeader>

@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectDataSource } from '@nestjs/typeorm';
@@ -12,7 +13,19 @@ export class NotificationCronService {
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly eventEmitter: EventEmitter2,
+    private readonly config: ConfigService,
   ) {}
+
+  private scheduledAlertsEnabled(): boolean {
+    // Queue activation alone must not turn historical domain backlog into mail.
+    // Enabling these producers requires a separate backlog/idempotency review;
+    // this guard does not provide source-event deduplication across replicas.
+    return (
+      this.config.get<unknown>(
+        'PORTAL_NOTIFICATION_SCHEDULED_ALERTS_ENABLED',
+      ) === 'true'
+    );
+  }
 
   /** Remove expired one-time codes from the authenticated notification inbox. */
   @Cron(CronExpression.EVERY_MINUTE)
@@ -28,6 +41,7 @@ export class NotificationCronService {
   /** Midnight: library books past return date. */
   @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
   async scanLibraryOverdue() {
+    if (!this.scheduledAlertsEnabled()) return;
     const rows = await this.dataSource.query<
       Array<{
         loan_id: string;
@@ -46,13 +60,16 @@ export class NotificationCronService {
     );
 
     for (const row of rows) {
-      this.eventEmitter.emit(NotificationEvents.OPERATIONS_LIBRARY_OVERDUE, {
-        tenantId: row.tenant_id,
-        userId: row.student_user_id,
-        bookTitle: row.title,
-        dueDate: row.due_date,
-        actionLink: '/student/library',
-      });
+      await this.eventEmitter.emitAsync(
+        NotificationEvents.OPERATIONS_LIBRARY_OVERDUE,
+        {
+          tenantId: row.tenant_id,
+          userId: row.student_user_id,
+          bookTitle: row.title,
+          dueDate: row.due_date,
+          actionLink: '/student/library',
+        },
+      );
       await this.dataSource.query(
         `UPDATE operations_library_loans SET overdue_notified_at = NOW() WHERE loan_id = $1`,
         [row.loan_id],
@@ -67,6 +84,7 @@ export class NotificationCronService {
   /** Daily 6 AM: attendance below 75% for enrolled students. */
   @Cron('0 6 * * *')
   async scanAttendanceWarnings() {
+    if (!this.scheduledAlertsEnabled()) return;
     const rows = await this.dataSource.query<
       Array<{
         student_user_id: string;

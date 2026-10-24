@@ -8,17 +8,27 @@ import { Button } from '@/components/ui/button';
 import { useAuthedApi } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import { getApiBaseUrl } from '@/lib/api-base-url';
+import { withAccessToken } from '@/lib/authenticated-download-url';
+
+type WeeklyTestDetails = {
+  course_code: string;
+  course_name: string;
+  test_type: string;
+  question_paper_url: string;
+  question_count: number;
+  max_marks: number;
+  scoring_version: number;
+};
 
 export default function AttemptTestPage({ params }: { params: Promise<{ testId: string }> }) {
   const router = useRouter();
   const api = useAuthedApi();
-  const { user } = useAuth();
+  const { user, token } = useAuth();
   
   const { testId } = use(params);
   
-  const [test, setTest] = useState<any>(null);
+  const [test, setTest] = useState<WeeklyTestDetails | null>(null);
   const [loading, setLoading] = useState(true);
-  const [isFullscreen, setIsFullscreen] = useState(false);
   const [hasStarted, setHasStarted] = useState(false);
   const [warnings, setWarnings] = useState(0);
   const [submitting, setSubmitting] = useState(false);
@@ -26,20 +36,27 @@ export default function AttemptTestPage({ params }: { params: Promise<{ testId: 
   const [isLocked, setIsLocked] = useState(false);
 
   const containerRef = useRef<HTMLDivElement>(null);
+  const submissionInFlight = useRef(false);
+  const warningsRef = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const data = await api.get<any>(`/api/weekly-tests/student/${testId}`);
+        const data = await api.get<WeeklyTestDetails>(`/api/weekly-tests/student/${testId}`);
+        if (cancelled) return;
         if (!data) {
           toast.error("Test not found or no longer active.");
           router.replace('/student/weekly-tests');
           return;
         }
-        if (!cancelled) setTest(data);
-      } catch (e: any) {
-        toast.error(e.message || "Failed to load test details.");
+        if (!cancelled) {
+          setAnswers(Array(data.question_count).fill(''));
+          setTest(data);
+        }
+      } catch (e: unknown) {
+        if (cancelled) return;
+        toast.error(e instanceof Error ? e.message : "Failed to load test details.");
         router.replace('/student/weekly-tests');
       } finally {
         if (!cancelled) setLoading(false);
@@ -48,14 +65,16 @@ export default function AttemptTestPage({ params }: { params: Promise<{ testId: 
     return () => { cancelled = true; };
   }, [api, testId, router]);
 
-  const submitTest = useCallback(async (isAutoSubmit: boolean = false) => {
-    if (submitting) return;
+  const submitTest = useCallback(async (isAutoSubmit = false, violationCount = warnings) => {
+    if (submissionInFlight.current) return;
+    submissionInFlight.current = true;
     setSubmitting(true);
+    setIsLocked(true);
     toast.info(isAutoSubmit ? 'Auto-submitting test...' : 'Submitting test...');
     try {
       await api.post(`/api/weekly-tests/student/${testId}/submit`, {
         answers: answers,
-        violation_count: warnings
+        violation_count: violationCount
       });
       toast.success('Test submitted successfully!');
       
@@ -67,41 +86,37 @@ export default function AttemptTestPage({ params }: { params: Promise<{ testId: 
       router.replace('/student/weekly-tests');
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to submit test');
-      setSubmitting(false); // only allow retry if it wasn't auto submit
-      if (isAutoSubmit) {
-        router.replace('/student/weekly-tests');
-      }
+      submissionInFlight.current = false;
+      setSubmitting(false);
+      if (!isAutoSubmit) setIsLocked(false);
     }
-  }, [api, testId, answers, submitting, router]);
+  }, [api, testId, answers, warnings, router]);
 
   useEffect(() => {
     const handleFullscreenChange = () => {
       const isFs = !!document.fullscreenElement;
-      setIsFullscreen(isFs);
-
-      if (hasStarted && !isFs && !submitting) {
-        setWarnings(prev => {
-          const newWarnings = prev + 1;
+      if (hasStarted && !isFs && !submissionInFlight.current) {
+          const newWarnings = warningsRef.current + 1;
+          warningsRef.current = newWarnings;
+          setWarnings(newWarnings);
           if (newWarnings === 1) {
             toast.error("WARNING: You exited full-screen mode. One more violation will auto-submit your test.", { duration: 10000 });
           } else if (newWarnings >= 2) {
             toast.error("VIOLATION: Full-screen exited multiple times. Auto-submitting test.");
-            submitTest(true);
+            void submitTest(true, newWarnings);
           }
-          return newWarnings;
-        });
       }
     };
 
     document.addEventListener('fullscreenchange', handleFullscreenChange);
     return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
-  }, [hasStarted, submitting, submitTest]);
+  }, [hasStarted, submitTest]);
 
   const startTest = async () => {
     try {
       await document.documentElement.requestFullscreen();
       setHasStarted(true);
-    } catch (err) {
+    } catch {
       toast.error("Failed to enter full-screen mode. Please try again.");
     }
   };
@@ -130,6 +145,8 @@ export default function AttemptTestPage({ params }: { params: Promise<{ testId: 
           <div className="bg-muted p-4 rounded-lg text-left space-y-2 text-sm">
             <p><strong>Course:</strong> {test.course_code} - {test.course_name}</p>
             <p><strong>Test Type:</strong> {test.test_type}</p>
+            <p><strong>Questions:</strong> {test.question_count}</p>
+            {test.scoring_version === 2 && <p><strong>Maximum Marks:</strong> {test.max_marks}</p>}
           </div>
           <Button onClick={startTest} className="w-full h-12 text-lg">
             <Maximize className="w-5 h-5 mr-2" />
@@ -166,7 +183,7 @@ export default function AttemptTestPage({ params }: { params: Promise<{ testId: 
         {/* PDF Viewer (Left) */}
         <div className="flex-1 border-r bg-muted/20 relative">
           <iframe 
-            src={`${getApiBaseUrl()}/api/uploads/download?path=${encodeURIComponent(test.question_paper_url)}&t=${Date.now()}#toolbar=0`} 
+            src={`${withAccessToken(`${getApiBaseUrl()}/api/uploads/download?path=${encodeURIComponent(test.question_paper_url)}`, token)}#toolbar=0`}
             className="w-full h-full border-0" 
             title="Question Paper"
             onLoad={() => {
@@ -187,7 +204,7 @@ export default function AttemptTestPage({ params }: { params: Promise<{ testId: 
             <div className="h-2 w-full bg-yellow-400 rounded-full overflow-hidden flex">
               <div 
                 className="h-full bg-green-500 transition-all duration-300" 
-                style={{ width: `${(answers.filter(a => a !== '').length / 10) * 100}%` }}
+                style={{ width: `${(answers.filter(a => a !== '').length / test.question_count) * 100}%` }}
               />
             </div>
           </div>
@@ -228,11 +245,11 @@ export default function AttemptTestPage({ params }: { params: Promise<{ testId: 
           </div>
           
           <div className="pt-6 mt-6 border-t">
-            <Button className="w-full" size="lg" onClick={() => setIsLocked(true)} disabled={isLocked || submitting}>
+            <Button className="w-full" size="lg" onClick={() => void submitTest(false)} disabled={submitting}>
               {isLocked ? 'Options Locked' : 'Final Submit'}
             </Button>
             <p className="text-xs text-center text-muted-foreground mt-3">
-              Ensure you have marked all 10 answers before submitting.
+              Review all {test.question_count} questions before submitting. Unanswered questions score zero.
             </p>
           </div>
         </div>

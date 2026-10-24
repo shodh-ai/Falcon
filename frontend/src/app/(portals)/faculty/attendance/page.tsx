@@ -22,6 +22,7 @@ import { Badge } from '@/components/ui/badge';
 import { useAuthedApi } from '@/lib/api';
 import { useTeachingDepartment } from '@/components/faculty/TeachingDepartmentContext';
 import { withTeachingDeptId } from '@/lib/faculty/teaching-departments';
+import { AttendanceWeekNavigator } from '@/components/faculty/AttendanceWeekNavigator';
 import {
   completeAttendancePayload,
   initializeAttendanceForm,
@@ -47,6 +48,9 @@ type FacultyClass = {
   student_count: number;
   section?: string | null;
   is_practical?: boolean;
+  has_saved_attendance?: boolean;
+  attendance_locked?: boolean;
+  awaiting_confirmation?: boolean;
 };
 
 type Student = {
@@ -112,6 +116,7 @@ function MarkAttendanceContent() {
   const [analytics, setAnalytics] = useState<AttendanceAnalytics | null>(null);
   const [attendance, setAttendance] = useState<Record<string, UiStatus>>({});
   const [selectedDate, setSelectedDate] = useState(todayIso());
+  const [attendanceRevision, setAttendanceRevision] = useState(0);
   const [locked, setLocked] = useState(false);
   const [hasSavedAttendance, setHasSavedAttendance] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -196,7 +201,8 @@ function MarkAttendanceContent() {
         if (!Array.isArray(data)) throw new Error('Timetable API returned an invalid response');
         setClassesError(null);
         setClasses(data);
-        if (data.length === 0) {
+        const selectable = data.filter(c => !c.awaiting_confirmation);
+        if (selectable.length === 0) {
           setSelectedCourseId(null);
           setSelectedTimetableId(null);
           setStudents([]);
@@ -204,9 +210,9 @@ function MarkAttendanceContent() {
           return;
         }
         const fromUrl = initialCourseId
-          ? data.find((c) => c.course_id === initialCourseId)
+          ? selectable.find((c) => c.course_id === initialCourseId)
           : undefined;
-        const pick = fromUrl ?? data[0]!;
+        const pick = fromUrl ?? selectable[0]!;
         setSelectedCourseId(pick.course_id);
         setSelectedTimetableId(pick.timetable_id);
       })
@@ -391,6 +397,9 @@ function MarkAttendanceContent() {
       );
       setLocked(state.locked);
       setHasSavedAttendance(true);
+      setAttendanceRevision(value => value + 1);
+      setClasses(rows => rows.map(row => row.timetable_id === timetableId && row.course_id === selectedCourseId
+        ? { ...row, has_saved_attendance: true, attendance_locked: state.locked } : row));
       const synced = result.attendance_updated?.length ?? 0;
       if (synced === 0) {
         toast.warning('Attendance saved to session log but no enrollment percentages were updated. Check student IDs.');
@@ -464,6 +473,14 @@ function MarkAttendanceContent() {
           Select a scheduled date to mark attendance or review a locked record.
         </p>
       </div>
+
+      <AttendanceWeekNavigator selectedDate={selectedDate} today={todayIso()} deptId={activeDeptId}
+        scopeLoading={deptLoading} revision={attendanceRevision} onSelect={date => {
+          if (date === selectedDate) return;
+          setLoading(true);
+          setClassesError(null);
+          setSelectedDate(date);
+        }} />
 
       {batchSlotsError ? <FacultyErrorBanner message={`Practical batch setup: ${batchSlotsError}`} /> : null}
       {batchSlots.length > 0 ? (
@@ -543,6 +560,7 @@ function MarkAttendanceContent() {
                   <li key={c.timetable_id}>
                     <button
                       type="button"
+                      disabled={c.awaiting_confirmation}
                       onClick={() => {
                         setRosterLoading(true);
                         setSelectedCourseId(c.course_id);
@@ -559,6 +577,11 @@ function MarkAttendanceContent() {
                       <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{c.course_name}</p>
                       <p className="mt-1 text-[11px] text-muted-foreground">
                         {String(c.start_time).slice(0, 5)}–{String(c.end_time).slice(0, 5)} · {c.student_count} students
+                      </p>
+                      <p className={cn('mt-2 text-xs font-medium', c.has_saved_attendance ? 'text-emerald-700' : 'text-amber-800')}>
+                        {c.awaiting_confirmation ? 'Awaiting department confirmation' : c.has_saved_attendance === true ? 'Attendance recorded'
+                          : c.has_saved_attendance === false ? c.attendance_locked ? 'Not recorded · date locked' : 'Attendance pending'
+                          : 'Attendance status unavailable'}
                       </p>
                     </button>
                   </li>

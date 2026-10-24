@@ -25,7 +25,10 @@ describe('HR final review queue and approval routing', () => {
       assertActorIsCurrentApprover: jest.fn(),
       advanceAfterApproval,
     };
-    const accessControl = { assertWorkflowApproverPower: jest.fn() };
+    const accessControl = {
+      assertWorkflowApproverPower: jest.fn(),
+      departmentScopeClause: jest.fn().mockResolvedValue({ clause: '', params: [] }),
+    };
     const service = new HrWorkforceService(
       {} as never, {} as never, requests as never, {} as never,
       {} as never, users as never, {} as never, {} as never,
@@ -61,6 +64,101 @@ describe('HR final review queue and approval routing', () => {
     expect(sql).toContain('r.current_approver_user_id = $3');
     expect(sql).toContain('p.entity_id = $2');
     expect(params).toEqual([tenantId, 7, approverId, 'LEAVE']);
+  });
+
+  it('keeps final HR review out of the manager inbox even for a dual-role approver', async () => {
+    const { service, query } = makeService();
+    await service.listPendingInbox(approverId, tenantId, ['HOD', 'HRAdmin']);
+    const [sql] = query.mock.calls[0];
+    expect(sql).toContain('AND NOT (r.request_type IN');
+    expect(sql).toContain("hr_step.approver_type IN ('HR_ADMIN', 'HR_EXECUTIVE')");
+    expect(sql).toContain('r.current_approver_user_id = $2');
+  });
+
+  it('requires an explicit reason before any admin override, including final review', async () => {
+    const row = {
+      leave_id: 'leave-id', tenant_id: tenantId, staff_user_id: 'staff-id',
+      request_type: 'LEAVE', status: 'HOD_APPROVED', workflow_id: 'workflow-id',
+      current_step_order: 2, current_approver_user_id: approverId,
+    };
+    const query = jest.fn()
+      .mockResolvedValueOnce([{ role_name: 'HRAdmin' }])
+      .mockResolvedValueOnce([{ approver_type: 'HR_ADMIN' }]);
+    const { service, transaction } = makeService({
+      query,
+      findOne: jest.fn().mockResolvedValue(row),
+    });
+    await expect(service.actOnTeamRequest(
+      approverId, tenantId, row.leave_id, 'APPROVE', undefined,
+      { adminOverride: true, roles: ['HRAdmin'] },
+    )).rejects.toThrow('override reason');
+    expect(transaction).not.toHaveBeenCalled();
+  });
+
+  it('includes first-level regularizations read-only only when explicitly requested', async () => {
+    const { service, query } = makeService();
+    await service.listHrReviewPending(tenantId, 7, approverId, 'REGULARIZATION', true);
+    const [sql, params] = query.mock.calls[0];
+    expect(sql).toContain('supervisory visibility');
+    expect(sql).toContain('AS can_review');
+    expect(sql).toContain("THEN 'FINAL_HR' ELSE 'FIRST_LEVEL'");
+    expect(sql).toContain('access.department_scope');
+    expect(params).toEqual([tenantId, 7, approverId, 'REGULARIZATION']);
+    query.mockClear();
+    await service.listHrReviewPending(tenantId, 7, approverId, 'LEAVE', true);
+    expect(query.mock.calls[0][0]).not.toContain('supervisory visibility');
+  });
+
+  it('denies self approval even when the caller is an HR override administrator', async () => {
+    const { service, query } = makeService({ findOne: jest.fn().mockResolvedValue({
+      staff_user_id: approverId, tenant_id: tenantId, leave_id: 'self',
+    }) });
+    await expect(service.actOnTeamRequest(approverId, tenantId, 'self', 'APPROVE', 'Test override reason', { adminOverride: true }))
+      .rejects.toThrow('your own request');
+    expect(query).not.toHaveBeenCalled();
+  });
+
+  it.each(['APPROVE', 'REJECT'] as const)('allows an independent final HR override %s with a scoped, audited reason', async (action) => {
+    const row = {
+      leave_id: 'leave-id', tenant_id: tenantId, staff_user_id: 'staff-id',
+      staff: { user_id: 'staff-id', name: 'Employee', tenant_id: tenantId },
+      request_type: 'LEAVE', status: 'HOD_APPROVED', workflow_id: 'workflow-id',
+      current_step_order: 2, current_approver_user_id: nextApproverId, entity_id: 7,
+    };
+    const query = jest.fn(async (sql: string) => {
+      if (sql.includes('FROM user_roles ur JOIN roles')) return [{ role_name: 'HRAdmin' }];
+      if (sql.includes('SELECT r.leave_id FROM staff_leave_requests')) return [{ leave_id: 'leave-id' }];
+      if (sql.includes('SELECT actor_user_id FROM hr_staff_request_decisions')) return [{ actor_user_id: nextApproverId }];
+      if (sql.includes('SELECT approver_type')) return [{ approver_type: 'HR_ADMIN' }];
+      if (sql.includes('UPDATE staff_leave_requests')) return [{ ...row, status: action === 'APPROVE' ? 'HR_APPROVED' : 'REJECTED' }];
+      return [];
+    });
+    const { service } = makeService({ query, findOne: jest.fn().mockResolvedValue(row), advanceAfterApproval: jest.fn().mockResolvedValue({ is_final: true }) });
+    jest.spyOn(service as unknown as { applyApprovalSideEffects: () => Promise<void> }, 'applyApprovalSideEffects').mockResolvedValue(undefined);
+    jest.spyOn(service as unknown as { recalculateApprovedAttendance: () => Promise<void> }, 'recalculateApprovedAttendance').mockResolvedValue(undefined);
+    jest.spyOn(service as unknown as { notifyEmployeeDecision: () => Promise<void> }, 'notifyEmployeeDecision').mockResolvedValue(undefined);
+    const result = await service.actOnTeamRequest(approverId, tenantId, row.leave_id, action, 'Assigned reviewer is unavailable', { adminOverride: true });
+    expect(result.status).toBe(action === 'APPROVE' ? 'HR_APPROVED' : 'REJECTED');
+    const audit = query.mock.calls.find(([sql]) => sql.includes('INSERT INTO hr_override_logs'));
+    expect(audit).toBeDefined();
+    expect((query.mock.calls as unknown as Array<[string, string[]]>).find(([sql]) => sql.includes('INSERT INTO hr_override_logs'))?.[1]).toEqual(expect.arrayContaining([approverId, 'leave-id', '2', 'Assigned reviewer is unavailable']));
+  });
+
+  it('never bypasses maker-checker separation when the final override actor already approved', async () => {
+    const row = { leave_id: 'leave-id', tenant_id: tenantId, staff_user_id: 'staff-id', staff: {}, request_type: 'LEAVE',
+      status: 'HOD_APPROVED', workflow_id: 'workflow-id', current_step_order: 2, current_approver_user_id: approverId, entity_id: 7 };
+    const query = jest.fn(async (sql: string) => {
+      if (sql.includes('FROM user_roles ur JOIN roles')) return [{ role_name: 'HRAdmin' }];
+      if (sql.includes('SELECT r.leave_id FROM staff_leave_requests')) return [{ leave_id: 'leave-id' }];
+      if (sql.includes('SELECT actor_user_id FROM hr_staff_request_decisions')) return [{ actor_user_id: approverId }];
+      if (sql.includes('SELECT approver_type')) return [{ approver_type: 'HR_ADMIN' }];
+      return [];
+    });
+    const { service } = makeService({ query, findOne: jest.fn().mockResolvedValue(row), advanceAfterApproval: jest.fn().mockResolvedValue({ is_final: true }) });
+    await expect(service.actOnTeamRequest(approverId, tenantId, row.leave_id, 'APPROVE', 'Assigned reviewer is unavailable', { adminOverride: true }))
+      .rejects.toThrow('previous approver');
+    expect(query.mock.calls.some(([sql]) => sql.includes('UPDATE staff_leave_requests'))).toBe(false);
+    expect(query.mock.calls.some(([sql]) => sql.includes('INSERT INTO hr_override_logs'))).toBe(false);
   });
 
   it('rejects legacy approval for an unassigned or out-of-entity request', async () => {
@@ -263,6 +361,7 @@ describe('HR final review queue and approval routing', () => {
       if (sql.includes('SELECT r.role_name FROM users u')) return [{ role_name: 'HOD' }];
       if (sql.includes('SELECT employee_id FROM hr_employee_profiles')) return [{ employee_id: 'EMP-1' }];
       if (sql.includes('SELECT approver_type')) return [{ approver_type: 'REPORTING_MANAGER' }];
+      if (sql.includes('SELECT r.leave_id FROM staff_leave_requests')) return [{ leave_id: 'leave-id' }];
       if (sql.includes('UPDATE staff_leave_requests')) return [{ ...row, status: 'HOD_APPROVED' }];
       return [];
     });
@@ -277,7 +376,7 @@ describe('HR final review queue and approval routing', () => {
       'notifyWorkflowApprover',
     ).mockResolvedValue(undefined);
     await service.actOnTeamRequest(
-      approverId, tenantId, row.leave_id, 'APPROVE', undefined,
+      approverId, tenantId, row.leave_id, 'APPROVE', 'Manager is unavailable; HR intervened',
       { adminOverride: true, roles: ['HRAdmin'] },
     );
     expect(advanceAfterApproval).toHaveBeenCalledWith(
