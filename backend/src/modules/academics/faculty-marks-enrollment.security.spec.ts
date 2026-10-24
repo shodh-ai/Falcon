@@ -13,13 +13,14 @@ const openSession = {
   declared_at: null,
   entry_open_at: null,
   entry_close_at: null,
+  max_marks: 40,
 };
 
-function draft(studentIds = [enrolledStudentId]) {
+function draft(studentIds = [enrolledStudentId], examType = 'CAT1') {
   return {
     course_id: courseId,
-    exam_type: 'CAT1',
-    max_marks: 50,
+    exam_type: examType,
+    max_marks: examType === 'ETE' ? 40 : 50,
     entries: studentIds.map((student_user_id, index) => ({
       student_user_id,
       marks_obtained: 30 + index,
@@ -107,10 +108,10 @@ describe('Faculty marks enrollment authorization', () => {
     expect(manager.query).not.toHaveBeenCalled();
   });
 
-  it('keeps the existing closed-window protection before a transaction begins', async () => {
+  it('requires an Exam Cell window for ETE before a transaction begins', async () => {
     const { service, dataSource, manager } = createService({ session: null });
 
-    await expect(service.saveMarksDraft(facultyId, tenantId, draft())).rejects.toBeInstanceOf(
+    await expect(service.saveMarksDraft(facultyId, tenantId, draft(undefined, 'ETE'))).rejects.toBeInstanceOf(
       BadRequestException,
     );
 
@@ -118,14 +119,20 @@ describe('Faculty marks enrollment authorization', () => {
     expect(manager.query).not.toHaveBeenCalled();
   });
 
-  it('keeps the existing locked-marks protection before a transaction begins', async () => {
+  it('keeps ETE locked-marks protection before a transaction begins', async () => {
     const { service, dataSource, manager } = createService({ locked: true });
 
-    await expect(service.saveMarksDraft(facultyId, tenantId, draft())).rejects.toBeInstanceOf(
+    await expect(service.saveMarksDraft(facultyId, tenantId, draft(undefined, 'ETE'))).rejects.toBeInstanceOf(
       ForbiddenException,
     );
 
     expect(dataSource.transaction).not.toHaveBeenCalled();
     expect(manager.query).not.toHaveBeenCalled();
+  });
+
+  it('allows a CAT1 draft without an Exam Cell session', async () => {
+    const { service } = createService({ session: null });
+    await expect(service.saveMarksDraft(facultyId, tenantId, draft()))
+      .resolves.toMatchObject({ saved: 1, status: 'DRAFT' });
   });
 });

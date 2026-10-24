@@ -939,6 +939,7 @@ export const hodPortal: PortalConfig = {
     {
       title: 'Examination',
       items: [
+        { label: 'End-Semester Marks Approval', href: '/hod/academics/end-term-results', icon: ClipboardCheck, keywords: ['exam', 'hod', 'end term', 'marks approval'] },
         { label: 'Result Analytics', href: '/hod/academics/result-analytics', icon: BarChart3, keywords: ['pass', 'fail', 'exam', 'grades'] },
         { label: 'Compiled Results', href: '/hod/dashboard?tab=results', icon: FileSpreadsheet, keywords: ['marks', 'grades', 'export', 'semester'] },
         { label: 'Grade Change Request', href: '/hod/academics/grade-change', icon: PenLine, keywords: ['grade change', 'request', 'sis'] },
@@ -1005,6 +1006,7 @@ export const hodPortal: PortalConfig = {
     {
       title: 'Examination',
       items: [
+        { label: 'End-Semester Marks Approval', href: '/hod/academics/end-term-results', icon: ClipboardCheck, keywords: ['exam', 'end term', 'hod marks'] },
         { label: 'Result Analytics', href: '/hod/academics/result-analytics', icon: BarChart3, keywords: ['pass fail'] },
         { label: 'Compiled Results', href: '/hod/dashboard?tab=results', icon: FileSpreadsheet, keywords: ['compiled results'] },
         { label: 'Grade Change Request', href: '/hod/academics/grade-change', icon: PenLine, keywords: ['grade change', 'request'] },

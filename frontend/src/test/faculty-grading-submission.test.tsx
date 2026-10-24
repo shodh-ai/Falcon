@@ -44,8 +44,7 @@ vi.mock("@/components/faculty", () => ({
   FacultyInlineLoading: () => null,
 }));
 
-const message =
-  "Submitted 1 exam marks to Exam Cell. Results require Dean approval and Exam Cell publication.";
+const message = "1 ETE marks submitted to the concerned HOD. Exam Cell must release them later.";
 const roster = (status = "DRAFT") => [
   {
     student_user_id: "student-a",
@@ -60,18 +59,21 @@ async function openCourse() {
     target: { value: "course-a" },
   });
   await screen.findByText("Test Student");
-  return screen.getByRole("button", { name: "Submit All Marks" });
+  const submit = screen.getByRole("button", { name: "Submit ETE to HOD" });
+  await waitFor(() => expect(submit).toBeEnabled());
+  return submit;
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
   window.localStorage.clear();
-  api.get.mockResolvedValue(roster());
+  api.get.mockImplementation(async (url: string) => url.includes('examType=ETE')
+    ? { result_session: { max_marks: 40, entry_status: 'OPEN', marks_locked: false } }
+    : roster());
   api.post.mockImplementation(async (url: string) =>
-    url.endsWith("/publish-all")
+    url.endsWith("/marks/publish")
       ? {
-          published: 0,
-          submitted: 1,
+          published: 1,
           status: "PENDING_COE",
           message,
           notified_count: 0,
@@ -82,11 +84,12 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("faculty bulk submission feedback", () => {
-  it("submits through the existing endpoint and says awaiting approval, not published", async () => {
+  it("submits ETE to HOD without publishing to students", async () => {
     fireEvent.click(await openCourse());
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith(message));
     expect(api.post).toHaveBeenCalledWith(
-      "/api/academics/faculty/workspaces/course/course-a/publish-all",
+      "/api/academics/faculty/workspaces/marks/publish",
+      { course_id: "course-a", exam_type: "ETE" },
     );
     expect(toast.warning).not.toHaveBeenCalled();
     expect(
@@ -99,8 +102,13 @@ describe("faculty bulk submission feedback", () => {
   it.each(["PENDING_COE", "PUBLISHED"])(
     "does not offer resubmission of %s marks",
     async (status) => {
-      api.get.mockResolvedValue(roster(status));
-      expect(await openCourse()).toBeDisabled();
+      api.get.mockImplementation(async (url: string) => url.includes('examType=ETE')
+        ? { result_session: { max_marks: 40, entry_status: 'OPEN', marks_locked: false } }
+        : roster(status));
+      render(<FacultyGradingPage />);
+      fireEvent.change(screen.getByRole('combobox'), { target: { value: 'course-a' } });
+      await screen.findByText('Test Student');
+      expect(screen.getByRole('button', { name: 'Submit ETE to HOD' })).toBeDisabled();
       expect(api.post).not.toHaveBeenCalled();
     },
   );
@@ -112,7 +120,7 @@ describe("faculty bulk submission feedback", () => {
       expect(toast.error).toHaveBeenCalledWith("Marks entry is locked"),
     );
     expect(
-      api.post.mock.calls.some(([url]) => String(url).endsWith("/publish-all")),
+      api.post.mock.calls.some(([url]) => String(url).endsWith("/marks/publish")),
     ).toBe(false);
     expect(toast.success).not.toHaveBeenCalled();
   });

@@ -149,9 +149,10 @@ export const MODULE_CATALOGUE: readonly ModuleDefinition[] = [
   definition(
     'examinations_credentials',
     'Examinations & Credentials',
-    ['/exam-cell', '/exams', '/student/exams', '/certificates'],
+    ['/exam-cell', '/exams', '/student/exams', '/certificates', '/hod/academics/end-term-results'],
     [
       '/api/exam-cell',
+      '/api/hod/end-term-results',
       '/api/academics/exams',
       '/api/academics/marks/history',
       '/api/academics/marksheet/download',

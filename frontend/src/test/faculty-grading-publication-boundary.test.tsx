@@ -23,7 +23,7 @@ async function open() {
   render(<FacultyGradingPage />);
   fireEvent.change(screen.getByRole('combobox'), { target: { value: 'course-real' } });
   await screen.findByText('Synthetic student');
-  return screen.getByRole('button', { name: 'Submit All Marks' });
+  return screen.getByRole('button', { name: 'Publish Internal Marks' });
 }
 
 describe('Faculty marks submission boundary', () => {
@@ -36,18 +36,17 @@ describe('Faculty marks submission boundary', () => {
     expect(toast.success).not.toHaveBeenCalled();
   });
 
-  it('reports actual COE submission instead of claiming student publication', async () => {
-    api.post.mockImplementation((path: string) => path.endsWith('/publish-all')
-      ? Promise.resolve({ published: 0, submitted: 1, status: 'PENDING_COE', message: '1 marks submitted for Examination Cell review.' })
+  it('publishes internal marks directly to students', async () => {
+    api.post.mockImplementation((path: string) => path.endsWith('/marks/publish')
+      ? Promise.resolve({ published: 1, status: 'PUBLISHED' })
       : Promise.resolve({ saved: 1 }));
     fireEvent.click(await open());
-    await waitFor(() => expect(toast.success).toHaveBeenCalledWith('1 marks submitted for Examination Cell review.'));
-    expect(api.post.mock.calls.some(([path]) => String(path).endsWith('/publish-all'))).toBe(true);
-    expect(toast.success.mock.calls.flat().some((message) => String(message).includes('Notifications sent'))).toBe(false);
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith('1 internal marks published directly to students.'));
+    expect(api.post).toHaveBeenCalledWith('/api/academics/faculty/workspaces/marks/publish', { course_id: 'course-real', exam_type: 'GA1' });
   });
 
   it('locks already submitted marks and does not offer repeat publication', async () => {
-    api.get.mockResolvedValue(rows('PENDING_COE'));
+    api.get.mockResolvedValue(rows('PUBLISHED'));
     const submit = await open();
     expect(submit).toBeDisabled();
     expect(screen.getByDisplayValue('3')).toBeDisabled();

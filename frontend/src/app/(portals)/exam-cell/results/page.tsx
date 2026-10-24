@@ -68,9 +68,13 @@ type ResultSession = {
   grading_policy_name?: string | null;
   coe_audit_status?: 'idle' | 'passed' | 'anomaly';
   dean_approved?: boolean;
+  hod_approved?: boolean;
+  hod_approval_status?: 'APPROVED' | 'REJECTED' | null;
+  owner_department_id?: number | null;
 };
 
 type CourseOption = { course_id: string; course_code: string; course_name: string };
+type DepartmentOption = { dept_id: number; dept_name: string };
 type PolicyOption = { policy_id: number; policy_name: string };
 type PreviewRow = {
   student_name: string;
@@ -90,7 +94,8 @@ type PendingGroup = {
   rows: PendingMark[];
 };
 
-const EXAM_TYPES = ['INTERNAL', 'CAT1', 'CAT2', 'END_TERM', 'PRACTICAL'];
+const EXAM_TYPES = ['INTERNAL', 'CAT1', 'CAT2', 'ETE', 'END_TERM', 'PRACTICAL'];
+const isEndTerm = (examType: string) => examType === 'ETE' || examType === 'END_TERM';
 
 type WorkflowStep = 'review' | 'lock' | 'declare' | 'preview' | 'done';
 
@@ -128,6 +133,7 @@ export default function ExamCellResultsPage() {
   const [sessions, setSessions] = useState<ResultSession[]>([]);
   const [courses, setCourses] = useState<CourseOption[]>([]);
   const [policies, setPolicies] = useState<PolicyOption[]>([]);
+  const [departments, setDepartments] = useState<DepartmentOption[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -137,6 +143,7 @@ export default function ExamCellResultsPage() {
   const [showSetup, setShowSetup] = useState(true);
   const [createForm, setCreateForm] = useState({
     course_id: '',
+    owner_department_id: '',
     exam_type: 'INTERNAL',
     semester: '4',
     max_marks: '50',
@@ -148,6 +155,8 @@ export default function ExamCellResultsPage() {
   const [reopenReason, setReopenReason] = useState('');
   const [coeAuditStatus, setCoeAuditStatus] = useState<'idle' | 'passed' | 'anomaly'>('idle');
   const [deanApproved, setDeanApproved] = useState(false);
+  const [hodApproved, setHodApproved] = useState(false);
+  const [hodApprovalStatus, setHodApprovalStatus] = useState<string | null>(null);
   const [anomalySubjects, setAnomalySubjects] = useState<{ course_code: string; failure_rate: number }[]>([]);
   const [moderationOpen, setModerationOpen] = useState(false);
   const [graceMarks, setGraceMarks] = useState('3');
@@ -156,6 +165,7 @@ export default function ExamCellResultsPage() {
   const [publishConfirmText, setPublishConfirmText] = useState('');
 
   const selected = sessions.find((s) => s.session_id === selectedId) ?? null;
+  const releaseApproved = selected ? (isEndTerm(selected.exam_type) ? hodApproved : deanApproved) : false;
   const workflowStep = deriveWorkflowStep(selected, preview);
   const activeStepIdx = stepIndex(workflowStep);
 
@@ -180,6 +190,18 @@ export default function ExamCellResultsPage() {
   }, [load]);
 
   useEffect(() => {
+    if (!createForm.course_id || !isEndTerm(createForm.exam_type)) {
+      setDepartments([]);
+      return;
+    }
+    let active = true;
+    void api.get<DepartmentOption[]>(`/api/exam-cell/result-control/courses/${createForm.course_id}/end-term-departments`)
+      .then((value) => { if (active) setDepartments(value); })
+      .catch(() => { if (active) setDepartments([]); });
+    return () => { active = false; };
+  }, [api, createForm.course_id, createForm.exam_type]);
+
+  useEffect(() => {
     if (!selectedId) return;
     let active = true;
     void Promise.resolve().then(async () => {
@@ -191,6 +213,8 @@ export default function ExamCellResultsPage() {
       setRulesForm({ pass_marks: '', max_marks: '', grading_policy_id: '' });
       setCoeAuditStatus('idle');
       setDeanApproved(false);
+      setHodApproved(false);
+      setHodApprovalStatus(null);
       setAnomalySubjects([]);
       try {
         const detail = await api.get<ResultSession>(`/api/exam-cell/result-control/sessions/${selectedId}`);
@@ -203,6 +227,8 @@ export default function ExamCellResultsPage() {
         const status = detail.coe_audit_status ?? 'idle';
         setCoeAuditStatus(status);
         setDeanApproved(Boolean(detail.dean_approved));
+        setHodApproved(Boolean(detail.hod_approved));
+        setHodApprovalStatus(detail.hod_approval_status ?? null);
         if (status === 'anomaly') {
           setAnomalySubjects([{ course_code: detail.course_code, failure_rate: 0 }]);
         } else {
@@ -213,6 +239,8 @@ export default function ExamCellResultsPage() {
         setDetailError(error instanceof Error ? error.message : 'Could not load result session details.');
         setCoeAuditStatus('idle');
         setDeanApproved(false);
+        setHodApproved(false);
+        setHodApprovalStatus(null);
         setAnomalySubjects([]);
       } finally {
         if (active) setDetailLoading(false);
@@ -258,6 +286,9 @@ export default function ExamCellResultsPage() {
   async function ensureSession(group: PendingGroup): Promise<string> {
     const existing = findSession(group.course_id, group.exam_type);
     if (existing) return existing.session_id;
+    if (isEndTerm(group.exam_type)) {
+      throw new Error('Create an end-semester session first and select its concerned department');
+    }
 
     const maxMarks = Number(group.rows[0]?.max_marks ?? 50);
     const created = await api.post<ResultSession>('/api/exam-cell/result-control/sessions', {
@@ -290,11 +321,16 @@ export default function ExamCellResultsPage() {
       toast.error('Select a course');
       return;
     }
+    if (isEndTerm(createForm.exam_type) && !createForm.owner_department_id) {
+      toast.error('Select the concerned department and HOD for end-semester marks');
+      return;
+    }
     setBusy(true);
     try {
       const created = await api.post<ResultSession>('/api/exam-cell/result-control/sessions', {
         course_id: createForm.course_id,
         exam_type: createForm.exam_type,
+        owner_department_id: isEndTerm(createForm.exam_type) ? Number(createForm.owner_department_id) : undefined,
         semester: Number(createForm.semester),
         max_marks: Number(createForm.max_marks),
         pass_marks: Number(createForm.pass_marks),
@@ -384,8 +420,8 @@ export default function ExamCellResultsPage() {
       toast.error('Preview grades before publishing');
       return;
     }
-    if (!deanApproved) {
-      toast.error('Dean/VC approval is required before publishing');
+    if (!releaseApproved) {
+      toast.error(isEndTerm(selected.exam_type) ? 'Concerned-department HOD approval is required before Exam Cell release' : 'Dean/VC approval is required before publishing');
       return;
     }
     setBusy(true);
@@ -475,10 +511,10 @@ export default function ExamCellResultsPage() {
       {
         key: 'faculty_lock',
         label: 'Faculty Lock',
-        description: 'Marks locked by HOD / faculty before COE review.',
+        description: 'Exam Cell locks faculty-submitted marks before final audit and release.',
         icon: PIPELINE_ICONS.faculty_lock,
         status: facultyLocked ? 'complete' : selected ? 'active' : 'pending',
-        statusLabel: facultyLocked ? 'Locked by HOD/Faculty' : 'Awaiting lock',
+        statusLabel: facultyLocked ? 'Entry locked' : 'Awaiting lock',
       },
       {
         key: 'coe_audit',
@@ -502,22 +538,22 @@ export default function ExamCellResultsPage() {
       },
       {
         key: 'dean_approval',
-        label: 'Dean / VC Approval',
-        description: 'Executive sign-off before public release.',
+        label: selected && isEndTerm(selected.exam_type) ? 'Department HOD Approval' : 'Dean / VC Approval',
+        description: selected && isEndTerm(selected.exam_type) ? 'Concerned HOD reviews exact submitted marks before Exam Cell release.' : 'Executive sign-off before public release.',
         icon: PIPELINE_ICONS.dean_approval,
-        status: deanApproved ? 'complete' : coeAuditStatus === 'passed' ? 'active' : 'pending',
-        statusLabel: deanApproved ? 'Approved' : 'Pending signature',
+        status: releaseApproved ? 'complete' : coeAuditStatus === 'passed' ? 'active' : 'pending',
+        statusLabel: releaseApproved ? 'Approved' : 'Pending signature',
       },
       {
         key: 'publish',
         label: 'Publish',
         description: 'Push final grades to student portals.',
         icon: PIPELINE_ICONS.publish,
-        status: deanApproved && preview?.length ? 'active' : 'pending',
-        statusLabel: deanApproved ? 'Ready to publish' : 'Locked',
+        status: releaseApproved && preview?.length ? 'active' : 'pending',
+        statusLabel: releaseApproved ? 'Ready to publish' : 'Locked',
       },
     ];
-  }, [selected, coeAuditStatus, deanApproved, preview?.length]);
+  }, [selected, coeAuditStatus, releaseApproved, preview?.length]);
 
   async function reopenEntry() {
     if (!selected || !reopenReason.trim()) {
@@ -597,13 +633,31 @@ export default function ExamCellResultsPage() {
                     id="result-exam-type"
                     className={fieldClass}
                     value={createForm.exam_type}
-                    onChange={(e) => setCreateForm({ ...createForm, exam_type: e.target.value })}
+                    onChange={(e) => setCreateForm({
+                      ...createForm,
+                      exam_type: e.target.value,
+                      owner_department_id: '',
+                      max_marks: e.target.value === 'ETE' ? '40' : e.target.value === 'END_TERM' ? '100' : '50',
+                      pass_marks: e.target.value === 'ETE' ? '16' : e.target.value === 'END_TERM' ? '40' : '20',
+                    })}
                   >
                     {EXAM_TYPES.map((t) => (
                       <option key={t} value={t}>{t}</option>
                     ))}
                   </Select>
                 </div>
+                {isEndTerm(createForm.exam_type) ? (
+                  <div className="flex flex-col gap-1.5 sm:col-span-2">
+                    <label htmlFor="result-owner-department" className={labelClass}>Concerned department / HOD</label>
+                    <Select id="result-owner-department" className={fieldClass}
+                      value={createForm.owner_department_id}
+                      onChange={(e) => setCreateForm({ ...createForm, owner_department_id: e.target.value })}>
+                      <option value="">Select department with an active HOD</option>
+                      {departments.map((department) => <option key={department.dept_id} value={department.dept_id}>{department.dept_name}</option>)}
+                    </Select>
+                    {!departments.length ? <p className="text-xs text-muted-foreground">No eligible department found. Check the student roster and HOD assignment.</p> : null}
+                  </div>
+                ) : null}
                 <div className="flex flex-col gap-1.5">
                   <label htmlFor="result-semester" className={labelClass}>Semester</label>
                   <Input
@@ -766,8 +820,8 @@ export default function ExamCellResultsPage() {
           <div className="border-b border-sgvu-navy/10 pb-4">
             <h2 className="text-lg font-bold text-sgvu-navy">Awaiting declaration</h2>
             <p className="mt-0.5 text-sm text-muted-foreground">
-              Faculty marks must be locked before the COE publishing pipeline activates. Each course follows:
-              Lock → Audit → Dean approval → Publish.
+              End-semester: Exam Cell opens entry → faculty submits → concerned HOD approves → Exam Cell audits and releases.
+              Internal components and quizzes are published directly by faculty.
             </p>
           </div>
           <ResultPublishingPipeline
@@ -775,8 +829,8 @@ export default function ExamCellResultsPage() {
             steps={[
               {
                 key: 'faculty_lock',
-                label: 'Faculty Lock',
-                description: 'HOD locks faculty submissions',
+                label: 'Entry Lock',
+                description: 'Exam Cell locks submitted marks',
                 icon: PIPELINE_ICONS.faculty_lock,
                 status: 'active',
                 statusLabel: 'Required first',
@@ -791,8 +845,8 @@ export default function ExamCellResultsPage() {
               },
               {
                 key: 'dean_approval',
-                label: 'Dean / VC',
-                description: 'Executive sign-off',
+                label: 'HOD / Dean',
+                description: 'HOD for end-semester; Dean for other controlled sessions',
                 icon: PIPELINE_ICONS.dean_approval,
                 status: 'pending',
                 statusLabel: 'After audit',
@@ -972,16 +1026,24 @@ export default function ExamCellResultsPage() {
               <WorkflowSection
                 step={3}
                 currentIdx={activeStepIdx}
-                title="Dean approval & publish"
-                description="Record Dean/VC sign-off, then push results to student portals with typed confirmation."
+                title={isEndTerm(selected.exam_type) ? 'HOD approval & Exam Cell release' : 'Dean approval & publish'}
+                description={isEndTerm(selected.exam_type) ? 'The concerned HOD approves the submitted sheet. Exam Cell then releases it to student portals.' : 'Record Dean/VC sign-off, then push results to student portals with typed confirmation.'}
               >
                 <div className="mb-4 flex flex-wrap items-center gap-3">
-                  <Badge variant={deanApproved ? 'default' : 'secondary'}>
-                    {deanApproved ? 'Dean/VC Approved' : 'Pending Dean/VC Signature'}
+                  <Badge variant={releaseApproved ? 'default' : 'secondary'}>
+                    {isEndTerm(selected.exam_type)
+                      ? (hodApproved ? 'HOD Approved' : hodApprovalStatus === 'REJECTED' ? 'HOD Rejected — reopen entry' : 'Awaiting HOD Approval')
+                      : (deanApproved ? 'Dean/VC Approved' : 'Pending Dean/VC Signature')}
                   </Badge>
-                  {!deanApproved && coeAuditStatus === 'passed' && (
+                  {!isEndTerm(selected.exam_type) && !deanApproved && coeAuditStatus === 'passed' && (
                     <Button size="sm" variant="outline" disabled={busy} onClick={() => void recordDeanApproval()}>
                       Submit for Dean Approval
+                    </Button>
+                  )}
+                  {isEndTerm(selected.exam_type) && (
+                    <Button size="sm" variant="outline" disabled={busy || detailLoading}
+                      onClick={() => setDetailAttempt((value) => value + 1)}>
+                      Refresh HOD decision
                     </Button>
                   )}
                 </div>
@@ -994,7 +1056,7 @@ export default function ExamCellResultsPage() {
                 <div className="mt-4 flex justify-end">
                   <Button
                     variant="destructive"
-                    disabled={busy || !preview?.length || !deanApproved}
+                    disabled={busy || !preview?.length || !releaseApproved}
                     onClick={() => setPublishDialogOpen(true)}
                   >
                     Push to Student Portals

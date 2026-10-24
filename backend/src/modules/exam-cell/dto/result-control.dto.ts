@@ -20,6 +20,11 @@ export class CreateResultSessionDto {
   @IsOptional()
   @IsInt()
   @Min(1)
+  owner_department_id?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
   semester?: number;
 
   @IsOptional()
