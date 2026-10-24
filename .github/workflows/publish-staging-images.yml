@@ -1,0 +1,271 @@
+name: Publish staging images
+
+on:
+  workflow_run:
+    workflows: ["Falcon CI"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      source_branch:
+        description: 'Reviewed source branch: develop, feature/*, or fix/*'
+        required: true
+        default: develop
+        type: string
+      source_sha:
+        description: Full 40-character lowercase SHA at the source branch head
+        required: true
+        type: string
+
+# Disabled until the isolated infrastructure and staging environment are ready.
+# No deploy hooks, migrations, or application credentials are used here.
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+
+concurrency:
+  group: falcon-staging-images-${{ github.event.workflow_run.head_sha || inputs.source_sha }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    if: >-
+      vars.STAGING_IMAGES_ENABLED == 'true' &&
+      github.repository == 'shodh-ai/Falcon' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_branch == 'develop' &&
+        github.event.workflow_run.head_repository.full_name == github.repository))
+    runs-on: ubuntu-latest
+    outputs:
+      source_sha: ${{ steps.source.outputs.source_sha }}
+      source_branch: ${{ steps.source.outputs.source_branch }}
+      ci_run_id: ${{ steps.source.outputs.ci_run_id }}
+      image_tag: ${{ steps.source.outputs.image_tag }}
+    steps:
+      # Keep this policy inline: never execute source-branch code with this token.
+      - name: Require a trusted workflow, current source revision, and passing CI
+        id: source
+        uses: actions/github-script@v7
+        env:
+          SOURCE_BRANCH: ${{ inputs.source_branch }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        with:
+          script: |
+            // BEGIN SOURCE VALIDATION
+            const assert = (condition, message) => { if (!condition) throw new Error(message); };
+            const { owner, repo } = context.repo;
+            const repository = `${owner}/${repo}`;
+            assert(repository === 'shodh-ai/Falcon', 'This publisher is restricted to shodh-ai/Falcon.');
+            assert(['refs/heads/main', 'refs/heads/develop'].includes(context.ref),
+              'Run the publisher workflow from main or develop; select the source using its inputs.');
+            const automatic = context.eventName === 'workflow_run';
+            assert(automatic || context.eventName === 'workflow_dispatch', 'Unsupported event.');
+            const run = context.payload.workflow_run;
+            const branch = automatic ? run.head_branch : process.env.SOURCE_BRANCH;
+            const sha = automatic ? run.head_sha : process.env.SOURCE_SHA;
+            assert(/^[0-9a-f]{40}$/.test(sha || ''), 'A full lowercase 40-character source SHA is required.');
+            assert(branch === 'develop' || /^(feature|fix)\/[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(branch || ''),
+              'Source branch must be develop, feature/*, or fix/*.');
+            assert(!branch.includes('..') && !branch.includes('//') && !/[/.]$/.test(branch),
+              'Invalid source branch name.');
+            const sameRepository = candidate => candidate.head_repository?.full_name === repository;
+            const { data: workflow } = await github.rest.actions.getWorkflow({ owner, repo, workflow_id: 'falcon-tests.yml' });
+            let ciRun;
+            if (automatic) {
+              assert(run.conclusion === 'success' && run.event === 'push' && branch === 'develop' &&
+                sameRepository(run) && run.workflow_id === workflow.id, 'Only successful same-repository develop push CI may publish automatically.');
+              ciRun = run;
+            }
+            const { data: ref } = await github.rest.git.getRef({ owner, repo, ref: `heads/${branch}` });
+            assert(ref.object.type === 'commit' && ref.object.sha === sha,
+              'Source SHA must still be the exact branch head. Run CI again for the current head.');
+            let pullRequest;
+            if (!automatic && branch !== 'develop') {
+              const prs = await github.paginate(github.rest.pulls.list, {
+                owner, repo, head: `${owner}:${branch}`, base: 'develop', state: 'open', per_page: 100,
+              });
+              pullRequest = prs.find(pr => pr.head.sha === sha && pr.head.repo?.full_name === repository &&
+                pr.head.ref === branch && pr.base.ref === 'develop' && pr.base.repo?.full_name === repository && !pr.draft);
+              assert(pullRequest, 'Feature/fix images require a non-draft, same-repository PR into develop at this SHA.');
+              const reviews = await github.paginate(github.rest.pulls.listReviews, {
+                owner, repo, pull_number: pullRequest.number, per_page: 100,
+              });
+              const latest = new Map();
+              for (const review of reviews.sort((a, b) => a.id - b.id)) {
+                if (review.user && ['APPROVED', 'CHANGES_REQUESTED', 'DISMISSED'].includes(review.state)) {
+                  latest.set(review.user.id, review);
+                }
+              }
+              assert(![...latest.values()].some(review => review.state === 'CHANGES_REQUESTED'),
+                'Resolve outstanding requested changes before publishing preview images.');
+              let trustedApproval = false;
+              for (const review of latest.values()) {
+                if (review.state !== 'APPROVED' || review.commit_id !== sha ||
+                    review.user.id === pullRequest.user.id || review.user.type !== 'User') continue;
+                assert(review.user.login, 'Cannot resolve the approving reviewer.');
+                // Public repositories allow outsider reviews. Only approval from a
+                // collaborator who can write this repository authorizes publication.
+                // API failures deliberately stop the job rather than bypassing review.
+                const { data: collaborator } = await github.rest.repos.getCollaboratorPermissionLevel({
+                  owner, repo, username: review.user.login,
+                });
+                if (['write', 'maintain', 'admin'].includes(collaborator.permission)) {
+                  trustedApproval = true;
+                  break;
+                }
+              }
+              assert(trustedApproval,
+                'A collaborator with write, maintain, or admin access must approve the current source SHA.');
+            }
+            if (!automatic) {
+              const runs = await github.paginate(github.rest.actions.listWorkflowRuns, {
+                owner, repo, workflow_id: workflow.id, branch, head_sha: sha, per_page: 100,
+              });
+              // A newer failed/re-run CI result must not be bypassed by an old success.
+              const matching = runs.filter(candidate => candidate.head_sha === sha && candidate.head_branch === branch &&
+                sameRepository(candidate) && candidate.workflow_id === workflow.id &&
+                (branch === 'develop' ? candidate.event === 'push' :
+                  candidate.event === 'pull_request' && candidate.pull_requests?.some(pr => pr.number === pullRequest.number)))
+                .sort((a, b) => b.id - a.id || b.run_attempt - a.run_attempt);
+              ciRun = matching[0];
+              assert(ciRun?.status === 'completed' && ciRun.conclusion === 'success',
+                'The latest matching Falcon CI run must have passed for this branch and SHA.');
+            }
+            core.setOutput('source_sha', sha);
+            core.setOutput('source_branch', branch);
+            core.setOutput('ci_run_id', String(ciRun.id));
+            // Rebuilds with changed public settings get a new tag, including on reruns.
+            core.setOutput('image_tag', `sha-${sha}-run-${context.runId}-${process.env.GITHUB_RUN_ATTEMPT}`);
+            // END SOURCE VALIDATION
+
+  publish:
+    needs: validate
+    runs-on: ubuntu-latest
+    environment: staging
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - component: backend
+            context: backend
+            image: ghcr.io/shodh-ai/falcon-staging-backend
+          - component: frontend
+            context: frontend
+            image: ghcr.io/shodh-ai/falcon-staging-frontend
+    steps:
+      - name: Validate isolated public build settings before checking out source
+        uses: actions/github-script@v7
+        env:
+          STAGING_API_URL: ${{ vars.STAGING_API_URL }}
+          STAGING_SAAS_BASE_DOMAIN: ${{ vars.STAGING_SAAS_BASE_DOMAIN }}
+          STAGING_DEFAULT_TENANT: ${{ vars.STAGING_DEFAULT_TENANT }}
+          STAGING_GOOGLE_CLIENT_ID: ${{ vars.STAGING_GOOGLE_CLIENT_ID }}
+        with:
+          script: |
+            // BEGIN CONFIG VALIDATION
+            const assert = (condition, message) => { if (!condition) throw new Error(message); };
+            const api = process.env.STAGING_API_URL || '';
+            const domain = process.env.STAGING_SAAS_BASE_DOMAIN || '';
+            const tenant = process.env.STAGING_DEFAULT_TENANT || '';
+            const googleClient = process.env.STAGING_GOOGLE_CLIENT_ID || '';
+            assert(api && !/\s/.test(api), 'Set STAGING_API_URL to the isolated HTTPS API URL.');
+            let url;
+            try { url = new URL(api); } catch { throw new Error('STAGING_API_URL must be a valid HTTPS URL.'); }
+            assert(url.protocol === 'https:' && !url.username && !url.password && !url.search && !url.hash,
+              'STAGING_API_URL must use HTTPS without credentials, a query, or a fragment.');
+            const forbidden = ['apifalcon.jataka.io', 'falcon.jataka.io'];
+            const isForbidden = host => forbidden.some(value => host === value || host.endsWith(`.${value}`));
+            assert(!isForbidden(url.hostname.toLowerCase().replace(/\.$/, '')), 'The live website/API cannot be used as the staging API.');
+            const label = '[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?';
+            assert(domain.length <= 253 && new RegExp(`^${label}(?:\\.${label})+$`).test(domain),
+              'Set STAGING_SAAS_BASE_DOMAIN to a dedicated staging hostname, without a scheme or path.');
+            assert(new RegExp(`^${label}$`).test(tenant), 'Set STAGING_DEFAULT_TENANT to one valid staging tenant label.');
+            assert(!isForbidden(domain) && !isForbidden(`${tenant}.${domain}`), 'Staging tenant settings cannot select the live website/API.');
+            assert(!googleClient || /^[A-Za-z0-9._-]+$/.test(googleClient), 'STAGING_GOOGLE_CLIENT_ID must be a public client ID or empty.');
+            // END CONFIG VALIDATION
+
+      - name: Check out the validated revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate.outputs.source_sha }}
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate staging image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ matrix.image }}
+          tags: type=raw,value=${{ needs.validate.outputs.image_tag }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/shodh-ai/Falcon
+            org.opencontainers.image.revision=${{ needs.validate.outputs.source_sha }}
+
+      - name: Build and publish ${{ matrix.component }} staging image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.context }}/Dockerfile
+          platforms: linux/amd64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=staging-${{ matrix.component }}
+          cache-to: type=gha,mode=max,scope=staging-${{ matrix.component }}
+          provenance: false
+          sbom: false
+          # Preserve the existing single-platform Docker media type compatibility.
+          outputs: type=registry,push=true,oci-mediatypes=false
+          build-args: |
+            NEXT_PUBLIC_API_URL=${{ vars.STAGING_API_URL }}
+            NEXT_PUBLIC_GOOGLE_CLIENT_ID=${{ vars.STAGING_GOOGLE_CLIENT_ID }}
+            NEXT_PUBLIC_SAAS_BASE_DOMAIN=${{ vars.STAGING_SAAS_BASE_DOMAIN }}
+            NEXT_PUBLIC_DEFAULT_TENANT_SUBDOMAIN=${{ vars.STAGING_DEFAULT_TENANT }}
+
+      - name: Record image identity and review instructions
+        uses: actions/github-script@v7
+        env:
+          SOURCE_SHA: ${{ needs.validate.outputs.source_sha }}
+          SOURCE_BRANCH: ${{ needs.validate.outputs.source_branch }}
+          CI_RUN_ID: ${{ needs.validate.outputs.ci_run_id }}
+          IMAGE: ${{ matrix.image }}
+          COMPONENT: ${{ matrix.component }}
+          IMAGE_TAG: ${{ needs.validate.outputs.image_tag }}
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+        with:
+          script: |
+            const fs = require('node:fs');
+            const { SOURCE_SHA, SOURCE_BRANCH, CI_RUN_ID, IMAGE, COMPONENT, IMAGE_TAG, IMAGE_DIGEST } = process.env;
+            if (!/^sha256:[0-9a-f]{64}$/.test(IMAGE_DIGEST)) throw new Error('Build did not return an image digest.');
+            const manifest = {
+              source_sha: SOURCE_SHA, source_branch: SOURCE_BRANCH, ci_run_id: CI_RUN_ID,
+              image: `${IMAGE}:${IMAGE_TAG}`, image_by_digest: `${IMAGE}@${IMAGE_DIGEST}`,
+            };
+            fs.mkdirSync('staging-images', { recursive: true });
+            fs.writeFileSync(`staging-images/${COMPONENT}.json`, `${JSON.stringify(manifest, null, 2)}\n`);
+            await core.summary.addHeading(`${COMPONENT} staging image published`)
+              .addCodeBlock(JSON.stringify(manifest, null, 2), 'json')
+              .addRaw('\nNo application was deployed and no database operation was run. Configure only isolated staging resources with the recorded digest.\n')
+              .write();
+
+      - name: Upload staging image manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: falcon-staging-${{ matrix.component }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: staging-images/${{ matrix.component }}.json
+          if-no-files-found: error
+          retention-days: 30

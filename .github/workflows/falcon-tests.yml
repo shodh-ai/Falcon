@@ -6,6 +6,15 @@ on:
   pull_request:
     branches: [main, develop, testing]
 
+permissions:
+  contents: read
+
+# Cancel obsolete PR checks, while keeping every push run available to the
+# existing production image publisher that waits for successful main CI.
+concurrency:
+  group: falcon-ci-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   deployment-boundaries:
     name: Storage and database deployment boundaries
@@ -22,6 +31,8 @@ jobs:
           node --test backend/scripts/storage-boundary.spec.cjs backend/scripts/resource-boundary.spec.cjs backend/scripts/runtime-start.spec.cjs backend/scripts/deploy-migrate.spec.cjs
           node --test ops/deployment-safety/tests/recovery_upload_probe.spec.cjs
           python3 -B -m unittest discover -s ops/deployment-safety/tests -v
+      - name: Verify staging image publication safeguards offline
+        run: node --test .github/tests/staging-workflow.spec.cjs
       - name: Prepare official disposable PostgreSQL 18 fixture image
         run: |
           docker pull postgres:18-alpine
@@ -132,6 +143,12 @@ jobs:
       DB_PASSWORD: postgres
       DB_DATABASE: falcon_test
       FALCON_TEST_DB: 1
+      FALCON_RESET_DB: '0'
+      FALCON_LIVE_API: '0'
+      FALCON_E2E_LIVE: '0'
+      TEST_DATABASE_URL: ''
+      FALCON_WEB_URL: http://localhost:3000
+      PORTAL_EMAIL_DELIVERY_ENABLED: 'false'
       JWT_SECRET: test-jwt-secret-do-not-use-in-production
       JWT_EXPIRATION: 1d
       NODE_ENV: test

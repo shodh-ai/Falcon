@@ -63,6 +63,9 @@ From repo root: `npm test` · See [TESTING_GUIDE.md](./docs/TESTING_GUIDE.md).
 
 ### Development & operations
 
+Start with [DEVELOPMENT_WORKFLOW.md](./DEVELOPMENT_WORKFLOW.md) for the protected
+feature → develop → main process and the remaining staging setup steps.
+
 | Document | Description |
 |----------|-------------|
 | [DEVELOPER_GUIDE.md](./docs/DEVELOPER_GUIDE.md) | Install, env vars, migrations, folder conventions |
