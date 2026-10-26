@@ -28,6 +28,29 @@ function setup(respond: (sql: string, params?: unknown[]) => unknown[]) {
 }
 
 describe('date-specific substitute class', () => {
+  it('loads HOD department faculty without a department tenant column', async () => {
+    const { service, dataSource } = setup(() => []);
+    await expect(service.listDepartmentFacultyForHod(OWNER, TENANT)).resolves.toEqual([]);
+    const [sql, params] = dataSource.query.mock.calls[0];
+    expect(sql).toContain('department_hod.tenant_id=$1');
+    expect(sql).not.toContain('departments WHERE tenant_id');
+    expect(params).toEqual([TENANT, OWNER]);
+  });
+
+  it('loads HOD proxy approvals without joining a nonexistent department tenant column', async () => {
+    const { service, dataSource } = setup((sql) => {
+      if (sql.includes('FROM users u JOIN roles r')) return [{ role_name: 'HOD' }];
+      if (sql.includes('SELECT dept_id FROM users')) return [{ dept_id: 7 }];
+      return [];
+    });
+    await expect(service.listHodPendingProxies(OWNER, TENANT)).resolves.toEqual([]);
+    const sql = dataSource.query.mock.calls.find(([query]) =>
+      String(query).includes('FROM academic_proxy_requests p'))?.[0];
+    expect(sql).toContain('p.tenant_id = $1');
+    expect(sql).toContain('d.dept_id=af.dept_id');
+    expect(sql).not.toContain('d.tenant_id');
+  });
+
   it('lists only active dated classes and returns a date-only value', async () => {
     const { service, dataSource } = setup(() => []);
     await service.listLecturesForLeaveDates(OWNER, TENANT, '2026-10-26', '2026-10-27');
