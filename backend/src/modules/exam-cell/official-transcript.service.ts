@@ -1,10 +1,13 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
+import { isUUID } from 'class-validator';
 import { DataSource } from 'typeorm';
+import { requireTenantId } from '../../common/utils/require-tenant-id';
 import { EnterpriseAuditService } from '../../core/audit/enterprise-audit.service';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 import { OfficialTranscriptPdfService } from './official-transcript-pdf.service';
@@ -14,6 +17,22 @@ export type TranscriptActor = {
   role?: string;
   ip?: string;
   sessionId?: string;
+};
+
+type TenantTranscript = {
+  transcript_id: string;
+  tenant_id: string;
+  student_user_id: string;
+  semester: number;
+  status: string;
+  student_name: string;
+  enrollment_no: string | null;
+  generated_at: Date | null;
+  approved_at: Date | null;
+  verification_code: string | null;
+  pdf_url: string | null;
+  requested_at: Date;
+  archived_at: Date | null;
 };
 
 @Injectable()
@@ -29,6 +48,16 @@ export class OfficialTranscriptService {
     tenantId: string,
     filters?: { status?: string; semester?: number },
   ) {
+    tenantId = requireTenantId(typeof tenantId === 'string' ? tenantId : null);
+    if (!isUUID(tenantId)) {
+      throw new ForbiddenException('Invalid tenant context');
+    }
+    if (
+      filters?.semester !== undefined &&
+      (!Number.isInteger(filters.semester) || filters.semester < 1)
+    ) {
+      throw new BadRequestException('Valid semester is required');
+    }
     const params: unknown[] = [tenantId];
     let where = 't.tenant_id = $1';
     if (filters?.status) {
@@ -39,13 +68,33 @@ export class OfficialTranscriptService {
       params.push(filters.semester);
       where += ` AND t.semester = $${params.length}`;
     }
-    return this.db.query(
+    return this.db.query<TenantTranscript[]>(
       `SELECT t.*, u.name AS student_name,
               COALESCE(sp.enrollment_no, sp.prn_number) AS enrollment_no
        FROM official_transcripts t
-       JOIN users u ON u.user_id = t.student_user_id
-       LEFT JOIN student_profiles sp ON sp.user_id = t.student_user_id
+       JOIN users u ON u.user_id = t.student_user_id AND u.tenant_id = t.tenant_id
+       LEFT JOIN student_profiles sp ON sp.user_id = t.student_user_id AND sp.tenant_id = t.tenant_id
        WHERE ${where}
+         AND EXISTS (
+           SELECT 1 FROM student_exam_reports r
+           JOIN exam_result_sessions s ON s.session_id = r.session_id
+             AND s.tenant_id = r.tenant_id AND s.course_id = r.course_id
+             AND s.exam_type = r.exam_type
+           JOIN academic_courses c ON c.course_id = r.course_id AND c.tenant_id = r.tenant_id
+           WHERE r.tenant_id = t.tenant_id AND r.student_user_id = t.student_user_id
+             AND s.semester = t.semester
+             AND r.declared_at IS NOT NULL AND s.declared_at IS NOT NULL
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM student_exam_reports r
+           JOIN exam_result_sessions s ON s.session_id = r.session_id
+             AND s.tenant_id = r.tenant_id AND s.course_id = r.course_id
+             AND s.exam_type = r.exam_type
+           JOIN academic_courses c ON c.course_id = r.course_id AND c.tenant_id = r.tenant_id
+           WHERE r.tenant_id = t.tenant_id AND r.student_user_id = t.student_user_id
+             AND s.semester = t.semester AND r.result_status = 'WITHHELD'
+             AND r.declared_at IS NOT NULL AND s.declared_at IS NOT NULL
+         )
        ORDER BY t.created_at DESC
        LIMIT 500`,
       params,
@@ -53,7 +102,22 @@ export class OfficialTranscriptService {
   }
 
   async listForStudent(tenantId: string, studentUserId: string) {
-    return this.db.query(
+    return this.db.query<
+      Array<
+        Pick<
+          TenantTranscript,
+          | 'transcript_id'
+          | 'semester'
+          | 'status'
+          | 'verification_code'
+          | 'pdf_url'
+          | 'requested_at'
+          | 'approved_at'
+          | 'generated_at'
+          | 'archived_at'
+        >
+      >
+    >(
       `SELECT transcript_id, semester, status, verification_code, pdf_url,
               requested_at, approved_at, generated_at, archived_at
        FROM official_transcripts
@@ -69,28 +133,40 @@ export class OfficialTranscriptService {
     actor: TranscriptActor,
     autoApprove = true,
   ) {
-    const blocked = await this.db.query(
+    tenantId = requireTenantId(tenantId);
+    if (!Number.isInteger(semester) || semester < 1) {
+      throw new BadRequestException('Valid semester is required');
+    }
+    const blocked = await this.db.query<Array<{ student_user_id: string }>>(
       `SELECT student_user_id FROM ufm_cases
        WHERE tenant_id = $1 AND status != 'CLOSED' AND marks_locked = true`,
       [tenantId],
     );
-    const blockedSet = new Set(
-      blocked.map((b: { student_user_id: string }) => b.student_user_id),
-    );
+    const blockedSet = new Set(blocked.map((b) => b.student_user_id));
 
-    const grads = await this.db.query(
+    const grads = await this.db.query<Array<{ user_id: string }>>(
       `SELECT DISTINCT u.user_id
        FROM users u
        JOIN student_course_enrollments e ON e.student_user_id = u.user_id
-       WHERE e.tenant_id = $1 AND e.semester = $2`,
+         AND e.tenant_id = u.tenant_id
+       WHERE e.tenant_id = $1 AND e.semester = $2
+         AND EXISTS (
+           SELECT 1 FROM student_exam_reports r
+           JOIN exam_result_sessions s ON s.session_id = r.session_id
+             AND s.tenant_id = r.tenant_id AND s.course_id = r.course_id
+             AND s.exam_type = r.exam_type
+           WHERE r.tenant_id = e.tenant_id AND r.student_user_id = e.student_user_id
+             AND s.semester = e.semester
+             AND r.declared_at IS NOT NULL AND s.declared_at IS NOT NULL
+         )`,
       [tenantId, semester],
     );
 
     const created: string[] = [];
-    for (const g of grads as { user_id: string }[]) {
+    for (const g of grads) {
       if (blockedSet.has(g.user_id)) continue;
 
-      const existing = await this.db.query(
+      const existing = await this.db.query<Array<{ transcript_id: string }>>(
         `SELECT transcript_id FROM official_transcripts
          WHERE tenant_id = $1 AND student_user_id = $2 AND semester = $3
            AND status NOT IN ('ARCHIVED')`,
@@ -98,13 +174,13 @@ export class OfficialTranscriptService {
       );
       if (existing[0]) continue;
 
-      const rows = await this.db.query(
+      const rows = await this.db.query<Array<{ transcript_id: string }>>(
         `INSERT INTO official_transcripts (tenant_id, student_user_id, semester, status)
          VALUES ($1, $2, $3, $4)
          RETURNING transcript_id`,
         [tenantId, g.user_id, semester, autoApprove ? 'APPROVED' : 'REQUESTED'],
       );
-      const transcriptId = rows[0].transcript_id as string;
+      const transcriptId = rows[0].transcript_id;
       created.push(transcriptId);
 
       if (autoApprove) {
@@ -149,11 +225,11 @@ export class OfficialTranscriptService {
     transcriptId: string,
     actor: TranscriptActor,
   ) {
-    const rows = await this.db.query(
-      `UPDATE official_transcripts
+    const rows = await this.db.query<Array<{ transcript_id: string }>>(
+      `WITH updated AS (UPDATE official_transcripts
        SET status = 'APPROVED', approved_at = NOW(), approved_by_user_id = $3, updated_at = NOW()
        WHERE transcript_id = $1 AND tenant_id = $2 AND status = 'REQUESTED'
-       RETURNING *`,
+       RETURNING *) SELECT * FROM updated`,
       [transcriptId, tenantId, actor.userId],
     );
     if (!rows[0]) {
@@ -181,7 +257,7 @@ export class OfficialTranscriptService {
     transcriptId: string,
     actor: TranscriptActor,
   ) {
-    const before = await this.db.query(
+    const before = await this.db.query<Array<{ status: string }>>(
       `SELECT status FROM official_transcripts WHERE transcript_id = $1 AND tenant_id = $2`,
       [transcriptId, tenantId],
     );
@@ -197,14 +273,18 @@ export class OfficialTranscriptService {
       transcriptId,
     );
 
-    const updated = await this.db.query(
-      `UPDATE official_transcripts
+    const updated = await this.db.query<
+      Array<{ student_user_id: string; semester: number }>
+    >(
+      `WITH updated AS (UPDATE official_transcripts
        SET status = 'GENERATED', verification_code = $3, pdf_url = $4,
            generated_at = NOW(), updated_at = NOW()
        WHERE transcript_id = $1 AND tenant_id = $2
-       RETURNING student_user_id, semester`,
+       RETURNING student_user_id, semester)
+       SELECT student_user_id, semester FROM updated`,
       [transcriptId, tenantId, verificationCode, url],
     );
+    if (!updated[0]) throw new NotFoundException('Transcript not found');
 
     await this.db.query(
       `UPDATE official_transcripts
@@ -213,7 +293,7 @@ export class OfficialTranscriptService {
       [transcriptId, tenantId],
     );
 
-    const studentUserId = updated[0].student_user_id as string;
+    const studentUserId = updated[0].student_user_id;
     this.notify.transcriptGenerated({
       tenantId,
       userId: studentUserId,
@@ -250,7 +330,20 @@ export class OfficialTranscriptService {
   }
 
   async verifyPublic(verificationCode: string) {
-    const rows = await this.db.query(
+    const rows = await this.db.query<
+      Array<
+        Pick<
+          TenantTranscript,
+          | 'transcript_id'
+          | 'semester'
+          | 'status'
+          | 'pdf_url'
+          | 'generated_at'
+          | 'student_name'
+          | 'enrollment_no'
+        > & { program_name: string | null }
+      >
+    >(
       `SELECT t.transcript_id, t.semester, t.status, t.pdf_url, t.generated_at,
               u.name AS student_name,
               COALESCE(sp.enrollment_no, sp.prn_number) AS enrollment_no,

@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   ParseIntPipe,
+  ParseUUIDPipe,
   Post,
   Query,
   Req,
@@ -48,17 +49,33 @@ export class ExamsController {
 
   @Get('admit-card')
   @Roles('Student')
-  async admitCard(@Req() req: { user: AuthUser }, @Res() res: Response) {
+  async admitCard(
+    @Req() req: { user: AuthUser },
+    @Res() res: Response,
+    @Query('entry_id', new ParseUUIDPipe({ optional: true })) entryId?: string,
+  ) {
     const pdf = await this.exams.generateAdmitCardOrThrow(
       req.user.user_id,
       requireTenantId(req.user.tenant_id),
+      entryId,
     );
     res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader(
       'Content-Disposition',
       'attachment; filename="admit-card.pdf"',
     );
     res.send(pdf);
+  }
+
+  @Get('admit-cards')
+  @Roles('Student')
+  issuedAdmitCards(@Req() req: { user: AuthUser }) {
+    return this.exams.listIssuedAdmitCards(
+      req.user.user_id,
+      requireTenantId(req.user.tenant_id),
+    );
   }
 
   @Get('applications/my')

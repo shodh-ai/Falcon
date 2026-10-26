@@ -2,12 +2,33 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
+  Optional,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { plainToInstance } from 'class-transformer';
+import { isUUID, validateSync } from 'class-validator';
 import { AttendanceEligibilityService } from '../attendance-policy/attendance-eligibility.service';
 import { FinanceService } from '../finance/finance.service';
 import { ExamCellAuditService } from './exam-cell-audit.service';
+import { HallTicketPreparationService } from './hall-ticket-preparation.service';
+import { HallTicketReadinessService } from './hall-ticket-readiness.service';
+import { ExamDayScriptsService } from './exam-day-scripts.service';
+import {
+  CreateAnswerSheetDto,
+  UpdateAnswerSheetStatusDto,
+} from './dto/exam-day.dto';
+import {
+  assertHallTicketApprovalPolicy,
+  hallTicketWorkflowAvailability,
+  requireHallTicketTenant,
+} from './hall-ticket-policy';
+import {
+  AdvanceHallTicketApprovalDto,
+  BulkApproveHallTicketsDto,
+} from './dto/hall-ticket-approval.dto';
+import { validateHallTicketApprovalCommand } from './hall-ticket-transition';
 
 export type EligibilityCategory =
   | 'ELIGIBLE'
@@ -26,6 +47,12 @@ export class ExamCellEnterpriseService {
     private readonly attendanceEligibility: AttendanceEligibilityService,
     private readonly finance: FinanceService,
     private readonly audit: ExamCellAuditService,
+    @Optional()
+    private readonly hallTicketPreparation?: HallTicketPreparationService,
+    @Optional()
+    private readonly hallTicketReadiness?: HallTicketReadinessService,
+    @Optional()
+    private readonly examDayScripts?: ExamDayScriptsService,
   ) {}
 
   private async queryOrEmpty<T extends Record<string, unknown>>(
@@ -283,52 +310,55 @@ export class ExamCellEnterpriseService {
 
   /* ── 3. Hall Ticket Approval Workflow ── */
 
-  async syncHallTicketApprovals(
+  inspectHallTicketReadiness(
+    tenantId: string,
+    sessionId: string,
+    registrationId: string,
+    actorRole?: string,
+  ) {
+    if (!this.hallTicketReadiness)
+      throw new ServiceUnavailableException(
+        'Session-linked readiness is unavailable',
+      );
+    return this.hallTicketReadiness.inspect(
+      tenantId,
+      sessionId,
+      registrationId,
+      actorRole,
+    );
+  }
+
+  prepareHallTicketApprovals(
+    tenantId: string,
+    sessionId: string,
+    actorUserId: string,
+    actorRole?: string,
+  ) {
+    if (!this.hallTicketPreparation)
+      throw new ServiceUnavailableException(
+        'Session-linked approval preparation is unavailable',
+      );
+    return this.hallTicketPreparation.prepare(
+      tenantId,
+      sessionId,
+      actorUserId,
+      actorRole,
+    );
+  }
+
+  syncHallTicketApprovals(
     tenantId: string,
     semester: number,
     batchLabel: string,
+    actorRole?: string,
   ) {
-    const dash = await this.eligibilityDashboard(tenantId, semester);
-    let synced = 0;
-
-    for (const item of dash.items) {
-      const stage =
-        item.category === 'ELIGIBLE'
-          ? 'ELIGIBILITY'
-          : item.category === 'FEE_PENDING'
-            ? 'FINANCE'
-            : 'REGISTRATION';
-
-      try {
-        await this.db.query(
-          `INSERT INTO hall_ticket_approvals
-             (tenant_id, student_user_id, semester, batch_label, stage, block_reasons,
-              eligibility_status, finance_status)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-           ON CONFLICT (tenant_id, student_user_id, semester, batch_label)
-           DO UPDATE SET
-             stage = EXCLUDED.stage,
-             block_reasons = EXCLUDED.block_reasons,
-             eligibility_status = EXCLUDED.eligibility_status,
-             finance_status = EXCLUDED.finance_status,
-             updated_at = NOW()`,
-          [
-            tenantId,
-            item.student_user_id,
-            semester,
-            batchLabel,
-            stage,
-            JSON.stringify(item.block_reasons),
-            item.category === 'ELIGIBLE' ? 'APPROVED' : 'PENDING',
-            item.fee_clear ? 'APPROVED' : 'PENDING',
-          ],
-        );
-        synced++;
-      } catch {
-        /* skip row on conflict with missing table — caller sees synced < total */
-      }
-    }
-    return { synced, total: dash.items.length };
+    // Compatibility route only. Batch labels cannot authorize a session-linked
+    // approval. New queue preparation uses prepareHallTicketApprovals instead.
+    return Promise.resolve().then(() => {
+      void semester;
+      void batchLabel;
+      return assertHallTicketApprovalPolicy(tenantId, actorRole);
+    });
   }
 
   async listHallTicketApprovals(
@@ -340,20 +370,39 @@ export class ExamCellEnterpriseService {
       page?: number;
       limit?: number;
       search?: string;
+      session_id?: string;
     },
+    actorRole?: string,
   ) {
+    tenantId = requireHallTicketTenant(tenantId);
+    let workflow = hallTicketWorkflowAvailability();
+    if (filters.session_id !== undefined) {
+      if (!this.hallTicketPreparation)
+        throw new ServiceUnavailableException(
+          'Session-linked approval preparation is unavailable',
+        );
+      workflow = await this.hallTicketPreparation.availability(
+        tenantId,
+        filters.session_id,
+        actorRole,
+      );
+    }
     const limit = Math.min(Math.max(Number(filters.limit) || 50, 1), 200);
     const page = Math.max(Number(filters.page) || 1, 1);
     const offset = (page - 1) * limit;
     const params: unknown[] = [tenantId];
     let sql = `
       FROM hall_ticket_approvals a
-      JOIN users u ON u.user_id = a.student_user_id
-      LEFT JOIN student_profiles sp ON sp.user_id = a.student_user_id
+      JOIN users u ON u.user_id = a.student_user_id AND u.tenant_id = a.tenant_id
+      LEFT JOIN student_profiles sp ON sp.user_id = a.student_user_id AND sp.tenant_id = a.tenant_id
       WHERE a.tenant_id = $1`;
     if (filters.semester) {
       params.push(filters.semester);
       sql += ` AND a.semester = $${params.length}`;
+    }
+    if (filters.session_id !== undefined) {
+      params.push(filters.session_id);
+      sql += ` AND a.session_id = $${params.length}`;
     }
     if (filters.batch_label) {
       params.push(filters.batch_label);
@@ -365,20 +414,22 @@ export class ExamCellEnterpriseService {
     }
     if (filters.search?.trim()) {
       params.push(`%${filters.search.trim()}%`);
-      sql += ` AND (u.name ILIKE $${params.length} OR sp.enrollment_number ILIKE $${params.length})`;
+      sql += ` AND (u.name ILIKE $${params.length} OR COALESCE(to_jsonb(sp)->>'enrollment_number',to_jsonb(sp)->>'enrollment_no',to_jsonb(sp)->>'prn_number') ILIKE $${params.length})`;
     }
 
-    const countRows = await this.queryOrEmpty<{ c: number }>(
+    const countRows = await this.db.query<Array<{ c: number }>>(
       `SELECT COUNT(*)::int AS c ${sql}`,
       params,
     );
     params.push(limit, offset);
-    const rows = await this.queryOrEmpty(
-      `SELECT a.*, u.name AS student_name, sp.enrollment_number ${sql}
-       ORDER BY u.name LIMIT $${params.length - 1} OFFSET $${params.length}`,
+    const rows = await this.db.query<Array<Record<string, unknown>>>(
+      `SELECT a.*, u.name AS student_name,
+              COALESCE(to_jsonb(sp)->>'enrollment_number',to_jsonb(sp)->>'enrollment_no',to_jsonb(sp)->>'prn_number') AS enrollment_number ${sql}
+       ORDER BY u.name, a.approval_id LIMIT $${params.length - 1} OFFSET $${params.length}`,
       params,
     );
     return {
+      workflow,
       data: rows,
       total: Number(countRows[0]?.c ?? 0),
       limit,
@@ -386,77 +437,50 @@ export class ExamCellEnterpriseService {
     };
   }
 
-  async advanceHallTicketApproval(
+  advanceHallTicketApproval(
     tenantId: string,
     approvalId: string,
     actorUserId: string,
-    action: 'APPROVE' | 'REJECT',
-    stage?: string,
+    dto: AdvanceHallTicketApprovalDto,
+    actorRole?: string,
   ) {
-    const [current] = await this.queryOrEmpty<Record<string, unknown>>(
-      `SELECT * FROM hall_ticket_approvals WHERE tenant_id = $1 AND approval_id = $2`,
-      [tenantId, approvalId],
-    );
-    if (!current) throw new NotFoundException('Approval record not found');
-
-    const flow = [
-      'REGISTRATION',
-      'ELIGIBILITY',
-      'FINANCE',
-      'EXAM_OFFICE',
-      'COE',
-      'APPROVED',
-    ];
-    let nextStage = String(current.stage);
-
-    if (action === 'REJECT') {
-      nextStage = 'REJECTED';
-    } else if (stage) {
-      nextStage = stage;
-    } else {
-      const idx = flow.indexOf(nextStage);
-      nextStage =
-        idx >= 0 && idx < flow.length - 1 ? flow[idx + 1] : 'APPROVED';
-    }
-
-    const [row] = await this.queryOrEmpty<Record<string, unknown>>(
-      `UPDATE hall_ticket_approvals
-       SET stage = $3, approved_by = $4, approved_at = NOW(), updated_at = NOW(),
-           coe_status = CASE WHEN $3 = 'APPROVED' THEN 'APPROVED' ELSE coe_status END
-       WHERE tenant_id = $1 AND approval_id = $2
-       RETURNING *`,
-      [tenantId, approvalId, nextStage, actorUserId],
-    );
-
-    await this.audit.log(tenantId, actorUserId, {
-      action:
-        action === 'REJECT' ? 'HALL_TICKET_REJECTED' : 'HALL_TICKET_APPROVED',
-      resource_type: 'hall_ticket_approval',
-      resource_id: approvalId,
-      new_value: { stage: nextStage },
+    return Promise.resolve().then(() => {
+      requireHallTicketTenant(tenantId);
+      if (!isUUID(approvalId) || !isUUID(actorUserId))
+        throw new BadRequestException(
+          'Valid approval and authenticated actor IDs are required',
+        );
+      validateHallTicketApprovalCommand(dto);
+      // The pure sequential planner is tested separately; it is deliberately
+      // not activated while essential stage policies remain unconfirmed.
+      return assertHallTicketApprovalPolicy(tenantId, actorRole);
     });
-    return row;
   }
 
-  async bulkApproveHallTickets(
+  bulkApproveHallTickets(
     tenantId: string,
     actorUserId: string,
-    dto: { semester: number; batch_label: string; target_stage: string },
+    dto: BulkApproveHallTicketsDto,
+    actorRole?: string,
   ) {
-    const result = await this.db.query(
-      `UPDATE hall_ticket_approvals
-       SET stage = $4, approved_by = $5, approved_at = NOW(), updated_at = NOW()
-       WHERE tenant_id = $1 AND semester = $2 AND batch_label = $3
-         AND stage NOT IN ('REJECTED', 'APPROVED')
-       RETURNING approval_id`,
-      [tenantId, dto.semester, dto.batch_label, dto.target_stage, actorUserId],
-    );
-    await this.audit.log(tenantId, actorUserId, {
-      action: 'HALL_TICKET_BULK_APPROVED',
-      resource_type: 'hall_ticket_approval',
-      new_value: { count: result.length, target_stage: dto.target_stage },
+    return Promise.resolve().then(() => {
+      requireHallTicketTenant(tenantId);
+      if (!isUUID(actorUserId))
+        throw new BadRequestException('Authenticated actor ID is required');
+      if (!dto || typeof dto !== 'object' || Array.isArray(dto))
+        throw new BadRequestException(
+          'An explicit session and approval IDs are required',
+        );
+      const errors = validateSync(
+        plainToInstance(BulkApproveHallTicketsDto, dto),
+        { whitelist: true, forbidNonWhitelisted: true },
+      );
+      if (errors.length)
+        throw new BadRequestException(
+          'An explicit session and unique approval IDs are required; target stages are controlled by the server',
+        );
+      return assertHallTicketApprovalPolicy(tenantId, actorRole);
     });
-    return { approved: result.length };
   }
 
   /* ── 5. Auto Invigilator Assignment ── */
@@ -537,76 +561,50 @@ export class ExamCellEnterpriseService {
 
   /* ── 6. Answer Sheet Tracking ── */
 
-  async listAnswerSheets(tenantId: string, status?: string) {
-    const params: unknown[] = [tenantId];
-    let sql = `
-      SELECT s.*, u.name AS student_name, sub.subject_name, es.exam_date
-      FROM answer_sheet_tracking s
-      LEFT JOIN users u ON u.user_id = s.student_user_id
-      LEFT JOIN exam_schedules es ON es.exam_schedule_id = s.exam_schedule_id
-      LEFT JOIN academic_subjects sub ON sub.subject_id = es.subject_id
-      WHERE s.tenant_id = $1`;
-    if (status) {
-      params.push(status);
-      sql += ` AND s.status = $${params.length}`;
-    }
-    sql += ' ORDER BY s.created_at DESC LIMIT 200';
-    return this.queryOrEmpty(sql, params);
+  listAnswerSheets(
+    tenantId: string,
+    status?: string,
+    scheduleId?: string,
+    role?: string,
+  ) {
+    if (!this.examDayScripts)
+      throw new ServiceUnavailableException(
+        'Exam-day script tracking is unavailable',
+      );
+    return this.examDayScripts.list(tenantId, status, scheduleId, role);
   }
 
   async createAnswerSheet(
     tenantId: string,
     actorUserId: string,
-    dto: {
-      sheet_number: string;
-      exam_schedule_id?: string;
-      student_user_id?: string;
-    },
+    dto: CreateAnswerSheetDto,
+    role?: string,
   ) {
-    const qrPayload = `AS-${dto.sheet_number}-${Date.now()}`;
-    const [row] = await this.queryOrEmpty<Record<string, unknown>>(
-      `INSERT INTO answer_sheet_tracking
-         (tenant_id, sheet_number, exam_schedule_id, student_user_id, qr_payload, barcode_payload)
-       VALUES ($1,$2,$3,$4,$5,$6)
-       RETURNING *`,
-      [
-        tenantId,
-        dto.sheet_number,
-        dto.exam_schedule_id ?? null,
-        dto.student_user_id ?? null,
-        qrPayload,
-        dto.sheet_number.replace(/\D/g, '').slice(0, 12),
-      ],
-    );
-    await this.audit.log(tenantId, actorUserId, {
-      action: 'ANSWER_SHEET_ISSUED',
-      resource_type: 'answer_sheet',
-      resource_id: String(row?.sheet_id ?? ''),
-    });
-    return row;
+    if (!this.examDayScripts)
+      throw new ServiceUnavailableException(
+        'Exam-day script tracking is unavailable',
+      );
+    return this.examDayScripts.create(tenantId, actorUserId, dto, role);
   }
 
   async updateAnswerSheetStatus(
     tenantId: string,
     sheetId: string,
     actorUserId: string,
-    status: string,
-    evaluatorUserId?: string,
+    dto: UpdateAnswerSheetStatusDto,
+    role?: string,
   ) {
-    const [row] = await this.queryOrEmpty<Record<string, unknown>>(
-      `UPDATE answer_sheet_tracking
-       SET status = $3, evaluator_user_id = COALESCE($4, evaluator_user_id), status_changed_at = NOW()
-       WHERE tenant_id = $1 AND sheet_id = $2
-       RETURNING *`,
-      [tenantId, sheetId, status, evaluatorUserId ?? null],
+    if (!this.examDayScripts)
+      throw new ServiceUnavailableException(
+        'Exam-day script tracking is unavailable',
+      );
+    return this.examDayScripts.transition(
+      tenantId,
+      sheetId,
+      actorUserId,
+      dto,
+      role,
     );
-    if (!row) throw new NotFoundException('Answer sheet not found');
-    await this.audit.log(tenantId, actorUserId, {
-      action: `ANSWER_SHEET_${status}`,
-      resource_type: 'answer_sheet',
-      resource_id: sheetId,
-    });
-    return row;
   }
 
   /* ── 7. Student Identity Verification ── */

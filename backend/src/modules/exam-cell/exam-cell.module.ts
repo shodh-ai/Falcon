@@ -18,6 +18,12 @@ import { ExamCellEnterpriseService } from './exam-cell-enterprise.service';
 import { ExamCellDevService } from './exam-cell-dev.service';
 import { OfficialTranscriptService } from './official-transcript.service';
 import { OfficialTranscriptPdfService } from './official-transcript-pdf.service';
+import { StudentEnrollmentSyncService } from '../academics/student-enrollment-sync.service';
+import { HallTicketPreparationService } from './hall-ticket-preparation.service';
+import { HallTicketReadinessService } from './hall-ticket-readiness.service';
+import { HallTicketTimetableService } from './hall-ticket-timetable.service';
+import { ExamDayScriptsService } from './exam-day-scripts.service';
+import { QuestionPaperWorkflowService } from './question-paper-workflow.service';
 
 @Module({
   imports: [
@@ -33,6 +39,13 @@ import { OfficialTranscriptPdfService } from './official-transcript-pdf.service'
     TranscriptVerifyController,
   ],
   providers: [
+    // Reuse the existing source service without an AcademicsModule import cycle.
+    StudentEnrollmentSyncService,
+    HallTicketPreparationService,
+    HallTicketReadinessService,
+    HallTicketTimetableService,
+    ExamDayScriptsService,
+    QuestionPaperWorkflowService,
     ExamCellService,
     ResultControlService,
     SemesterResultsService,

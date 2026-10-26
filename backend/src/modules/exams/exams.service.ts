@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Injectable,
   ForbiddenException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
@@ -16,6 +17,7 @@ import {
 } from './pdf/admit-card-pdf.service';
 import { AttendanceEligibilityService } from '../attendance-policy/attendance-eligibility.service';
 import { requireTenantId } from '../../common/utils/require-tenant-id';
+import { IssuedHallTicketService } from './issued-hall-ticket.service';
 
 export interface ExamEligibilityResult {
   eligible: boolean;
@@ -40,6 +42,7 @@ export class ExamsService {
     private readonly finance: FinanceService,
     private readonly pdf: AdmitCardPdfService,
     private readonly attendanceEligibility: AttendanceEligibilityService,
+    private readonly issuedTickets?: IssuedHallTicketService,
   ) {}
 
   async listUpcomingSchedulesForStudent(
@@ -459,26 +462,35 @@ export class ExamsService {
   async generateAdmitCardOrThrow(
     studentUserId: string,
     tenantId: string,
+    entryId?: string,
   ): Promise<Buffer> {
-    const eligibility = await this.checkEligibility(
+    if (!this.issuedTickets)
+      throw new ServiceUnavailableException(
+        'Issued hall-ticket retrieval unavailable',
+      );
+    return this.issuedTickets.download(
       studentUserId,
       requireTenantId(tenantId),
+      entryId,
+      async () => {
+        const eligibility = await this.checkEligibility(
+          studentUserId,
+          tenantId,
+        );
+        if (!eligibility.eligible)
+          throw new ForbiddenException(
+            eligibility.reasons[0]?.message ?? 'Blocked',
+          );
+      },
     );
-    if (!eligibility.eligible) {
-      const top = eligibility.reasons[0];
-      throw new ForbiddenException(top?.message ?? 'Blocked');
-    }
+  }
 
-    const [student, exams] = await Promise.all([
-      this.loadAdmitCardStudent(studentUserId, tenantId),
-      this.listAdmitCardExams(studentUserId, tenantId),
-    ]);
-
-    return this.pdf.generate({
-      student,
-      exams,
-      barcodePayload: `${student.enrollment_no || student.user_id}|${exams.map((e) => e.subject_code).join(',')}`,
-    });
+  listIssuedAdmitCards(studentUserId: string, tenantId: string) {
+    if (!this.issuedTickets)
+      throw new ServiceUnavailableException(
+        'Issued hall-ticket retrieval unavailable',
+      );
+    return this.issuedTickets.list(studentUserId, requireTenantId(tenantId));
   }
 
   private getAcademicYear(now = new Date()): string {

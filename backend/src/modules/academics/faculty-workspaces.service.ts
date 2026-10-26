@@ -11,6 +11,7 @@ import { SaveMarksDraftDto } from './dto/save-marks-draft.dto';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 import { DeanAuditService } from './dean-audit.service';
 import { assertNoPendingSql } from '../../common/validators/pending-request.util';
+import { lockResultInputs } from '../exam-cell/result-input-lock';
 import {
   GRADING_COMPONENT_CATALOG,
   GRADING_COMPONENT_IDS,
@@ -1064,28 +1065,6 @@ export class FacultyWorkspacesService {
     const needsExamCellSession =
       !isDirectPublish && !isFacultyDirectGradingType(examType);
 
-    if (needsExamCellSession) {
-      const session = await this.getResultSession(
-        tenantId,
-        dto.course_id,
-        examType,
-      );
-      this.assertFacultyEntryAllowed(session);
-    }
-
-    if (!isDirectPublish) {
-      const locked = await this.dataSource.query(
-        `SELECT 1 FROM academic_marks
-         WHERE tenant_id = $1 AND course_id = $2 AND exam_type = $3
-           AND status IN ('PENDING_COE', 'PUBLISHED') LIMIT 1`,
-        [tenantId, dto.course_id, examType],
-      );
-      if (locked[0]) {
-        throw new ForbiddenException(
-          'Submitted marks are locked. Contact Exam Cell to reopen entry.',
-        );
-      }
-    }
     const maxMarks = getGradingComponentMax(examType) ?? dto.max_marks;
     for (const entry of dto.entries) {
       if (entry.marks_obtained > maxMarks) {
@@ -1103,8 +1082,32 @@ export class FacultyWorkspacesService {
       );
     }
 
-    if (dto.entries.length > 0) {
-      await this.dataSource.transaction(async (manager) => {
+    await this.dataSource.transaction(async (manager) => {
+      // Recheck the window while holding the same session lock as declaration.
+      // A pre-transaction check can become stale while waiting to write marks.
+      const session = await this.getResultSession(
+        tenantId,
+        dto.course_id,
+        examType,
+        manager,
+      );
+      if (session || needsExamCellSession) {
+        this.assertFacultyEntryAllowed(session);
+      }
+      if (!isDirectPublish) {
+        const locked = await manager.query(
+          `SELECT 1 FROM academic_marks
+           WHERE tenant_id = $1 AND course_id = $2 AND exam_type = $3
+             AND status IN ('PENDING_COE', 'PUBLISHED') LIMIT 1 FOR UPDATE`,
+          [tenantId, dto.course_id, examType],
+        );
+        if (locked[0]) {
+          throw new ForbiddenException(
+            'Submitted marks are locked. Contact Exam Cell to reopen entry.',
+          );
+        }
+      }
+      if (dto.entries.length > 0) {
         const enrolledRows = await manager.query<
           Array<{ student_user_id: string }>
         >(
@@ -1144,32 +1147,29 @@ export class FacultyWorkspacesService {
             entry.co_mapped ?? null,
           );
         }
-        await manager.query(
+        const saved = await manager.query<Array<{ mark_id: string }>>(
           `INSERT INTO academic_marks (
              tenant_id, student_user_id, course_id, exam_type, marks_obtained, max_marks,
              co_mapped, status, uploaded_by, updated_at
            ) VALUES ${valuePlaceholders.join(', ')}
            ON CONFLICT (tenant_id, student_user_id, course_id, exam_type) DO UPDATE SET
-             marks_obtained = CASE
-               WHEN academic_marks.status IN ('PENDING_COE', 'PUBLISHED') THEN academic_marks.marks_obtained
-               ELSE EXCLUDED.marks_obtained
-             END,
+             marks_obtained = EXCLUDED.marks_obtained,
              max_marks = EXCLUDED.max_marks,
-             co_mapped = CASE
-               WHEN academic_marks.status IN ('PENDING_COE', 'PUBLISHED') THEN academic_marks.co_mapped
-               ELSE EXCLUDED.co_mapped
-             END,
-             status = CASE
-               WHEN EXCLUDED.exam_type = 'QUIZ' THEN 'DRAFT'
-               WHEN academic_marks.status IN ('PENDING_COE', 'PUBLISHED') THEN academic_marks.status
-               ELSE 'DRAFT'
-             END,
+             co_mapped = EXCLUDED.co_mapped,
+             status = 'DRAFT',
              uploaded_by = EXCLUDED.uploaded_by,
-             updated_at = NOW()`,
+             updated_at = NOW()
+           WHERE academic_marks.status NOT IN ('PENDING_COE', 'PUBLISHED')
+           RETURNING mark_id`,
           params,
         );
-      });
-    }
+        if (saved.length !== dto.entries.length) {
+          throw new ForbiddenException(
+            'Submitted marks are locked. Contact Exam Cell to reopen entry.',
+          );
+        }
+      }
+    });
     return { saved: dto.entries.length, status: 'DRAFT' };
   }
 
@@ -1189,21 +1189,28 @@ export class FacultyWorkspacesService {
     const isDirectPublish = examType === 'QUIZ';
     const needsExamCellSession =
       !isDirectPublish && !isFacultyDirectGradingType(examType);
-    if (needsExamCellSession) {
-      const session = await this.getResultSession(tenantId, courseId, examType);
-      this.assertFacultyEntryAllowed(session);
-    }
     const targetStatus = isDirectPublish ? 'PUBLISHED' : 'PENDING_COE';
     const statusCondition = isDirectPublish
       ? `status IN ('DRAFT', 'PENDING_COE', 'PUBLISHED')`
       : `status = 'DRAFT'`;
-    const result = await this.dataSource.query(
-      `UPDATE academic_marks
-       SET status = $5, updated_at = NOW()
-       WHERE tenant_id = $1 AND course_id = $2 AND exam_type = $3 AND uploaded_by = $4 AND ${statusCondition}
-       RETURNING mark_id`,
-      [tenantId, courseId, examType, facultyUserId, targetStatus],
-    );
+    const result = await this.dataSource.transaction(async (manager) => {
+      const session = await this.getResultSession(
+        tenantId,
+        courseId,
+        examType,
+        manager,
+      );
+      if (session || needsExamCellSession) {
+        this.assertFacultyEntryAllowed(session);
+      }
+      return manager.query(
+        `UPDATE academic_marks
+         SET status = $5, updated_at = NOW()
+         WHERE tenant_id = $1 AND course_id = $2 AND exam_type = $3 AND uploaded_by = $4 AND ${statusCondition}
+         RETURNING mark_id`,
+        [tenantId, courseId, examType, facultyUserId, targetStatus],
+      );
+    });
 
     const courseRows = await this.dataSource.query<
       Array<{ course_name: string }>
@@ -1272,14 +1279,16 @@ export class FacultyWorkspacesService {
         if (!isKnownExamType(examType) || isAutoSyncedExamType(examType)) {
           throw new BadRequestException(`${examType} cannot be submitted manually`);
         }
-        if (examType === 'QUIZ') continue;
         const session = await this.getResultSession(
           tenantId,
           courseId,
           examType,
           manager,
         );
-        if (session || !isFacultyDirectGradingType(examType)) {
+        if (
+          session ||
+          (examType !== 'QUIZ' && !isFacultyDirectGradingType(examType))
+        ) {
           this.assertFacultyEntryAllowed(session);
         }
       }
@@ -3480,12 +3489,24 @@ export class FacultyWorkspacesService {
     examType: string,
     manager?: EntityManager,
   ) {
+    if (manager) {
+      await lockResultInputs(manager, tenantId, courseId, examType);
+    }
     const rows = await (manager ?? this.dataSource).query(
       `SELECT * FROM exam_result_sessions
        WHERE tenant_id = $1 AND course_id = $2 AND exam_type = $3
-       ORDER BY created_at DESC LIMIT 1${manager ? ' FOR UPDATE' : ''}`,
+       ORDER BY created_at DESC${manager ? ', session_id FOR UPDATE' : ' LIMIT 1'}`,
       [tenantId, courseId, examType],
     );
+    if (manager) {
+      // academic_marks has no session/semester discriminator. A newer open
+      // session cannot authorize changes to a shared locked or declared batch.
+      const protectedSession = rows.find(
+        (row: { declared_at?: unknown; marks_locked?: boolean }) =>
+          row.declared_at || row.marks_locked,
+      );
+      if (protectedSession) return protectedSession;
+    }
     return rows[0] ?? null;
   }
 

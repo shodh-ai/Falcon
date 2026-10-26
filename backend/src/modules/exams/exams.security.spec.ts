@@ -254,22 +254,16 @@ describe('student exam data isolation', () => {
   );
 
   it('propagates hall-ticket database failures instead of generating a misleading PDF', async () => {
-    const query = jest
-      .fn<Promise<unknown[]>, [string, unknown[]]>()
-      .mockImplementation((sql: string) => {
-        if (sql.includes('FROM exam_schedules'))
-          return Promise.reject(new Error('Database unavailable'));
-        return Promise.resolve([
-          { user_id: 'student-a', name: 'Student A', email: 'a@example.test' },
-        ]);
-      });
+    const issued = {
+      download: jest.fn().mockRejectedValue(new Error('Database unavailable')),
+    };
     const pdf = { generate: jest.fn() };
     const unused = {} as never;
     const service = new ExamsService(
       unused,
       unused,
       unused,
-      { query } as never,
+      unused,
       { getPendingDues: jest.fn().mockResolvedValue([]) } as never,
       pdf as never,
       {
@@ -279,10 +273,17 @@ describe('student exam data isolation', () => {
           effective_threshold: 75,
         }),
       } as never,
+      issued as never,
     );
     await expect(
       service.generateAdmitCardOrThrow('student-a', 'tenant-a'),
     ).rejects.toThrow('Database unavailable');
+    expect(issued.download).toHaveBeenCalledWith(
+      'student-a',
+      'tenant-a',
+      undefined,
+      expect.any(Function),
+    );
     expect(pdf.generate).not.toHaveBeenCalled();
   });
 });

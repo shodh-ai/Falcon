@@ -1,11 +1,13 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
-import { DataSource } from 'typeorm';
+import { DataSource, EntityManager } from 'typeorm';
+import { requireTenantId } from '../../common/utils/require-tenant-id';
 
 type GradeCardStage = 'DRAFT' | 'PROVISIONAL' | 'FINAL';
 
@@ -27,6 +29,29 @@ type CgpaRow = {
   student_user_id: string;
   points: string | null;
   credits: string | null;
+};
+
+type GradeCardRow = {
+  grade_card_id: string;
+  student_user_id: string;
+  semester: number;
+  cgpa: string | number | null;
+  status: string;
+  published_at: Date | null;
+  payload: GradeCardPayload;
+  student_name: string;
+  student_email: string;
+  enrollment_number: string | null;
+};
+
+type MeritRow = {
+  student_user_id: string;
+  student_name: string;
+  enrollment_number: string | null;
+  rank: number | null;
+  sgpa: string | number | null;
+  cgpa: string | number | null;
+  result_stage: GradeCardStage | null;
 };
 
 type GradeCardPayload = {
@@ -59,99 +84,122 @@ export class SemesterResultsService {
   constructor(@InjectDataSource() private readonly db: DataSource) {}
 
   async generateGradeCards(tenantId: string, semester: number) {
-    if (!Number.isFinite(semester) || semester < 1) {
+    tenantId = requireTenantId(tenantId);
+    if (!Number.isInteger(semester) || semester < 1) {
       throw new BadRequestException('Valid semester is required');
     }
 
-    const rows = await this.loadEnrollmentRows(tenantId, semester);
-    if (!rows.length)
-      throw new BadRequestException(
-        `No enrollments found for semester ${semester}`,
+    return this.db.transaction(async (manager) => {
+      await this.lockSemester(manager, tenantId, semester);
+      // Check the entire batch before changing even its first draft. A withheld
+      // card may still be a previously published, issued snapshot.
+      const existing = await manager.query<Array<{ grade_card_id: string }>>(
+        `SELECT grade_card_id FROM grade_cards
+         WHERE tenant_id = $1 AND semester = $2
+           AND (status = 'PUBLISHED' OR published_at IS NOT NULL
+                OR payload->>'result_stage' IN ('PROVISIONAL', 'FINAL')
+                OR payload ? 'provisional_published_at'
+                OR payload ? 'final_published_at')
+         ORDER BY grade_card_id FOR UPDATE`,
+        [tenantId, semester],
       );
+      if (existing.length) {
+        throw new ConflictException(
+          'Published grade cards cannot be regenerated. An authorized correction/reissue workflow is required.',
+        );
+      }
 
-    const cgpaByStudent = await this.loadCgpaMap(tenantId);
-    const openUfm = await this.loadOpenUfmSet(tenantId);
-    const grouped = this.groupByStudent(rows);
-    const generatedAt = new Date().toISOString();
+      const rows = await this.loadEnrollmentRows(tenantId, semester, manager);
+      if (!rows.length)
+        throw new BadRequestException(
+          `No enrollments found for semester ${semester}`,
+        );
 
-    const cards = [...grouped.entries()].map(([studentId, studentRows]) => {
-      const first = studentRows[0];
-      const semesterCalc = this.calculateSemester(studentRows);
-      const cgpaCalc = cgpaByStudent.get(studentId) ?? {
-        points: 0,
-        credits: 0,
-      };
-      const cgpa =
-        cgpaCalc.credits > 0
-          ? this.round2(cgpaCalc.points / cgpaCalc.credits)
-          : 0;
-      const withheldReason = openUfm.has(studentId)
-        ? 'Open UFM case'
-        : undefined;
-      const payload: GradeCardPayload = {
-        result_stage: 'DRAFT',
-        semester,
-        generated_at: generatedAt,
-        formula:
-          'SGPA/CGPA = sum(credits * grade points) / sum(attempted credits)',
-        sgpa: semesterCalc.sgpa,
-        cgpa,
-        rank: null,
-        credits_attempted: semesterCalc.creditsAttempted,
-        credits_earned: semesterCalc.creditsEarned,
-        verification_id: `FALCON-${studentId.slice(0, 8)}-S${semester}`,
-        withheld_reason: withheldReason,
-        courses: studentRows.map((row) => ({
-          course_id: row.course_id,
-          course_code: row.course_code,
-          course_name: row.course_name,
-          credits: Number(row.credits),
-          grade: row.grade,
-          grade_points:
-            row.grade_points == null ? null : Number(row.grade_points),
-          status: row.status,
-        })),
-      };
+      const cgpaByStudent = await this.loadCgpaMap(tenantId, manager);
+      const openUfm = await this.loadOpenUfmSet(tenantId, manager);
+      const grouped = this.groupByStudent(rows);
+      const generatedAt = new Date().toISOString();
+
+      const cards = [...grouped.entries()].map(([studentId, studentRows]) => {
+        const first = studentRows[0];
+        const semesterCalc = this.calculateSemester(studentRows);
+        const cgpaCalc = cgpaByStudent.get(studentId) ?? {
+          points: 0,
+          credits: 0,
+        };
+        const cgpa =
+          cgpaCalc.credits > 0
+            ? this.round2(cgpaCalc.points / cgpaCalc.credits)
+            : 0;
+        const withheldReason = openUfm.has(studentId)
+          ? 'Open UFM case'
+          : undefined;
+        const payload: GradeCardPayload = {
+          result_stage: 'DRAFT',
+          semester,
+          generated_at: generatedAt,
+          formula:
+            'SGPA/CGPA = sum(credits * grade points) / sum(attempted credits)',
+          sgpa: semesterCalc.sgpa,
+          cgpa,
+          rank: null,
+          credits_attempted: semesterCalc.creditsAttempted,
+          credits_earned: semesterCalc.creditsEarned,
+          verification_id: `FALCON-${studentId.slice(0, 8)}-S${semester}`,
+          withheld_reason: withheldReason,
+          courses: studentRows.map((row) => ({
+            course_id: row.course_id,
+            course_code: row.course_code,
+            course_name: row.course_name,
+            credits: Number(row.credits),
+            grade: row.grade,
+            grade_points:
+              row.grade_points == null ? null : Number(row.grade_points),
+            status: row.status,
+          })),
+        };
+        return {
+          student_user_id: studentId,
+          student_name: first.student_name,
+          student_email: first.student_email,
+          enrollment_number: first.enrollment_number,
+          status: withheldReason ? 'WITHHELD' : 'DRAFT',
+          payload,
+        };
+      });
+
+      const ranked = this.assignRanks(cards);
+      for (const card of ranked) {
+        await this.upsertGradeCard(
+          tenantId,
+          semester,
+          card.student_user_id,
+          card.status,
+          card.payload,
+          manager,
+        );
+      }
+
       return {
-        student_user_id: studentId,
-        student_name: first.student_name,
-        student_email: first.student_email,
-        enrollment_number: first.enrollment_number,
-        status: withheldReason ? 'WITHHELD' : 'DRAFT',
-        payload,
+        semester,
+        generated_count: ranked.length,
+        top_students: ranked
+          .filter((card) => card.status !== 'WITHHELD')
+          .slice(0, 10)
+          .map((card) => this.toResponseCard(card)),
+        cards: ranked.map((card) => this.toResponseCard(card)),
       };
     });
-
-    const ranked = this.assignRanks(cards);
-    for (const card of ranked) {
-      await this.upsertGradeCard(
-        tenantId,
-        semester,
-        card.student_user_id,
-        card.status,
-        card.payload,
-      );
-    }
-
-    return {
-      semester,
-      generated_count: ranked.length,
-      top_students: ranked
-        .filter((card) => card.status !== 'WITHHELD')
-        .slice(0, 10)
-        .map((card) => this.toResponseCard(card)),
-      cards: ranked.map((card) => this.toResponseCard(card)),
-    };
   }
 
   async listGradeCards(tenantId: string, semester?: number) {
     const params: unknown[] = [tenantId];
     const semesterFilter = semester ? 'AND g.semester = $2' : '';
     if (semester) params.push(semester);
-    return this.db.query(
+    return this.db.query<GradeCardRow[]>(
       `SELECT g.grade_card_id, g.student_user_id, g.semester, g.cgpa, g.status, g.published_at, g.payload,
               u.name AS student_name, u.official_email AS student_email,
-              COALESCE(sp.enrollment_number, sp.enrollment_no) AS enrollment_number
+              COALESCE(to_jsonb(sp)->>'enrollment_number', sp.enrollment_no, to_jsonb(sp)->>'prn_number') AS enrollment_number
        FROM grade_cards g
        JOIN users u ON u.user_id = g.student_user_id
        LEFT JOIN student_profiles sp ON sp.user_id = g.student_user_id
@@ -173,9 +221,9 @@ export class SemesterResultsService {
   }
 
   async topStudents(tenantId: string, semester: number, limit = 10) {
-    return this.db.query(
+    return this.db.query<MeritRow[]>(
       `SELECT g.student_user_id, u.name AS student_name,
-              COALESCE(sp.enrollment_number, sp.enrollment_no) AS enrollment_number,
+              COALESCE(to_jsonb(sp)->>'enrollment_number', sp.enrollment_no, to_jsonb(sp)->>'prn_number') AS enrollment_number,
               (g.payload->>'rank')::int AS rank,
               (g.payload->>'sgpa')::numeric AS sgpa,
               (g.payload->>'cgpa')::numeric AS cgpa,
@@ -212,7 +260,7 @@ export class SemesterResultsService {
     >(
       `SELECT g.grade_card_id, g.semester, g.cgpa, g.status, g.payload,
               u.name AS student_name,
-              COALESCE(sp.enrollment_number, sp.enrollment_no) AS enrollment_number
+              COALESCE(to_jsonb(sp)->>'enrollment_number', sp.enrollment_no, to_jsonb(sp)->>'prn_number') AS enrollment_number
        FROM grade_cards g
        JOIN users u ON u.user_id = g.student_user_id
        LEFT JOIN student_profiles sp ON sp.user_id = g.student_user_id
@@ -359,61 +407,110 @@ export class SemesterResultsService {
     semester: number,
     stage: Exclude<GradeCardStage, 'DRAFT'>,
   ) {
-    const rows = await this.listGradeCards(tenantId, semester);
-    if (!rows.length)
-      throw new BadRequestException('Generate grade cards before publishing');
-    const timestampKey =
-      stage === 'FINAL' ? 'final_published_at' : 'provisional_published_at';
-    const now = new Date().toISOString();
+    tenantId = requireTenantId(tenantId);
+    if (!Number.isInteger(semester) || semester < 1) {
+      throw new BadRequestException('Valid semester is required');
+    }
+    return this.db.transaction(async (manager) => {
+      await this.lockSemester(manager, tenantId, semester);
+      const rows = await manager.query<
+        Array<{ grade_card_id: string; payload: Partial<GradeCardPayload> }>
+      >(
+        `SELECT grade_card_id, payload FROM grade_cards
+         WHERE tenant_id = $1 AND semester = $2
+         ORDER BY grade_card_id FOR UPDATE`,
+        [tenantId, semester],
+      );
+      if (!rows.length)
+        throw new BadRequestException('Generate grade cards before publishing');
+      if (
+        stage === 'PROVISIONAL' &&
+        rows.some(
+          (row) =>
+            row.payload?.result_stage === 'FINAL' ||
+            Object.prototype.hasOwnProperty.call(
+              row.payload ?? {},
+              'final_published_at',
+            ),
+        )
+      ) {
+        throw new ConflictException(
+          'Final grade cards cannot be made provisional',
+        );
+      }
+      const timestampKey =
+        stage === 'FINAL' ? 'final_published_at' : 'provisional_published_at';
+      const now = new Date().toISOString();
 
-    for (const row of rows) {
-      const payload = {
-        ...(row.payload ?? {}),
-        result_stage: stage,
-        [timestampKey]: now,
-      };
-      await this.db.query(
-        `UPDATE grade_cards
+      let updatedCount = 0;
+      for (const row of rows) {
+        if (row.payload?.result_stage === stage) continue;
+        const payload = {
+          ...(row.payload ?? {}),
+          result_stage: stage,
+          [timestampKey]: now,
+        };
+        await manager.query(
+          `UPDATE grade_cards
          SET status = CASE WHEN status = 'WITHHELD' THEN 'WITHHELD' ELSE 'PUBLISHED' END,
              published_at = COALESCE(published_at, NOW()),
              payload = $4::jsonb
          WHERE tenant_id = $1 AND grade_card_id = $2 AND semester = $3`,
-        [tenantId, row.grade_card_id, semester, JSON.stringify(payload)],
-      );
-    }
+          [tenantId, row.grade_card_id, semester, JSON.stringify(payload)],
+        );
+        updatedCount++;
+      }
 
-    return {
-      semester,
-      result_stage: stage,
-      updated_count: rows.length,
-    };
+      return {
+        semester,
+        result_stage: stage,
+        updated_count: updatedCount,
+      };
+    });
   }
 
-  private async loadEnrollmentRows(tenantId: string, semester: number) {
-    return this.db.query<EnrollmentRow[]>(
+  private async lockSemester(
+    manager: EntityManager,
+    tenantId: string,
+    semester: number,
+  ) {
+    // Also serializes creation when no grade-card row exists yet. Publication
+    // takes the same transaction-scoped lock before reading the saved payload.
+    await manager.query(
+      'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+      [`falcon:grade-cards:${tenantId}:${semester}`],
+    );
+  }
+
+  private async loadEnrollmentRows(
+    tenantId: string,
+    semester: number,
+    manager: EntityManager,
+  ) {
+    return manager.query<EnrollmentRow[]>(
       `SELECT e.student_user_id, u.name AS student_name, u.official_email AS student_email,
-              COALESCE(sp.enrollment_number, sp.enrollment_no) AS enrollment_number,
+              COALESCE(to_jsonb(sp)->>'enrollment_number', sp.enrollment_no, to_jsonb(sp)->>'prn_number') AS enrollment_number,
               e.course_id, c.course_code, c.course_name, c.credits,
               e.grade, e.grade_points, e.status
        FROM student_course_enrollments e
-       JOIN academic_courses c ON c.course_id = e.course_id
-       JOIN users u ON u.user_id = e.student_user_id
-       LEFT JOIN student_profiles sp ON sp.user_id = e.student_user_id
+       JOIN academic_courses c ON c.course_id = e.course_id AND c.tenant_id = e.tenant_id
+       JOIN users u ON u.user_id = e.student_user_id AND u.tenant_id = e.tenant_id
+       LEFT JOIN student_profiles sp ON sp.user_id = e.student_user_id AND sp.tenant_id = e.tenant_id
        WHERE e.tenant_id = $1 AND e.semester = $2
        ORDER BY u.name ASC, c.course_code ASC`,
       [tenantId, semester],
     );
   }
 
-  private async loadCgpaMap(tenantId: string) {
-    const rows = await this.db.query<CgpaRow[]>(
+  private async loadCgpaMap(tenantId: string, manager: EntityManager) {
+    const rows = await manager.query<CgpaRow[]>(
       `SELECT e.student_user_id,
               SUM(CASE WHEN e.status IN ('COMPLETED', 'FAILED') AND e.grade_points IS NOT NULL
                        THEN e.grade_points * c.credits ELSE 0 END) AS points,
               SUM(CASE WHEN e.status IN ('COMPLETED', 'FAILED') AND e.grade_points IS NOT NULL
                        THEN c.credits ELSE 0 END) AS credits
        FROM student_course_enrollments e
-       JOIN academic_courses c ON c.course_id = e.course_id
+       JOIN academic_courses c ON c.course_id = e.course_id AND c.tenant_id = e.tenant_id
        WHERE e.tenant_id = $1
        GROUP BY e.student_user_id`,
       [tenantId],
@@ -426,8 +523,8 @@ export class SemesterResultsService {
     );
   }
 
-  private async loadOpenUfmSet(tenantId: string) {
-    const rows = await this.db.query<Array<{ student_user_id: string }>>(
+  private async loadOpenUfmSet(tenantId: string, manager: EntityManager) {
+    const rows = await manager.query<Array<{ student_user_id: string }>>(
       `SELECT DISTINCT student_user_id
        FROM ufm_cases
        WHERE tenant_id = $1 AND status <> 'CLOSED' AND student_user_id IS NOT NULL`,
@@ -497,18 +594,24 @@ export class SemesterResultsService {
     studentUserId: string,
     status: string,
     payload: GradeCardPayload,
+    manager: EntityManager,
   ) {
-    const existing = await this.db.query<Array<{ grade_card_id: string }>>(
+    const existing = await manager.query<Array<{ grade_card_id: string }>>(
       `SELECT grade_card_id FROM grade_cards
        WHERE tenant_id = $1 AND student_user_id = $2 AND semester = $3
-       ORDER BY created_at DESC LIMIT 1`,
+       ORDER BY created_at DESC LIMIT 1 FOR UPDATE`,
       [tenantId, studentUserId, semester],
     );
     if (existing[0]) {
-      await this.db.query(
-        `UPDATE grade_cards
+      const updated = await manager.query<Array<{ grade_card_id: string }>>(
+        `WITH updated AS (UPDATE grade_cards
          SET cgpa = $4, status = $5, payload = $6::jsonb
-         WHERE grade_card_id = $1 AND tenant_id = $2 AND semester = $3`,
+         WHERE grade_card_id = $1 AND tenant_id = $2 AND semester = $3
+           AND status <> 'PUBLISHED' AND published_at IS NULL
+           AND COALESCE(payload->>'result_stage', 'DRAFT') NOT IN ('PROVISIONAL', 'FINAL')
+           AND NOT (payload ? 'provisional_published_at' OR payload ? 'final_published_at')
+         RETURNING grade_card_id)
+         SELECT grade_card_id FROM updated`,
         [
           existing[0].grade_card_id,
           tenantId,
@@ -518,9 +621,14 @@ export class SemesterResultsService {
           JSON.stringify(payload),
         ],
       );
+      if (!updated.length) {
+        throw new ConflictException(
+          'Published grade cards cannot be regenerated',
+        );
+      }
       return;
     }
-    await this.db.query(
+    await manager.query(
       `INSERT INTO grade_cards (tenant_id, student_user_id, semester, cgpa, status, payload)
        VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
       [

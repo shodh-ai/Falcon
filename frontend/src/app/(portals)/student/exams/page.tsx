@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/context/AuthContext';
 import { academicsApi } from '@/lib/api/api.academics';
 import { API_URL, authHeaders } from '@/lib/api/client';
-import { examsApi, type ExamApplication, type ExamEligibilityResult, type ExamSchedule } from '@/lib/api/api.exams';
+import { examsApi, type ExamApplication, type ExamEligibilityResult, type ExamSchedule, type IssuedAdmitCard } from '@/lib/api/api.exams';
 import { useAuthedApi } from '@/lib/api';
 import { StudentExemptionPanel } from '@/components/attendance/StudentExemptionPanel';
 import { StudentPageHeader } from '@/components/student/StudentPageHeader';
@@ -145,6 +145,24 @@ export default function StudentExamsPage() {
   const [applications, setApplications] = useState<ExamApplication[]>([]);
   const [results, setResults] = useState<StudentResult[]>([]);
   const [downloadingAdmit, setDownloadingAdmit] = useState(false);
+  const [issuedState, setIssuedState] = useState<{ token: string; tickets: IssuedAdmitCard[]; error: string | null } | null>(null);
+  const [ticketChoice, setTicketChoice] = useState('');
+  const issuedTickets = issuedState?.token === token ? issuedState.tickets : [];
+  const issuedError = issuedState?.token === token ? issuedState.error : null;
+  const issuedLoading = Boolean(token && issuedState?.token !== token);
+  const selectedTicket = issuedTickets.some((ticket) => ticket.entry_id === ticketChoice)
+    ? ticketChoice : issuedTickets.length === 1 ? issuedTickets[0].entry_id : '';
+
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    void examsApi.issuedAdmitCards(token).then((tickets) => {
+      if (!cancelled) setIssuedState({ token, tickets, error: null });
+    }).catch((cause: unknown) => {
+      if (!cancelled) setIssuedState({ token, tickets: [], error: cause instanceof Error ? cause.message : 'Issued tickets could not be loaded. Please retry or contact the Exam Cell.' });
+    });
+    return () => { cancelled = true; };
+  }, [token]);
 
   const ineligibleMessage = useMemo(() => {
     if (!eligibility || eligibility.eligible) return null;
@@ -254,12 +272,12 @@ export default function StudentExamsPage() {
   }, [token, user?.user_id, api]);
 
   const downloadAdmitCard = async () => {
-    if (!token || downloadingAdmit) return;
+    if (!token || downloadingAdmit || !selectedTicket || issuedError) return;
     setDownloadingAdmit(true);
     setError(null);
 
     try {
-      const res = await fetch(`${API_URL}/api/academics/exams/admit-card`, {
+      const res = await fetch(`${API_URL}/api/academics/exams/admit-card?entry_id=${encodeURIComponent(selectedTicket)}`, {
         headers: authHeaders(token),
       });
 
@@ -284,7 +302,7 @@ export default function StudentExamsPage() {
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
-      toast.success('Admit card downloaded with full exam details');
+      toast.success('Officially issued admit card downloaded');
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Failed to download admit card';
       setError(message);
@@ -469,7 +487,7 @@ export default function StudentExamsPage() {
         <Card>
           <CardHeader>
             <CardTitle>Admit Card</CardTitle>
-            <CardDescription>The system checks eligibility before generating your PDF</CardDescription>
+            <CardDescription>Download your officially issued ticket. Eligibility alone does not mean a ticket has been issued.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid gap-2 text-sm sm:grid-cols-2">
@@ -487,8 +505,10 @@ export default function StudentExamsPage() {
                 <span>Fee clearance</span>
                 {eligibility && eligibility.reasons.some((r) => r.code === 'PENDING_FEE_DUES') ? (
                   <Badge variant="destructive">Pending</Badge>
-                ) : (
+                ) : eligibility ? (
                   <Badge variant="success">Clear</Badge>
+                ) : (
+                  <Badge variant="outline">Unavailable</Badge>
                 )}
               </div>
             </div>
@@ -511,19 +531,31 @@ export default function StudentExamsPage() {
               />
             ) : null}
 
+            {issuedLoading ? <p className="text-sm text-muted-foreground">Checking issued tickets…</p>
+              : issuedError ? <p role="alert" className="text-sm text-destructive">{issuedError}</p>
+              : issuedTickets.length === 0 ? <p className="text-sm text-muted-foreground">No verified issued ticket is available. Contact the Exam Cell about registration, approval, and issuance.</p>
+              : <label className="block space-y-2 text-sm font-medium">
+                  <span>Issued examination ticket</span>
+                  <select className="w-full rounded-lg border bg-background px-3 py-2" value={selectedTicket} onChange={(event) => setTicketChoice(event.target.value)}>
+                    <option value="">Select an issued ticket</option>
+                    {issuedTickets.map((ticket) => <option key={ticket.entry_id} value={ticket.entry_id}>{ticket.session_name} — Semester {ticket.semester}</option>)}
+                  </select>
+                </label>}
+
             <Button
               className="w-full"
               size="lg"
               disabled={
                 loading ||
                 downloadingAdmit ||
+                issuedLoading || Boolean(issuedError) || !selectedTicket ||
                 !eligibility ||
                 !eligibility.eligible
               }
               onClick={() => void downloadAdmitCard()}
             >
               <FileDown className="h-4 w-4" />
-              {downloadingAdmit ? 'Preparing PDF…' : 'Download Admit Card (PDF)'}
+              {downloadingAdmit ? 'Downloading issued PDF…' : 'Download Admit Card (PDF)'}
             </Button>
           </CardContent>
         </Card>

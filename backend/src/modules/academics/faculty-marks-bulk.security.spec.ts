@@ -30,6 +30,7 @@ function setup(
   }));
   const manager = {
     query: jest.fn(async (sql: string, _params?: unknown[]) => {
+      if (sql.includes('pg_advisory_xact_lock')) return [];
       if (sql.includes('SELECT mark_id, exam_type FROM academic_marks')) {
         return marks.filter((row) => row.status === 'DRAFT');
       }
@@ -164,6 +165,21 @@ describe('Faculty bulk marks submission security', () => {
       submitted: 1,
     });
     expect(notify.marksPublished).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { ...openSession, marks_locked: true },
+    { ...openSession, declared_at: '2026-01-01' },
+  ])('does not bypass a protected result session for quiz bulk publication: %j', async (session) => {
+    const { submit, manager, notify } = setup({ types: ['QUIZ'], session });
+    await expect(submit()).rejects.toBeInstanceOf(BadRequestException);
+    expect(manager.query.mock.calls.some(([sql]) => /^\s*UPDATE\b/.test(sql))).toBe(false);
+    expect(notify.marksPublished).not.toHaveBeenCalled();
+  });
+
+  it('preserves quiz-only bulk publication without a result session', async () => {
+    const { submit } = setup({ types: ['QUIZ'], session: null });
+    await expect(submit()).resolves.toMatchObject({ published: 1, submitted: 0 });
   });
 
   it.each(['PENDING_COE', 'PUBLISHED'])(

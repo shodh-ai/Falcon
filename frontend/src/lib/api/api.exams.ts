@@ -23,6 +23,15 @@ export interface ExamEligibilityResult {
   reasons: Array<{ code: 'ATTENDANCE_SHORTFALL' | 'PENDING_FEE_DUES'; message: string; details?: unknown }>;
 }
 
+export interface IssuedAdmitCard {
+  entry_id: string;
+  session_id: string;
+  session_name: string;
+  semester: number;
+  issued_at: string;
+  status: 'ISSUED';
+}
+
 export type ExamApplicationType = 'RE_EVALUATION' | 'BACKLOG';
 
 export type ExamApplicationStatus =
@@ -53,6 +62,7 @@ export interface ExamApplication {
 }
 
 export const examsApi = {
+  issuedAdmitCards: (token: string) => apiFetch<IssuedAdmitCard[]>(token, { url: `${EXAMS}/admit-cards`, headers: {} }),
   schedule: (token: string) => apiFetch<ExamSchedule[]>(token, { url: `${EXAMS}/schedule`, headers: {} }),
   eligibility: (token: string) => apiFetch<ExamEligibilityResult>(token, { url: `${EXAMS}/eligibility`, headers: {} }),
   myApplications: (token: string) => apiFetch<ExamApplication[]>(token, { url: `${EXAMS}/applications/my`, headers: {} }),

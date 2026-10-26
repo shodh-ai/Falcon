@@ -3,18 +3,27 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  Optional,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { isUUID } from 'class-validator';
+import { requireTenantId } from '../../common/utils/require-tenant-id';
 import { FinanceService } from '../finance/finance.service';
 import { AdmitCardPdfService } from '../exams/pdf/admit-card-pdf.service';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
-import { NotificationEvents } from '../../core/notifications/notification.events';
 import { AttendanceEligibilityService } from '../attendance-policy/attendance-eligibility.service';
 import { ResultControlService } from './result-control.service';
-import * as fs from 'fs';
-import * as path from 'path';
+import { ExamCellAuditService } from './exam-cell-audit.service';
+import { HallTicketTimetableService } from './hall-ticket-timetable.service';
+import { CreateExamScheduleDto } from './dto/exam-schedule.dto';
+import { lockResultInputs } from './result-input-lock';
+import {
+  assertHallTicketIssuancePolicy,
+  hallTicketWorkflowAvailability,
+} from './hall-ticket-policy';
 
 @Injectable()
 export class ExamCellService {
@@ -26,6 +35,9 @@ export class ExamCellService {
     private readonly events: EventEmitter2,
     private readonly attendanceEligibility: AttendanceEligibilityService,
     private readonly resultControl: ResultControlService,
+    private readonly audit: ExamCellAuditService,
+    @Optional()
+    private readonly hallTicketTimetable?: HallTicketTimetableService,
   ) {}
 
   private async queryOrEmpty<T extends Record<string, unknown>>(
@@ -63,43 +75,66 @@ export class ExamCellService {
   }
 
   async dashboard(tenantId: string) {
-    const today = new Date().toISOString().slice(0, 10);
+    tenantId = requireTenantId(tenantId);
+    const timezone = 'Asia/Kolkata';
+    // Exam dates are local timetable dates, not UTC calendar dates.
+    const today = new Intl.DateTimeFormat('en-CA', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date());
+    const count = async (sql: string, params: unknown[]): Promise<number> => {
+      const rows = await this.db.query<Array<{ c: number }>>(sql, params);
+      if (
+        rows.length !== 1 ||
+        !Number.isSafeInteger(rows[0]?.c) ||
+        rows[0].c < 0
+      )
+        throw new ServiceUnavailableException(
+          'Dashboard counts are unavailable',
+        );
+      return rows[0].c;
+    };
     const [
-      [schedules],
-      [upcoming],
-      [todayExams],
-      [activeSessions],
-      [registeredStudents],
-      [pendingHallTickets],
-      [pendingMarks],
-      [reEvals],
-      [supplementaryApps],
-      [ufmOpen],
-      [duties],
-      [invigilatorsToday],
-      [pendingResultSessions],
-      [hallTicketsGenerated],
-      [studentsEligible],
-      [todaysAttendance],
-      [formRegistrations],
+      schedules,
+      upcoming,
+      todayExams,
+      activeSessions,
+      registeredStudents,
+      pendingHallTickets,
+      pendingMarks,
+      reEvals,
+      supplementaryApps,
+      ufmOpen,
+      duties,
+      invigilatorsToday,
+      pendingResultSessions,
+      hallTicketsGenerated,
+      studentsEligible,
+      todaysAttendance,
+      formRegistrations,
+      pendingRegistrations,
+      upcomingPreview,
+      paperReview,
     ] = await Promise.all([
-      this.queryOrEmpty<{ c: number }>(
-        `SELECT COUNT(*)::int AS c FROM exam_schedules WHERE tenant_id = $1`,
+      count(
+        `SELECT COUNT(*)::int AS c FROM exam_schedules WHERE tenant_id = $1 AND deleted_at IS NULL AND status <> 'CANCELLED'`,
         [tenantId],
       ),
-      this.queryOrEmpty<{ c: number }>(
-        `SELECT COUNT(*)::int AS c FROM exam_schedules WHERE tenant_id = $1 AND exam_date > $2::date`,
+      count(
+        `SELECT COUNT(*)::int AS c FROM exam_schedules WHERE tenant_id = $1 AND exam_date > $2::date AND deleted_at IS NULL AND status <> 'CANCELLED'`,
         [tenantId, today],
       ),
-      this.queryOrEmpty<{ c: number }>(
-        `SELECT COUNT(*)::int AS c FROM exam_schedules WHERE tenant_id = $1 AND exam_date = $2::date`,
+      count(
+        `SELECT COUNT(*)::int AS c FROM exam_schedules WHERE tenant_id = $1 AND exam_date = $2::date AND deleted_at IS NULL AND status <> 'CANCELLED'`,
         [tenantId, today],
       ),
-      this.queryOrEmpty<{ c: number }>(
+      count(
         `SELECT COUNT(*)::int AS c FROM exam_sessions WHERE tenant_id = $1 AND status IN ('OPEN','ACTIVE')`,
         [tenantId],
       ),
-      this.queryOrEmpty<{ c: number }>(
+      count(
         `SELECT COUNT(DISTINCT student_user_id)::int AS c FROM (
            SELECT student_user_id FROM exam_semester_registrations WHERE tenant_id = $1
            UNION
@@ -109,69 +144,117 @@ export class ExamCellService {
          ) registered`,
         [tenantId],
       ),
-      this.queryOrEmpty<{ c: number }>(
+      count(
         `SELECT COUNT(*)::int AS c FROM exam_admit_card_entries e
          JOIN exam_admit_card_runs r ON r.run_id = e.run_id
          WHERE r.tenant_id = $1 AND e.eligible = true AND e.pdf_path IS NULL`,
         [tenantId],
       ),
-      this.queryOrEmpty<{ c: number }>(
+      count(
         `SELECT COUNT(*)::int AS c FROM academic_marks WHERE tenant_id = $1 AND status = 'PENDING_COE'`,
         [tenantId],
       ),
-      this.queryOrEmpty<{ c: number }>(
+      count(
         `SELECT COUNT(*)::int AS c FROM exam_applications a
          JOIN users u ON u.user_id = a.student_user_id
          WHERE u.tenant_id = $1 AND a.application_type = 'RE_EVALUATION'
            AND a.fee_status = 'PAID' AND a.status IN ('PENDING','ASSIGNED','UNDER_REVIEW')`,
         [tenantId],
       ),
-      this.queryOrEmpty<{ c: number }>(
+      count(
         `SELECT COUNT(*)::int AS c FROM exam_applications a
          JOIN users u ON u.user_id = a.student_user_id
          WHERE u.tenant_id = $1 AND a.application_type = 'BACKLOG' AND a.status = 'PENDING'`,
         [tenantId],
       ),
-      this.queryOrEmpty<{ c: number }>(
+      count(
         `SELECT COUNT(*)::int AS c FROM ufm_cases WHERE tenant_id = $1 AND status != 'CLOSED'`,
         [tenantId],
       ),
-      this.queryOrEmpty<{ c: number }>(
+      count(
         `SELECT COUNT(*)::int AS c FROM exam_invigilation_duties WHERE tenant_id = $1 AND published = true`,
         [tenantId],
       ),
-      this.queryOrEmpty<{ c: number }>(
+      count(
         `SELECT COUNT(DISTINCT d.faculty_user_id)::int AS c
          FROM exam_invigilation_duties d
-         JOIN exam_schedules es ON es.exam_schedule_id = d.exam_schedule_id
-         WHERE d.tenant_id = $1 AND es.exam_date = $2::date AND d.published = true`,
+         JOIN exam_schedules es ON es.exam_schedule_id = d.exam_schedule_id AND es.tenant_id = d.tenant_id
+         WHERE d.tenant_id = $1 AND es.exam_date = $2::date AND d.published = true
+           AND es.deleted_at IS NULL AND es.status <> 'CANCELLED'`,
         [tenantId, today],
       ),
-      this.queryOrEmpty<{ c: number }>(
+      count(
         `SELECT COUNT(*)::int AS c FROM exam_result_sessions
          WHERE tenant_id = $1 AND declared_at IS NULL`,
         [tenantId],
       ),
-      this.queryOrEmpty<{ c: number }>(
+      count(
         `SELECT COUNT(*)::int AS c FROM exam_admit_card_entries e
          JOIN exam_admit_card_runs r ON r.run_id = e.run_id
          WHERE r.tenant_id = $1 AND e.eligible = true AND e.pdf_path IS NOT NULL`,
         [tenantId],
       ),
-      this.queryOrEmpty<{ c: number }>(
+      count(
         `SELECT COUNT(*)::int AS c FROM hall_ticket_approvals
          WHERE tenant_id = $1 AND stage = 'APPROVED'`,
         [tenantId],
       ),
-      this.queryOrEmpty<{ c: number }>(
-        `SELECT COUNT(*)::int AS c FROM exam_day_attendance
-         WHERE tenant_id = $1 AND marked_at::date = $2::date`,
+      count(
+        `SELECT COUNT(*)::int AS c FROM exam_day_attendance da
+         JOIN exam_schedules es ON es.exam_schedule_id = da.exam_schedule_id AND es.tenant_id = da.tenant_id
+         WHERE da.tenant_id = $1 AND es.exam_date = $2::date
+           AND es.deleted_at IS NULL AND es.status <> 'CANCELLED'`,
         [tenantId, today],
       ),
-      this.queryOrEmpty<{ c: number }>(
+      count(
         `SELECT COUNT(DISTINCT student_user_id)::int AS c FROM exam_semester_registrations
          WHERE tenant_id = $1 AND status IN ('PENDING','APPROVED')`,
         [tenantId],
+      ),
+      count(
+        `SELECT COUNT(*)::int AS c FROM exam_semester_registrations
+         WHERE tenant_id = $1 AND status = 'PENDING'`,
+        [tenantId],
+      ),
+      this.db.query<
+        Array<{
+          exam_schedule_id: string;
+          exam_type: string;
+          exam_date: string;
+          start_time: string | null;
+          end_time: string | null;
+          venue: string | null;
+          subject_name: string | null;
+          subject_code: string | null;
+        }>
+      >(
+        `SELECT es.exam_schedule_id, es.exam_type, es.exam_date, es.start_time, es.end_time, es.venue,
+                sub.subject_name, sub.subject_code
+         FROM exam_schedules es
+         LEFT JOIN academic_subjects sub ON sub.subject_id = es.subject_id
+         WHERE es.tenant_id = $1 AND es.exam_date > $2::date
+           AND es.deleted_at IS NULL AND es.status <> 'CANCELLED'
+         ORDER BY es.exam_date ASC, es.start_time ASC, es.exam_schedule_id ASC
+         LIMIT 3`,
+        [tenantId, today],
+      ),
+      // This optional extension may not be deployed yet. Report unavailable,
+      // never a fabricated zero, without hiding the other operational counts.
+      count(
+        `SELECT COUNT(*)::int AS c FROM exam_question_papers p
+         JOIN LATERAL (
+           SELECT version_id, storage_key FROM exam_question_paper_versions
+           WHERE tenant_id = p.tenant_id AND qp_id = p.qp_id
+           ORDER BY version_number DESC LIMIT 1
+         ) v ON p.storage_path = v.storage_key
+         WHERE p.tenant_id = $1 AND p.status = 'UNDER_MODERATION'`,
+        [tenantId],
+      ).then(
+        (value) => ({ value, error: null }),
+        () => ({
+          value: undefined,
+          error: 'Question-paper review data is unavailable.',
+        }),
       ),
     ]);
 
@@ -194,24 +277,38 @@ export class ExamCellService {
 
     return {
       persona: 'Falcon Exam OS',
-      schedules: schedules?.c ?? 0,
-      upcoming_exams: upcoming?.c ?? 0,
-      todays_exams: todayExams?.c ?? 0,
-      active_exam_sessions: activeSessions?.c ?? 0,
-      registered_students: registeredStudents?.c ?? 0,
-      students_eligible: studentsEligible?.c ?? 0,
-      hall_tickets_generated: hallTicketsGenerated?.c ?? 0,
-      todays_attendance: todaysAttendance?.c ?? 0,
-      form_registrations: formRegistrations?.c ?? 0,
-      pending_hall_tickets: pendingHallTickets?.c ?? 0,
-      pending_coe_marks: pendingMarks?.c ?? 0,
-      pending_results: pendingResultSessions?.c ?? 0,
-      re_evaluations_queue: reEvals?.c ?? 0,
-      pending_supplementary: supplementaryApps?.c ?? 0,
-      open_ufm_cases: ufmOpen?.c ?? 0,
-      invigilation_duties_published: duties?.c ?? 0,
-      invigilators_assigned_today: invigilatorsToday?.c ?? 0,
-      published_results: resultStats.reduce((total, row) => total + row.count, 0),
+      dashboard_date: today,
+      timezone,
+      upcoming_exams_preview: upcomingPreview,
+      schedules,
+      upcoming_exams: upcoming,
+      todays_exams: todayExams,
+      active_exam_sessions: activeSessions,
+      registered_students: registeredStudents,
+      students_eligible: studentsEligible,
+      // Legacy compatibility only: these counts do not establish official issuance.
+      hall_tickets_generated: hallTicketsGenerated,
+      todays_attendance: todaysAttendance,
+      form_registrations: formRegistrations,
+      pending_registrations: pendingRegistrations,
+      ...(paperReview.value === undefined
+        ? {}
+        : { question_papers_awaiting_review: paperReview.value }),
+      metric_errors: paperReview.error
+        ? { question_papers_awaiting_review: paperReview.error }
+        : {},
+      pending_hall_tickets: pendingHallTickets,
+      pending_coe_marks: pendingMarks,
+      pending_results: pendingResultSessions,
+      re_evaluations_queue: reEvals,
+      pending_supplementary: supplementaryApps,
+      open_ufm_cases: ufmOpen,
+      invigilation_duties_published: duties,
+      invigilators_assigned_today: invigilatorsToday,
+      published_results: resultStats.reduce(
+        (total, row) => total + row.count,
+        0,
+      ),
       result_status_chart: resultStats,
     };
   }
@@ -251,7 +348,28 @@ export class ExamCellService {
     return { students, schedules, subjects };
   }
 
-  async listSchedules(tenantId: string) {
+  async listSchedules(tenantId: string, sessionId?: string) {
+    if (sessionId !== undefined) {
+      tenantId = this.requireAdmitTenant(tenantId);
+      if (!isUUID(sessionId))
+        throw new BadRequestException(
+          'A valid examination session is required',
+        );
+      const session = await this.db.query<unknown[]>(
+        'SELECT session_id FROM exam_sessions WHERE tenant_id=$1 AND session_id=$2',
+        [tenantId, sessionId],
+      );
+      if (session.length !== 1)
+        throw new NotFoundException('Examination session not found');
+      return this.db.query<Array<Record<string, unknown>>>(
+        `SELECT es.*, sub.subject_name, sub.subject_code
+         FROM exam_schedules es
+         LEFT JOIN academic_subjects sub ON sub.subject_id=es.subject_id
+         WHERE es.tenant_id=$1 AND es.session_id=$2 AND es.deleted_at IS NULL
+         ORDER BY es.exam_date, es.start_time, es.exam_schedule_id`,
+        [tenantId, sessionId],
+      );
+    }
     try {
       return await this.db.query(
         `SELECT es.*, sub.subject_name, sub.subject_code
@@ -278,190 +396,47 @@ export class ExamCellService {
     }
   }
 
-  async createSchedule(
+  createSchedule(
     tenantId: string,
-    dto: {
-      exam_type: string;
-      subject_id: number;
-      exam_date: string;
-      start_time: string;
-      end_time: string;
-      venue: string;
-      max_marks?: number;
-      batch_label?: string;
-    },
+    dto: CreateExamScheduleDto,
+    actorUserId?: string,
+    actorRole?: string,
   ) {
-    const rows = await this.db.query(
-      `INSERT INTO exam_schedules (tenant_id, exam_type, subject_id, exam_date, start_time, end_time, venue, max_marks, batch_label, status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'SCHEDULED') RETURNING *`,
-      [
-        tenantId,
-        dto.exam_type,
-        dto.subject_id,
-        dto.exam_date,
-        dto.start_time,
-        dto.end_time,
-        dto.venue,
-        dto.max_marks ?? 100,
-        dto.batch_label ?? null,
-      ],
-    );
-    const schedule = rows[0];
-    if (schedule) {
-      const subjectRows = await this.db.query(
-        `SELECT subject_name, subject_code, semester FROM academic_subjects WHERE subject_id = $1`,
-        [dto.subject_id],
+    if (!this.hallTicketTimetable)
+      throw new ServiceUnavailableException(
+        'Session-linked timetable service is unavailable',
       );
-      const subject = subjectRows[0];
-      const semester = subject?.semester ?? null;
-      if (semester) {
-        const students = await this.db.query(
-          `SELECT DISTINCT e.student_user_id
-           FROM student_course_enrollments e
-           JOIN academic_subjects sub ON sub.subject_id = $3
-           WHERE e.tenant_id = $1 AND e.semester = $2`,
-          [tenantId, semester, dto.subject_id],
-        );
-        const label = subject?.subject_code
-          ? `${subject.subject_code} — ${subject.subject_name}`
-          : 'Examination';
-        for (const s of students) {
-          this.events.emit(NotificationEvents.ACADEMICS_TIMETABLE_CHANGED, {
-            tenantId,
-            userId: s.student_user_id,
-            courseName: label,
-            changeSummary: `${dto.exam_type.replace(/_/g, ' ')} on ${dto.exam_date} ${dto.start_time}–${dto.end_time} at ${dto.venue}`,
-          });
-        }
-      }
-    }
-    return rows;
+    return this.hallTicketTimetable.create(
+      tenantId,
+      actorUserId ?? '',
+      actorRole,
+      dto,
+    );
   }
 
-  /** Loop 1: Batch admit card engine with finance + attendance + hostel fines gates */
-  async generateAdmitCards(
+  /** Compatibility endpoint: no legacy batch-label or local-file issuance. */
+  generateAdmitCards(
     tenantId: string,
     dto: { batch_label: string; semester?: number },
     runBy: string,
-  ) {
-    const semester = dto.semester ?? 4;
-    const students = await this.db.query(
-      `SELECT DISTINCT u.user_id, u.name, u.official_email,
-              sp.enrollment_number, sp.admission_number, sp.profile_photo_url
-       FROM users u
-       INNER JOIN student_course_enrollments e ON e.student_user_id = u.user_id AND e.tenant_id = $1
-       LEFT JOIN student_profiles sp ON sp.user_id = u.user_id
-       WHERE e.semester = $2 AND u.tenant_id = $1
-       ORDER BY u.name`,
-      [tenantId, semester],
-    );
-
-    const schedules = await this.db.query(
-      `SELECT * FROM exam_schedules
-       WHERE (tenant_id = $1 OR tenant_id IS NULL)
-         AND ($2::text IS NULL OR batch_label = $2)
-         AND exam_date >= CURRENT_DATE
-       ORDER BY exam_date, start_time`,
-      [tenantId, dto.batch_label || null],
-    );
-
-    const runRows = await this.db.query(
-      `INSERT INTO exam_admit_card_runs (tenant_id, batch_label, semester, run_by)
-       VALUES ($1,$2,$3,$4) RETURNING *`,
-      [tenantId, dto.batch_label, semester, runBy],
-    );
-    const runId = runRows[0].run_id as string;
-
-    let generated = 0;
-    let blocked = 0;
-    const results: {
+  ): Promise<{
+    run_id: string;
+    generated: number;
+    blocked: number;
+    students: Array<{
       student_user_id: string;
       name: string;
       eligible: boolean;
       reasons: string[];
-    }[] = [];
-
-    const uploadDir = path.join(process.cwd(), 'uploads', 'admit-cards', runId);
-    fs.mkdirSync(uploadDir, { recursive: true });
-
-    for (const student of students) {
-      const reasons = await this.getAdmitBlockReasons(
-        student.user_id,
-        tenantId,
-      );
-      const eligible = reasons.length === 0;
-
-      if (eligible) {
-        const seating = await this.db.query(
-          `SELECT room, seat_number FROM exam_seating_allocations
-           WHERE student_user_id = $1 ORDER BY created_at DESC LIMIT 20`,
-          [student.user_id],
-        );
-        const pdf = await this.admitPdf.generate({
-          student: {
-            user_id: student.user_id,
-            name: student.name,
-            email: student.official_email ?? '',
-            profile_picture_url: student.profile_photo_url ?? null,
-          },
-          schedules: schedules.map(
-            (s: {
-              exam_schedule_id: string;
-              exam_date: string;
-              start_time: string;
-              end_time: string;
-              exam_type: string;
-              venue: string;
-            }) => ({
-              exam_schedule_id: s.exam_schedule_id,
-              exam_date: s.exam_date,
-              start_time: s.start_time,
-              end_time: s.end_time,
-              exam_type: s.exam_type,
-              venue: s.venue,
-              seat_no: seating[0]?.seat_number ?? 'TBA',
-            }),
-          ),
-          barcodePayload: `${student.user_id}:${schedules.map((s: { exam_schedule_id: string }) => s.exam_schedule_id).join(',')}`,
-        });
-        const pdfPath = path.join(uploadDir, `${student.user_id}.pdf`);
-        fs.writeFileSync(pdfPath, pdf);
-        generated++;
-        await this.db.query(
-          `INSERT INTO exam_admit_card_entries (run_id, student_user_id, eligible, block_reasons, pdf_path)
-           VALUES ($1,$2,true,'[]',$3)`,
-          [runId, student.user_id, pdfPath],
-        );
-      } else {
-        blocked++;
-        for (const r of reasons) {
-          this.notify.admitCardLocked({
-            tenantId,
-            userId: student.user_id,
-            message: r,
-          });
-        }
-        await this.db.query(
-          `INSERT INTO exam_admit_card_entries (run_id, student_user_id, eligible, block_reasons)
-           VALUES ($1,$2,false,$3)`,
-          [runId, student.user_id, JSON.stringify(reasons)],
-        );
-      }
-
-      results.push({
-        student_user_id: student.user_id,
-        name: student.name,
-        eligible,
-        reasons,
-      });
-    }
-
-    await this.db.query(
-      `UPDATE exam_admit_card_runs SET generated_count = $2, blocked_count = $3 WHERE run_id = $1`,
-      [runId, generated, blocked],
-    );
-
-    return { run_id: runId, generated, blocked, students: results };
+    }>;
+  }> {
+    return Promise.resolve().then(() => {
+      // Preserve the route and closed policy response. The unsafe unreachable
+      // writer must not be revived by removing a guard in a later change.
+      void dto;
+      void runBy;
+      return assertHallTicketIssuancePolicy(this.requireAdmitTenant(tenantId));
+    });
   }
 
   /** Pre-generation audit matrix for COE review before batch admit card PDFs. */
@@ -469,8 +444,16 @@ export class ExamCellService {
     tenantId: string,
     dto: { batch_label: string; semester?: number },
   ) {
+    tenantId = this.requireAdmitTenant(tenantId);
     const semester = dto.semester ?? 4;
-    const students = await this.db.query(
+    const students = await this.db.query<
+      Array<{
+        user_id: string;
+        name: string;
+        enrollment_number: string | null;
+        admission_number: string | null;
+      }>
+    >(
       `SELECT DISTINCT u.user_id, u.name,
               sp.enrollment_number, sp.admission_number
        FROM users u
@@ -494,17 +477,16 @@ export class ExamCellService {
     }[] = [];
 
     for (const student of students) {
-      const pendingDues = await this.finance.getPendingDues(student.user_id);
+      const {
+        pendingDues,
+        attendance,
+        reasons: blockReasons,
+      } = await this.getAdmitClearanceSnapshot(
+        student.user_id,
+        tenantId,
+        false,
+      );
       const feeStatus = pendingDues.length > 0 ? 'Pending' : 'Clear';
-      const attendance = await this.attendanceEligibility.evaluate(
-        tenantId,
-        student.user_id,
-        { context: 'ADMIT_CARD', audit: false },
-      );
-      const blockReasons = await this.getAdmitBlockReasons(
-        student.user_id,
-        tenantId,
-      );
       items.push({
         student_user_id: student.user_id,
         student_id:
@@ -523,6 +505,7 @@ export class ExamCellService {
 
     const eligibleCount = items.filter((i) => i.eligible).length;
     return {
+      workflow: hallTicketWorkflowAvailability(),
       batch_label: dto.batch_label,
       semester,
       eligible_count: eligibleCount,
@@ -533,10 +516,42 @@ export class ExamCellService {
 
   async getAdmitBlockReasons(
     studentUserId: string,
-    tenantId = 'a0000000-0000-4000-8000-000000000001',
+    tenantId: string,
   ): Promise<string[]> {
+    const { reasons } = await this.getAdmitClearanceSnapshot(
+      studentUserId,
+      tenantId,
+      true,
+    );
+    return reasons;
+  }
+
+  private requireAdmitTenant(tenantId: string): string {
+    if (typeof tenantId !== 'string')
+      throw new ForbiddenException('Tenant context required');
+    const tenant = requireTenantId(tenantId);
+    if (!isUUID(tenant))
+      throw new ForbiddenException('Valid tenant context required');
+    return tenant;
+  }
+
+  // This is only the existing clearance snapshot, not proof of final approval
+  // or official issuance. Session-linked registration/approval gates are separate.
+  private async getAdmitClearanceSnapshot(
+    studentUserId: string,
+    tenantId: string,
+    audit: boolean,
+  ) {
+    tenantId = this.requireAdmitTenant(tenantId);
+    if (!isUUID(studentUserId))
+      throw new BadRequestException('A valid student ID is required');
     const reasons: string[] = [];
-    const pendingDues = await this.finance.getPendingDues(studentUserId);
+    const pendingDues = await this.finance.getPendingDues(
+      studentUserId,
+      tenantId,
+    );
+    if (!Array.isArray(pendingDues))
+      throw new ServiceUnavailableException('Finance clearance is unavailable');
     if (pendingDues.length > 0) {
       reasons.push('Blocked: Pending fee dues');
     }
@@ -546,21 +561,39 @@ export class ExamCellService {
       studentUserId,
       {
         context: 'ADMIT_CARD',
-        audit: true,
+        audit,
       },
     );
-    if (!attendance.eligible && attendance.reason) {
-      reasons.push(attendance.reason);
+    if (
+      !attendance ||
+      typeof attendance.eligible !== 'boolean' ||
+      !Number.isFinite(attendance.attendance_percent) ||
+      attendance.attendance_percent < 0 ||
+      attendance.attendance_percent > 100
+    )
+      throw new ServiceUnavailableException(
+        'Attendance clearance is unavailable',
+      );
+    if (!attendance.eligible) {
+      reasons.push(
+        attendance.reason || 'Blocked: Attendance clearance is not verified',
+      );
     }
 
-    const fines = await this.db.query(
+    const fines = await this.db.query<Array<{ c: number }>>(
       `SELECT COUNT(*)::int AS c FROM operations_hostel_fines
-       WHERE student_user_id = $1 AND status = 'PENDING'`,
-      [studentUserId],
+       WHERE student_user_id = $1 AND tenant_id = $2 AND status = 'PENDING'`,
+      [studentUserId, tenantId],
     );
-    if ((fines[0]?.c ?? 0) > 0) reasons.push('Blocked: Pending hostel fines');
+    if (
+      fines.length !== 1 ||
+      !Number.isSafeInteger(fines[0]?.c) ||
+      fines[0].c < 0
+    )
+      throw new ServiceUnavailableException('Hostel clearance is unavailable');
+    if (fines[0].c > 0) reasons.push('Blocked: Pending hostel fines');
 
-    return reasons;
+    return { reasons, pendingDues, attendance };
   }
 
   async getBranchesBySemester(tenantId: string, semester: number) {
@@ -2049,43 +2082,130 @@ export class ExamCellService {
       }
     }
 
-    const rows = await this.db.query(
-      `INSERT INTO ufm_cases (tenant_id, student_user_id, exam_id, description, penalty_applied, reported_by, marks_locked, status)
+    return this.db.transaction(async (manager) => {
+      type TargetMark = {
+        mark_id: string;
+        course_id: string;
+        exam_type: string;
+        status: string;
+      };
+      const candidates = await manager.query<TargetMark[]>(
+        `SELECT mark_id, course_id, exam_type, status FROM academic_marks
+         WHERE tenant_id = $1 AND student_user_id = $2
+           AND ($3::uuid IS NULL OR course_id = $3::uuid)
+         ORDER BY mark_id`,
+        [tenantId, studentUserId, courseId],
+      );
+      const pairs = new Map(
+        candidates.map((mark) => [
+          JSON.stringify([
+            'result-input',
+            tenantId,
+            mark.course_id,
+            mark.exam_type,
+          ]),
+          { courseId: mark.course_id, examType: mark.exam_type },
+        ]),
+      );
+      const orderedPairs = [...pairs.entries()].sort(([left], [right]) =>
+        left < right ? -1 : left > right ? 1 : 0,
+      );
+      // Use the same input lock as approval, declaration, and faculty writes.
+      // Acquire every advisory lock before taking session or marks row locks.
+      for (const [, pair] of orderedPairs) {
+        await lockResultInputs(manager, tenantId, pair.courseId, pair.examType);
+      }
+      for (const [, pair] of orderedPairs) {
+        const sessions = await manager.query<
+          Array<{
+            declared_at: Date | string | null;
+            marks_locked: boolean;
+            entry_status: string;
+          }>
+        >(
+          `SELECT declared_at, marks_locked, entry_status FROM exam_result_sessions
+           WHERE tenant_id = $1 AND course_id = $2 AND exam_type = $3
+           ORDER BY session_id FOR UPDATE`,
+          [tenantId, pair.courseId, pair.examType],
+        );
+        if (
+          sessions.some(
+            (session) =>
+              session.declared_at ||
+              session.marks_locked ||
+              session.entry_status === 'LOCKED',
+          )
+        ) {
+          throw new BadRequestException(
+            'Cannot apply a UFM marks penalty to locked or declared results. Use the authorized reopening or correction workflow.',
+          );
+        }
+      }
+      const markIds = candidates.map((mark) => mark.mark_id);
+      const marks = markIds.length
+        ? await manager.query<TargetMark[]>(
+            `SELECT mark_id, course_id, exam_type, status FROM academic_marks
+             WHERE tenant_id = $1 AND student_user_id = $2
+               AND mark_id = ANY($3::uuid[])
+             ORDER BY mark_id FOR UPDATE`,
+            [tenantId, studentUserId, markIds],
+          )
+        : [];
+      if (
+        marks.length !== candidates.length ||
+        marks.some(
+          (mark) =>
+            !pairs.has(
+              JSON.stringify([
+                'result-input',
+                tenantId,
+                mark.course_id,
+                mark.exam_type,
+              ]),
+            ),
+        )
+      ) {
+        throw new BadRequestException(
+          'The marks batch changed while applying the UFM penalty. Reload and retry.',
+        );
+      }
+      if (marks.some((mark) => mark.status === 'PUBLISHED')) {
+        throw new BadRequestException(
+          'Cannot change published marks through a UFM penalty. Use the authorized correction workflow.',
+        );
+      }
+
+      const rows = await manager.query<Array<{ case_id: string }>>(
+        `INSERT INTO ufm_cases (tenant_id, student_user_id, exam_id, description, penalty_applied, reported_by, marks_locked, status)
        VALUES ($1,$2,$3,$4,$5,$6,true,'OPEN') RETURNING *`,
-      [
-        tenantId,
-        studentUserId,
-        dto.exam_id ?? null,
-        description,
-        dto.penalty_applied?.trim() || 'Exam cancelled — UFM',
-        dto.reported_by ?? null,
-      ],
-    );
-
-    if (courseId) {
-      await this.db.query(
-        `UPDATE academic_marks SET marks_obtained = 0, status = 'PUBLISHED', updated_at = NOW()
-         WHERE student_user_id = $1 AND course_id = $2 AND tenant_id = $3`,
-        [studentUserId, courseId, tenantId],
+        [
+          tenantId,
+          studentUserId,
+          dto.exam_id ?? null,
+          description,
+          dto.penalty_applied?.trim() || 'Exam cancelled — UFM',
+          dto.reported_by ?? null,
+        ],
       );
-    } else {
-      await this.db.query(
-        `UPDATE academic_marks SET marks_obtained = 0, status = 'PUBLISHED', updated_at = NOW()
-         WHERE student_user_id = $1 AND tenant_id = $2`,
-        [studentUserId, tenantId],
-      );
-    }
 
-    await this.db.query(
-      `UPDATE grade_cards
+      if (markIds.length) {
+        await manager.query(
+          `UPDATE academic_marks SET marks_obtained = 0, status = 'PUBLISHED', updated_at = NOW()
+         WHERE student_user_id = $1 AND tenant_id = $2 AND mark_id = ANY($3::uuid[])`,
+          [studentUserId, tenantId, markIds],
+        );
+      }
+
+      await manager.query(
+        `UPDATE grade_cards
        SET status = 'WITHHELD',
            payload = COALESCE(payload, '{}'::jsonb) || '{"withheld_reason":"Open UFM case","result_stage":"WITHHELD"}'::jsonb
        WHERE student_user_id = $1 AND tenant_id = $2`,
-      [studentUserId, tenantId],
-    );
+        [studentUserId, tenantId],
+      );
 
-    await this.db.query(
-      `INSERT INTO grade_cards (tenant_id, student_user_id, semester, cgpa, status, payload)
+      await manager.query(
+        `INSERT INTO grade_cards (tenant_id, student_user_id, semester, cgpa, status, payload)
        SELECT $1, $2, e.semester, 0, 'WITHHELD',
               jsonb_build_object(
                 'withheld_reason', 'Open UFM case',
@@ -2098,17 +2218,33 @@ export class ExamCellService {
            SELECT 1 FROM grade_cards g
            WHERE g.tenant_id = $1 AND g.student_user_id = $2 AND g.semester = e.semester
          )`,
-      [tenantId, studentUserId],
-    );
+        [tenantId, studentUserId],
+      );
 
-    const enriched = await this.db.query(
-      `SELECT c.*, u.name AS student_name
+      await this.audit.log(
+        tenantId,
+        dto.reported_by,
+        {
+          action: 'UFM_MARKS_INVALIDATED',
+          resource_type: 'ufm_case',
+          resource_id: rows[0].case_id,
+          new_value: {
+            reason: 'UFM penalty applied to unpublished, unlocked marks',
+            affected_mark_count: markIds.length,
+          },
+        },
+        manager,
+      );
+
+      const enriched = await manager.query<Array<Record<string, unknown>>>(
+        `SELECT c.*, u.name AS student_name
        FROM ufm_cases c
        LEFT JOIN users u ON u.user_id = c.student_user_id
-       WHERE c.case_id = $1`,
-      [rows[0].case_id],
-    );
-    return enriched[0] ?? rows[0];
+       WHERE c.case_id = $1 AND c.tenant_id = $2`,
+        [rows[0].case_id, tenantId],
+      );
+      return enriched[0] ?? rows[0];
+    });
   }
 
   listUfmFormOptions(

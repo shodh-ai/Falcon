@@ -1,6 +1,18 @@
 import { Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
+import { DataSource, EntityManager } from 'typeorm';
+
+type AuditRow = {
+  audit_id: string;
+  action: string;
+  resource_type: string;
+  resource_id: string | null;
+  old_value: unknown;
+  new_value: unknown;
+  ip_address: string | null;
+  created_at: string | Date;
+  actor_name: string | null;
+};
 
 @Injectable()
 export class ExamCellAuditService {
@@ -17,12 +29,13 @@ export class ExamCellAuditService {
       new_value?: unknown;
       ip_address?: string;
     },
+    manager?: EntityManager,
   ) {
-    try {
-      await this.db.query(
+    const insert = async () => {
+      await (manager ?? this.db).query(
         `INSERT INTO exam_audit_logs
-           (tenant_id, actor_user_id, action, resource_type, resource_id, old_value, new_value, ip_address)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+           (tenant_id, actor_user_id, action, resource_type, resource_id, old_value, new_value, ip_address, created_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,${manager ? 'clock_timestamp()' : 'NOW()'})`,
         [
           tenantId,
           actorUserId ?? null,
@@ -34,13 +47,28 @@ export class ExamCellAuditService {
           payload.ip_address ?? null,
         ],
       );
+    };
+    // Use event time after lock acquisition, not transaction-start NOW(), so
+    // waiting transactions cannot backdate approval/invalidation audit order.
+    // Transactional callers require the audit record to commit with the action.
+    // Keep existing best-effort behavior for callers outside a transaction.
+    if (manager) {
+      await insert();
+      return;
+    }
+    try {
+      await insert();
     } catch {
       /* audit must not break primary flows */
     }
   }
 
-  async listRecent(tenantId: string, limit = 15) {
-    const result = await this.list(tenantId, { limit });
+  async listRecent(
+    tenantId: string,
+    limit = 15,
+    opts: { strict?: boolean } = {},
+  ) {
+    const result = await this.list(tenantId, { limit, strict: opts.strict });
     return result.data;
   }
 
@@ -50,7 +78,7 @@ export class ExamCellAuditService {
     action: string,
   ): Promise<boolean> {
     try {
-      const rows = await this.db.query(
+      const rows = await this.db.query<unknown[]>(
         `SELECT 1 FROM exam_audit_logs
          WHERE tenant_id = $1 AND resource_id = $2 AND action = $3
          LIMIT 1`,
@@ -90,6 +118,7 @@ export class ExamCellAuditService {
       action?: string;
       resource_type?: string;
       search?: string;
+      strict?: boolean;
     } = {},
   ) {
     const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200);
@@ -98,7 +127,7 @@ export class ExamCellAuditService {
     const params: unknown[] = [tenantId];
     let sql = `
       FROM exam_audit_logs a
-      LEFT JOIN users u ON u.user_id = a.actor_user_id
+      LEFT JOIN users u ON u.user_id = a.actor_user_id${opts.strict ? ' AND u.tenant_id = a.tenant_id' : ''}
       WHERE a.tenant_id = $1`;
     if (opts.action) {
       params.push(`%${opts.action}%`);
@@ -119,11 +148,11 @@ export class ExamCellAuditService {
         params,
       );
       const listParams = [...params, limit, offset];
-      const rows = await this.db.query(
+      const rows = await this.db.query<AuditRow[]>(
         `SELECT a.audit_id, a.action, a.resource_type, a.resource_id,
                 a.old_value, a.new_value, a.ip_address, a.created_at,
                 u.name AS actor_name ${sql}
-         ORDER BY a.created_at DESC
+         ORDER BY a.created_at DESC${opts.strict ? ', a.audit_id DESC' : ''}
          LIMIT $${listParams.length - 1} OFFSET $${listParams.length}`,
         listParams,
       );
@@ -135,7 +164,10 @@ export class ExamCellAuditService {
         offset,
         page,
       };
-    } catch {
+    } catch (error) {
+      // Dashboard reads must distinguish an unavailable audit source from a
+      // genuinely empty trail. Preserve legacy best-effort callers by default.
+      if (opts.strict) throw error;
       return { data: [], total: 0, limit, offset, page };
     }
   }

@@ -23,6 +23,19 @@ describe('Student upload download authorization', () => {
     } as unknown as DataSource);
   });
 
+  it.each(['Student', 'Faculty', 'ExamCell', 'SuperAdmin'])(
+    'requires the authorized ticket endpoint even for %s',
+    async (role) => {
+      await expect(
+        service.assertStudentDownloadAccess(
+          { ...student, roles: [role] },
+          `${tenant}/EXAM-CELL/issued-hall-tickets/session/student/ticket.pdf`,
+        ),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(query).not.toHaveBeenCalled();
+    },
+  );
+
   it.each([`/uploads/${key}`, `s3://bucket/${key}`, key, resolve(root, key)])(
     'accepts an owned legacy reference: %s',
     async (reference) => {
@@ -34,6 +47,19 @@ describe('Student upload download authorization', () => {
         tenant,
         'student-a',
       ]);
+    },
+  );
+
+  it.each(['Student', 'Faculty', 'ExamOperator', 'ExamCell', 'SuperAdmin'])(
+    'never permits generic question-paper downloads for %s',
+    async (role) => {
+      await expect(
+        service.assertStudentDownloadAccess(
+          { ...student, roles: [role] },
+          `${tenant}/exam-cell/question-papers/paper/version.pdf`,
+        ),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(query).not.toHaveBeenCalled();
     },
   );
 

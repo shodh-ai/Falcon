@@ -1,6 +1,7 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
+import { isUUID } from 'class-validator';
+import { DataSource, EntityManager } from 'typeorm';
 
 export const DEFAULT_MIN_ATTENDANCE = 75;
 
@@ -12,6 +13,29 @@ export interface AttendanceEligibility {
   eligible: boolean;
   reason: string | null;
 }
+
+export interface AttendanceEligibilityOptions {
+  deptId?: number | null;
+  context?: string;
+  audit?: boolean;
+  /** Exam operations opt in to complete, tenant-scoped source validation. */
+  strict?: boolean;
+  semester?: number;
+  courseIds?: string[];
+  manager?: EntityManager;
+}
+
+type AttendanceEnrollment = {
+  course_id?: string;
+  attendance_percent: string | number | null;
+  course_code: string;
+  min_attendance: number | null;
+};
+
+type AttendanceQueryOptions = Pick<
+  AttendanceEligibilityOptions,
+  'strict' | 'semester' | 'manager'
+>;
 
 /**
  * Single source of truth for "is this student attendance-eligible for exams".
@@ -51,8 +75,9 @@ export class AttendanceEligibilityService {
   async resolveThreshold(
     tenantId: string,
     deptId: number | null | undefined,
+    options: AttendanceQueryOptions = {},
   ): Promise<{ threshold: number; source: 'DEFAULT' | 'POLICY' }> {
-    const rows = await this.db
+    const rows = await (options.manager ?? this.db)
       .query(
         `SELECT requested_min_percent, dept_id
          FROM attendance_threshold_requests
@@ -62,8 +87,19 @@ export class AttendanceEligibilityService {
          LIMIT 1`,
         [tenantId, deptId ?? null],
       )
-      .catch(() => [] as Array<{ requested_min_percent: number }>);
+      .catch((error: unknown) => {
+        if (options.strict) throw error;
+        return [] as Array<{ requested_min_percent: number }>;
+      });
     if (rows[0]?.requested_min_percent != null) {
+      if (
+        options.strict &&
+        (!Number.isFinite(Number(rows[0].requested_min_percent)) ||
+          Number(rows[0].requested_min_percent) < 1 ||
+          Number(rows[0].requested_min_percent) > 100)
+      ) {
+        throw new BadRequestException('Approved attendance policy is invalid');
+      }
       return {
         threshold: Number(rows[0].requested_min_percent),
         source: 'POLICY',
@@ -75,16 +111,23 @@ export class AttendanceEligibilityService {
   private async findActiveExemption(
     tenantId: string,
     studentUserId: string,
+    options: AttendanceQueryOptions = {},
   ): Promise<string | null> {
-    const rows = await this.db
+    const rows = await (options.manager ?? this.db)
       .query(
         `SELECT exemption_id FROM student_attendance_exemptions
          WHERE tenant_id = $1 AND student_user_id = $2 AND status = 'APPROVED'
+         ${options.strict ? 'AND (semester IS NULL OR semester = $3)' : ''}
          ORDER BY hod_decided_at DESC NULLS LAST, final_decided_at DESC NULLS LAST, created_at DESC
          LIMIT 1`,
-        [tenantId, studentUserId],
+        options.strict
+          ? [tenantId, studentUserId, options.semester]
+          : [tenantId, studentUserId],
       )
-      .catch(() => [] as Array<{ exemption_id: string }>);
+      .catch((error: unknown) => {
+        if (options.strict) throw error;
+        return [] as Array<{ exemption_id: string }>;
+      });
     return rows[0]?.exemption_id ?? null;
   }
 
@@ -92,10 +135,57 @@ export class AttendanceEligibilityService {
   async evaluate(
     tenantId: string,
     studentUserId: string,
-    options: { deptId?: number | null; context?: string; audit?: boolean } = {},
+    options: AttendanceEligibilityOptions = {},
   ): Promise<AttendanceEligibility> {
     let deptId = options.deptId ?? null;
-    if (deptId == null) {
+    let strictEnrollments: AttendanceEnrollment[] | undefined;
+    if (options.strict) {
+      this.validateStrictScope(tenantId, studentUserId, options);
+      const query = options.manager ?? this.db;
+      const students = await query.query<Array<{ dept_id: number | null }>>(
+        `SELECT u.dept_id FROM users u
+         WHERE u.user_id = $1 AND u.tenant_id = $2
+           AND u.is_active = true AND u.deleted_at IS NULL
+           AND (EXISTS (
+             SELECT 1 FROM roles r WHERE r.role_id = u.role_id
+               AND r.role_name = 'Student' AND r.deleted_at IS NULL
+           ) OR EXISTS (
+             SELECT 1 FROM user_roles ur JOIN roles r ON r.role_id = ur.role_id
+             WHERE ur.user_id = u.user_id AND ur.deleted_at IS NULL
+               AND r.role_name = 'Student' AND r.deleted_at IS NULL
+           ))`,
+        [studentUserId, tenantId],
+      );
+      if (!students[0]) {
+        return {
+          attendance_percent: 0,
+          effective_threshold: DEFAULT_MIN_ATTENDANCE,
+          threshold_source: 'DEFAULT',
+          exemption_id: null,
+          eligible: false,
+          reason:
+            'Blocked: Active student record is unavailable in this tenant',
+        };
+      }
+      // Caller-supplied department information must not select a different policy.
+      deptId = students[0].dept_id;
+      strictEnrollments = await query.query<AttendanceEnrollment[]>(
+        `SELECT e.course_id, e.attendance_percent, c.course_code, c.min_attendance
+         FROM student_course_enrollments e
+         JOIN academic_courses c ON c.course_id = e.course_id
+           AND c.tenant_id = $1 AND c.deleted_at IS NULL
+         WHERE e.tenant_id = $1 AND e.student_user_id = $2
+           AND e.semester = $3 AND e.course_id = ANY($4::uuid[])
+           AND e.status = 'ENROLLED' AND e.deleted_at IS NULL
+         ORDER BY e.course_id`,
+        [
+          tenantId,
+          studentUserId,
+          options.semester,
+          options.courseIds!.map((courseId) => courseId.toLowerCase()),
+        ],
+      );
+    } else if (deptId == null) {
       const u = await this.db
         .query(`SELECT dept_id FROM users WHERE user_id = $1`, [studentUserId])
         .catch(() => [] as Array<{ dept_id: number | null }>);
@@ -103,25 +193,64 @@ export class AttendanceEligibilityService {
     }
 
     const [attendance, { threshold, source }] = await Promise.all([
-      this.computeAttendancePercent(studentUserId),
-      this.resolveThreshold(tenantId, deptId),
+      strictEnrollments
+        ? Promise.resolve(this.strictAttendancePercent(strictEnrollments))
+        : this.computeAttendancePercent(studentUserId),
+      this.resolveThreshold(tenantId, deptId, options),
     ]);
 
-    const enrollments = await this.db
-      .query(
-        `SELECT e.attendance_percent, c.course_code, c.min_attendance
+    const enrollments =
+      strictEnrollments ??
+      (await this.db
+        .query(
+          `SELECT e.attendance_percent, c.course_code, c.min_attendance
        FROM student_course_enrollments e
        JOIN academic_courses c ON c.course_id = e.course_id
        WHERE e.student_user_id = $1 AND e.attendance_percent IS NOT NULL`,
-        [studentUserId],
-      )
-      .catch(() => []);
+          [studentUserId],
+        )
+        .catch(() => []));
 
+    const incomplete: string[] = [];
+    if (options.strict) {
+      const expected = new Set(
+        options.courseIds!.map((courseId) => courseId.toLowerCase()),
+      );
+      const actual = new Set(
+        enrollments.map((e: AttendanceEnrollment) => e.course_id),
+      );
+      if (
+        enrollments.length !== expected.size ||
+        actual.size !== expected.size ||
+        [...expected].some((courseId) => !actual.has(courseId))
+      ) {
+        incomplete.push(
+          'Active enrollment is missing or inconsistent for the requested semester and subjects',
+        );
+      }
+    }
     const shortfalls: string[] = [];
     for (const e of enrollments) {
       const courseMin =
         e.min_attendance != null ? Number(e.min_attendance) : threshold;
       const att = Number(e.attendance_percent);
+      if (options.strict) {
+        if (
+          e.attendance_percent == null ||
+          !Number.isFinite(att) ||
+          att < 0 ||
+          att > 100
+        ) {
+          incomplete.push(
+            `Attendance data is unavailable or invalid for ${e.course_code}`,
+          );
+          continue;
+        }
+        if (!Number.isFinite(courseMin) || courseMin < 0 || courseMin > 100) {
+          incomplete.push(`Attendance rule is invalid for ${e.course_code}`);
+          continue;
+        }
+      }
       if (att < courseMin) {
         shortfalls.push(
           `${e.course_code} (${Math.round(att)}% < ${courseMin}%)`,
@@ -129,13 +258,19 @@ export class AttendanceEligibilityService {
       }
     }
 
-    let eligible = shortfalls.length === 0;
+    let eligible = incomplete.length === 0 && shortfalls.length === 0;
     let exemptionId: string | null = null;
     let resolvedSource: AttendanceEligibility['threshold_source'] = source;
-    let reason: string | null = null;
+    let reason: string | null = incomplete.length
+      ? `Blocked: ${incomplete.join('; ')}`
+      : null;
 
-    if (!eligible) {
-      exemptionId = await this.findActiveExemption(tenantId, studentUserId);
+    if (!eligible && incomplete.length === 0) {
+      exemptionId = await this.findActiveExemption(
+        tenantId,
+        studentUserId,
+        options,
+      );
       if (exemptionId) {
         eligible = true;
         resolvedSource = 'EXEMPTION';
@@ -145,7 +280,7 @@ export class AttendanceEligibilityService {
     }
 
     if (options.audit) {
-      await this.db
+      await (options.manager ?? this.db)
         .query(
           `INSERT INTO attendance_eligibility_audit
              (tenant_id, student_user_id, attendance_percent, effective_threshold,
@@ -163,7 +298,10 @@ export class AttendanceEligibilityService {
             options.context ?? 'ADMIT_CARD',
           ],
         )
-        .catch(() => undefined);
+        .catch((error: unknown) => {
+          if (options.strict) throw error;
+          return undefined;
+        });
     }
 
     return {
@@ -174,5 +312,52 @@ export class AttendanceEligibilityService {
       eligible,
       reason,
     };
+  }
+
+  private validateStrictScope(
+    tenantId: string,
+    studentUserId: string,
+    options: AttendanceEligibilityOptions,
+  ): void {
+    if (!isUUID(tenantId) || !isUUID(studentUserId)) {
+      throw new BadRequestException(
+        'Valid tenant and student IDs are required for attendance verification',
+      );
+    }
+    if (
+      !Number.isSafeInteger(options.semester) ||
+      Number(options.semester) <= 0
+    ) {
+      throw new BadRequestException(
+        'A positive semester is required for attendance verification',
+      );
+    }
+    if (
+      !Array.isArray(options.courseIds) ||
+      options.courseIds.length === 0 ||
+      options.courseIds.some((courseId) => !isUUID(courseId)) ||
+      new Set(options.courseIds.map((courseId) => courseId.toLowerCase()))
+        .size !== options.courseIds.length
+    ) {
+      throw new BadRequestException(
+        'Unique enrolled course IDs are required for attendance verification',
+      );
+    }
+  }
+
+  private strictAttendancePercent(enrollments: AttendanceEnrollment[]): number {
+    const percentages = enrollments
+      .filter((enrollment) => enrollment.attendance_percent != null)
+      .map((enrollment) => Number(enrollment.attendance_percent))
+      .filter(
+        (percentage) =>
+          Number.isFinite(percentage) && percentage >= 0 && percentage <= 100,
+      );
+    return percentages.length
+      ? Math.round(
+          percentages.reduce((sum, percentage) => sum + percentage, 0) /
+            percentages.length,
+        )
+      : 0;
   }
 }

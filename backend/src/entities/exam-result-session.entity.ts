@@ -12,6 +12,11 @@ export type ExamResultEntryStatus = 'CLOSED' | 'OPEN' | 'LOCKED';
 
 @Entity('exam_result_sessions')
 @Index(['tenant_id', 'entry_status'])
+@Index(
+  'uq_exam_result_sessions_scope',
+  ['tenant_id', 'course_id', 'exam_type', 'semester'],
+  { unique: true },
+)
 export class ExamResultSession extends BaseSoftDeleteEntity {
   @PrimaryGeneratedColumn('uuid')
   session_id: string;

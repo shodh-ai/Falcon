@@ -1564,19 +1564,19 @@ export const examCellPortal: PortalConfig = {
       title: 'Exam Planning',
       items: [
         { label: 'Exam Sessions', href: '/exam-cell/sessions', icon: CalendarRange, keywords: ['academic year', 'semester cycle'] },
-        { label: 'Master Exam Schedule', href: '/exam-cell/schedule', icon: CalendarDays, keywords: ['mid term', 'end term', 'timetable'] },
+        { label: 'Exam Timetable', href: '/exam-cell/schedule', icon: CalendarDays, keywords: ['mid term', 'end term', 'timetable', 'master exam schedule'] },
         { label: 'Examination Calendar', href: '/exam-cell/calendar', icon: Calendar, keywords: ['month', 'week', 'holidays'] },
         { label: 'Deadlines', href: '/exam-cell/deadlines', icon: Timer, keywords: ['countdown', 'reminder'] },
       ],
     },
     {
-      title: 'Registration & Admit Cards',
+      title: 'Registration & Hall Tickets',
       items: [
         { label: 'Exam Registration', href: '/exam-cell/form-fillup', icon: FileCheck2, keywords: ['registration', 'eligibility', 'form fill-up desk'] },
         { label: 'Eligibility Dashboard', href: '/exam-cell/eligibility', icon: ClipboardCheck, keywords: ['attendance', 'fee', 'debarred'] },
         { label: 'Attendance Exemptions', href: '/exam-cell/attendance-exemptions', icon: ClipboardCheck, keywords: ['exemption', 'low attendance'] },
         { label: 'Hall Ticket Approvals', href: '/exam-cell/hall-ticket-approvals', icon: FileCheck2, keywords: ['coe approval', 'workflow'] },
-        { label: 'Admit Cards', href: '/exam-cell/admit-cards', icon: Ticket, keywords: ['hall ticket', 'admit', 'admit card engine'] },
+        { label: 'Hall Tickets', href: '/exam-cell/admit-cards', icon: Ticket, keywords: ['hall ticket', 'admit', 'admit card engine', 'admit cards'] },
       ],
     },
     {
@@ -1588,17 +1588,16 @@ export const examCellPortal: PortalConfig = {
         { label: 'Seating Planner', href: '/exam-cell/seating', icon: ClipboardList, keywords: ['seating', 'rooms', 'ai'] },
         { label: 'Published Seating Plans', href: '/exam-cell/seating-plans', icon: ClipboardList, keywords: ['published seating'] },
         { label: 'Invigilation Roster', href: '/exam-cell/invigilation', icon: Eye, keywords: ['faculty', 'duty', 'auto assign'] },
-        { label: 'Question Paper Control', href: '/exam-cell/question-papers', icon: FolderLock, keywords: ['qp', 'moderation'] },
+        { label: 'Question Papers', href: '/exam-cell/question-papers', icon: FolderLock, keywords: ['qp', 'moderation', 'question paper control'] },
         { label: 'Exam Day Operations', href: '/exam-cell/exam-day', icon: Timer, keywords: ['attendance', 'qr verify'] },
         { label: 'Answer Sheet Tracking', href: '/exam-cell/answer-sheets', icon: FileText, keywords: ['qr', 'barcode', 'evaluator'] },
         { label: 'Malpractice Cases', href: '/exam-cell/ufm-cases', icon: Shield, keywords: ['cheating', 'unfair means', 'ufm malpractice desk'] },
-        { label: 'Product Viva Panel', href: '/exam-cell/product-viva', icon: Users, keywords: ['product viva', 'urop', 'industry', 'shodh'] },
       ],
     },
     {
       title: 'Results & Corrections',
       items: [
-        { label: 'Result Control Centre', href: '/exam-cell/results', icon: TrendingUp, keywords: ['publish', 'bell curve', 'declare', 'marks entry'] },
+        { label: 'Results & Publication', href: '/exam-cell/results', icon: TrendingUp, keywords: ['publish', 'bell curve', 'declare', 'marks entry', 'result control centre'] },
         { label: 'Course Grades', href: '/exam-cell/course-grades', icon: GraduationCap, keywords: ['grades', 'aggregate'] },
         { label: 'Grade Cards & Merit', href: '/exam-cell/grade-cards', icon: Medal, keywords: ['marksheet', 'grade cards', 'cgpa', 'sgpa', 'top students', 'merit'] },
         { label: 'Re-evaluations', href: '/exam-cell/re-evaluations', icon: FileText, keywords: ['recheck', 'backlog'] },
@@ -1609,10 +1608,9 @@ export const examCellPortal: PortalConfig = {
     {
       title: 'Certificates & Documents',
       items: [
-        { label: 'Degree & Transcripts', href: '/exam-cell/transcripts', icon: Award, keywords: ['digilocker', 'abc id'] },
+        { label: 'Official Transcripts', href: '/exam-cell/transcripts', icon: Award, keywords: ['digilocker', 'abc id', 'degree & transcripts'] },
         { label: 'Degree Eligibility Audit', href: '/exam-cell/degree-audit', icon: FileCheck2, keywords: ['credits', 'cgpa', 'clearance'] },
         { label: 'Document Repository', href: '/exam-cell/documents', icon: Archive, keywords: ['notices', 'circulars', 'verification'] },
-        { label: 'Portfolio Transcripts', href: '/exam-cell/portfolio-transcripts', icon: Briefcase, keywords: ['github', 'patents', 'hardware', 'portfolio degree'] },
       ],
     },
     {
@@ -1628,7 +1626,7 @@ export const examCellPortal: PortalConfig = {
   commandItems: [
     { label: 'Dashboard', href: '/exam-cell/dashboard', icon: LayoutDashboard },
     { label: 'Exam Schedule', href: '/exam-cell/schedule', icon: CalendarDays },
-    { label: 'Admit Cards', href: '/exam-cell/admit-cards', icon: Ticket },
+    { label: 'Hall Tickets', href: '/exam-cell/admit-cards', icon: Ticket },
     { label: 'Attendance Exemptions', href: '/exam-cell/attendance-exemptions', icon: ClipboardCheck },
     { label: 'Publish Results', href: '/exam-cell/results', icon: TrendingUp },
     { label: 'Grade Cards & Merit', href: '/exam-cell/grade-cards', icon: Medal },

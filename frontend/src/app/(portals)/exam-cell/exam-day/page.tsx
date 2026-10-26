@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Loader2, QrCode } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Button } from '@/components/ui/button';
@@ -13,6 +13,7 @@ import { ExamCellPageHeader } from '@/components/exam-cell/ExamCellPageHeader';
 import { useAuthedApi } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import { canExamCellAction } from '@/lib/exam-cell-rbac';
+import { ExamDayOperationsPanel } from '@/components/exam-cell/ExamDayOperationsPanel';
 
 type TodayExam = {
   exam_schedule_id: string;
@@ -52,7 +53,6 @@ type VerifiedStudent = {
     semester: number | null;
   };
   seating: Array<{ room: string; seat_number: string; subject_name: string; exam_date: string }>;
-  verified: boolean;
 };
 
 const STATUSES = ['PRESENT', 'ABSENT', 'MEDICAL', 'DEBARRED', 'LATE'] as const;
@@ -60,55 +60,100 @@ const STATUSES = ['PRESENT', 'ABSENT', 'MEDICAL', 'DEBARRED', 'LATE'] as const;
 export default function ExamCellExamDayPage() {
   const api = useAuthedApi();
   const { user } = useAuth();
-  const canMark = canExamCellAction(user?.roles ?? user?.role, 'manage_seating');
-  const [todayExams, setTodayExams] = useState<TodayExam[]>([]);
+  const canMark = canExamCellAction(user?.primaryRole ?? user?.role, 'manage_sessions');
+  const [examSnapshot, setExamSnapshot] = useState<{
+    api: typeof api; date: string; exams: TodayExam[]; error: string | null;
+  } | null>(null);
   const [selectedExam, setSelectedExam] = useState('');
-  const [attendance, setAttendance] = useState<AttendanceRow[]>([]);
-  const [roster, setRoster] = useState<RosterRow[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [operationsBusy, setOperationsBusy] = useState(false);
+  const [examDate, setExamDate] = useState('');
+  const [detailsSnapshot, setDetailsSnapshot] = useState<{
+    api: typeof api; examId: string; attendance: AttendanceRow[]; roster: RosterRow[]; error: string | null;
+  } | null>(null);
+  const [refreshingExams, setRefreshingExams] = useState(false);
+  const [refreshingDetails, setRefreshingDetails] = useState(false);
+  const examsRequest = useRef(0);
+  const detailsRequest = useRef(0);
+  const markingInFlight = useRef(false);
   const [markingId, setMarkingId] = useState<string | null>(null);
   const [qrInput, setQrInput] = useState('');
   const [verified, setVerified] = useState<VerifiedStudent | null>(null);
   const [verifying, setVerifying] = useState(false);
 
-  const loadExams = useCallback(async () => {
-    setLoading(true);
-    try {
-      const exams = await api.get<TodayExam[]>('/api/exam-cell/exam-day/today');
-      setTodayExams(exams);
-      if (!selectedExam && exams[0]) setSelectedExam(exams[0].exam_schedule_id);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed to load today\'s exams');
-    } finally {
-      setLoading(false);
-    }
+  const loadExams = useCallback(() => {
+    const requestId = ++examsRequest.current;
+    const dateQuery = examDate ? `?date=${encodeURIComponent(examDate)}` : '';
+    return api.get<TodayExam[]>(`/api/exam-cell/exam-day/today${dateQuery}`).then(
+      (exams) => {
+        if (requestId !== examsRequest.current) return;
+        setExamSnapshot({ api, date: examDate, exams, error: null });
+        setSelectedExam((current) => exams.some((exam) => exam.exam_schedule_id === current)
+          ? current : exams[0]?.exam_schedule_id ?? '');
+      },
+      (e: unknown) => {
+        if (requestId === examsRequest.current) setExamSnapshot({
+          api, date: examDate, exams: [], error: e instanceof Error ? e.message : 'Failed to load today\'s exams',
+        });
+      },
+    ).finally(() => {
+      if (requestId === examsRequest.current) setRefreshingExams(false);
+    });
+  }, [api, examDate]);
+
+  const loadAttendance = useCallback(() => {
+    if (!selectedExam) return Promise.resolve();
+    const requestId = ++detailsRequest.current;
+    return Promise.all([
+      api.get<AttendanceRow[]>(`/api/exam-cell/exam-day/attendance?exam_schedule_id=${selectedExam}`),
+      api.get<RosterRow[]>(`/api/exam-cell/exam-day/roster?exam_schedule_id=${selectedExam}`),
+    ]).then(
+      ([attendanceRows, rosterRows]) => {
+        if (requestId !== detailsRequest.current) return;
+        setDetailsSnapshot({ api, examId: selectedExam, attendance: attendanceRows, roster: rosterRows, error: null });
+      },
+      (e: unknown) => {
+        if (requestId !== detailsRequest.current) return;
+        setDetailsSnapshot({
+          api, examId: selectedExam, attendance: [], roster: [],
+          error: e instanceof Error ? e.message : 'Failed to load the examination roster',
+        });
+      },
+    ).finally(() => {
+      if (requestId === detailsRequest.current) setRefreshingDetails(false);
+    });
   }, [api, selectedExam]);
 
-  const loadAttendance = useCallback(async () => {
-    if (!selectedExam) return;
-    try {
-      const [attendanceRows, rosterRows] = await Promise.all([
-        api.get<AttendanceRow[]>(`/api/exam-cell/exam-day/attendance?exam_schedule_id=${selectedExam}`),
-        api.get<RosterRow[]>(`/api/exam-cell/exam-day/roster?exam_schedule_id=${selectedExam}`),
-      ]);
-      setAttendance(attendanceRows);
-      setRoster(rosterRows);
-    } catch {
-      setAttendance([]);
-      setRoster([]);
-    }
-  }, [api, selectedExam]);
+  useEffect(() => {
+    void loadExams();
+    return () => { examsRequest.current += 1; };
+  }, [loadExams]);
+  useEffect(() => {
+    void loadAttendance();
+    return () => { detailsRequest.current += 1; };
+  }, [loadAttendance]);
 
-  useEffect(() => { void loadExams(); }, [loadExams]);
-  useEffect(() => { void loadAttendance(); }, [loadAttendance]);
+  const currentExams = examSnapshot?.api === api && examSnapshot.date === examDate ? examSnapshot : null;
+  const loading = refreshingExams || !currentExams;
+  const todayExams = currentExams?.exams ?? [];
+  const loadError = !loading ? currentExams?.error : null;
+  const detailsMatch = detailsSnapshot?.api === api && detailsSnapshot.examId === selectedExam;
+  const detailsError = detailsMatch && !refreshingDetails ? detailsSnapshot.error : null;
+  const roster = detailsMatch ? detailsSnapshot.roster : [];
+  const attendance = detailsMatch ? detailsSnapshot.attendance : [];
+  const detailsReady = !!selectedExam && detailsMatch &&
+    !loading && !loadError && !refreshingDetails && !detailsError;
+  const identityOnRoster = detailsReady && !!verified &&
+    roster.some((row) => row.student_user_id === verified.student.user_id);
 
   async function verifyQr() {
+    if (verifying) return;
     const payload = qrInput.trim();
     if (!payload) {
       toast.error('Enter an enrollment number or scan a hall ticket QR');
       return;
     }
     setVerifying(true);
+    setVerified(null);
     try {
       const res = await api.post<VerifiedStudent>('/api/exam-cell/identity/verify', {
         qr_payload: payload,
@@ -124,9 +169,8 @@ export default function ExamCellExamDayPage() {
         ...res,
         student,
         seating: Array.isArray(res.seating) ? res.seating : [],
-        verified: true,
       });
-      toast.success(`${student.name} verified`);
+      toast.success(`Student record found: ${student.name}`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Verification failed');
       setVerified(null);
@@ -136,7 +180,9 @@ export default function ExamCellExamDayPage() {
   }
 
   async function markAttendance(studentUserId: string, status: string) {
-    if (!selectedExam) return;
+    if (!canMark || !detailsReady || operationsBusy || markingInFlight.current ||
+      !roster.some((row) => row.student_user_id === studentUserId)) return;
+    markingInFlight.current = true;
     setMarkingId(studentUserId);
     try {
       await api.post('/api/exam-cell/exam-day/attendance', {
@@ -145,11 +191,14 @@ export default function ExamCellExamDayPage() {
         status,
       });
       toast.success(`Marked ${status.toLowerCase()}`);
+      setRefreshingDetails(true);
       await loadAttendance();
+      setRefreshingExams(true);
       await loadExams();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to mark attendance');
     } finally {
+      markingInFlight.current = false;
       setMarkingId(null);
     }
   }
@@ -182,7 +231,7 @@ export default function ExamCellExamDayPage() {
               key={s}
               size="sm"
               variant={r.attendance_status === s ? 'default' : 'outline'}
-              disabled={markingId === r.student_user_id}
+              disabled={!!markingId || operationsBusy || !detailsReady}
               onClick={() => void markAttendance(r.student_user_id, s)}
             >
               {s}
@@ -231,7 +280,10 @@ export default function ExamCellExamDayPage() {
               <div>
                 <p className="font-bold text-sgvu-navy">{verified.student.name}</p>
                 <p className="text-sm text-muted-foreground">{verified.student.enrollment_number ?? '—'} · {(verified.student as { branch_name?: string; branch?: string }).branch_name ?? verified.student.branch ?? 'Program'} · Sem {verified.student.semester ?? '—'}</p>
-                <Badge className="mt-2 bg-emerald-600">Verified for entry</Badge>
+                <Badge className="mt-2" variant="outline">Student record found — not an entry clearance</Badge>
+                {detailsReady ? <p className="mt-2 text-sm text-muted-foreground">{identityOnRoster
+                  ? 'Listed on the selected examination seating roster.'
+                  : 'Not on the selected examination seating roster. Attendance cannot be recorded.'}</p> : null}
               </div>
               {verified.seating.length > 0 ? (
                 <div className="text-sm">
@@ -241,10 +293,10 @@ export default function ExamCellExamDayPage() {
                   ))}
                 </div>
               ) : null}
-              {canMark && selectedExam ? (
+              {canMark && identityOnRoster ? (
                 <div className="flex flex-wrap gap-1">
                   {STATUSES.map((s) => (
-                    <Button key={s} size="sm" variant="outline" onClick={() => void markAttendance(verified.student.user_id, s)}>
+                    <Button key={s} size="sm" variant="outline" disabled={!!markingId || operationsBusy} onClick={() => void markAttendance(verified.student.user_id, s)}>
                       Mark {s}
                     </Button>
                   ))}
@@ -256,16 +308,24 @@ export default function ExamCellExamDayPage() {
       </Card>
 
       <Card>
-        <CardHeader><CardTitle className="text-base">Today&apos;s examination sessions</CardTitle></CardHeader>
+        <CardHeader className="gap-3"><CardTitle className="text-base">{examDate ? 'Examinations on selected date' : "Today's examination sessions"}</CardTitle>
+          <div className="flex items-center gap-2"><label htmlFor="exam-day-date" className="text-sm">Examination date</label><Input id="exam-day-date" type="date" className="w-auto" disabled={!!markingId || operationsBusy} value={examDate} onChange={e => setExamDate(e.target.value)} /></div>
+        </CardHeader>
         <CardContent>
-          {loading ? <Loader2 className="h-6 w-6 animate-spin" /> : todayExams.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No exams scheduled for today.</p>
+          {loading ? <Loader2 aria-label="Loading today's exams" className="h-6 w-6 animate-spin" /> : loadError ? (
+            <div role="alert" className="space-y-2 text-sm text-red-700">
+              <p>{loadError}</p>
+              <Button variant="outline" onClick={() => { setRefreshingExams(true); void loadExams(); }}>Retry loading exams</Button>
+            </div>
+          ) : todayExams.length === 0 ? (
+            <p className="text-sm text-muted-foreground">{examDate ? 'No exams scheduled for this date.' : 'No exams scheduled for today.'}</p>
           ) : (
             <div className="grid gap-2 sm:grid-cols-2">
               {todayExams.map((e) => (
                 <button
                   key={e.exam_schedule_id}
                   type="button"
+                  disabled={!!markingId || operationsBusy}
                   onClick={() => setSelectedExam(e.exam_schedule_id)}
                   className={`rounded-lg border p-3 text-left transition ${selectedExam === e.exam_schedule_id ? 'border-sgvu-gold bg-sgvu-gold/5' : 'hover:border-sgvu-navy/20'}`}
                 >
@@ -279,25 +339,34 @@ export default function ExamCellExamDayPage() {
         </CardContent>
       </Card>
 
-      {selectedExam && roster.length > 0 ? (
+      {selectedExam && !loadError ? (
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle className="text-base">Seating roster — mark attendance</CardTitle>
-            <Select className="rounded-md border px-2 py-1 text-sm" value={selectedExam} onChange={(e) => setSelectedExam(e.target.value)}>
+            <label className="sr-only" htmlFor="exam-day-roster-exam">Examination seating roster</label>
+            <Select id="exam-day-roster-exam" disabled={!!markingId || operationsBusy} className="rounded-md border px-2 py-1 text-sm" value={selectedExam} onChange={(e) => setSelectedExam(e.target.value)}>
               {todayExams.map((e) => <option key={e.exam_schedule_id} value={e.exam_schedule_id}>{e.subject_name ?? e.exam_type}</option>)}
             </Select>
           </CardHeader>
           <CardContent>
-            <DataTable columns={rosterColumns} rows={roster} rowKey={(r) => r.student_user_id} emptyMessage="No seating allocations for this session. Publish seating plan first." />
+            {detailsError ? (
+              <div role="alert" className="space-y-2 text-sm text-red-700">
+                <p>{detailsError}</p>
+                <Button variant="outline" onClick={() => { setRefreshingDetails(true); void loadAttendance(); }}>Retry loading roster</Button>
+              </div>
+            ) : !detailsReady ? <p role="status" className="text-sm text-muted-foreground">Loading seating roster and attendance…</p> : (
+              <DataTable columns={rosterColumns} rows={roster} rowKey={(r) => r.student_user_id} emptyMessage="No seating allocations for this session. Check the seating plan before recording attendance." />
+            )}
           </CardContent>
         </Card>
       ) : null}
 
-      {selectedExam ? (
+      {detailsReady ? (
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle className="text-base">Attendance register</CardTitle>
-            <Select className="rounded-md border px-2 py-1 text-sm" value={selectedExam} onChange={(e) => setSelectedExam(e.target.value)}>
+            <label className="sr-only" htmlFor="exam-day-register-exam">Attendance register examination</label>
+            <Select id="exam-day-register-exam" disabled={!!markingId || operationsBusy} className="rounded-md border px-2 py-1 text-sm" value={selectedExam} onChange={(e) => setSelectedExam(e.target.value)}>
               {todayExams.map((e) => <option key={e.exam_schedule_id} value={e.exam_schedule_id}>{e.subject_name ?? e.exam_type}</option>)}
             </Select>
           </CardHeader>
@@ -306,6 +375,7 @@ export default function ExamCellExamDayPage() {
           </CardContent>
         </Card>
       ) : null}
+      {detailsReady ? <ExamDayOperationsPanel api={api} scheduleId={selectedExam} role={user?.primaryRole ?? user?.role} onBusyChange={setOperationsBusy} /> : null}
     </div>
   );
 }

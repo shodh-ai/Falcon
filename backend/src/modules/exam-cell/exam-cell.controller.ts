@@ -10,8 +10,23 @@ import {
   Param,
   BadRequestException,
   ParseIntPipe,
+  ParseUUIDPipe,
   StreamableFile,
+  Optional,
+  ServiceUnavailableException,
+  UseInterceptors,
+  UploadedFile,
+  Header,
+  ValidationPipe,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
+import { QuestionPaperWorkflowService } from './question-paper-workflow.service';
+import {
+  CreateQuestionPaperDto,
+  UpdateQuestionPaperStatusDto,
+  UploadQuestionPaperDto,
+} from './dto/question-paper.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -31,12 +46,39 @@ import { ResultControlService } from './result-control.service';
 import { SemesterResultsService } from './semester-results.service';
 import { ExamCellAuditService } from './exam-cell-audit.service';
 import { ExamCellSessionsService } from './exam-cell-sessions.service';
+import { CreateExamScheduleDto } from './dto/exam-schedule.dto';
+import {
+  CreateExamSessionDto,
+  UpdateExamSessionStatusDto,
+} from './dto/exam-session.dto';
+import {
+  MarkExamDayAttendanceDto,
+  ExamDayDateQueryDto,
+  CreateAnswerSheetDto,
+  UpdateAnswerSheetStatusDto,
+  ReportMissingScriptDto,
+  ResolveMissingScriptDto,
+  ReportExamDayUfmDto,
+  ReviewExamDayUfmDto,
+  CorrectScriptReceiptDto,
+} from './dto/exam-day.dto';
+import { ExamDayScriptsService } from './exam-day-scripts.service';
+import {
+  CreateExamFormWindowDto,
+  ReviewExamRegistrationDto,
+  SyncExamRegistrationsDto,
+  UpdateExamFormWindowStatusDto,
+} from './dto/exam-registration.dto';
 import { ExamCellOperationsService } from './exam-cell-operations.service';
 import { ExamCellEnterpriseService } from './exam-cell-enterprise.service';
 import { ExamCellDevService } from './exam-cell-dev.service';
 import { OfficialTranscriptService } from './official-transcript.service';
 import { requireTenantId } from '../../common/utils/require-tenant-id';
 import { EXAM_CELL_ACCESS_ROLES } from './exam-cell.constants';
+import {
+  AdvanceHallTicketApprovalDto,
+  BulkApproveHallTicketsDto,
+} from './dto/hall-ticket-approval.dto';
 import {
   assertExamCellAction,
   examCellRoleFromUser,
@@ -64,45 +106,79 @@ export class ExamCellController {
     private readonly enterprise: ExamCellEnterpriseService,
     private readonly dev: ExamCellDevService,
     private readonly officialTranscripts: OfficialTranscriptService,
+    @Optional() private readonly scripts?: ExamDayScriptsService,
+    @Optional() private readonly questionPapers?: QuestionPaperWorkflowService,
   ) {}
 
   @Get('dashboard')
   async dashboard(@Req() req: { user: AuthUser }) {
+    this.requireAction(req, 'view_dashboard');
     const tenantId = this.tenant(req);
+    let recentActivityError: string | undefined;
     const [stats, recentActivity] = await Promise.all([
       this.examCell.dashboard(tenantId),
-      this.audit.listRecent(tenantId, 12),
+      this.audit.listRecent(tenantId, 5, { strict: true }).catch(() => {
+        recentActivityError = 'Recent audit activity is unavailable.';
+        return null;
+      }),
     ]);
-    return { ...stats, recent_activity: recentActivity };
+    return {
+      ...stats,
+      recent_activity:
+        recentActivity?.map((event) => ({
+          audit_id: event.audit_id,
+          action: event.action,
+          resource_type: event.resource_type,
+          created_at: event.created_at,
+          actor_name: event.actor_name,
+        })) ?? null,
+      ...(recentActivityError
+        ? { recent_activity_error: recentActivityError }
+        : {}),
+    };
   }
 
   @Get('schedules')
-  schedules(@Req() req: { user: AuthUser }) {
-    return this.examCell.listSchedules(this.tenant(req));
+  schedules(
+    @Req() req: { user: AuthUser },
+    @Query('session_id') sessionId?: string,
+  ) {
+    return this.examCell.listSchedules(this.tenant(req), sessionId);
   }
 
   @Post('schedules')
   createSchedule(
     @Req() req: { user: AuthUser },
-    @Body() dto: Record<string, unknown>,
+    @Body(
+      new ValidationPipe({
+        transform: true,
+        whitelist: true,
+        forbidNonWhitelisted: true,
+      }),
+    )
+    dto: CreateExamScheduleDto,
   ) {
     this.requireAction(req, 'manage_schedules');
     return this.examCell.createSchedule(
       this.tenant(req),
-      dto as Parameters<ExamCellService['createSchedule']>[1],
+      dto,
+      req.user.user_id,
+      examCellRoleFromUser(req.user),
     );
   }
 
   @Get('admit-cards/audit')
   auditAdmitCards(
     @Req() req: { user: AuthUser },
-    @Query('batch_label') batchLabel: string,
-    @Query('semester') semester?: string,
+    @Query('session_id', new ParseUUIDPipe()) sessionId: string,
+    @Query('registration_id', new ParseUUIDPipe()) registrationId: string,
   ) {
-    return this.examCell.auditAdmitCardsPreGeneration(this.tenant(req), {
-      batch_label: batchLabel || 'B.Tech Sem 4',
-      semester: semester ? Number(semester) : undefined,
-    });
+    return this.enterprise.inspectHallTicketReadiness(
+      this.tenant(req),
+      sessionId,
+      registrationId,
+      examCellRoleFromUser(req.user),
+    );
   }
 
   @Post('admit-cards/generate')
@@ -659,7 +735,11 @@ export class ExamCellController {
     @Body() dto: CreateResultSessionDto,
   ) {
     this.requireAction(req, 'manage_sessions');
-    return this.resultControl.createSession(this.tenant(req), dto);
+    return this.resultControl.createSession(
+      this.tenant(req),
+      dto,
+      req.user.user_id,
+    );
   }
 
   @Get('result-control/sessions/:sessionId')
@@ -677,7 +757,12 @@ export class ExamCellController {
     @Body() dto: OpenResultEntryDto,
   ) {
     this.requireAction(req, 'manage_sessions');
-    return this.resultControl.openEntry(this.tenant(req), sessionId, dto);
+    return this.resultControl.openEntry(
+      this.tenant(req),
+      sessionId,
+      dto,
+      req.user.user_id,
+    );
   }
 
   @Post('result-control/sessions/:sessionId/close-entry')
@@ -686,7 +771,11 @@ export class ExamCellController {
     @Param('sessionId') sessionId: string,
   ) {
     this.requireAction(req, 'manage_sessions');
-    return this.resultControl.closeEntry(this.tenant(req), sessionId);
+    return this.resultControl.closeEntry(
+      this.tenant(req),
+      sessionId,
+      req.user.user_id,
+    );
   }
 
   @Post('result-control/sessions/:sessionId/lock-marks')
@@ -722,7 +811,12 @@ export class ExamCellController {
     @Body() dto: ReopenResultEntryDto,
   ) {
     this.requireAction(req, 'manage_sessions');
-    return this.resultControl.reopenEntry(this.tenant(req), sessionId, dto);
+    return this.resultControl.reopenEntry(
+      this.tenant(req),
+      sessionId,
+      dto,
+      req.user.user_id,
+    );
   }
 
   @Post('result-control/sessions/:sessionId/configure-rules')
@@ -732,7 +826,12 @@ export class ExamCellController {
     @Body() dto: ConfigureSessionRulesDto,
   ) {
     this.requireAction(req, 'manage_sessions');
-    return this.resultControl.configureRules(this.tenant(req), sessionId, dto);
+    return this.resultControl.configureRules(
+      this.tenant(req),
+      sessionId,
+      dto,
+      req.user.user_id,
+    );
   }
 
   @Get('result-control/courses')
@@ -830,21 +929,17 @@ export class ExamCellController {
   @Post('sessions')
   createExamSession(
     @Req() req: { user: AuthUser },
-    @Body() dto: Record<string, unknown>,
+    @Body() dto: CreateExamSessionDto,
   ) {
     this.requireAction(req, 'manage_sessions');
-    return this.sessions.createSession(
-      this.tenant(req),
-      req.user.user_id,
-      dto as never,
-    );
+    return this.sessions.createSession(this.tenant(req), req.user.user_id, dto);
   }
 
   @Post('sessions/:sessionId/status')
   updateExamSessionStatus(
     @Req() req: { user: AuthUser },
-    @Param('sessionId') sessionId: string,
-    @Body() dto: { status: string },
+    @Param('sessionId', ParseUUIDPipe) sessionId: string,
+    @Body() dto: UpdateExamSessionStatusDto,
   ) {
     this.requireAction(req, 'manage_sessions');
     return this.sessions.updateSessionStatus(
@@ -918,13 +1013,23 @@ export class ExamCellController {
   @Post('hall-ticket-approvals/sync')
   syncHallTicketApprovals(
     @Req() req: { user: AuthUser },
-    @Body() dto: { semester: number; batch_label: string },
+    @Body() dto: { semester: number; batch_label: string; session_id?: string },
   ) {
+    if (dto.session_id !== undefined) {
+      this.requireAction(req, 'manage_sessions');
+      return this.enterprise.prepareHallTicketApprovals(
+        this.tenant(req),
+        dto.session_id,
+        req.user.user_id,
+        examCellRoleFromUser(req.user),
+      );
+    }
     this.requireAction(req, 'generate_admit_cards');
     return this.enterprise.syncHallTicketApprovals(
       this.tenant(req),
       dto.semester,
       dto.batch_label,
+      examCellRoleFromUser(req.user),
     );
   }
 
@@ -937,44 +1042,50 @@ export class ExamCellController {
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @Query('search') search?: string,
+    @Query('session_id') sessionId?: string,
   ) {
-    return this.enterprise.listHallTicketApprovals(this.tenant(req), {
-      semester: semester ? Number(semester) : undefined,
-      batch_label: batchLabel,
-      stage,
-      page: page ? Number(page) : undefined,
-      limit: limit ? Number(limit) : undefined,
-      search,
-    });
+    return this.enterprise.listHallTicketApprovals(
+      this.tenant(req),
+      {
+        semester: semester ? Number(semester) : undefined,
+        batch_label: batchLabel,
+        stage,
+        page: page ? Number(page) : undefined,
+        limit: limit ? Number(limit) : undefined,
+        search,
+        session_id: sessionId,
+      },
+      examCellRoleFromUser(req.user),
+    );
   }
 
   @Post('hall-ticket-approvals/:approvalId/advance')
+  @Roles(...EXAM_CELL_ACCESS_ROLES, 'Accountant')
   advanceHallTicketApproval(
     @Req() req: { user: AuthUser },
-    @Param('approvalId') approvalId: string,
-    @Body() dto: { action: 'APPROVE' | 'REJECT'; stage?: string },
+    @Param('approvalId', ParseUUIDPipe) approvalId: string,
+    @Body() dto: AdvanceHallTicketApprovalDto,
   ) {
-    this.requireAction(req, 'generate_admit_cards');
     return this.enterprise.advanceHallTicketApproval(
       this.tenant(req),
       approvalId,
       req.user.user_id,
-      dto.action,
-      dto.stage,
+      dto,
+      examCellRoleFromUser(req.user),
     );
   }
 
   @Post('hall-ticket-approvals/bulk-approve')
+  @Roles(...EXAM_CELL_ACCESS_ROLES, 'Accountant')
   bulkApproveHallTickets(
     @Req() req: { user: AuthUser },
-    @Body()
-    dto: { semester: number; batch_label: string; target_stage: string },
+    @Body() dto: BulkApproveHallTicketsDto,
   ) {
-    this.requireAction(req, 'generate_admit_cards');
     return this.enterprise.bulkApproveHallTickets(
       this.tenant(req),
       req.user.user_id,
       dto,
+      examCellRoleFromUser(req.user),
     );
   }
 
@@ -995,36 +1106,44 @@ export class ExamCellController {
   listAnswerSheets(
     @Req() req: { user: AuthUser },
     @Query('status') status?: string,
+    @Query('exam_schedule_id', new ParseUUIDPipe({ optional: true }))
+    scheduleId?: string,
   ) {
-    return this.enterprise.listAnswerSheets(this.tenant(req), status);
+    return this.enterprise.listAnswerSheets(
+      this.tenant(req),
+      status,
+      scheduleId,
+      examCellRoleFromUser(req.user),
+    );
   }
 
   @Post('answer-sheets')
   createAnswerSheet(
     @Req() req: { user: AuthUser },
-    @Body() dto: Record<string, unknown>,
+    @Body() dto: CreateAnswerSheetDto,
   ) {
     this.requireAction(req, 'manage_sessions');
     return this.enterprise.createAnswerSheet(
       this.tenant(req),
       req.user.user_id,
-      dto as never,
+      dto,
+      examCellRoleFromUser(req.user),
     );
   }
 
   @Post('answer-sheets/:sheetId/status')
   updateAnswerSheetStatus(
     @Req() req: { user: AuthUser },
-    @Param('sheetId') sheetId: string,
-    @Body() dto: { status: string; evaluator_user_id?: string },
+    @Param('sheetId', ParseUUIDPipe) sheetId: string,
+    @Body() dto: UpdateAnswerSheetStatusDto,
   ) {
     this.requireAction(req, 'manage_sessions');
     return this.enterprise.updateAnswerSheetStatus(
       this.tenant(req),
       sheetId,
       req.user.user_id,
-      dto.status,
-      dto.evaluator_user_id,
+      dto,
+      examCellRoleFromUser(req.user),
     );
   }
 
@@ -1197,21 +1316,21 @@ export class ExamCellController {
   @Post('form-windows')
   createFormWindow(
     @Req() req: { user: AuthUser },
-    @Body() dto: Record<string, unknown>,
+    @Body() dto: CreateExamFormWindowDto,
   ) {
     this.requireAction(req, 'manage_sessions');
     return this.operations.createFormWindow(
       this.tenant(req),
       req.user.user_id,
-      dto as never,
+      dto,
     );
   }
 
   @Post('form-windows/:windowId/status')
   updateFormWindowStatus(
     @Req() req: { user: AuthUser },
-    @Param('windowId') windowId: string,
-    @Body() dto: { status: 'OPEN' | 'CLOSED' | 'DRAFT' },
+    @Param('windowId', ParseUUIDPipe) windowId: string,
+    @Body() dto: UpdateExamFormWindowStatusDto,
   ) {
     this.requireAction(req, 'manage_sessions');
     return this.operations.updateFormWindowStatus(
@@ -1225,14 +1344,15 @@ export class ExamCellController {
   @Post('form-windows/:windowId/sync-registrations')
   syncRegistrations(
     @Req() req: { user: AuthUser },
-    @Param('windowId') windowId: string,
-    @Body() dto: { semester: number },
+    @Param('windowId', ParseUUIDPipe) windowId: string,
+    @Body() dto: SyncExamRegistrationsDto,
   ) {
     this.requireAction(req, 'manage_sessions');
     return this.operations.seedRegistrationsFromSemester(
       this.tenant(req),
       windowId,
-      Number(dto.semester),
+      dto.semester,
+      req.user.user_id,
     );
   }
 
@@ -1253,8 +1373,8 @@ export class ExamCellController {
   @Post('registrations/:registrationId/review')
   reviewRegistration(
     @Req() req: { user: AuthUser },
-    @Param('registrationId') registrationId: string,
-    @Body() dto: { status: 'APPROVED' | 'REJECTED' },
+    @Param('registrationId', ParseUUIDPipe) registrationId: string,
+    @Body() dto: ReviewExamRegistrationDto,
   ) {
     this.requireAction(req, 'manage_sessions');
     return this.operations.reviewRegistration(
@@ -1284,21 +1404,22 @@ export class ExamCellController {
   @Post('question-papers')
   createQuestionPaper(
     @Req() req: { user: AuthUser },
-    @Body() dto: Record<string, unknown>,
+    @Body() dto: CreateQuestionPaperDto,
   ) {
     this.requireAction(req, 'manage_qp');
     return this.operations.createQuestionPaperRecord(
       this.tenant(req),
       req.user.user_id,
       dto,
+      examCellRoleFromUser(req.user),
     );
   }
 
   @Post('question-papers/:qpId/status')
   updateQuestionPaperStatus(
     @Req() req: { user: AuthUser },
-    @Param('qpId') qpId: string,
-    @Body() dto: { status: string },
+    @Param('qpId', new ParseUUIDPipe()) qpId: string,
+    @Body() dto: UpdateQuestionPaperStatusDto,
   ) {
     this.requireAction(req, 'manage_qp');
     return this.operations.updateQuestionPaperStatus(
@@ -1306,18 +1427,212 @@ export class ExamCellController {
       qpId,
       req.user.user_id,
       dto.status,
+      examCellRoleFromUser(req.user),
+      dto.reason,
     );
   }
 
+  @Post('question-papers/:qpId/file')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 25 * 1024 * 1024, files: 1 },
+    }),
+  )
+  uploadQuestionPaper(
+    @Req() req: { user: AuthUser },
+    @Param('qpId', new ParseUUIDPipe()) id: string,
+    @UploadedFile() file: Express.Multer.File | undefined,
+    @Body() dto: UploadQuestionPaperDto,
+  ) {
+    this.requireAction(req, 'manage_qp');
+    return this.paperFiles().upload(
+      this.tenant(req),
+      id,
+      req.user.user_id,
+      examCellRoleFromUser(req.user),
+      file,
+      dto,
+    );
+  }
+
+  @Get('question-papers/:qpId/versions')
+  questionPaperVersions(
+    @Req() req: { user: AuthUser },
+    @Param('qpId', new ParseUUIDPipe()) id: string,
+  ) {
+    this.requireAction(req, 'manage_qp');
+    return this.paperFiles().versions(
+      this.tenant(req),
+      id,
+      req.user.user_id,
+      examCellRoleFromUser(req.user),
+    );
+  }
+
+  @Get('question-papers/:qpId/versions/:versionId/review-file')
+  @Header('Cache-Control', 'private, no-store')
+  @Header('X-Content-Type-Options', 'nosniff')
+  async reviewQuestionPaper(
+    @Req() req: { user: AuthUser },
+    @Param('qpId', new ParseUUIDPipe()) id: string,
+    @Param('versionId', new ParseUUIDPipe()) version: string,
+  ) {
+    this.requireAction(req, 'manage_qp');
+    const file = await this.paperFiles().download(
+      this.tenant(req),
+      id,
+      req.user.user_id,
+      examCellRoleFromUser(req.user),
+      version,
+    );
+    return this.paperFile(file);
+  }
+
+  @Get('question-papers/:qpId/file')
+  @Header('Cache-Control', 'private, no-store')
+  @Header('X-Content-Type-Options', 'nosniff')
+  async releasedQuestionPaper(
+    @Req() req: { user: AuthUser },
+    @Param('qpId', new ParseUUIDPipe()) id: string,
+  ) {
+    this.requireAction(req, 'manage_qp');
+    const file = await this.paperFiles().download(
+      this.tenant(req),
+      id,
+      req.user.user_id,
+      examCellRoleFromUser(req.user),
+    );
+    return this.paperFile(file);
+  }
+
+  private paperFiles(): QuestionPaperWorkflowService {
+    if (!this.questionPapers)
+      throw new ServiceUnavailableException(
+        'Question-paper file workflow unavailable',
+      );
+    return this.questionPapers;
+  }
+
+  private paperFile(file: { buffer: Buffer; filename: string }) {
+    return new StreamableFile(file.buffer, {
+      type: 'application/pdf',
+      disposition: `attachment; filename="${file.filename}"`,
+    });
+  }
+
   @Get('exam-day/today')
-  todayExams(@Req() req: { user: AuthUser }) {
-    return this.operations.listTodayExams(this.tenant(req));
+  todayExams(
+    @Req() req: { user: AuthUser },
+    @Query() query: ExamDayDateQueryDto,
+  ) {
+    return this.operations.listTodayExams(this.tenant(req), query.date);
+  }
+
+  @Get('exam-day/scripts')
+  reconcileScripts(
+    @Req() req: { user: AuthUser },
+    @Query('exam_schedule_id', ParseUUIDPipe) scheduleId: string,
+  ) {
+    return this.scriptService().reconciliation(
+      this.tenant(req),
+      scheduleId,
+      examCellRoleFromUser(req.user),
+    );
+  }
+
+  @Post('answer-sheets/:sheetId/correct-receipt')
+  correctScriptReceipt(
+    @Req() req: { user: AuthUser },
+    @Param('sheetId', ParseUUIDPipe) sheetId: string,
+    @Body() dto: CorrectScriptReceiptDto,
+  ) {
+    this.requireAction(req, 'manage_sessions');
+    return this.scriptService().correctReceipt(
+      this.tenant(req),
+      sheetId,
+      req.user.user_id,
+      dto,
+      examCellRoleFromUser(req.user),
+    );
+  }
+
+  @Post('exam-day/scripts/missing')
+  reportMissingScript(
+    @Req() req: { user: AuthUser },
+    @Body() dto: ReportMissingScriptDto,
+  ) {
+    this.requireAction(req, 'manage_sessions');
+    return this.scriptService().reportMissing(
+      this.tenant(req),
+      req.user.user_id,
+      dto,
+      examCellRoleFromUser(req.user),
+    );
+  }
+
+  @Post('exam-day/scripts/:discrepancyId/resolve')
+  resolveMissingScript(
+    @Req() req: { user: AuthUser },
+    @Param('discrepancyId', ParseUUIDPipe) discrepancyId: string,
+    @Body() dto: ResolveMissingScriptDto,
+  ) {
+    this.requireAction(req, 'manage_sessions');
+    return this.scriptService().resolveMissing(
+      this.tenant(req),
+      discrepancyId,
+      req.user.user_id,
+      dto,
+      examCellRoleFromUser(req.user),
+    );
+  }
+
+  @Get('exam-day/ufm')
+  examDayIncidents(
+    @Req() req: { user: AuthUser },
+    @Query('exam_schedule_id', ParseUUIDPipe) scheduleId: string,
+  ) {
+    return this.scriptService().listIncidents(
+      this.tenant(req),
+      scheduleId,
+      examCellRoleFromUser(req.user),
+    );
+  }
+
+  @Post('exam-day/ufm')
+  reportExamDayIncident(
+    @Req() req: { user: AuthUser },
+    @Body() dto: ReportExamDayUfmDto,
+  ) {
+    this.requireAction(req, 'approve_ufm');
+    return this.scriptService().reportIncident(
+      this.tenant(req),
+      req.user.user_id,
+      dto,
+      examCellRoleFromUser(req.user),
+    );
+  }
+
+  @Post('exam-day/ufm/:caseId/status')
+  reviewExamDayIncident(
+    @Req() req: { user: AuthUser },
+    @Param('caseId', ParseUUIDPipe) caseId: string,
+    @Body() dto: ReviewExamDayUfmDto,
+  ) {
+    this.requireAction(req, 'approve_ufm');
+    return this.scriptService().reviewIncident(
+      this.tenant(req),
+      caseId,
+      req.user.user_id,
+      dto,
+      examCellRoleFromUser(req.user),
+    );
   }
 
   @Get('exam-day/roster')
   examDayRoster(
     @Req() req: { user: AuthUser },
-    @Query('exam_schedule_id') examScheduleId: string,
+    @Query('exam_schedule_id', ParseUUIDPipe) examScheduleId: string,
   ) {
     return this.operations.listExamDayRoster(this.tenant(req), examScheduleId);
   }
@@ -1325,7 +1640,7 @@ export class ExamCellController {
   @Get('exam-day/attendance')
   examDayAttendance(
     @Req() req: { user: AuthUser },
-    @Query('exam_schedule_id') examScheduleId: string,
+    @Query('exam_schedule_id', ParseUUIDPipe) examScheduleId: string,
   ) {
     return this.operations.listExamDayAttendance(
       this.tenant(req),
@@ -1337,7 +1652,7 @@ export class ExamCellController {
   markExamDayAttendance(
     @Req() req: { user: AuthUser },
     @Body()
-    dto: { exam_schedule_id: string; student_user_id: string; status: string },
+    dto: MarkExamDayAttendanceDto,
   ) {
     this.requireAction(req, 'manage_sessions');
     return this.operations.markExamDayAttendance(
@@ -1410,6 +1725,14 @@ export class ExamCellController {
 
   private tenant(req: { user: AuthUser }) {
     return requireTenantId(req.user.tenant_id);
+  }
+
+  private scriptService() {
+    if (!this.scripts)
+      throw new ServiceUnavailableException(
+        'Exam-day script tracking is unavailable',
+      );
+    return this.scripts;
   }
 
   private requireAction(req: { user: AuthUser }, action: ExamCellAction) {

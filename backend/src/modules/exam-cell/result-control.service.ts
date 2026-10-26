@@ -1,6 +1,8 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
@@ -8,6 +10,16 @@ import { DataSource, EntityManager } from 'typeorm';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 import { ExamCellAuditService } from './exam-cell-audit.service';
 import { resolveDeanDepartmentIds } from '../academics/dean-scope.util';
+import { isAutoSyncedExamType } from '../academics/grading-components';
+import { requireTenantId } from '../../common/utils/require-tenant-id';
+import { lockResultInputs } from './result-input-lock';
+import {
+  matchesResultApprovalState,
+  resultApprovalState,
+  type ResultApprovalSession,
+  type ResultApprovalMark,
+  type ResultApprovalState,
+} from './result-approval-state';
 import {
   computeGradeFromPercent,
   computePassFail,
@@ -21,8 +33,24 @@ import type {
   ReopenResultEntryDto,
 } from './dto/result-control.dto';
 
+type ApprovalRequest = {
+  request_id: string;
+  session_id: string;
+  tenant_id: string;
+  status: string;
+  request_summary: Record<string, unknown> | null;
+};
+
+type ApprovalSession = ResultApprovalSession & {
+  course_name?: string;
+  course_code?: string;
+  declared_at?: string | Date | null;
+};
+
 @Injectable()
 export class ResultControlService {
+  private readonly logger = new Logger(ResultControlService.name);
+
   constructor(
     @InjectDataSource() private readonly db: DataSource,
     private readonly notify: NotificationEmitterService,
@@ -58,33 +86,61 @@ export class ResultControlService {
       [tenantId, sessionId],
     );
     if (!rows[0]) throw new NotFoundException('Result session not found');
-    const workflow = await this.sessionWorkflowState(tenantId, sessionId);
+    const workflow = await this.sessionWorkflowState(
+      tenantId,
+      sessionId,
+      rows[0],
+    );
     return { ...rows[0], ...workflow };
   }
 
-  private async sessionWorkflowState(tenantId: string, sessionId: string) {
-    const auditAction = await this.audit.latestAction(tenantId, sessionId, [
-      'RESULT_COE_AUDIT_PASSED',
-      'RESULT_COE_AUDIT_ANOMALY',
-    ]);
-    const coe_audit_status =
-      auditAction === 'RESULT_COE_AUDIT_PASSED'
+  private async sessionWorkflowState(
+    tenantId: string,
+    sessionId: string,
+    session?: ApprovalSession,
+  ) {
+    if (!session) {
+      [session] = await this.db.query<ApprovalSession[]>(
+        'SELECT * FROM exam_result_sessions WHERE tenant_id = $1 AND session_id = $2',
+        [requireTenantId(tenantId), sessionId],
+      );
+    }
+    const approval = await this.latestApproval(this.db, tenantId, sessionId);
+    const coeAudit = await this.latestCoeAudit(this.db, tenantId, sessionId);
+    const inputs =
+      session && !session.declared_at
+        ? await this.approvalInputs(this.db, session, false)
+        : null;
+    const current =
+      !!session?.marks_locked && session.entry_status === 'LOCKED';
+    const coeCurrent =
+      !!session?.declared_at ||
+      (current &&
+        !!inputs &&
+        inputs.rosterValid &&
+        matchesResultApprovalState(
+          coeAudit?.new_value?.result_state,
+          inputs.state,
+        ));
+    const coe_audit_status = !coeCurrent
+      ? 'idle'
+      : coeAudit?.action === 'RESULT_COE_AUDIT_PASSED'
         ? 'passed'
-        : auditAction === 'RESULT_COE_AUDIT_ANOMALY'
+        : coeAudit?.action === 'RESULT_COE_AUDIT_ANOMALY'
           ? 'anomaly'
           : 'idle';
-    const approvalRows = await this.db
-      .query<Array<{ status: string }>>(
-        `SELECT status FROM exam_result_dean_approval_requests
-       WHERE tenant_id = $1 AND session_id = $2
-       ORDER BY requested_at DESC LIMIT 1`,
-        [tenantId, sessionId],
-      )
-      .catch(() => []);
-    const deanApprovalStatus = approvalRows[0]?.status ?? null;
+    const deanApprovalStatus = approval?.status ?? null;
     const dean_approved =
-      deanApprovalStatus === 'APPROVED' ||
-      (await this.audit.hasAction(tenantId, sessionId, 'RESULT_DEAN_APPROVED'));
+      deanApprovalStatus === 'APPROVED' &&
+      (!!session?.declared_at ||
+        (current &&
+          !!inputs &&
+          inputs.rosterValid &&
+          matchesResultApprovalState(
+            approval?.request_summary?.result_state,
+            inputs.state,
+          ) &&
+          coe_audit_status === 'passed'));
     return {
       coe_audit_status,
       dean_approved,
@@ -92,15 +148,38 @@ export class ResultControlService {
     };
   }
 
-  async createSession(tenantId: string, dto: CreateResultSessionDto) {
+  async createSession(
+    tenantId: string,
+    dto: CreateResultSessionDto,
+    actorUserId?: string,
+  ) {
+    tenantId = requireTenantId(tenantId);
     const courseRows = await this.db.query(
       `SELECT course_id FROM academic_courses WHERE course_id = $1 AND tenant_id = $2`,
       [dto.course_id, tenantId],
     );
     if (!courseRows[0]) throw new BadRequestException('Course not found');
 
-    const rows = await this.db.query(
-      `INSERT INTO exam_result_sessions (
+    const sessionId = await this.db.transaction(async (manager) => {
+      await lockResultInputs(manager, tenantId, dto.course_id, dto.exam_type);
+      const [existing] = await manager.query<ApprovalSession[]>(
+        `SELECT * FROM exam_result_sessions
+         WHERE tenant_id = $1 AND course_id = $2 AND exam_type = $3 AND semester = $4
+         FOR UPDATE`,
+        [tenantId, dto.course_id, dto.exam_type, dto.semester ?? 4],
+      );
+      if (existing) {
+        this.assertUndeclared(existing);
+        await this.invalidateApprovals(
+          manager,
+          tenantId,
+          existing.session_id,
+          actorUserId,
+          'Result session rules updated',
+        );
+      }
+      const rows = await manager.query(
+        `INSERT INTO exam_result_sessions (
          tenant_id, course_id, exam_type, semester, max_marks, pass_marks, grading_policy_id
        ) VALUES ($1,$2,$3,$4,$5,$6,$7)
        ON CONFLICT (tenant_id, course_id, exam_type, semester) DO UPDATE SET
@@ -109,32 +188,46 @@ export class ResultControlService {
          grading_policy_id = COALESCE(EXCLUDED.grading_policy_id, exam_result_sessions.grading_policy_id),
          updated_at = NOW()
        RETURNING *`,
-      [
+        [
+          tenantId,
+          dto.course_id,
+          dto.exam_type,
+          dto.semester ?? 4,
+          dto.max_marks ?? 100,
+          dto.pass_marks ?? null,
+          dto.grading_policy_id ?? null,
+        ],
+      );
+      await this.audit.log(
         tenantId,
-        dto.course_id,
-        dto.exam_type,
-        dto.semester ?? 4,
-        dto.max_marks ?? 100,
-        dto.pass_marks ?? null,
-        dto.grading_policy_id ?? null,
-      ],
-    );
-    return this.getSession(tenantId, rows[0].session_id);
+        actorUserId,
+        {
+          action: 'RESULT_INPUTS_CHANGED',
+          resource_type: 'exam_result_session',
+          resource_id: rows[0].session_id,
+          new_value: { reason: 'Result session configured' },
+        },
+        manager,
+      );
+      return rows[0].session_id as string;
+    });
+    return this.getSession(tenantId, sessionId);
   }
 
   async openEntry(
     tenantId: string,
     sessionId: string,
     dto: OpenResultEntryDto,
+    actorUserId?: string,
   ) {
-    const session = await this.getSession(tenantId, sessionId);
-    if (session.declared_at) {
-      throw new BadRequestException(
-        'Cannot open entry after results are declared',
-      );
-    }
-    await this.db.query(
-      `UPDATE exam_result_sessions
+    await this.editSession(
+      tenantId,
+      sessionId,
+      actorUserId,
+      'Marks entry opened',
+      async (manager) => {
+        await manager.query(
+          `UPDATE exam_result_sessions
        SET entry_status = 'OPEN',
            entry_open_at = COALESCE($2::timestamptz, NOW()),
            entry_close_at = $3::timestamptz,
@@ -143,30 +236,54 @@ export class ResultControlService {
            marks_locked_by = NULL,
            reopen_reason = NULL,
            updated_at = NOW()
-       WHERE session_id = $1`,
-      [sessionId, dto.entry_open_at ?? null, dto.entry_close_at ?? null],
+       WHERE session_id = $1 AND tenant_id = $4`,
+          [
+            sessionId,
+            dto.entry_open_at ?? null,
+            dto.entry_close_at ?? null,
+            tenantId,
+          ],
+        );
+      },
     );
     return this.getSession(tenantId, sessionId);
   }
 
-  async closeEntry(tenantId: string, sessionId: string) {
-    await this.getSession(tenantId, sessionId);
-    await this.db.query(
-      `UPDATE exam_result_sessions SET entry_status = 'CLOSED', updated_at = NOW() WHERE session_id = $1`,
-      [sessionId],
+  async closeEntry(tenantId: string, sessionId: string, actorUserId?: string) {
+    await this.editSession(
+      tenantId,
+      sessionId,
+      actorUserId,
+      'Marks entry closed',
+      async (manager) => {
+        await manager.query(
+          `UPDATE exam_result_sessions SET entry_status = 'CLOSED', updated_at = NOW()
+         WHERE session_id = $1 AND tenant_id = $2`,
+          [sessionId, tenantId],
+        );
+      },
     );
     return this.getSession(tenantId, sessionId);
   }
 
   async lockMarks(tenantId: string, sessionId: string, actorUserId: string) {
-    await this.getSession(tenantId, sessionId);
-    await this.db.query(
-      `UPDATE exam_result_sessions
-       SET entry_status = 'LOCKED', marks_locked = TRUE, marks_locked_at = NOW(),
-           marks_locked_by = $2, updated_at = NOW()
-       WHERE session_id = $1`,
-      [sessionId, actorUserId],
-    );
+    await this.db.transaction(async (manager) => {
+      const session = await this.getDeclarationSession(
+        manager,
+        tenantId,
+        sessionId,
+      );
+      this.assertUndeclared(session);
+      if (session.marks_locked && session.entry_status === 'LOCKED') return;
+      await this.invalidateApprovals(
+        manager,
+        tenantId,
+        sessionId,
+        actorUserId,
+        'Marks batch locked for review',
+      );
+      await this.lockSessionMarks(manager, tenantId, sessionId, actorUserId);
+    });
     return this.getSession(tenantId, sessionId);
   }
 
@@ -176,22 +293,34 @@ export class ResultControlService {
     sessionId: string,
     actorUserId: string,
   ) {
-    const session = await this.getSession(tenantId, sessionId);
-    if (session.declared_at) {
-      throw new BadRequestException('Results already declared');
-    }
-    const pending = await this.db.query<Array<{ c: number }>>(
-      `SELECT COUNT(*)::int AS c FROM academic_marks
-       WHERE tenant_id = $1 AND course_id = $2 AND exam_type = $3 AND status = 'PENDING_COE'`,
-      [tenantId, session.course_id, session.exam_type],
-    );
-    if (!pending[0]?.c) {
-      throw new BadRequestException(
-        'No faculty submissions awaiting declaration',
+    await this.db.transaction(async (manager) => {
+      const session = await this.getDeclarationSession(
+        manager,
+        tenantId,
+        sessionId,
       );
-    }
-    await this.closeEntry(tenantId, sessionId);
-    await this.lockMarks(tenantId, sessionId, actorUserId);
+      this.assertUndeclared(session);
+      const pending = await manager.query<Array<{ c: number }>>(
+        `SELECT COUNT(*)::int AS c FROM academic_marks
+       WHERE tenant_id = $1 AND course_id = $2 AND exam_type = $3 AND status = 'PENDING_COE'`,
+        [tenantId, session.course_id, session.exam_type],
+      );
+      if (!pending[0]?.c) {
+        throw new BadRequestException(
+          'No faculty submissions awaiting declaration',
+        );
+      }
+      if (!session.marks_locked || session.entry_status !== 'LOCKED') {
+        await this.invalidateApprovals(
+          manager,
+          tenantId,
+          sessionId,
+          actorUserId,
+          'Marks batch prepared for review',
+        );
+        await this.lockSessionMarks(manager, tenantId, sessionId, actorUserId);
+      }
+    });
     return this.getSession(tenantId, sessionId);
   }
 
@@ -199,22 +328,27 @@ export class ResultControlService {
     tenantId: string,
     sessionId: string,
     dto: ReopenResultEntryDto,
+    actorUserId?: string,
   ) {
-    const session = await this.getSession(tenantId, sessionId);
-    if (session.declared_at) {
-      throw new BadRequestException('Cannot reopen after declaration');
-    }
-    await this.db.query(
-      `UPDATE exam_result_sessions
+    await this.editSession(
+      tenantId,
+      sessionId,
+      actorUserId,
+      'Marks entry reopened',
+      async (manager, session) => {
+        await manager.query(
+          `UPDATE exam_result_sessions
        SET entry_status = 'OPEN', marks_locked = FALSE, marks_locked_at = NULL,
            marks_locked_by = NULL, reopen_reason = $2, updated_at = NOW()
-       WHERE session_id = $1`,
-      [sessionId, dto.reason.trim()],
-    );
-    await this.db.query(
-      `UPDATE academic_marks SET status = 'DRAFT', updated_at = NOW()
+       WHERE session_id = $1 AND tenant_id = $3`,
+          [sessionId, dto.reason.trim(), tenantId],
+        );
+        await manager.query(
+          `UPDATE academic_marks SET status = 'DRAFT', updated_at = NOW()
        WHERE tenant_id = $1 AND course_id = $2 AND exam_type = $3 AND status = 'PENDING_COE'`,
-      [tenantId, session.course_id, session.exam_type],
+          [tenantId, session.course_id, session.exam_type],
+        );
+      },
     );
     return this.getSession(tenantId, sessionId);
   }
@@ -223,21 +357,30 @@ export class ResultControlService {
     tenantId: string,
     sessionId: string,
     dto: ConfigureSessionRulesDto,
+    actorUserId?: string,
   ) {
-    await this.getSession(tenantId, sessionId);
-    await this.db.query(
-      `UPDATE exam_result_sessions
+    await this.editSession(
+      tenantId,
+      sessionId,
+      actorUserId,
+      'Assessment rules changed',
+      async (manager) => {
+        await manager.query(
+          `UPDATE exam_result_sessions
        SET pass_marks = COALESCE($2, pass_marks),
            grading_policy_id = COALESCE($3, grading_policy_id),
            max_marks = COALESCE($4, max_marks),
            updated_at = NOW()
-       WHERE session_id = $1`,
-      [
-        sessionId,
-        dto.pass_marks ?? null,
-        dto.grading_policy_id ?? null,
-        dto.max_marks ?? null,
-      ],
+       WHERE session_id = $1 AND tenant_id = $5`,
+          [
+            sessionId,
+            dto.pass_marks ?? null,
+            dto.grading_policy_id ?? null,
+            dto.max_marks ?? null,
+            tenantId,
+          ],
+        );
+      },
     );
     return this.getSession(tenantId, sessionId);
   }
@@ -264,10 +407,11 @@ export class ResultControlService {
     executor: DataSource | EntityManager = this.db,
   ) {
     if (!session.grading_policy_id) return parseGradeBands(null);
-    const rows = await executor.query<Array<{ rules: Record<string, unknown> }>>(
-      `SELECT rules FROM academic_grading_policies WHERE policy_id = $1`,
-      [session.grading_policy_id],
-    );
+    const rows = await executor.query<
+      Array<{ rules: Record<string, unknown> }>
+    >(`SELECT rules FROM academic_grading_policies WHERE policy_id = $1`, [
+      session.grading_policy_id,
+    ]);
     return parseGradeBands(rows[0]?.rules);
   }
 
@@ -337,55 +481,62 @@ export class ResultControlService {
     sessionId: string,
     actorUserId: string,
   ) {
-    const session = await this.getSession(tenantId, sessionId);
-    const passMarks =
-      session.pass_marks != null ? Number(session.pass_marks) : null;
+    return this.db.transaction(async (manager) => {
+      const session = await this.getDeclarationSession(
+        manager,
+        tenantId,
+        sessionId,
+      );
+      this.assertReviewable(session);
+      const inputs = await this.approvalInputs(manager, session);
+      const passMarks =
+        session.pass_marks != null ? Number(session.pass_marks) : null;
 
-    const marks = await this.db.query<
-      Array<{ marks_obtained: string; max_marks: string }>
-    >(
-      `SELECT marks_obtained, max_marks FROM academic_marks
-       WHERE tenant_id = $1 AND course_id = $2 AND exam_type = $3
-         AND status IN ('PENDING_COE', 'PUBLISHED')`,
-      [tenantId, session.course_id, session.exam_type],
-    );
-    if (!marks.length) throw new BadRequestException('No marks to audit');
+      const marks = inputs.marks;
+      if (!marks.length) throw new BadRequestException('No marks to audit');
 
-    const failing = marks.filter((row) => {
-      const obtained = Number(row.marks_obtained);
-      const max = Number(row.max_marks ?? session.max_marks);
-      if (passMarks != null) return obtained < passMarks;
-      return max > 0 && (obtained / max) * 100 < 40;
-    }).length;
-    const rate = failing / marks.length;
-    const passed = rate < 0.5;
-    const action = passed
-      ? 'RESULT_COE_AUDIT_PASSED'
-      : 'RESULT_COE_AUDIT_ANOMALY';
+      const failing = marks.filter((row) => {
+        const obtained = Number(row.marks_obtained);
+        const max = Number(row.max_marks ?? session.max_marks);
+        if (passMarks != null) return obtained < passMarks;
+        return max > 0 && (obtained / max) * 100 < 40;
+      }).length;
+      const rate = failing / marks.length;
+      const passed = rate < 0.5;
+      const action = passed
+        ? 'RESULT_COE_AUDIT_PASSED'
+        : 'RESULT_COE_AUDIT_ANOMALY';
 
-    await this.audit.log(tenantId, actorUserId, {
-      action,
-      resource_type: 'exam_result_session',
-      resource_id: sessionId,
-      new_value: {
+      await this.audit.log(
+        tenantId,
+        actorUserId,
+        {
+          action,
+          resource_type: 'exam_result_session',
+          resource_id: sessionId,
+          new_value: {
+            failure_rate: Math.round(rate * 100),
+            failing,
+            total: marks.length,
+            result_state: inputs.state,
+          },
+        },
+        manager,
+      );
+
+      return {
+        status: passed ? 'passed' : 'anomaly',
         failure_rate: Math.round(rate * 100),
-        failing,
-        total: marks.length,
-      },
+        anomaly_subjects: passed
+          ? []
+          : [
+              {
+                course_code: session.course_code,
+                failure_rate: Math.round(rate * 100),
+              },
+            ],
+      };
     });
-
-    return {
-      status: passed ? 'passed' : 'anomaly',
-      failure_rate: Math.round(rate * 100),
-      anomaly_subjects: passed
-        ? []
-        : [
-            {
-              course_code: session.course_code,
-              failure_rate: Math.round(rate * 100),
-            },
-          ],
-    };
   }
 
   async recordDeanApproval(
@@ -402,71 +553,82 @@ export class ResultControlService {
     sessionId: string,
     actorUserId: string,
   ) {
-    const session = await this.getSession(tenantId, sessionId);
-    const coePassed = await this.audit.hasAction(
-      tenantId,
-      sessionId,
-      'RESULT_COE_AUDIT_PASSED',
-    );
-    if (!coePassed) {
-      throw new BadRequestException(
-        'COE formula audit must pass before requesting dean approval',
+    const outcome = await this.db.transaction(async (manager) => {
+      const session = await this.getDeclarationSession(
+        manager,
+        tenantId,
+        sessionId,
       );
-    }
-    if (session.declared_at) {
-      throw new BadRequestException('Results already declared');
-    }
+      this.assertReviewable(session);
+      const inputs = await this.approvalInputs(manager, session);
+      await this.assertCurrentCoeAudit(manager, session, inputs.state);
+      const existing = await this.latestApproval(manager, tenantId, sessionId);
+      if (
+        existing &&
+        ['PENDING', 'APPROVED'].includes(existing.status) &&
+        matchesResultApprovalState(
+          existing.request_summary?.result_state,
+          inputs.state,
+        )
+      ) {
+        return {
+          request: { request_id: existing.request_id, status: existing.status },
+          session,
+          created: false,
+        };
+      }
+      await this.invalidateApprovals(
+        manager,
+        tenantId,
+        sessionId,
+        actorUserId,
+        'Superseded result review',
+      );
+      const summary = {
+        course_code: session.course_code,
+        course_name: session.course_name,
+        exam_type: session.exam_type,
+        semester: session.semester,
+        pending_marks: inputs.marks.length,
+        result_state: inputs.state,
+      };
 
-    const existing = await this.db.query(
-      `SELECT request_id, status FROM exam_result_dean_approval_requests
-       WHERE tenant_id = $1 AND session_id = $2 AND status = 'PENDING'
-       LIMIT 1`,
-      [tenantId, sessionId],
-    );
-    if (existing.length) {
-      return { request_id: existing[0].request_id, status: 'PENDING' };
-    }
-
-    const pendingMarks = await this.db.query(
-      `SELECT COUNT(*)::int AS c FROM academic_marks
-       WHERE tenant_id = $1 AND course_id = $2 AND exam_type = $3 AND status = 'PENDING_COE'`,
-      [tenantId, session.course_id, session.exam_type],
-    );
-
-    const summary = {
-      course_code: session.course_code,
-      course_name: session.course_name,
-      exam_type: session.exam_type,
-      semester: session.semester,
-      pending_marks: pendingMarks[0]?.c ?? 0,
-    };
-
-    const rows = await this.db.query(
-      `INSERT INTO exam_result_dean_approval_requests
-         (tenant_id, session_id, status, requested_by, request_summary)
-       VALUES ($1, $2, 'PENDING', $3, $4::jsonb)
+      const rows = await manager.query(
+        `INSERT INTO exam_result_dean_approval_requests
+         (tenant_id, session_id, status, requested_by, request_summary, requested_at)
+       VALUES ($1, $2, 'PENDING', $3, $4::jsonb, clock_timestamp())
        RETURNING request_id, status, requested_at`,
-      [tenantId, sessionId, actorUserId, JSON.stringify(summary)],
-    );
-    const request = rows[0];
+        [tenantId, sessionId, actorUserId, JSON.stringify(summary)],
+      );
+      const request = rows[0];
 
-    await this.appendDeanApprovalHistory(
-      tenantId,
-      request.request_id,
-      sessionId,
-      actorUserId,
-      'ExamCell',
-      'REQUESTED',
-      'PENDING',
-      null,
-    );
+      await this.appendDeanApprovalHistory(
+        tenantId,
+        request.request_id,
+        sessionId,
+        actorUserId,
+        'ExamCell',
+        'REQUESTED',
+        'PENDING',
+        null,
+        manager,
+      );
 
-    await this.audit.log(tenantId, actorUserId, {
-      action: 'RESULT_DEAN_APPROVAL_REQUESTED',
-      resource_type: 'exam_result_session',
-      resource_id: sessionId,
-      new_value: summary,
+      await this.audit.log(
+        tenantId,
+        actorUserId,
+        {
+          action: 'RESULT_DEAN_APPROVAL_REQUESTED',
+          resource_type: 'exam_result_session',
+          resource_id: sessionId,
+          new_value: summary,
+        },
+        manager,
+      );
+      return { request, session, created: true };
     });
+    if (!outcome.created) return outcome.request;
+    const { session } = outcome;
 
     const deanUsers = await this.db.query<Array<{ user_id: string }>>(
       `SELECT u.user_id FROM users u
@@ -487,7 +649,7 @@ export class ResultControlService {
       });
     }
 
-    return request;
+    return outcome.request;
   }
 
   async listPendingDeanResultApprovals(
@@ -561,60 +723,113 @@ export class ResultControlService {
     comment?: string,
     actorRole = 'Dean',
   ) {
-    const [pending] = await this.db.query<
-      Array<{ request_id: string; session_id: string; status: string }>
-    >(
-      `SELECT request_id, session_id, status
+    if (
+      !['Dean', 'SuperAdmin'].some(
+        (role) => role.toLowerCase() === actorRole.trim().toLowerCase(),
+      )
+    ) {
+      throw new ForbiddenException('Dean approval permission required');
+    }
+    if (!['APPROVED', 'REJECTED'].includes(decision)) {
+      throw new BadRequestException('Decision must be APPROVED or REJECTED');
+    }
+    tenantId = requireTenantId(tenantId);
+    return this.db.transaction(async (manager) => {
+      const [pending] = await manager.query<ApprovalRequest[]>(
+        `SELECT request_id, session_id, status
        FROM exam_result_dean_approval_requests
        WHERE tenant_id = $1 AND request_id = $2 AND status = 'PENDING'
        LIMIT 1`,
-      [tenantId, requestId],
-    );
-    if (!pending) {
-      throw new NotFoundException('Pending result approval request not found');
-    }
+        [tenantId, requestId],
+      );
+      if (!pending) {
+        throw new NotFoundException(
+          'Pending result approval request not found',
+        );
+      }
+      const session = await this.getDeclarationSession(
+        manager,
+        tenantId,
+        pending.session_id,
+      );
+      this.assertReviewable(session);
 
-    await this.assertDeanCanAccessResultSession(
-      tenantId,
-      deanUserId,
-      pending.session_id,
-      actorRole,
-    );
-
-    await this.db.query(
-      `UPDATE exam_result_dean_approval_requests
+      await this.assertDeanCanAccessResultSession(
+        tenantId,
+        deanUserId,
+        pending.session_id,
+        actorRole,
+        manager,
+      );
+      const current = await this.latestApproval(
+        manager,
+        tenantId,
+        pending.session_id,
+      );
+      if (
+        !current ||
+        current.request_id !== requestId ||
+        current.status !== 'PENDING'
+      ) {
+        throw new NotFoundException(
+          'Pending result approval request not found',
+        );
+      }
+      const inputs = await this.approvalInputs(manager, session);
+      await this.assertCurrentCoeAudit(manager, session, inputs.state);
+      this.assertApprovalMatches(current, session, inputs.state);
+      const updated = await manager.query<
+        Array<{ request_id: string }> | [Array<{ request_id: string }>, number]
+      >(
+        `UPDATE exam_result_dean_approval_requests
        SET status = $3, decided_by = $4, decided_at = NOW(),
            decision_comment = $5, updated_at = NOW()
-       WHERE request_id = $1 AND tenant_id = $2`,
-      [requestId, tenantId, decision, deanUserId, comment?.trim() ?? null],
-    );
+       WHERE request_id = $1 AND tenant_id = $2 AND status = 'PENDING'
+       RETURNING request_id`,
+        [requestId, tenantId, decision, deanUserId, comment?.trim() ?? null],
+      );
+      const updatedRows = Array.isArray(updated[0]) ? updated[0] : updated;
+      if (!updatedRows.length)
+        throw new BadRequestException('Approval request already decided');
 
-    await this.appendDeanApprovalHistory(
-      tenantId,
-      requestId,
-      pending.session_id,
-      deanUserId,
-      actorRole,
-      decision === 'APPROVED' ? 'APPROVED' : 'REJECTED',
-      decision,
-      comment?.trim() ?? null,
-    );
+      await this.appendDeanApprovalHistory(
+        tenantId,
+        requestId,
+        pending.session_id,
+        deanUserId,
+        actorRole,
+        decision === 'APPROVED' ? 'APPROVED' : 'REJECTED',
+        decision,
+        comment?.trim() ?? null,
+        manager,
+      );
 
-    await this.audit.log(tenantId, deanUserId, {
-      action:
-        decision === 'APPROVED'
-          ? 'RESULT_DEAN_APPROVED'
-          : 'RESULT_DEAN_REJECTED',
-      resource_type: 'exam_result_session',
-      resource_id: pending.session_id,
-      new_value: { comment: comment?.trim() ?? null, decision },
+      await this.audit.log(
+        tenantId,
+        deanUserId,
+        {
+          action:
+            decision === 'APPROVED'
+              ? 'RESULT_DEAN_APPROVED'
+              : 'RESULT_DEAN_REJECTED',
+          resource_type: 'exam_result_session',
+          resource_id: pending.session_id,
+          new_value: {
+            comment: comment?.trim() ?? null,
+            decision,
+            request_id: requestId,
+            result_state: inputs.state,
+          },
+        },
+        manager,
+      );
+
+      return {
+        request_id: requestId,
+        session_id: pending.session_id,
+        status: decision,
+      };
     });
-
-    return {
-      request_id: requestId,
-      session_id: pending.session_id,
-      status: decision,
-    };
   }
 
   async getDeanResultApprovalHistory(
@@ -653,24 +868,25 @@ export class ResultControlService {
     deanUserId: string,
     sessionId: string,
     actorRole: string,
+    executor: DataSource | EntityManager = this.db,
   ) {
     if (actorRole.trim().toLowerCase() === 'superadmin') return;
 
-    const departmentIds = await resolveDeanDepartmentIds(this.db, deanUserId);
+    const departmentIds = await resolveDeanDepartmentIds(executor, deanUserId);
     if (!departmentIds.length) {
       throw new NotFoundException('Result approval record not found');
     }
 
-    const rows = await this.db.query<Array<{ session_id: string }>>(
+    const rows = await executor.query<Array<{ session_id: string }>>(
       `SELECT s.session_id
        FROM exam_result_sessions s
-       INNER JOIN academic_courses c ON c.course_id = s.course_id
+       INNER JOIN academic_courses c ON c.course_id = s.course_id AND c.tenant_id = s.tenant_id
        WHERE s.tenant_id = $1
          AND s.session_id = $2
          AND EXISTS (
            SELECT 1
            FROM academic_timetables t
-           INNER JOIN users faculty ON faculty.user_id = t.faculty_user_id
+           INNER JOIN users faculty ON faculty.user_id = t.faculty_user_id AND faculty.tenant_id = t.tenant_id
            WHERE t.course_id = c.course_id
              AND t.tenant_id = s.tenant_id
              AND faculty.dept_id = ANY($3::int[])
@@ -695,24 +911,23 @@ export class ResultControlService {
     action: string,
     status: string,
     comment: string | null,
+    manager: EntityManager,
   ) {
-    await this.db
-      .query(
-        `INSERT INTO exam_result_dean_approval_history
+    await manager.query(
+      `INSERT INTO exam_result_dean_approval_history
          (request_id, tenant_id, session_id, actor_user_id, actor_role, action, status, comment)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-        [
-          requestId,
-          tenantId,
-          sessionId,
-          actorUserId,
-          actorRole,
-          action,
-          status,
-          comment,
-        ],
-      )
-      .catch(() => undefined);
+      [
+        requestId,
+        tenantId,
+        sessionId,
+        actorUserId || null,
+        actorRole,
+        action,
+        status,
+        comment,
+      ],
+    );
   }
 
   async applySessionGraceMarks(
@@ -724,42 +939,61 @@ export class ResultControlService {
     if (!Number.isFinite(graceMarks) || graceMarks <= 0) {
       throw new BadRequestException('Grace marks must be a positive number');
     }
-    const session = await this.getSession(tenantId, sessionId);
-    if (session.declared_at) {
-      throw new BadRequestException('Results already declared');
-    }
-
-    const marks = await this.db.query<
-      Array<{
-        mark_id: string;
-        student_user_id: string;
-        marks_obtained: string;
-        max_marks: string;
-      }>
-    >(
-      `SELECT mark_id, student_user_id, marks_obtained, max_marks FROM academic_marks
-       WHERE tenant_id = $1 AND course_id = $2 AND exam_type = $3 AND status = 'PENDING_COE'`,
-      [tenantId, session.course_id, session.exam_type],
-    );
-    if (!marks.length)
-      throw new BadRequestException('No pending marks to adjust');
-
-    let updated = 0;
-    for (const row of marks) {
-      const max = Number(row.max_marks ?? session.max_marks);
-      const boosted = Math.min(max, Number(row.marks_obtained) + graceMarks);
-      await this.db.query(
-        `UPDATE academic_marks SET marks_obtained = $2, updated_at = NOW() WHERE mark_id = $1`,
-        [row.mark_id, boosted],
+    const updated = await this.db.transaction(async (manager) => {
+      const session = await this.getDeclarationSession(
+        manager,
+        tenantId,
+        sessionId,
       );
-      updated += 1;
-    }
+      this.assertUndeclared(session);
 
-    await this.audit.log(tenantId, actorUserId, {
-      action: 'RESULT_GRACE_MARKS_APPLIED',
-      resource_type: 'exam_result_session',
-      resource_id: sessionId,
-      new_value: { grace_marks: graceMarks, students_updated: updated },
+      const marks = await manager.query<
+        Array<{
+          mark_id: string;
+          student_user_id: string;
+          marks_obtained: string;
+          max_marks: string;
+        }>
+      >(
+        `SELECT mark_id, student_user_id, marks_obtained, max_marks FROM academic_marks
+       WHERE tenant_id = $1 AND course_id = $2 AND exam_type = $3 AND status = 'PENDING_COE'
+       ORDER BY mark_id FOR UPDATE`,
+        [tenantId, session.course_id, session.exam_type],
+      );
+      if (!marks.length)
+        throw new BadRequestException('No pending marks to adjust');
+      await this.invalidateApprovals(
+        manager,
+        tenantId,
+        sessionId,
+        actorUserId,
+        'Grace marks changed',
+      );
+
+      let updated = 0;
+      for (const row of marks) {
+        const max = Number(row.max_marks ?? session.max_marks);
+        const boosted = Math.min(max, Number(row.marks_obtained) + graceMarks);
+        await manager.query(
+          `UPDATE academic_marks SET marks_obtained = $2, updated_at = NOW()
+         WHERE mark_id = $1 AND tenant_id = $3 AND status = 'PENDING_COE'`,
+          [row.mark_id, boosted, tenantId],
+        );
+        updated += 1;
+      }
+
+      await this.audit.log(
+        tenantId,
+        actorUserId,
+        {
+          action: 'RESULT_GRACE_MARKS_APPLIED',
+          resource_type: 'exam_result_session',
+          resource_id: sessionId,
+          new_value: { grace_marks: graceMarks, students_updated: updated },
+        },
+        manager,
+      );
+      return updated;
     });
 
     const processed = await this.processSession(
@@ -799,45 +1033,25 @@ export class ResultControlService {
           tenantId,
           sessionId,
         );
-        if (session.declared_at)
-          throw new BadRequestException('Results already declared');
-
-        const deanApproved = await manager.query(
-          `SELECT 1 FROM exam_result_dean_approval_requests
-           WHERE tenant_id = $1 AND session_id = $2 AND status = 'APPROVED'
-           LIMIT 1`,
-          [tenantId, sessionId],
+        this.assertReviewable(session);
+        const approval = await this.latestApproval(
+          manager,
+          tenantId,
+          sessionId,
         );
-        if (!deanApproved.length) {
-          const legacyApproved = await this.audit.hasAction(
-            tenantId,
-            sessionId,
-            'RESULT_DEAN_APPROVED',
+        if (!approval || approval.status !== 'APPROVED') {
+          throw new BadRequestException(
+            'Dean approval is required before publishing results',
           );
-          if (!legacyApproved) {
-            throw new BadRequestException(
-              'Dean approval is required before publishing results',
-            );
-          }
         }
-
-        const bands = await this.loadGradeBands(session, manager);
+        const inputs = await this.approvalInputs(manager, session);
+        await this.assertCurrentCoeAudit(manager, session, inputs.state);
+        this.assertApprovalMatches(approval, session, inputs.state);
+        const bands = inputs.bands;
         const passMarks =
           session.pass_marks != null ? Number(session.pass_marks) : null;
 
-        const marks = await manager.query<
-          Array<{
-            mark_id: string;
-            student_user_id: string;
-            marks_obtained: string;
-            max_marks: string;
-          }>
-        >(
-          `SELECT mark_id, student_user_id, marks_obtained, max_marks FROM academic_marks
-           WHERE tenant_id = $1 AND course_id = $2 AND exam_type = $3 AND status = 'PENDING_COE'
-           FOR UPDATE`,
-          [tenantId, session.course_id, session.exam_type],
-        );
+        const marks = inputs.marks;
         if (!marks.length)
           throw new BadRequestException('No PENDING_COE marks to declare');
 
@@ -847,8 +1061,12 @@ export class ResultControlService {
         for (const row of marks) {
           const obtained = Number(row.marks_obtained);
           const max = Number(row.max_marks ?? session.max_marks);
-          const percent = max > 0 ? Number(((obtained / max) * 100).toFixed(2)) : 0;
-          const { grade, gradePoints } = computeGradeFromPercent(percent, bands);
+          const percent =
+            max > 0 ? Number(((obtained / max) * 100).toFixed(2)) : 0;
+          const { grade, gradePoints } = computeGradeFromPercent(
+            percent,
+            bands,
+          );
           const resultStatus = computePassFail(obtained, max, passMarks);
           const summary = `${courseName} ${session.exam_type}: ${obtained}/${max} (${percent}%) — Grade ${grade}`;
 
@@ -898,11 +1116,16 @@ export class ResultControlService {
             session.exam_type === 'END_TERM' ||
             session.exam_type === 'INTERNAL'
           ) {
-            await manager.query(
+            const enrollmentUpdate = await manager.query<
+              | Array<{ enrollment_id: string }>
+              | [Array<{ enrollment_id: string }>, number]
+            >(
               `UPDATE student_course_enrollments
                SET grade = $4, grade_points = $5,
                    status = CASE WHEN $6 = 'PASS' THEN 'COMPLETED' ELSE 'FAILED' END
-               WHERE tenant_id = $1 AND student_user_id = $2 AND course_id = $3 AND semester = $7`,
+               WHERE tenant_id = $1 AND student_user_id = $2 AND course_id = $3 AND semester = $7
+                 AND deleted_at IS NULL
+               RETURNING enrollment_id`,
               [
                 tenantId,
                 row.student_user_id,
@@ -913,6 +1136,14 @@ export class ResultControlService {
                 session.semester,
               ],
             );
+            const enrollmentRows = Array.isArray(enrollmentUpdate[0])
+              ? enrollmentUpdate[0]
+              : enrollmentUpdate;
+            if (enrollmentRows.length !== 1) {
+              throw new BadRequestException(
+                'Expected exactly one enrollment grade update for each declared student',
+              );
+            }
           }
 
           notifications.push({
@@ -926,7 +1157,10 @@ export class ResultControlService {
           declared += 1;
         }
 
-        const declaredSession = await manager.query(
+        const declaredSession = await manager.query<
+          | Array<{ session_id: string }>
+          | [Array<{ session_id: string }>, number]
+        >(
           `UPDATE exam_result_sessions
            SET declared_at = NOW(), declared_by = $3, declaration_note = $4,
                entry_status = 'LOCKED', marks_locked = TRUE, updated_at = NOW()
@@ -939,9 +1173,28 @@ export class ResultControlService {
             dto.declaration_note?.trim() ?? null,
           ],
         );
-        if (!declaredSession.length) {
+        const declaredRows = Array.isArray(declaredSession[0])
+          ? declaredSession[0]
+          : declaredSession;
+        if (!declaredRows.length) {
           throw new BadRequestException('Results already declared');
         }
+        await this.audit.log(
+          tenantId,
+          actorUserId,
+          {
+            action: 'RESULT_DECLARED',
+            resource_type: 'exam_result_session',
+            resource_id: sessionId,
+            new_value: {
+              declared,
+              outcome: 'SUCCESS',
+              approval_request_id: approval.request_id,
+              result_state: inputs.state,
+            },
+          },
+          manager,
+        );
 
         return {
           declared,
@@ -950,7 +1203,6 @@ export class ResultControlService {
           session_id: sessionId,
         };
       });
-
     } catch (error) {
       try {
         await this.audit.log(tenantId, actorUserId, {
@@ -965,20 +1217,42 @@ export class ResultControlService {
       throw error;
     }
 
+    let notificationDispatchFailures = 0;
     for (const notification of notifications) {
-      this.notify.examResultsPublished(notification);
+      try {
+        this.notify.examResultsPublished(notification);
+      } catch {
+        // The database already committed. A transport/listener error must not
+        // report a failed declaration or prevent the remaining dispatches.
+        notificationDispatchFailures += 1;
+        this.logger.warn(
+          `Result publication committed; notification dispatch failed for session ${sessionId}`,
+        );
+      }
     }
 
-    await this.audit.log(tenantId, actorUserId, {
-      action: 'RESULT_DECLARED',
-      resource_type: 'exam_result_session',
-      resource_id: sessionId,
-      new_value: {
-        declared: publication.declared,
-        outcome: 'SUCCESS',
-      },
-    });
-
+    if (notificationDispatchFailures) {
+      try {
+        await this.audit.log(tenantId, actorUserId, {
+          action: 'RESULT_NOTIFICATION_DISPATCH_FAILED',
+          resource_type: 'exam_result_session',
+          resource_id: sessionId,
+          new_value: {
+            outcome: 'PUBLICATION_COMMITTED',
+            failed_count: notificationDispatchFailures,
+          },
+        });
+      } catch {
+        // Post-commit diagnostics follow the existing best-effort audit policy.
+        this.logger.warn(
+          `Could not audit notification dispatch failure for session ${sessionId}`,
+        );
+      }
+      return {
+        ...publication,
+        notification_dispatch_failures: notificationDispatchFailures,
+      };
+    }
     return publication;
   }
 
@@ -1014,12 +1288,291 @@ export class ResultControlService {
     );
   }
 
+  private assertUndeclared(session: ApprovalSession) {
+    if (session.declared_at)
+      throw new BadRequestException('Results already declared');
+  }
+
+  private assertReviewable(session: ApprovalSession) {
+    this.assertUndeclared(session);
+    // These inputs are owned by the automatic assessment publisher, not the
+    // manual COE submission workflow (same catalogue used by faculty entry).
+    if (isAutoSyncedExamType(session.exam_type)) {
+      throw new BadRequestException(
+        'Auto-synced assessments must use their existing assessment workflow',
+      );
+    }
+    if (!session.marks_locked || session.entry_status !== 'LOCKED') {
+      throw new BadRequestException(
+        'Close entry and lock marks before result review or declaration',
+      );
+    }
+  }
+
+  private async approvalInputs(
+    executor: DataSource | EntityManager,
+    session: ApprovalSession,
+    lock = true,
+  ) {
+    let rules: Record<string, unknown> | null = null;
+    let policyRevision: string | undefined;
+    if (session.grading_policy_id != null) {
+      const [policy] = await executor.query<
+        Array<{ rules: Record<string, unknown>; revision: string }>
+      >(
+        `SELECT rules, xmin::text AS revision FROM academic_grading_policies
+         WHERE policy_id = $1${lock ? ' FOR SHARE' : ''}`,
+        [session.grading_policy_id],
+      );
+      if (!policy) throw new BadRequestException('Grading policy not found');
+      rules = policy.rules;
+      policyRevision = policy.revision;
+    }
+    const bands = parseGradeBands(rules);
+    // This is exactly the batch that declaration publishes, not already
+    // published assessments or unrelated draft/weekly-test records.
+    const marks = await executor.query<ResultApprovalMark[]>(
+      `SELECT mark_id, student_user_id, marks_obtained, max_marks, status,
+              updated_at::text AS updated_at, xmin::text AS revision
+       FROM academic_marks
+       WHERE tenant_id = $1 AND course_id = $2 AND exam_type = $3 AND status = 'PENDING_COE'
+       ORDER BY mark_id${lock ? ' FOR UPDATE' : ''}`,
+      [session.tenant_id, session.course_id, session.exam_type],
+    );
+    if (lock && !marks.length)
+      throw new BadRequestException(
+        'No PENDING_COE marks to review or declare',
+      );
+
+    // Marks are stored by course/exam type, not semester. Never silently filter
+    // a mismatched student out of the approved batch. Lock the official roster
+    // after marks so an enrollment move/archive cannot race with declaration.
+    const studentIds = [...new Set(marks.map((mark) => mark.student_user_id))];
+    const enrollments = studentIds.length
+      ? await executor.query<
+          Array<{ enrollment_id: string; student_user_id: string }>
+        >(
+          `SELECT enrollment_id, student_user_id FROM student_course_enrollments
+           WHERE tenant_id = $1 AND course_id = $2 AND semester = $3
+             AND student_user_id = ANY($4::uuid[]) AND deleted_at IS NULL
+           ORDER BY enrollment_id${lock ? ' FOR UPDATE' : ''}`,
+          [session.tenant_id, session.course_id, session.semester, studentIds],
+        )
+      : [];
+    // Do not require ENROLLED here: an earlier declared assessment may already
+    // have set COMPLETED/FAILED. This check establishes scope, not a new policy.
+    const enrolledStudents = new Set(
+      enrollments.map((enrollment) => enrollment.student_user_id),
+    );
+    const rosterValid =
+      enrollments.length === studentIds.length &&
+      studentIds.every((studentId) => enrolledStudents.has(studentId));
+    if (lock && !rosterValid) {
+      throw new BadRequestException(
+        'Result batch contains students without a matching course enrollment for this semester',
+      );
+    }
+    return {
+      marks,
+      bands,
+      rosterValid,
+      state: resultApprovalState(
+        session,
+        marks,
+        { rules, bands },
+        policyRevision,
+      ),
+    };
+  }
+
+  private async latestApproval(
+    executor: DataSource | EntityManager,
+    tenantId: string,
+    sessionId: string,
+  ) {
+    const [request] = await executor.query<ApprovalRequest[]>(
+      `SELECT request_id, session_id, tenant_id, status, request_summary
+       FROM exam_result_dean_approval_requests
+       WHERE tenant_id = $1 AND session_id = $2
+       ORDER BY requested_at DESC, request_id DESC LIMIT 1`,
+      [requireTenantId(tenantId), sessionId],
+    );
+    return request;
+  }
+
+  private async latestCoeAudit(
+    executor: DataSource | EntityManager,
+    tenantId: string,
+    sessionId: string,
+  ) {
+    const [event] = await executor.query<
+      Array<{ action: string; new_value: Record<string, unknown> | null }>
+    >(
+      `SELECT action, new_value FROM exam_audit_logs
+       WHERE tenant_id = $1 AND resource_id = $2 AND resource_type = 'exam_result_session'
+         AND action IN ('RESULT_COE_AUDIT_PASSED', 'RESULT_COE_AUDIT_ANOMALY', 'RESULT_INPUTS_CHANGED')
+       ORDER BY created_at DESC, audit_id DESC LIMIT 1`,
+      [tenantId, sessionId],
+    );
+    return event;
+  }
+
+  private async assertCurrentCoeAudit(
+    manager: EntityManager,
+    session: ApprovalSession,
+    state: ResultApprovalState,
+  ) {
+    const event = await this.latestCoeAudit(
+      manager,
+      session.tenant_id,
+      session.session_id,
+    );
+    if (
+      event?.action !== 'RESULT_COE_AUDIT_PASSED' ||
+      !matchesResultApprovalState(event.new_value?.result_state, state)
+    ) {
+      throw new BadRequestException(
+        'A passing COE formula audit for the current marks and rules is required',
+      );
+    }
+  }
+
+  private assertApprovalMatches(
+    request: ApprovalRequest,
+    session: ApprovalSession,
+    state: ResultApprovalState,
+  ) {
+    if (
+      request.tenant_id !== session.tenant_id ||
+      request.session_id !== session.session_id ||
+      !matchesResultApprovalState(request.request_summary?.result_state, state)
+    ) {
+      throw new BadRequestException(
+        'Dean approval is stale or unverified. Request fresh review of the current marks and rules.',
+      );
+    }
+  }
+
+  private async invalidateApprovals(
+    manager: EntityManager,
+    tenantId: string,
+    sessionId: string,
+    actorUserId: string | undefined,
+    reason: string,
+  ) {
+    const result = await manager.query<
+      Array<{ request_id: string }> | [Array<{ request_id: string }>, number]
+    >(
+      `UPDATE exam_result_dean_approval_requests
+       SET status = 'REJECTED', decision_comment = $3, decided_by = NULL, decided_at = NULL,
+           request_summary = COALESCE(request_summary, '{}'::jsonb) ||
+             jsonb_build_object('invalidated_at', clock_timestamp(), 'invalidation_reason', $3::text),
+           updated_at = clock_timestamp()
+       WHERE tenant_id = $1 AND session_id = $2 AND status IN ('PENDING', 'APPROVED')
+       RETURNING request_id`,
+      [tenantId, sessionId, `Invalidated: ${reason}`],
+    );
+    // The PostgreSQL driver returns UPDATE results as [rows, affectedCount].
+    const invalidated = (
+      Array.isArray(result[0]) ? result[0] : result
+    ) as Array<{
+      request_id: string;
+    }>;
+    for (const request of invalidated) {
+      await this.appendDeanApprovalHistory(
+        tenantId,
+        request.request_id,
+        sessionId,
+        actorUserId ?? '',
+        'System',
+        'INVALIDATED',
+        'REJECTED',
+        reason,
+        manager,
+      );
+    }
+    if (invalidated.length) {
+      await this.audit.log(
+        tenantId,
+        actorUserId,
+        {
+          action: 'RESULT_APPROVALS_INVALIDATED',
+          resource_type: 'exam_result_session',
+          resource_id: sessionId,
+          new_value: { reason, requests: invalidated.length },
+        },
+        manager,
+      );
+    }
+  }
+
+  private async editSession(
+    tenantId: string,
+    sessionId: string,
+    actorUserId: string | undefined,
+    reason: string,
+    change: (manager: EntityManager, session: ApprovalSession) => Promise<void>,
+  ) {
+    await this.db.transaction(async (manager) => {
+      const session = await this.getDeclarationSession(
+        manager,
+        tenantId,
+        sessionId,
+      );
+      this.assertUndeclared(session);
+      await this.invalidateApprovals(
+        manager,
+        tenantId,
+        sessionId,
+        actorUserId,
+        reason,
+      );
+      await change(manager, session);
+      await this.audit.log(
+        tenantId,
+        actorUserId,
+        {
+          action: 'RESULT_INPUTS_CHANGED',
+          resource_type: 'exam_result_session',
+          resource_id: sessionId,
+          new_value: { reason },
+        },
+        manager,
+      );
+    });
+  }
+
+  private async lockSessionMarks(
+    manager: EntityManager,
+    tenantId: string,
+    sessionId: string,
+    actorUserId: string,
+  ) {
+    await manager.query(
+      `UPDATE exam_result_sessions
+       SET entry_status = 'LOCKED', marks_locked = TRUE, marks_locked_at = clock_timestamp(),
+           marks_locked_by = $3, updated_at = NOW()
+       WHERE tenant_id = $1 AND session_id = $2`,
+      [tenantId, sessionId, actorUserId],
+    );
+  }
+
   private async getDeclarationSession(
     manager: EntityManager,
     tenantId: string,
     sessionId: string,
   ) {
-    const rows = await manager.query(
+    tenantId = requireTenantId(tenantId);
+    const [scope] = await manager.query<
+      Array<{ course_id: string; exam_type: string }>
+    >(
+      `SELECT course_id, exam_type FROM exam_result_sessions
+       WHERE tenant_id = $1 AND session_id = $2`,
+      [tenantId, sessionId],
+    );
+    if (!scope) throw new NotFoundException('Result session not found');
+    await lockResultInputs(manager, tenantId, scope.course_id, scope.exam_type);
+    const rows = await manager.query<ApprovalSession[]>(
       `SELECT s.*, c.course_code, c.course_name, gp.policy_name AS grading_policy_name
        FROM exam_result_sessions s
        JOIN academic_courses c ON c.course_id = s.course_id AND c.tenant_id = s.tenant_id

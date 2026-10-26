@@ -12,9 +12,17 @@ export type ExamType = 'MID_TERM' | 'END_TERM' | 'PRACTICAL';
 @Entity('exam_schedules')
 @Index(['exam_date'])
 @Index(['subject_id'])
+@Index('idx_hall_schedule_session', ['tenant_id', 'session_id'])
 export class ExamSchedule extends BaseSoftDeleteEntity {
   @PrimaryGeneratedColumn('uuid')
   exam_schedule_id: string;
+
+  // Legacy records may be unlinked. Official issuance must require both IDs.
+  @Column({ type: 'uuid', nullable: true })
+  tenant_id: string | null;
+
+  @Column({ type: 'uuid', nullable: true })
+  session_id: string | null;
 
   @Column({ length: 20 })
   exam_type: ExamType;

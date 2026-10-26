@@ -19,6 +19,7 @@ import {
   DeanIntelligenceService,
 } from './dean-intelligence.service';
 import type { ListQueryParams } from '../../common/utils/pagination';
+import { requireTenantId } from '../../common/utils/require-tenant-id';
 
 type AuthUser = {
   user_id: string;
@@ -232,7 +233,7 @@ export class DeanIntelligenceController {
     @Query() query: ListQueryParams,
   ) {
     return this.intelligence.listResultApprovals(
-      this.tenant(req),
+      requireTenantId(req.user.tenant_id),
       req.user.user_id,
       query,
     );
@@ -246,7 +247,7 @@ export class DeanIntelligenceController {
     @Body() dto: { decision: 'APPROVED' | 'REJECTED'; comment?: string },
   ) {
     return this.intelligence.decideResultApproval(
-      this.tenant(req),
+      requireTenantId(req.user.tenant_id),
       req.user.user_id,
       requestId,
       dto.decision,
@@ -264,7 +265,7 @@ export class DeanIntelligenceController {
     @Param('sessionId') sessionId: string,
   ) {
     return this.intelligence.getResultApprovalHistory(
-      this.tenant(req),
+      requireTenantId(req.user.tenant_id),
       req.user.user_id,
       sessionId,
       this.actorRole(req),

@@ -9,6 +9,9 @@ import { ExamsController } from './exams.controller';
 import { ExamsService } from './exams.service';
 import { AdmitCardPdfService } from './pdf/admit-card-pdf.service';
 import { AttendancePolicyModule } from '../attendance-policy/attendance-policy.module';
+import { StorageModule } from '../../storage/storage.module';
+import { IssuedHallTicketService } from './issued-hall-ticket.service';
+import { ExamCellAuditService } from '../exam-cell/exam-cell-audit.service';
 
 @Module({
   imports: [
@@ -20,9 +23,15 @@ import { AttendancePolicyModule } from '../attendance-policy/attendance-policy.m
     ]),
     FinanceModule,
     AttendancePolicyModule,
+    StorageModule,
   ],
   controllers: [ExamsController],
-  providers: [ExamsService, AdmitCardPdfService],
+  providers: [
+    ExamsService,
+    AdmitCardPdfService,
+    IssuedHallTicketService,
+    ExamCellAuditService,
+  ],
   exports: [ExamsService, AdmitCardPdfService],
 })
 export class ExamsModule {}

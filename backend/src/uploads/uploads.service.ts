@@ -42,6 +42,13 @@ export class UploadsService {
     user: UploadUser,
     key: string,
   ): Promise<void> {
+    // Official hall tickets must pass their record/approval checks, even for
+    // staff. The generic file endpoint must not bypass revocation or expose
+    // an uncommitted object merely because its key belongs to this tenant.
+    if (/^[^/]+\/exam-cell\/issued-hall-tickets\//i.test(key))
+      throw new NotFoundException('Use the authorized hall-ticket endpoint');
+    if (/^[^/]+\/exam-cell\/question-papers\//i.test(key))
+      throw new NotFoundException('Use the authorized question-paper endpoint');
     if (!needsStudentFileOwnership(user)) return;
     if (!user.tenant_id || !user.user_id)
       throw new UnauthorizedException('Student identity required');
