@@ -19,6 +19,7 @@ describe('Faculty marks student enrollment boundary', () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never,
     );
     return { service, query };
   }
@@ -82,6 +83,7 @@ describe('Faculty marks after a previously declared component', () => {
     );
     const service = new FacultyWorkspacesService(
       { query, transaction: async (work: (manager: { query: typeof query }) => unknown) => work({ query }) } as never,
+      {} as never,
       {} as never,
       {} as never,
       {} as never,
@@ -215,6 +217,7 @@ describe('Faculty bulk marks publication boundary', () => {
     const service = new FacultyWorkspacesService(
       { query, transaction } as never,
       { marksPublished } as never,
+      {} as never,
       {} as never,
       {} as never,
     );

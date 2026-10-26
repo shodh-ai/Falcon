@@ -18,6 +18,7 @@ describe('HOD academic department scope', () => {
       {} as any,
       {} as any,
       {} as any,
+      {} as any,
     );
 
     await expect(

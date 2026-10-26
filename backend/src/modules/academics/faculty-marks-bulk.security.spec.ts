@@ -81,6 +81,7 @@ function setup(
     notify as never,
     {} as never,
     {} as never,
+    {} as never,
   );
   const submit = () =>
     service.publishAllCourseMarks(facultyId, tenantId, courseId);

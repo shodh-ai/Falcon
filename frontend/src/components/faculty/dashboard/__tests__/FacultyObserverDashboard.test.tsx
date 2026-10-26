@@ -44,7 +44,8 @@ describe('Faculty academic observer dashboard', () => {
   it('loads the timetable without requesting private adjustments or showing write controls', async () => {
     mocks.get.mockImplementation((path: string) => Promise.resolve(path.includes('/stats') ? null : []));
     render(<FacultyTimetablePage />);
-    await waitFor(() => expect(mocks.get).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(mocks.get).toHaveBeenCalledTimes(3));
+    expect(mocks.get.mock.calls.some(([path]) => path.includes('/faculty/attendance/week?start='))).toBe(true);
     expect(mocks.get.mock.calls.every(([path]) => !path.includes('adjustments'))).toBe(true);
     expect(screen.queryByText('Schedule change request')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Submit for HoD approval' })).not.toBeInTheDocument();

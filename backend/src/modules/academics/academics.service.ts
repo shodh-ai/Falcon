@@ -485,6 +485,30 @@ export class AcademicsService {
         room: move.target_room,
       });
     }
+    const extraClasses = baseSlots.length ? await this.courseEnrollments.manager.query<Array<{
+      timetable_id: string; course_id: string; session_date: string;
+      start_time: string; end_time: string; room: string | null; section: string;
+    }>>(
+      `SELECT a.timetable_id,a.course_id,a.session_date::text AS session_date,
+              a.start_time,a.end_time,a.room,a.section
+       FROM class_adjustments a
+       WHERE a.tenant_id=$1 AND a.adjustment_type='EXTRA_CLASS' AND a.status='APPROVED'
+         AND a.session_date BETWEEN $3::date AND $4::date
+         AND a.timetable_id=ANY($2::uuid[]) AND a.section IS NOT NULL
+         AND a.start_time IS NOT NULL AND a.end_time IS NOT NULL`,
+      [tenantId,baseSlots.map((slot) => slot.timetable_id),weekStart,weekEnd],
+    ) : [];
+    for (const extra of extraClasses) {
+      const original = baseSlots.find((slot) => slot.timetable_id === extra.timetable_id &&
+        slot.course_id === extra.course_id && slot.section === extra.section);
+      if (!original) continue;
+      datedSlots.push({ ...original,
+        session_date: extra.session_date,
+        day_of_week: new Date(`${extra.session_date}T00:00:00Z`).getUTCDay() || 7,
+        start_time: this.normalizeTime(extra.start_time),
+        end_time: this.normalizeTime(extra.end_time),room: extra.room,
+      });
+    }
     const covers = baseSlots.length ? await this.courseEnrollments.manager.query<Array<{
       timetable_id: string; session_date: string; substitute_name: string;
     }>>(
