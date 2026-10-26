@@ -1,6 +1,7 @@
 'use client';
 
 import { Suspense, useEffect, useState } from 'react';
+import Link from 'next/link';
 import { Inbox, Loader2 } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { cn } from '@/lib/utils';
@@ -74,7 +75,9 @@ type TabId =
   | 'DOCUMENT'
   | 'APPRAISAL'
   | 'ATTENDANCE_OVERRIDE'
-  | 'FUNDING_REQUESTS';
+  | 'FUNDING_REQUESTS'
+  | 'SUBSTITUTION'
+  | 'TIMETABLE_CHANGE';
 
 const TABS: { id: TabId; label: string }[] = [
   { id: 'LEAVE', label: 'Leaves' },
@@ -86,6 +89,8 @@ const TABS: { id: TabId; label: string }[] = [
   { id: 'APPRAISAL', label: 'Probation / Appraisals' },
   { id: 'ATTENDANCE_OVERRIDE', label: 'Attendance' },
   { id: 'FUNDING_REQUESTS', label: 'Project Funding' },
+  { id: 'SUBSTITUTION', label: 'Substitution' },
+  { id: 'TIMETABLE_CHANGE', label: 'Timetable Change' },
 ];
 
 type RequestItem = {
@@ -103,6 +108,8 @@ type RequestItem = {
   status: string;
   supporting_doc_urls?: string[];
   employee: { name: string; email?: string | null; employee_id?: string | null };
+  action_href?: string;
+  course_code?: string;
 };
 
 type RequestsPayload = {
@@ -121,6 +128,8 @@ type PendingCounts = {
   appraisals: number;
   attendanceOverrides: number;
   fundingRequests: number;
+  substitution: number;
+  timetableChange: number;
 };
 
 const PENDING_COUNT_KEYS: (keyof PendingCounts)[] = [
@@ -132,6 +141,8 @@ const PENDING_COUNT_KEYS: (keyof PendingCounts)[] = [
   'documents',
   'appraisals',
   'fundingRequests',
+  'substitution',
+  'timetableChange',
 ];
 
 function sumPendingCounts(counts: PendingCounts): number {
@@ -148,7 +159,20 @@ const TAB_COUNT_KEY: Record<TabId, keyof PendingCounts> = {
   APPRAISAL: 'appraisals',
   ATTENDANCE_OVERRIDE: 'attendanceOverrides',
   FUNDING_REQUESTS: 'fundingRequests',
+  SUBSTITUTION: 'substitution',
+  TIMETABLE_CHANGE: 'timetableChange',
 };
+
+type PendingSubstitution = {
+  proxy_id: string; date_of_proxy: string; created_at?: string;
+  course_code: string; absent_faculty_name: string; proxy_faculty_name: string;
+  reason?: string;
+};
+type PendingTimetableChange = {
+  change_group_id: string; move_type: string; reason: string; created_at?: string;
+  sessions: Array<{ course_code: string; source_date: string }>;
+};
+const academicApprovalHref = '/hod/approvals/proxy';
 
 type Props = {
   defaultScope?: TeamScope;
@@ -162,6 +186,7 @@ function RequestsContent({ defaultScope }: Props) {
   const visibleTabs = TABS.filter((t) => {
     if (t.id === 'FUNDING_REQUESTS') return Boolean(fundingRole);
     if (t.id === 'GATE_PASS') return showGatePassTab;
+    if (t.id === 'SUBSTITUTION' || t.id === 'TIMETABLE_CHANGE') return showGatePassTab;
     return true;
   });
   const scope = useTeamScope(defaultScope);
@@ -173,10 +198,11 @@ function RequestsContent({ defaultScope }: Props) {
   const [bulkActing, setBulkActing] = useState(false);
 
   async function loadCounts() {
-    try {
-      const res = await api.get<PendingCounts & { scope?: string }>(`/api/hr/team/pending-counts?scope=${scope}`);
+      const res = await api.get<PendingCounts & { scope?: string }>(`/api/hr/team/pending-counts?scope=${scope}`).catch(() => null);
       let pendingFunding = 0;
       let pendingGatePasses = 0;
+      let pendingSubstitutions = 0;
+      let pendingTimetableChanges = 0;
       if (fundingRole) {
         try {
           const fundingRows = await fetchPendingFundingRequests(api, fundingRole);
@@ -192,39 +218,55 @@ function RequestsContent({ defaultScope }: Props) {
         } catch {
           pendingGatePasses = 0;
         }
+        const [proxies, changes] = await Promise.all([
+          api.get<PendingSubstitution[]>('/api/academics/hod/approvals/proxy-requests').catch(() => []),
+          api.get<PendingTimetableChange[]>('/api/academics/session-changes/hod/pending').catch(() => []),
+        ]);
+        pendingSubstitutions = Array.isArray(proxies) ? proxies.length : 0;
+        pendingTimetableChanges = Array.isArray(changes) ? changes.length : 0;
       }
 
       setCounts({
-        leaves: Number(res.leaves) || 0,
+        leaves: Number(res?.leaves) || 0,
         gatePasses: pendingGatePasses,
-        regularization: Number(res.regularization) || 0,
-        onDuty: Number(res.onDuty) || 0,
-        compOff: Number(res.compOff) || 0,
-        documents: Number(res.documents) || 0,
-        appraisals: Number(res.appraisals) || 0,
-        attendanceOverrides: Number(res.attendanceOverrides) || 0,
+        regularization: Number(res?.regularization) || 0,
+        onDuty: Number(res?.onDuty) || 0,
+        compOff: Number(res?.compOff) || 0,
+        documents: Number(res?.documents) || 0,
+        appraisals: Number(res?.appraisals) || 0,
+        attendanceOverrides: Number(res?.attendanceOverrides) || 0,
         fundingRequests: pendingFunding,
+        substitution: pendingSubstitutions,
+        timetableChange: pendingTimetableChanges,
       });
-    } catch {
-      setCounts({
-        leaves: 0,
-        gatePasses: 0,
-        regularization: 0,
-        onDuty: 0,
-        compOff: 0,
-        documents: 0,
-        appraisals: 0,
-        attendanceOverrides: 0,
-        fundingRequests: 0,
-      });
-    }
   }
 
   async function load(active: TabId) {
     setLoading(true);
     setSelected(new Set());
     try {
-      if (active === 'FUNDING_REQUESTS') {
+      if (active === 'SUBSTITUTION') {
+        const rows = await api.get<PendingSubstitution[]>('/api/academics/hod/approvals/proxy-requests');
+        const items: RequestItem[] = rows.map((row) => ({
+          id: row.proxy_id, request_type: 'Substitution', leave_type: null,
+          applied_date: String(row.date_of_proxy).slice(0, 10), raised_on: row.created_at ?? null,
+          reason: row.reason || `Cover by ${row.proxy_faculty_name}`, status: 'Pending HOD approval',
+          employee: { name: row.absent_faculty_name }, course_code: row.course_code,
+          action_href: academicApprovalHref,
+        }));
+        setData({ count: items.length, tab: active, items });
+      } else if (active === 'TIMETABLE_CHANGE') {
+        const rows = await api.get<PendingTimetableChange[]>('/api/academics/session-changes/hod/pending');
+        const items: RequestItem[] = rows.map((row) => ({
+          id: row.change_group_id, request_type: 'Timetable Change', leave_type: row.move_type.replaceAll('_', ' '),
+          applied_date: row.sessions[0]?.source_date ? String(row.sessions[0].source_date).slice(0, 10) : null,
+          raised_on: row.created_at ?? null, reason: row.reason,
+          status: 'Pending HOD approval', employee: { name: 'Faculty request' },
+          course_code: [...new Set(row.sessions.map((session) => session.course_code))].join(', '),
+          action_href: academicApprovalHref,
+        }));
+        setData({ count: items.length, tab: active, items });
+      } else if (active === 'FUNDING_REQUESTS') {
         if (!fundingRole) {
           setData({ count: 0, tab: active, items: [] });
           return;
@@ -293,7 +335,7 @@ function RequestsContent({ defaultScope }: Props) {
       setTab(visibleTabs[0].id);
       return;
     }
-    if (tab === 'GATE_PASS' && !showGatePassTab && visibleTabs.length) {
+    if (['GATE_PASS', 'SUBSTITUTION', 'TIMETABLE_CHANGE'].includes(tab) && !showGatePassTab && visibleTabs.length) {
       setTab(visibleTabs[0].id);
       return;
     }
@@ -416,7 +458,7 @@ function RequestsContent({ defaultScope }: Props) {
           <Inbox className="h-5 w-5 text-sgvu-gold" />
           <FacultyMetricChip label="Pending in scope" value={totalPending} emphasis={totalPending > 0} />
         </div>
-        {data && data.items.length > 0 && tab !== 'GATE_PASS' && (
+        {data && data.items.length > 0 && !['GATE_PASS', 'SUBSTITUTION', 'TIMETABLE_CHANGE'].includes(tab) && (
           <div className="flex gap-2">
             <Button size="sm" disabled={bulkActing || !selected.size} onClick={() => void bulkAction('APPROVE')}>
               Bulk Approve
@@ -455,32 +497,33 @@ function RequestsContent({ defaultScope }: Props) {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b bg-slate-50 text-left text-muted-foreground">
-                <th className="w-10 px-3 py-3">
+                {!['SUBSTITUTION', 'TIMETABLE_CHANGE'].includes(tab) && <th className="w-10 px-3 py-3">
                   <input
                     type="checkbox"
                     checked={allSelected}
                     onChange={(e) => toggleAll(e.target.checked)}
                     className="h-4 w-4 rounded border-gray-300"
                   />
-                </th>
+                </th>}
                 <th className="px-3 py-3">User Name</th>
                 <th className="px-3 py-3">Request Type</th>
                 <th className="px-3 py-3">Applied Date</th>
                 <th className="px-3 py-3">Raised On</th>
                 <th className="px-3 py-3">Status</th>
+                {['SUBSTITUTION', 'TIMETABLE_CHANGE'].includes(tab) && <th className="px-3 py-3">Action</th>}
               </tr>
             </thead>
             <tbody>
               {data.items.map((row) => (
                 <tr key={row.id} className="border-b hover:bg-muted/30">
-                  <td className="px-3 py-3">
+                  {!['SUBSTITUTION', 'TIMETABLE_CHANGE'].includes(tab) && <td className="px-3 py-3">
                     <input
                       type="checkbox"
                       checked={selected.has(row.id)}
                       onChange={(e) => toggleOne(row.id, e.target.checked)}
                       className="h-4 w-4 rounded border-gray-300"
                     />
-                  </td>
+                  </td>}
                   <td className="px-3 py-3">
                     <HrPersonCell
                       name={row.employee?.name ?? 'Employee'}
@@ -489,6 +532,7 @@ function RequestsContent({ defaultScope }: Props) {
                   </td>
                   <td className="px-3 py-3">
                     <span className="font-medium">{row.leave_type ?? row.request_type}</span>
+                    {row.course_code && <p className="text-xs text-muted-foreground">{row.course_code}</p>}
                     {(row.start_time && row.end_time) ? (
                       <p className="text-xs text-muted-foreground">{row.start_time.slice(0, 5)}–{row.end_time.slice(0, 5)}</p>
                     ) : null}
@@ -518,6 +562,7 @@ function RequestsContent({ defaultScope }: Props) {
                   <td className="px-3 py-3">
                     <Badge variant="outline">{row.status}</Badge>
                   </td>
+                  {row.action_href && <td className="px-3 py-3"><Button asChild size="sm" variant="outline"><Link href={row.action_href}>Review</Link></Button></td>}
                 </tr>
               ))}
             </tbody>
