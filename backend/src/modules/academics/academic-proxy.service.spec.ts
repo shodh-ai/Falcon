@@ -28,6 +28,15 @@ function setup(respond: (sql: string, params?: unknown[]) => unknown[]) {
 }
 
 describe('date-specific substitute class', () => {
+  it('loads HOD department faculty without a department tenant column', async () => {
+    const { service, dataSource } = setup(() => []);
+    await expect(service.listDepartmentFacultyForHod(OWNER, TENANT)).resolves.toEqual([]);
+    const [sql, params] = dataSource.query.mock.calls[0];
+    expect(sql).toContain('department_hod.tenant_id=$1');
+    expect(sql).not.toContain('departments WHERE tenant_id');
+    expect(params).toEqual([TENANT, OWNER]);
+  });
+
   it('loads HOD proxy approvals without joining a nonexistent department tenant column', async () => {
     const { service, dataSource } = setup((sql) => {
       if (sql.includes('FROM users u JOIN roles r')) return [{ role_name: 'HOD' }];

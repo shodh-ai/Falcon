@@ -261,7 +261,9 @@ export class AcademicProxyService {
        JOIN roles r ON r.role_id=u.role_id
        WHERE u.tenant_id=$1 AND u.is_active=true AND r.role_name IN ('Faculty','HOD','Dean')
          AND u.dept_id IN (
-           SELECT dept_id FROM departments WHERE tenant_id=$1 AND hod_user_id=$2
+           SELECT d.dept_id FROM departments d
+           JOIN users department_hod ON department_hod.user_id=d.hod_user_id AND department_hod.tenant_id=$1
+           WHERE d.hod_user_id=$2
            UNION SELECT dept_id FROM users WHERE tenant_id=$1 AND user_id=$2
          )
        ORDER BY u.name`,
