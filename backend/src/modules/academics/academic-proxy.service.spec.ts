@@ -23,8 +23,9 @@ function setup(respond: (sql: string, params?: unknown[]) => unknown[]) {
     query: jest.fn(async (sql: string, params?: unknown[]) => respond(sql, params)),
   };
   const notify = { approvalRequired: jest.fn(), leaveApproved: jest.fn() };
-  return { service: new AcademicProxyService(dataSource as never, notify as never),
-    manager, dataSource, notify };
+  const scheduleAvailability = { assertDatedSessionAvailable: jest.fn(async () => undefined) };
+  return { service: new AcademicProxyService(dataSource as never, notify as never,
+    scheduleAvailability as never), manager, dataSource, notify, scheduleAvailability };
 }
 
 describe('date-specific substitute class', () => {

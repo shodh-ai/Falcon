@@ -8,6 +8,7 @@ describe('Faculty course visibility', () => {
       {} as any,
       teachingDepartments,
       {} as any,
+      {} as any,
     );
   }
 

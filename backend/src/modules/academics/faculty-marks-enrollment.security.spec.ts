@@ -59,6 +59,7 @@ function createService(options?: {
     {} as never,
     {} as never,
     {} as never,
+    {} as never,
   );
   (
     service as unknown as { assertFacultyOwnsCourse: jest.Mock }

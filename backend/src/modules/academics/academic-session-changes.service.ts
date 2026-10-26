@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { DataSource, EntityManager } from 'typeorm';
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 
 type MoveType = 'RESCHEDULE' | 'SWAP' | 'RESHUFFLE';
@@ -33,6 +33,12 @@ type Leg = MoveInput & {
   original_faculty_id: string;
   faculty_dept_id: number | null;
   section: string | null;
+  source_start_time: string;
+  source_end_time: string;
+  source_room: string | null;
+  source_section: string | null;
+  source_roster_hash?: string;
+  is_extra?: boolean;
 };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -161,6 +167,10 @@ export class AcademicSessionChangesService {
       original_faculty_id: slot.faculty_user_id,
       faculty_dept_id: slot.faculty_dept_id,
       section: slot.section,
+      source_start_time: slot.start_time,
+      source_end_time: slot.end_time,
+      source_room: slot.room,
+      source_section: slot.section,
     };
   }
 
@@ -183,6 +193,11 @@ export class AcademicSessionChangesService {
       [tenantId, courseId, section?.trim() || null],
     );
     return new Set(rows.map((row) => row.student_user_id));
+  }
+
+  async studentsForClass(manager: EntityManager, tenantId: string,
+    courseId: string, section: string): Promise<string[]> {
+    return [...await this.studentIds(manager,tenantId,courseId,section)];
   }
 
   private async assertNoCollisions(manager: EntityManager, tenantId: string, legs: Leg[]) {
@@ -225,8 +240,21 @@ export class AcademicSessionChangesService {
        WHERE m.tenant_id=$1 AND m.status='APPROVED' AND m.target_date=ANY($2::date[])`,
       [tenantId, targetDates],
     );
+    const approvedExtras = await manager.query<Array<{
+      timetable_id: string; course_id: string; faculty_user_id: string; date: string;
+      start_time: string; end_time: string; room: string | null; section: string | null;
+    }>>(
+      `SELECT a.adjustment_id AS timetable_id,a.course_id,a.faculty_user_id,
+              a.session_date::text AS date,a.start_time,a.end_time,a.room,a.section
+       FROM class_adjustments a
+       WHERE a.tenant_id=$1 AND a.adjustment_type='EXTRA_CLASS' AND a.status='APPROVED'
+         AND a.session_date=ANY($2::date[]) AND a.start_time IS NOT NULL
+         AND a.end_time IS NOT NULL AND a.section IS NOT NULL AND a.room IS NOT NULL`,
+      [tenantId,targetDates],
+    );
     const excluded = new Set(legs.map((leg) => `${leg.timetable_id}|${leg.source_date}`));
-    const existing = [...recurring, ...moved].filter((row) => !excluded.has(`${row.timetable_id}|${row.date}`));
+    const existing = [...recurring, ...moved, ...approvedExtras]
+      .filter((row) => !excluded.has(`${row.timetable_id}|${row.date}`));
     const targets = legs.map((leg) => ({
       timetable_id: leg.timetable_id, course_id: leg.course_id,
       faculty_user_id: leg.original_faculty_id, date: leg.target_date,
@@ -267,14 +295,434 @@ export class AcademicSessionChangesService {
     }
   }
 
-  async propose(actorId: string, tenantId: string, moveType: MoveType, inputs: MoveInput[], reason: string) {
-    // Historical moves remain readable, but new one-way reschedules and
-    // multi-class reshuffles are disabled at the API as well as in the UI.
-    if (moveType !== 'SWAP') {
-      throw new BadRequestException('Only an exact two-class swap is available');
+  /** A suggested slot is not a reservation. These checks run again under the
+   *  approval transaction after date locks are acquired. Unknown authoritative
+   *  data is deliberately different from a proven free slot. */
+  private async assertExternalConstraints(manager: EntityManager, tenantId: string, legs: Leg[]) {
+    for (const leg of legs) {
+      const students = await this.studentIds(manager, tenantId, leg.course_id, leg.section);
+      if (!students.size) throw new BadRequestException('Cannot verify availability: the student group is not mapped');
+      const [day] = await manager.query<Array<{ kind_of_day: string | null }>>(
+        `SELECT kind_of_day FROM academic_calendar_days
+         WHERE tenant_id=$1 AND calendar_date=$2::date`, [tenantId,leg.target_date],
+      );
+      if (!day?.kind_of_day) {
+        throw new BadRequestException('Cannot verify availability: academic calendar classification is missing');
+      }
+      const kind = day.kind_of_day.toUpperCase();
+      if (/HOLIDAY|CLOSED|VACATION|NON.?TEACHING|SUSPEND|SUNDAY/.test(kind)) {
+        throw new BadRequestException('The academic calendar blocks classes on this date');
+      }
+      if (!/WORK|TEACH|INSTRUCTION|CLASS|ACADEMIC/.test(kind)) {
+        throw new BadRequestException('Cannot verify availability: academic day type requires review');
+      }
+      const blockedEvent = await manager.query<Array<{ title: string; event_scope: string }>>(
+        `SELECT title,event_scope FROM admin_academic_calendar_events
+         WHERE tenant_id=$1 AND deleted_at IS NULL
+           AND starts_on<=$2::date AND COALESCE(ends_on,starts_on)>=$2::date
+           AND (UPPER(event_type) ~ 'HOLIDAY|CLOSED|SUSPEND|EXAM'
+             OR UPPER(COALESCE(kind_of_day,'')) ~ 'HOLIDAY|CLOSED|SUSPEND|EXAM')
+         LIMIT 1`, [tenantId,leg.target_date],
+      );
+      if (blockedEvent.length) {
+        const event = blockedEvent[0];
+        throw new BadRequestException(event.event_scope === 'UNIVERSITY'
+          ? `Calendar restriction: ${event.title}`
+          : `Cannot verify availability: review applicability of calendar event ${event.title}`);
+      }
+      if (!leg.target_room?.trim()) {
+        throw new BadRequestException('Cannot verify availability: a room or laboratory must be selected');
+      }
+      const spaces = await manager.query<Array<{
+        space_id: string; space_type: string; capacity: number | null; status: string;
+      }>>(
+        `SELECT space_id,space_type,capacity,status FROM campus_spaces
+         WHERE tenant_id=$1 AND (UPPER(BTRIM(room_number))=UPPER(BTRIM($2::text))
+           OR UPPER(BTRIM(building_name || ' ' || room_number))=UPPER(BTRIM($2::text)))`,
+        [tenantId,leg.target_room],
+      );
+      if (spaces.length !== 1 || spaces[0].capacity == null) {
+        throw new BadRequestException('Cannot verify availability: room identity or capacity needs review');
+      }
+      const space = spaces[0];
+      if (space.status !== 'AVAILABLE') throw new BadRequestException('The proposed room is unavailable');
+      if (students.size > Number(space.capacity)) {
+        throw new BadRequestException('The proposed room is too small for this student group');
+      }
+      const [course] = await manager.query<Array<{ course_code: string }>>(
+        `SELECT course_code FROM academic_courses WHERE tenant_id=$1 AND course_id=$2`,
+        [tenantId,leg.course_id],
+      );
+      if (course && /(P|LAB)$/i.test(course.course_code) && space.space_type !== 'LAB') {
+        throw new BadRequestException('A practical class requires a suitable laboratory');
+      }
+      const allocation = await manager.query(
+        `SELECT 1 FROM timetable_room_allocations
+         WHERE tenant_id=$1 AND space_id=$2::uuid
+           AND (allocation_date=$3::date OR (allocation_date IS NULL
+             AND day_of_week=EXTRACT(ISODOW FROM $3::date)::int))
+           AND start_time<$5::time AND end_time>$4::time
+           AND NOT ($8::boolean AND course_id=$6::uuid AND faculty_user_id=$7::uuid
+             AND start_time=$4::time AND end_time=$5::time)
+         LIMIT 1`,
+        [tenantId,space.space_id,leg.target_date,leg.target_start_time,
+          leg.target_end_time,leg.course_id,leg.original_faculty_id,
+          !leg.is_extra && leg.source_date === leg.target_date &&
+            leg.source_start_time === leg.target_start_time &&
+            leg.source_end_time === leg.target_end_time &&
+            leg.source_room === leg.target_room],
+      );
+      if (allocation.length) throw new BadRequestException('The proposed room is already allocated');
+      const legacyExtraClass = await manager.query(
+        `SELECT 1 FROM class_adjustments
+         WHERE tenant_id=$1 AND adjustment_type='EXTRA_CLASS' AND status='APPROVED'
+           AND COALESCE(session_date,new_date::date)=$2::date
+           AND (start_time IS NULL OR end_time IS NULL OR section IS NULL OR room IS NULL)
+         LIMIT 1`,
+        [tenantId,leg.target_date],
+      );
+      if (legacyExtraClass.length) {
+        throw new BadRequestException('Cannot verify availability: an approved extra class lacks a confirmed student group or duration');
+      }
+      const duties = await manager.query(
+        `SELECT 1 FROM exam_invigilation_duties duty
+         JOIN exam_schedules es ON es.exam_schedule_id=duty.exam_schedule_id AND es.tenant_id=duty.tenant_id
+         WHERE duty.tenant_id=$1 AND duty.faculty_user_id=$2::uuid
+           AND duty.status NOT IN ('CANCELLED','DECLINED') AND es.deleted_at IS NULL
+           AND es.exam_date=$3::date AND es.start_time<$5::time AND es.end_time>$4::time
+         LIMIT 1`,
+        [tenantId,leg.original_faculty_id,leg.target_date,
+          leg.target_start_time,leg.target_end_time],
+      );
+      if (duties.length) throw new BadRequestException('Faculty has invigilation duty at the proposed time');
+      const unmappedDuty = await manager.query(
+        `SELECT 1 FROM faculty_invigilation_assignments duty
+         WHERE duty.tenant_id=$1 AND duty.faculty_user_id=$2::uuid AND duty.exam_date=$3::date
+           AND duty.exam_schedule_id IS NULL LIMIT 1`,
+        [tenantId,leg.original_faculty_id,leg.target_date],
+      );
+      if (unmappedDuty.length) {
+        throw new BadRequestException('Cannot verify availability: faculty examination duty has no time mapping');
+      }
+      const exams = await manager.query<Array<{ exam_schedule_id: string; student_user_id: string | null }>>(
+        `SELECT es.exam_schedule_id,e.student_user_id
+         FROM exam_schedules es
+         LEFT JOIN academic_subjects s ON s.subject_id=es.subject_id AND s.deleted_at IS NULL
+         LEFT JOIN academic_courses c ON UPPER(BTRIM(c.course_code))=UPPER(BTRIM(s.subject_code))
+           AND c.tenant_id=$1
+         LEFT JOIN student_course_enrollments e ON e.tenant_id=$1 AND e.course_id=c.course_id
+           AND e.status='ENROLLED' AND e.student_user_id=ANY($5::uuid[])
+         WHERE es.tenant_id=$1 AND es.deleted_at IS NULL
+           AND es.status NOT IN ('CANCELLED','DRAFT') AND es.exam_date=$2::date
+           AND es.start_time<$4::time AND es.end_time>$3::time`,
+        [tenantId,leg.target_date,leg.target_start_time,leg.target_end_time,[...students]],
+      );
+      if (exams.some((exam) => exam.student_user_id)) {
+        throw new BadRequestException('Affected students have an examination at the proposed time');
+      }
+      if (exams.length) {
+        throw new BadRequestException('Cannot verify availability: an overlapping examination has no confirmed student mapping');
+      }
     }
-    if (!Array.isArray(inputs) || inputs.length !== 2 || !reason?.trim()) {
-      throw new BadRequestException('Choose two classes to exchange and provide a reason');
+  }
+
+  /** Shared by substitute and extra-class flows so they cannot bypass the
+   * same student, room, exam and calendar checks as a reschedule. */
+  async assertDatedSessionAvailable(manager: EntityManager, tenantId: string, input: {
+    timetable_id: string; course_id: string; section: string | null;
+    faculty_user_id: string; date: string; start_time: string; end_time: string;
+    room: string | null;
+  }) {
+    const leg: Leg = {
+      timetable_id: input.timetable_id, course_id: input.course_id,
+      original_faculty_id: input.faculty_user_id, faculty_dept_id: null,
+      section: input.section, source_section: input.section,
+      source_date: input.date, target_date: input.date,
+      source_start_time: input.start_time, source_end_time: input.end_time,
+      source_room: input.room, target_start_time: input.start_time,
+      target_end_time: input.end_time, target_room: input.room,
+    };
+    await this.assertNoCollisions(manager, tenantId, [leg]);
+    await this.assertExternalConstraints(manager, tenantId, [leg]);
+  }
+
+  /** An extra class has no source timetable to exclude. Use an independent
+   * synthetic identity so a same-time scheduled class remains a collision. */
+  async assertExtraClassAvailable(manager: EntityManager, tenantId: string, input: {
+    source_timetable_id: string; course_id: string; section: string; faculty_user_id: string; date: string;
+    start_time: string; end_time: string; room: string;
+  }): Promise<string> {
+    const date = this.date(input.date);
+    if (!UUID.test(input.source_timetable_id || '') || !UUID.test(input.course_id || '') ||
+        !UUID.test(input.faculty_user_id || '')) {
+      throw new BadRequestException('Choose a valid assigned class for the extra session');
+    }
+    if (date < campusToday()) throw new BadRequestException('Extra classes must be scheduled in the future');
+    const start = this.time(input.start_time);
+    const end = this.time(input.end_time);
+    if (start >= end || !input.section?.trim() || !input.room?.trim()) {
+      throw new BadRequestException('Choose a student section, room and valid start/end time');
+    }
+    const sameSessionDay = await manager.query(
+      `SELECT 1 FROM academic_timetables t
+       WHERE t.tenant_id=$1 AND t.timetable_id=$2::uuid AND t.deleted_at IS NULL
+         AND t.day_of_week=EXTRACT(ISODOW FROM $3::date)::int
+         AND (t.valid_from IS NULL OR t.valid_from<=$3::date)
+         AND (t.valid_to IS NULL OR t.valid_to>=$3::date)
+         AND NOT EXISTS (SELECT 1 FROM academic_class_moves m
+           WHERE m.tenant_id=$1 AND m.source_timetable_id=t.timetable_id
+             AND m.source_date=$3::date AND m.status='APPROVED')
+       UNION ALL
+       SELECT 1 FROM class_adjustments a
+       WHERE a.tenant_id=$1 AND a.timetable_id=$2::uuid AND a.session_date=$3::date
+         AND a.adjustment_type='EXTRA_CLASS' AND a.status='APPROVED'
+       UNION ALL
+       SELECT 1 FROM academic_class_moves m
+       WHERE m.tenant_id=$1 AND m.source_timetable_id=$2::uuid
+         AND m.target_date=$3::date AND m.status='APPROVED'
+       LIMIT 1`,
+      [tenantId,input.source_timetable_id,date],
+    );
+    if (sameSessionDay.length) {
+      throw new BadRequestException('This class already has a session on that date; choose another date so attendance remains separate');
+    }
+    const leg: Leg = {
+      timetable_id: randomUUID(), course_id: input.course_id,
+      original_faculty_id: input.faculty_user_id, faculty_dept_id: null,
+      section: input.section.trim(), source_section: input.section.trim(),
+      source_date: date, target_date: date, source_start_time: start,
+      source_end_time: end, source_room: input.room.trim(),
+      target_start_time: start, target_end_time: end, target_room: input.room.trim(),
+      is_extra: true,
+    };
+    await this.assertNoCollisions(manager, tenantId, [leg]);
+    await this.assertExternalConstraints(manager, tenantId, [leg]);
+    const students = await this.studentIds(manager, tenantId, input.course_id, leg.section);
+    return createHash('sha256').update([...students].sort().join('|')).digest('hex');
+  }
+
+  async extraAvailability(actorId: string, tenantId: string, input: {
+    timetable_id: string; target_date: string; target_room?: string;
+    duration_minutes?: number | string;
+  }) {
+    const targetDate = this.date(input.target_date);
+    if (!UUID.test(input.timetable_id || '') || targetDate < campusToday()) {
+      throw new BadRequestException('Choose an assigned class and a future date');
+    }
+    const duration = Number(input.duration_minutes || 60);
+    if (!Number.isInteger(duration) || duration < 30 || duration > 240 || duration % 30 !== 0) {
+      throw new BadRequestException('Extra-class duration must be 30 to 240 minutes in 30-minute steps');
+    }
+    return this.dataSource.transaction(async (manager) => {
+      const actor = await this.actorScope(manager,tenantId,actorId);
+      const [slot] = await manager.query<Array<Slot>>(
+        `SELECT t.timetable_id,t.course_id,t.faculty_user_id,u.dept_id AS faculty_dept_id,
+                t.day_of_week,t.start_time,t.end_time,t.room,t.section
+         FROM academic_timetables t JOIN users u ON u.tenant_id=t.tenant_id
+           AND u.user_id=t.faculty_user_id
+         WHERE t.tenant_id=$1 AND t.timetable_id=$2::uuid AND t.deleted_at IS NULL
+           AND (t.valid_from IS NULL OR t.valid_from<=$3::date)
+           AND (t.valid_to IS NULL OR t.valid_to>=$3::date)`,
+        [tenantId,input.timetable_id,targetDate],
+      );
+      if (!slot || !slot.section) throw new NotFoundException('Choose an active class with a mapped section');
+      if (actor.role_name === 'Faculty' && slot.faculty_user_id !== actorId) {
+        throw new ForbiddenException('Faculty may inspect only their assigned class');
+      }
+      if (actor.role_name === 'HOD' && Number(actor.dept_id) !== Number(slot.faculty_dept_id)) {
+        throw new ForbiddenException('Class is outside the HOD department');
+      }
+      if (actor.role_name === 'Dean') {
+        await this.assertDeanDepartments(manager,tenantId,actorId,[slot.faculty_dept_id]);
+      }
+      const format = (minutes: number) =>
+        `${String(Math.floor(minutes / 60)).padStart(2,'0')}:${String(minutes % 60).padStart(2,'0')}:00`;
+      const room = input.target_room?.trim() || slot.room || '';
+      const slots: Array<{ start_time: string; end_time: string;
+        status: 'AVAILABLE' | 'CONFLICT' | 'REQUIRES_REVIEW'; reasons: string[] }> = [];
+      for (let start = 8 * 60; start + duration <= 18 * 60; start += 30) {
+        const candidate: typeof slots[number] = {
+          start_time: format(start), end_time: format(start + duration),
+          status: 'AVAILABLE', reasons: [],
+        };
+        try {
+          await this.assertExtraClassAvailable(manager,tenantId,{
+            source_timetable_id: slot.timetable_id,course_id: slot.course_id, section: slot.section,
+            faculty_user_id: slot.faculty_user_id, date: targetDate,
+            start_time: candidate.start_time, end_time: candidate.end_time, room,
+          });
+          const pending = await manager.query(
+            `SELECT 1 FROM class_adjustments WHERE tenant_id=$1
+               AND adjustment_type='EXTRA_CLASS' AND status='PENDING_HOD_APPROVAL'
+               AND session_date=$2::date AND
+               (timetable_id=$7::uuid OR (start_time<$4::time AND end_time>$3::time
+                 AND (faculty_user_id=$5::uuid OR UPPER(BTRIM(room))=UPPER(BTRIM($6::text)))))
+             LIMIT 1`,
+            [tenantId,targetDate,candidate.start_time,candidate.end_time,
+              slot.faculty_user_id,room,slot.timetable_id],
+          );
+          if (pending.length) {
+            candidate.status = 'REQUIRES_REVIEW';
+            candidate.reasons.push('Another pending request overlaps; this slot is not reserved');
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'Availability could not be verified';
+          candidate.status = /cannot verify|cannot prove|requires review|not mapped/i.test(message)
+            ? 'REQUIRES_REVIEW' : 'CONFLICT';
+          candidate.reasons.push(message);
+        }
+        slots.push(candidate);
+      }
+      return { timetable_id: slot.timetable_id, target_date: targetDate,
+        duration_minutes: duration, room,
+        note: 'Suggested slots are not reservations. HOD approval revalidates all constraints.',
+        slots };
+    });
+  }
+
+  async availability(actorId: string, tenantId: string, input: {
+    timetable_id: string; source_date: string; target_date: string; target_room?: string;
+  }) {
+    const targetDate = this.date(input.target_date);
+    const sourceDate = this.date(input.source_date);
+    if (!UUID.test(input.timetable_id || '') || targetDate < campusToday()) {
+      throw new BadRequestException('Choose a valid future class and target date');
+    }
+    return this.dataSource.transaction(async (manager) => {
+      const actor = await this.actorScope(manager, tenantId, actorId);
+      const [slot] = await manager.query<Array<Slot>>(
+        `SELECT t.timetable_id,t.course_id,t.faculty_user_id,u.dept_id AS faculty_dept_id,
+                t.day_of_week,t.start_time,t.end_time,t.room,t.section
+         FROM academic_timetables t JOIN users u ON u.user_id=t.faculty_user_id
+           AND u.tenant_id=t.tenant_id
+         WHERE t.tenant_id=$1 AND t.timetable_id=$2::uuid AND t.deleted_at IS NULL
+           AND (t.valid_from IS NULL OR t.valid_from<=$3::date)
+           AND (t.valid_to IS NULL OR t.valid_to>=$3::date)`,
+        [tenantId,input.timetable_id,sourceDate],
+      );
+      if (!slot || (new Date(`${sourceDate}T00:00:00Z`).getUTCDay() || 7) !== Number(slot.day_of_week)) {
+        throw new NotFoundException('The selected class is not scheduled on its source date');
+      }
+      if (actor.role_name === 'Faculty' && slot.faculty_user_id !== actorId) {
+        throw new ForbiddenException('Faculty may inspect only their own class changes');
+      }
+      if (actor.role_name === 'HOD' && Number(actor.dept_id) !== Number(slot.faculty_dept_id)) {
+        throw new ForbiddenException('Class is outside the HOD department');
+      }
+      if (actor.role_name === 'Dean') {
+        await this.assertDeanDepartments(manager, tenantId, actorId, [slot.faculty_dept_id]);
+      }
+      const minutes = (time: string) => Number(time.slice(0, 2)) * 60 + Number(time.slice(3, 5));
+      const duration = minutes(slot.end_time) - minutes(slot.start_time);
+      if (duration <= 0 || duration > 240) {
+        throw new BadRequestException('Class duration requires timetable review');
+      }
+      const displayTime = (value: number) =>
+        `${String(Math.floor(value / 60)).padStart(2, '0')}:${String(value % 60).padStart(2, '0')}:00`;
+      const candidates: Array<{ start_time: string; end_time: string;
+        status: 'AVAILABLE' | 'CONFLICT' | 'REQUIRES_REVIEW'; reasons: string[] }> = [];
+      for (let start = 8 * 60; start + duration <= 18 * 60; start += 30) {
+        const move: MoveInput = {
+          timetable_id: input.timetable_id, source_date: sourceDate, target_date: targetDate,
+          target_start_time: displayTime(start), target_end_time: displayTime(start + duration),
+          target_room: input.target_room?.trim() || slot.room,
+        };
+        const candidate: typeof candidates[number] = {
+          start_time: move.target_start_time, end_time: move.target_end_time,
+          status: 'AVAILABLE', reasons: [],
+        };
+        try {
+          const leg = await this.loadSlot(manager, tenantId, move);
+          await this.assertNoCollisions(manager, tenantId, [leg]);
+          await this.assertExternalConstraints(manager, tenantId, [leg]);
+          const pending = await manager.query(
+            `SELECT 1 FROM academic_class_moves WHERE tenant_id=$1
+               AND target_date=$2::date AND status='PENDING_HOD_APPROVAL'
+               AND target_start_time<$4::time AND target_end_time>$3::time
+               AND (target_room IS NOT DISTINCT FROM $5::text
+                 OR original_faculty_id=$6::uuid) LIMIT 1`,
+            [tenantId,targetDate,move.target_start_time,move.target_end_time,
+              move.target_room,slot.faculty_user_id],
+          );
+          if (pending.length) {
+            candidate.status = 'REQUIRES_REVIEW';
+            candidate.reasons.push('Another change request overlaps this slot; it is not reserved');
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'Availability could not be verified';
+          candidate.status = /cannot verify|cannot prove|requires review|not mapped/i.test(message)
+            ? 'REQUIRES_REVIEW' : 'CONFLICT';
+          candidate.reasons.push(message);
+        }
+        candidates.push(candidate);
+      }
+      return {
+        timetable_id: slot.timetable_id, source_date: sourceDate, target_date: targetDate,
+        duration_minutes: duration, room: input.target_room?.trim() || slot.room,
+        note: 'Suggested slots are not reservations. HOD approval revalidates all constraints.',
+        slots: candidates,
+      };
+    });
+  }
+
+  async previewGroup(actorId: string, tenantId: string, moveType: MoveType,
+    inputs: MoveInput[]) {
+    if (!['SWAP','RESHUFFLE'].includes(moveType) ||
+        !Array.isArray(inputs) || inputs.length < 2 || inputs.length > 6 ||
+        (moveType === 'SWAP' && inputs.length !== 2) ||
+        (moveType === 'RESHUFFLE' && inputs.length < 3)) {
+      throw new BadRequestException('Choose two classes for a swap or three to six for a reshuffle');
+    }
+    try {
+      await this.dataSource.transaction(async (manager) => {
+        const actor = await this.actorScope(manager,tenantId,actorId);
+        const legs: Leg[] = [];
+        for (const input of inputs) legs.push(await this.loadSlot(manager,tenantId,input));
+        if (new Set(legs.map((leg) => `${leg.timetable_id}|${leg.source_date}`)).size !== legs.length) {
+          throw new BadRequestException('A class may appear only once in the group');
+        }
+        if (moveType === 'SWAP') {
+          const [a,b] = legs;
+          if (a.target_date !== b.source_date || b.target_date !== a.source_date ||
+              a.target_start_time !== b.source_start_time ||
+              a.target_end_time !== b.source_end_time ||
+              a.target_room !== b.source_room ||
+              b.target_start_time !== a.source_start_time ||
+              b.target_end_time !== a.source_end_time ||
+              b.target_room !== a.source_room) {
+            throw new BadRequestException('A swap must exchange the exact two dated class slots');
+          }
+        }
+        if (actor.role_name === 'Faculty' && legs.some((leg) => leg.original_faculty_id !== actorId)) {
+          throw new ForbiddenException('Faculty can change only their own classes');
+        }
+        if (actor.role_name === 'HOD' && legs.some((leg) => Number(leg.faculty_dept_id) !== Number(actor.dept_id))) {
+          throw new ForbiddenException('A class is outside the HOD department');
+        }
+        if (actor.role_name === 'Dean') {
+          await this.assertDeanDepartments(manager,tenantId,actorId,legs.map((leg) => leg.faculty_dept_id));
+        }
+        await this.assertNoCollisions(manager,tenantId,legs);
+        await this.assertExternalConstraints(manager,tenantId,legs);
+      });
+      return { status: 'AVAILABLE', reasons: [],
+        note: 'The group is not reserved. HOD approval rechecks every class atomically.' };
+    } catch (error) {
+      if (error instanceof ForbiddenException) throw error;
+      const message = error instanceof Error ? error.message : 'Availability could not be verified';
+      return { status: /cannot verify|cannot prove|requires review|not mapped/i.test(message)
+        ? 'REQUIRES_REVIEW' : 'CONFLICT', reasons: [message],
+        note: 'No class was changed.' };
+    }
+  }
+
+  async propose(actorId: string, tenantId: string, moveType: MoveType, inputs: MoveInput[], reason: string) {
+    const requiredLegs = moveType === 'RESCHEDULE' ? 1 : moveType === 'SWAP' ? 2 : null;
+    if (!['RESCHEDULE','SWAP','RESHUFFLE'].includes(moveType) ||
+        !Array.isArray(inputs) || !inputs.length || inputs.length > 6 ||
+        (requiredLegs !== null && inputs.length !== requiredLegs) ||
+        (moveType === 'RESHUFFLE' && inputs.length < 3) || !reason?.trim()) {
+      throw new BadRequestException('Choose the affected class sessions and provide a reason');
     }
     const result = await this.dataSource.transaction(async (manager) => {
       const actor = await this.actorScope(manager, tenantId, actorId);
@@ -314,19 +762,27 @@ export class AcademicSessionChangesService {
           throw new BadRequestException('A swap must exchange the exact two dated class slots');
         }
       }
+      for (const leg of legs) {
+        const ids = await this.studentIds(manager, tenantId, leg.course_id, leg.section);
+        if (!ids.size) throw new BadRequestException('Cannot verify a clash-free move until the class roster is mapped');
+        leg.source_roster_hash = createHash('sha256').update([...ids].sort().join('|')).digest('hex');
+      }
       await this.assertNoCollisions(manager, tenantId, legs);
+      await this.assertExternalConstraints(manager, tenantId, legs);
       const groupId = randomUUID();
       for (const leg of legs) {
         await manager.query(
           `INSERT INTO academic_class_moves (
              change_group_id,tenant_id,source_timetable_id,course_id,original_faculty_id,
              source_date,target_date,target_start_time,target_end_time,target_room,
-             move_type,status,reason,requested_by_user_id
+             move_type,status,reason,requested_by_user_id,
+             source_start_time,source_end_time,source_room,source_section,source_roster_hash
            ) VALUES ($1::uuid,$2,$3::uuid,$4,$5,$6::date,$7::date,$8::time,$9::time,$10,
-             $11,'PENDING_HOD_APPROVAL',$12,$13::uuid)`,
+             $11,'PENDING_HOD_APPROVAL',$12,$13::uuid,$14::time,$15::time,$16,$17,$18)`,
           [groupId,tenantId,leg.timetable_id,leg.course_id,leg.original_faculty_id,
             leg.source_date,leg.target_date,leg.target_start_time,leg.target_end_time,
-            leg.target_room,moveType,reason.trim(),actorId],
+            leg.target_room,moveType,reason.trim(),actorId,leg.source_start_time,
+            leg.source_end_time,leg.source_room,leg.source_section,leg.source_roster_hash],
         );
       }
       return { change_group_id: groupId, status: 'PENDING_HOD_APPROVAL', legs: legs.length };
@@ -427,14 +883,43 @@ export class AcademicSessionChangesService {
         }
         await this.lockDates(manager, tenantId, legs.flatMap((row) => [row.source_date,row.target_date]));
         for (const row of rows) {
+          const [current] = await manager.query<Array<Slot>>(
+            `SELECT t.timetable_id,t.course_id,t.faculty_user_id,t.day_of_week,
+                    t.start_time,t.end_time,t.room,t.section
+             FROM academic_timetables t WHERE t.tenant_id=$1 AND t.timetable_id=$2::uuid
+               AND t.deleted_at IS NULL AND (t.valid_from IS NULL OR t.valid_from<=$3::date)
+               AND (t.valid_to IS NULL OR t.valid_to>=$3::date) FOR UPDATE`,
+            [tenantId,row.timetable_id,row.source_date_text],
+          );
+          if (!current || current.course_id !== row.course_id ||
+              current.faculty_user_id !== row.original_faculty_id ||
+              current.start_time !== row.source_start_time ||
+              current.end_time !== row.source_end_time ||
+              current.room !== row.source_room || current.section !== row.source_section) {
+            throw new BadRequestException('The source timetable changed after this request; revise and resubmit it');
+          }
+          const ids = await this.studentIds(manager, tenantId, row.course_id, row.section);
+          const rosterHash = createHash('sha256').update([...ids].sort().join('|')).digest('hex');
+          if (!ids.size || rosterHash !== row.source_roster_hash) {
+            throw new BadRequestException('The student group changed after this request; revise and resubmit it');
+          }
           const attendance = await manager.query(
             `SELECT 1 FROM course_attendance_logs WHERE tenant_id=$1 AND timetable_id=$2::uuid
                AND date=$3::date LIMIT 1`,
             [tenantId,row.timetable_id,row.source_date_text],
           );
           if (attendance.length) throw new BadRequestException('Attendance has already been recorded for a source class');
+          const proxy = await manager.query(
+            `SELECT 1 FROM academic_proxy_requests WHERE tenant_id=$1
+               AND timetable_id=$2::uuid AND date_of_proxy=$3::date
+               AND status IN ('PENDING_SUBSTITUTE_ACCEPTANCE','PENDING_HOD_APPROVAL','APPROVED')
+             LIMIT 1`,
+            [tenantId,row.timetable_id,row.source_date_text],
+          );
+          if (proxy.length) throw new BadRequestException('Substitute arrangement changed after this request; revise and resubmit it');
         }
         await this.assertNoCollisions(manager, tenantId, legs);
+        await this.assertExternalConstraints(manager, tenantId, legs);
       }
       await manager.query(
         `UPDATE academic_class_moves SET status=$3,decided_by_user_id=$4::uuid,decided_at=NOW()

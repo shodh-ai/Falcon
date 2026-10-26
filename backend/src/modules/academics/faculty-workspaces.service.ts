@@ -4,6 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { AcademicSessionChangesService } from './academic-session-changes.service';
 import * as crypto from 'crypto';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager } from 'typeorm';
@@ -79,6 +80,7 @@ export class FacultyWorkspacesService {
     private readonly notify: NotificationEmitterService,
     private readonly teachingDepartments: FacultyTeachingDepartmentsService,
     private readonly deanAudit: DeanAuditService,
+    private readonly sessionChanges: AcademicSessionChangesService,
   ) {}
 
   async listFacultyCourses(
@@ -1651,6 +1653,10 @@ export class FacultyWorkspacesService {
       reason?: string;
       substitute_faculty_user_id?: string;
       timetable_id?: string;
+      session_date?: string;
+      start_time?: string;
+      end_time?: string;
+      room?: string;
     },
   ) {
     await this.assertFacultyOwnsCourse(facultyUserId, tenantId, dto.course_id);
@@ -1664,10 +1670,51 @@ export class FacultyWorkspacesService {
       'You already have a pending schedule change for this course. Wait for HoD approval on the existing request, or cancel it before submitting another.',
     );
 
-    if (!dto.new_date?.trim()) {
+    if (dto.adjustment_type !== 'EXTRA_CLASS' && !dto.new_date?.trim()) {
       throw new BadRequestException(
         'Please provide a valid date and time for the schedule change',
       );
+    }
+
+    if (dto.adjustment_type === 'EXTRA_CLASS') {
+      if (!dto.timetable_id || !dto.session_date || !dto.start_time || !dto.end_time || !dto.room) {
+        throw new BadRequestException('Extra class requires an assigned section, date, start/end time and room');
+      }
+      const { timetable_id, session_date, start_time, end_time, room } = dto;
+      const rows = await this.dataSource.transaction(async (manager) => {
+        await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))',
+          [`class-move:${tenantId}:${session_date}`]);
+        const [source] = await manager.query<Array<{ course_id: string; faculty_user_id: string;
+          section: string | null; room: string | null }>>(
+          `SELECT course_id,faculty_user_id,section,room FROM academic_timetables
+           WHERE tenant_id=$1 AND timetable_id=$2::uuid AND deleted_at IS NULL
+             AND (valid_from IS NULL OR valid_from<=$3::date)
+             AND (valid_to IS NULL OR valid_to>=$3::date)`,
+          [tenantId,timetable_id,session_date],
+        );
+        if (!source || source.course_id !== dto.course_id ||
+            source.faculty_user_id !== facultyUserId || !source.section) {
+          throw new BadRequestException('Choose an assigned class with a mapped student section');
+        }
+        const rosterHash = await this.sessionChanges.assertExtraClassAvailable(manager,tenantId,{
+          source_timetable_id: timetable_id,course_id: dto.course_id,
+          section: source.section, faculty_user_id: facultyUserId,
+          date: session_date, start_time, end_time, room,
+        });
+        return manager.query(
+          `INSERT INTO class_adjustments (
+             tenant_id,course_id,faculty_user_id,adjustment_type,original_date,new_date,
+             reason,timetable_id,section,room,session_date,start_time,end_time,roster_hash
+           ) VALUES ($1,$2,$3,'EXTRA_CLASS',NULL,
+             ($4::date + $5::time) AT TIME ZONE 'Asia/Kolkata',$6,$7::uuid,$8,$9,
+             $4::date,$5::time,$10::time,$11) RETURNING *`,
+          [tenantId,dto.course_id,facultyUserId,session_date,start_time,
+            dto.reason ?? null,timetable_id,source.section,room.trim(),
+            end_time,rosterHash],
+        );
+      });
+      await this.notifyHodOfAdjustment(facultyUserId,tenantId,dto.course_id,dto.adjustment_type);
+      return rows[0];
     }
 
     const rows = await this.dataSource.query(
@@ -1688,6 +1735,12 @@ export class FacultyWorkspacesService {
       ],
     );
 
+    await this.notifyHodOfAdjustment(facultyUserId,tenantId,dto.course_id,dto.adjustment_type);
+    return rows[0];
+  }
+
+  private async notifyHodOfAdjustment(facultyUserId: string, tenantId: string,
+    courseId: string, adjustmentType: string) {
     // Notify department HoD so the request appears in Extra Class Approvals inbox.
     const metaRows = await this.dataSource.query<
       Array<{
@@ -1706,13 +1759,13 @@ export class FacultyWorkspacesService {
        INNER JOIN academic_courses c ON c.course_id = $3 AND c.tenant_id = $2
        WHERE u.user_id = $1 AND u.tenant_id = $2
        LIMIT 1`,
-      [facultyUserId, tenantId, dto.course_id],
+      [facultyUserId, tenantId, courseId],
     );
 
     const meta = metaRows[0];
     if (meta?.hod_user_id) {
       const typeLabel = String(
-        dto.adjustment_type || 'SCHEDULE_CHANGE',
+        adjustmentType || 'SCHEDULE_CHANGE',
       ).replace(/_/g, ' ');
       this.notify.approvalRequired({
         tenantId,
@@ -1726,7 +1779,6 @@ export class FacultyWorkspacesService {
       });
     }
 
-    return rows[0];
   }
 
   async listHodPendingAdjustments(hodUserId: string, tenantId: string) {
@@ -1796,8 +1848,56 @@ export class FacultyWorkspacesService {
         'HOD can act only on adjustments from their department',
       );
     }
+    if (action === 'APPROVE' && row.faculty_user_id === hodUserId) {
+      throw new ForbiddenException('A faculty member cannot approve their own extra-class request');
+    }
 
-    if (action === 'REJECT') {
+    if (action === 'APPROVE' && row.adjustment_type === 'EXTRA_CLASS') {
+      await this.dataSource.transaction(async (manager) => {
+        const [current] = await manager.query<Array<typeof row>>(
+          `SELECT *,session_date::text AS session_date_text FROM class_adjustments
+           WHERE adjustment_id=$1::uuid AND tenant_id=$2 FOR UPDATE`,
+          [adjustmentId,tenantId],
+        );
+        if (!current || current.status !== 'PENDING_HOD_APPROVAL') {
+          throw new BadRequestException('Adjustment has already been processed');
+        }
+        if (!current.session_date || !current.start_time || !current.end_time ||
+            !current.section || !current.room || !current.timetable_id || !current.roster_hash) {
+          throw new BadRequestException('This legacy extra-class request lacks scheduling details; ask faculty to submit it again');
+        }
+        const date = String(current.session_date_text);
+        await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))',
+          [`class-move:${tenantId}:${date}`]);
+        const [source] = await manager.query<Array<{ course_id: string; faculty_user_id: string;
+          section: string | null }>>(
+          `SELECT course_id,faculty_user_id,section FROM academic_timetables
+           WHERE tenant_id=$1 AND timetable_id=$2::uuid AND deleted_at IS NULL
+             AND (valid_from IS NULL OR valid_from<=$3::date)
+             AND (valid_to IS NULL OR valid_to>=$3::date) FOR UPDATE`,
+          [tenantId,current.timetable_id,date],
+        );
+        if (!source || source.course_id !== current.course_id ||
+            source.faculty_user_id !== current.faculty_user_id ||
+            source.section !== current.section) {
+          throw new BadRequestException('The source class or section changed; faculty must submit a revised request');
+        }
+        const rosterHash = await this.sessionChanges.assertExtraClassAvailable(manager,tenantId,{
+          source_timetable_id: current.timetable_id,course_id: current.course_id,
+          section: current.section,
+          faculty_user_id: current.faculty_user_id, date,
+          start_time: String(current.start_time), end_time: String(current.end_time),
+          room: current.room,
+        });
+        if (rosterHash !== current.roster_hash) {
+          throw new BadRequestException('The student group changed; faculty must submit a revised request');
+        }
+        await manager.query(
+          `UPDATE class_adjustments SET status='APPROVED' WHERE adjustment_id=$1::uuid AND tenant_id=$2`,
+          [adjustmentId,tenantId],
+        );
+      });
+    } else if (action === 'REJECT') {
       if (!remarks?.trim())
         throw new BadRequestException('Rejection remarks are required');
       await this.dataSource.query(
@@ -1829,6 +1929,19 @@ export class FacultyWorkspacesService {
             ? 'Your extra class request was approved by your HOD.'
             : `Your extra class request was rejected.${remarks ? ` Reason: ${remarks}` : ''}`,
         actionLink: '/faculty/timetable',
+      });
+    }
+
+    if (action === 'APPROVE' && row.adjustment_type === 'EXTRA_CLASS' && row.section && row.session_date) {
+      const date = row.session_date instanceof Date
+        ? row.session_date.toLocaleDateString('en-CA',{ timeZone: 'Asia/Kolkata' })
+        : String(row.session_date).slice(0,10);
+      const students = await this.dataSource.transaction((manager) =>
+        this.sessionChanges.studentsForClass(manager,tenantId,row.course_id,row.section));
+      for (const studentId of students) this.notify.timetableChanged({
+        tenantId,userId: studentId,courseName: 'Extra class',
+        changeSummary: `An extra class was approved for ${date} at ${String(row.start_time).slice(0,5)}.`,
+        actionLink: '/student/timetable',
       });
     }
 

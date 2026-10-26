@@ -6,12 +6,14 @@ import {
 } from '@nestjs/common';
 import { DataSource, EntityManager } from 'typeorm';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
+import { AcademicSessionChangesService } from './academic-session-changes.service';
 
 @Injectable()
 export class AcademicProxyService {
   constructor(
     private readonly dataSource: DataSource,
     private readonly notify: NotificationEmitterService,
+    private readonly scheduleAvailability: AcademicSessionChangesService,
   ) {}
 
   async listLecturesForLeaveDates(
@@ -95,11 +97,11 @@ export class AcademicProxyService {
         [`proxy:${tenantId}:${dto.timetable_id}:${date}`]);
       const [slot] = await manager.query<Array<{
         timetable_id: string; course_id: string; start_time: string; end_time: string;
-        day_of_week: number; faculty_user_id: string;
+        day_of_week: number; faculty_user_id: string; section: string | null; room: string | null;
         valid_from: string | null; valid_to: string | null;
       }>>(
         `SELECT t.timetable_id, t.course_id, t.start_time, t.end_time,
-                t.day_of_week, t.faculty_user_id,
+                t.day_of_week, t.faculty_user_id,t.section,t.room,
                 t.valid_from::text AS valid_from,t.valid_to::text AS valid_to
          FROM academic_timetables t
          WHERE t.timetable_id=$1::uuid AND t.tenant_id=$2 AND t.faculty_user_id=$3
@@ -108,9 +110,9 @@ export class AcademicProxyService {
       );
       if (!slot) throw new NotFoundException('Timetable slot not found for this faculty and date');
       const [approvedTarget] = await manager.query<Array<{
-        source_date: string; target_start_time: string; target_end_time: string;
+        source_date: string; target_start_time: string; target_end_time: string; target_room: string | null;
       }>>(
-        `SELECT source_date::text AS source_date,target_start_time,target_end_time
+        `SELECT source_date::text AS source_date,target_start_time,target_end_time,target_room
          FROM academic_class_moves WHERE tenant_id=$1 AND source_timetable_id=$2::uuid
            AND target_date=$3::date AND status='APPROVED' LIMIT 1`,
         [tenantId,dto.timetable_id,date],
@@ -147,7 +149,7 @@ export class AcademicProxyService {
       if (recorded.length) throw new BadRequestException('Attendance has already been recorded for this class');
       await this.assertCandidateAvailable(manager, tenantId, absentFacultyId, dto.proxy_faculty_id, date,
         approvedTarget ? { ...slot, start_time: approvedTarget.target_start_time,
-          end_time: approvedTarget.target_end_time } : slot);
+          end_time: approvedTarget.target_end_time, room: approvedTarget.target_room } : slot);
       const rows = await manager.query(
         `INSERT INTO academic_proxy_requests (
            tenant_id, timetable_id, absent_faculty_id, proxy_faculty_id, course_id,
@@ -187,7 +189,8 @@ export class AcademicProxyService {
     absentFacultyId: string,
     candidateId: string,
     date: string,
-    slot: { timetable_id: string; start_time: string; end_time: string },
+    slot: { timetable_id: string; course_id: string; section: string | null;
+      room: string | null; start_time: string; end_time: string },
   ) {
     if (!candidateId || candidateId === absentFacultyId) {
       throw new BadRequestException('Select a different substitute faculty');
@@ -239,6 +242,11 @@ export class AcademicProxyService {
       [tenantId, candidateId, date, slot.timetable_id, slot.start_time, slot.end_time],
     );
     if (conflict.length) throw new BadRequestException('Substitute faculty has another class in this time slot');
+    await this.scheduleAvailability.assertDatedSessionAvailable(manager, tenantId, {
+      timetable_id: slot.timetable_id, course_id: slot.course_id,
+      section: slot.section, faculty_user_id: candidateId, date,
+      start_time: slot.start_time, end_time: slot.end_time, room: slot.room,
+    });
   }
 
   async listMyProxyRequests(facultyUserId: string, tenantId: string) {
@@ -321,9 +329,10 @@ export class AcademicProxyService {
       }
       if (action === 'ACCEPT') {
         const [slot] = await manager.query<Array<{
-          timetable_id: string; start_time: string; end_time: string;
+          timetable_id: string; course_id: string; section: string | null;
+          room: string | null; start_time: string; end_time: string;
         }>>(
-          `SELECT timetable_id,start_time,end_time FROM academic_timetables
+          `SELECT timetable_id,course_id,section,room,start_time,end_time FROM academic_timetables
            WHERE tenant_id=$1 AND timetable_id=$2::uuid AND course_id=$3
              AND faculty_user_id=$4 AND deleted_at IS NULL`,
           [tenantId, current.timetable_id, current.course_id, current.absent_faculty_id],
@@ -465,9 +474,9 @@ export class AcademicProxyService {
           [tenantId,current.timetable_id,current.proxy_date],
         );
         const [approvedTarget] = await manager.query<Array<{
-          target_start_time: string; target_end_time: string;
+          target_start_time: string; target_end_time: string; target_room: string | null;
         }>>(
-          `SELECT target_start_time,target_end_time FROM academic_class_moves
+          `SELECT target_start_time,target_end_time,target_room FROM academic_class_moves
            WHERE tenant_id=$1 AND source_timetable_id=$2::uuid AND target_date=$3::date
              AND status='APPROVED' LIMIT 1`,
           [tenantId,current.timetable_id,current.proxy_date],
@@ -476,9 +485,10 @@ export class AcademicProxyService {
           throw new BadRequestException('Resolve the class swap before approving substitution');
         }
         const [slot] = await manager.query<Array<{
-          timetable_id: string; start_time: string; end_time: string;
+          timetable_id: string; course_id: string; section: string | null;
+          room: string | null; start_time: string; end_time: string;
         }>>(
-          `SELECT timetable_id,start_time,end_time FROM academic_timetables
+          `SELECT timetable_id,course_id,section,room,start_time,end_time FROM academic_timetables
            WHERE tenant_id=$1 AND timetable_id=$2::uuid AND course_id=$3
              AND faculty_user_id=$4 AND deleted_at IS NULL
              AND (valid_from IS NULL OR valid_from<=COALESCE(
@@ -502,7 +512,7 @@ export class AcademicProxyService {
         await this.assertCandidateAvailable(manager, tenantId, current.absent_faculty_id,
           current.proxy_faculty_id, current.proxy_date,
           approvedTarget ? { ...slot, start_time: approvedTarget.target_start_time,
-            end_time: approvedTarget.target_end_time } : slot);
+            end_time: approvedTarget.target_end_time, room: approvedTarget.target_room } : slot);
       }
       await manager.query(
         `UPDATE academic_proxy_requests

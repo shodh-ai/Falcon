@@ -316,6 +316,18 @@ export class AcademicsFacultyService {
            WHERE p.tenant_id=m.tenant_id AND p.timetable_id=m.source_timetable_id
              AND p.date_of_proxy=m.target_date AND p.status='APPROVED')
        UNION ALL
+       SELECT a.session_date::text,a.timetable_id::text,a.course_id,c.course_code,c.course_name,
+         a.start_time,a.end_time,a.room,a.section,
+         EXISTS (SELECT 1 FROM course_attendance_logs cal
+           WHERE cal.tenant_id=a.tenant_id AND cal.course_id=a.course_id
+             AND cal.timetable_id=a.timetable_id AND cal.date=a.session_date)
+       FROM class_adjustments a
+       JOIN academic_courses c ON c.course_id=a.course_id AND c.tenant_id=a.tenant_id
+       WHERE a.tenant_id=$1 AND a.faculty_user_id=$2 AND a.adjustment_type='EXTRA_CLASS'
+         AND a.status='APPROVED' AND a.session_date BETWEEN $4::date AND ($4::date + 6)
+         AND a.timetable_id IS NOT NULL AND a.section IS NOT NULL
+         AND a.course_id IN (SELECT course_id FROM faculty_courses)
+       UNION ALL
        SELECT days.date::text, 'held:' || e.source_key, e.course_id, c.course_code, c.course_name,
          (e.entry->>'start')::time, (e.entry->>'end')::time, e.entry->>'room', e.entry->>'batch', false
        FROM days JOIN academic_timetable_source_entries e ON e.tenant_id=$1 AND e.state='HELD'
@@ -1336,10 +1348,15 @@ export class AcademicsFacultyService {
           [`class-move:${tenantId}:${date}`]);
         const [effective] = await manager.query<Array<{
           day_of_week: number; valid_from: string | null; valid_to: string | null;
-          source_date: string | null; target_date: string | null;
+          source_date: string | null; target_date: string | null; approved_extra: boolean;
         }>>(
           `SELECT t.day_of_week,t.valid_from::text AS valid_from,t.valid_to::text AS valid_to,
-                  m.source_date::text AS source_date,m.target_date::text AS target_date
+                  m.source_date::text AS source_date,m.target_date::text AS target_date,
+                  EXISTS (SELECT 1 FROM class_adjustments a
+                    WHERE a.tenant_id=t.tenant_id AND a.timetable_id=t.timetable_id
+                      AND a.course_id=t.course_id AND a.faculty_user_id=t.faculty_user_id
+                      AND a.session_date=$4::date AND a.adjustment_type='EXTRA_CLASS'
+                      AND a.status='APPROVED') AS approved_extra
            FROM academic_timetables t
            LEFT JOIN academic_class_moves m ON m.tenant_id=t.tenant_id
              AND m.source_timetable_id=t.timetable_id AND m.status='APPROVED'
@@ -1353,7 +1370,7 @@ export class AcademicsFacultyService {
         if (effective.source_date === date && effective.target_date !== date) {
           throw new ForbiddenException('This class was moved to another date');
         }
-        if (effective.target_date !== date && (
+        if (!effective.approved_extra && effective.target_date !== date && (
           Number(effective.day_of_week) !== isoDay ||
           (effective.valid_from && String(effective.valid_from).slice(0,10) > date) ||
           (effective.valid_to && String(effective.valid_to).slice(0,10) < date)

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -18,6 +18,34 @@ export class AcademicSessionChangesController {
   @Roles('Faculty','HOD','Dean','SuperAdmin')
   mine(@Req() req: { user: AuthUser }) {
     return this.changes.listMy(req.user.user_id, requireTenantId(req.user.tenant_id));
+  }
+
+  @Get('availability')
+  @Roles('Faculty','HOD','Dean','SuperAdmin')
+  availability(@Req() req: { user: AuthUser }, @Query() query: {
+    timetable_id: string; source_date: string; target_date: string; target_room?: string;
+  }) {
+    return this.changes.availability(req.user.user_id, requireTenantId(req.user.tenant_id), query);
+  }
+
+  @Get('extra-availability')
+  @Roles('Faculty','HOD','Dean','SuperAdmin')
+  extraAvailability(@Req() req: { user: AuthUser }, @Query() query: {
+    timetable_id: string; target_date: string; target_room?: string; duration_minutes?: string;
+  }) {
+    return this.changes.extraAvailability(req.user.user_id,
+      requireTenantId(req.user.tenant_id), query);
+  }
+
+  @Post('preview')
+  @Roles('Faculty','HOD','Dean','SuperAdmin')
+  preview(@Req() req: { user: AuthUser }, @Body() body: {
+    move_type: 'SWAP' | 'RESHUFFLE';
+    legs: Array<{ timetable_id: string; source_date: string; target_date: string;
+      target_start_time: string; target_end_time: string; target_room?: string }>;
+  }) {
+    return this.changes.previewGroup(req.user.user_id,
+      requireTenantId(req.user.tenant_id),body.move_type,body.legs);
   }
 
   @Post()
