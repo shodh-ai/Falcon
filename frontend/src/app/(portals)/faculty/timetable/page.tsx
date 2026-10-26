@@ -2,7 +2,7 @@
 
 import { Select } from '@/components/ui/select';
 import Link from 'next/link';
-import { PublishedTimetableGrid } from '@/components/faculty/PublishedTimetableGrid';
+import { PublishedTimetableGrid, type PublishedSlot } from '@/components/faculty/PublishedTimetableGrid';
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   BookOpen,
@@ -96,7 +96,12 @@ type Adjustment = {
   original_date: string | null;
   new_date: string | null;
   reason: string | null;
+  proposed_room?: string | null;
 };
+
+type DatedMove = { move_id: string; source_timetable_id: string; source_date: string; target_date: string; target_start_time: string; target_end_time: string; target_room: string | null; course_code: string; course_name: string; status: string };
+
+type ExtraClassSlot = { date: string; start_time: string; end_time: string; status: 'AVAILABLE' | 'CONFLICT' | 'REQUIRES_REVIEW'; reasons: string[]; room: string | null };
 
 type ProxyOffer = {
   proxy_id: string;
@@ -157,11 +162,17 @@ export default function FacultyTimetablePage() {
   const { courses, loading: coursesLoading, error: coursesError } = useFacultyCourses();
   const [schedule, setSchedule] = useState<TimetableRow[]>([]);
   const [courseFilter, setCourseFilter] = useState('');
+  const [weekOffset, setWeekOffset] = useState(0);
+  const [suggestions, setSuggestions] = useState<ExtraClassSlot[]>([]);
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
+  const [suggestionsError, setSuggestionsError] = useState<string | null>(null);
+  const [selectedRoom, setSelectedRoom] = useState<string | null>(null);
   const [sectionFilter, setSectionFilter] = useState('');
   const [selectedSlotId, setSelectedSlotId] = useState<string | null>(null);
   const [scheduleError, setScheduleError] = useState<string | null>(null);
   const [stats, setStats] = useState<TimetableStats | null>(null);
   const [adjustments, setAdjustments] = useState<Adjustment[]>([]);
+  const [datedMoves, setDatedMoves] = useState<DatedMove[]>([]);
   const [form, setForm] = useState({
     course_id: '',
     adjustment_type: 'EXTRA_CLASS',
@@ -198,20 +209,23 @@ export default function FacultyTimetablePage() {
 
   const loadPageData = useCallback(async () => {
     try {
-      const [scheduleData, statsData, adjustmentData] = await Promise.all([
+      const [scheduleData, statsData, adjustmentData, movesData] = await Promise.all([
         api.get<TimetableRow[]>(withTeachingDeptId('/api/academics/faculty/workspaces/timetable', activeDeptId)),
         api.get<TimetableStats>(withTeachingDeptId('/api/academics/faculty/workspaces/timetable/stats', activeDeptId)),
         isObserver ? Promise.resolve([] as Adjustment[]) : api.get<Adjustment[]>('/api/academics/faculty/workspaces/adjustments'),
+        isObserver ? Promise.resolve([] as DatedMove[]) : api.get<DatedMove[]>('/api/academics/session-changes/mine').catch(() => [] as DatedMove[]),
       ]);
       setSchedule(withFacultyDemoFallback(scheduleData, facultyDemoTimetable(), isEmptyArray));
       setScheduleError(null);
       setStats(withFacultyDemoFallback(statsData, facultyDemoTimetableStats()));
       setAdjustments(withFacultyDemoFallback(adjustmentData, facultyDemoAdjustments(), isEmptyArray));
+      setDatedMoves(Array.isArray(movesData) ? movesData : []);
     } catch {
       setScheduleError('Could not load the published timetable. Please retry; this does not mean there are no classes.');
       setSchedule(withFacultyDemoFallback([], facultyDemoTimetable(), isEmptyArray));
       setStats(withFacultyDemoFallback(null, facultyDemoTimetableStats()));
       setAdjustments(withFacultyDemoFallback([], facultyDemoAdjustments(), isEmptyArray));
+      setDatedMoves([]);
     }
   }, [api, activeDeptId, isObserver]);
 
@@ -258,7 +272,63 @@ export default function FacultyTimetablePage() {
     () => schedule.filter((slot) => (!courseFilter || slot.course_code === courseFilter) && (!sectionFilter || slot.section === sectionFilter)),
     [schedule, courseFilter, sectionFilter],
   );
-  const selectedSlot = visibleSchedule.find((slot) => slot.timetable_id === selectedSlotId) ?? null;
+  const weekStart = useMemo(() => {
+    const today = new Date();
+    const monday = new Date(today.getFullYear(),today.getMonth(),today.getDate() - ((today.getDay() + 6) % 7) + weekOffset * 7);
+    return monday;
+  }, [weekOffset]);
+  const gridSlots = useMemo<PublishedSlot[]>(() => {
+    const weekEnd = new Date(weekStart.getFullYear(),weekStart.getMonth(),weekStart.getDate() + 6);
+    const inWeek = (value: string | null) => {
+      if (!value) return false;
+      const date = new Date(value);
+      return date >= weekStart && date < new Date(weekEnd.getFullYear(),weekEnd.getMonth(),weekEnd.getDate() + 1);
+    };
+    const approved = adjustments.filter(row => row.status === 'APPROVED' && inWeek(row.new_date));
+    const isoDate = (date: Date) => `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
+    const moved = datedMoves.filter(move => move.status === 'APPROVED');
+    const updated: PublishedSlot[] = visibleSchedule.filter(slot => {
+      const occurrence = isoDate(new Date(weekStart.getFullYear(),weekStart.getMonth(),weekStart.getDate() + slot.day_of_week - 1));
+      return !moved.some(move => move.source_timetable_id === slot.timetable_id && String(move.source_date).slice(0,10) === occurrence);
+    }).map(slot => {
+      const cancellation = approved.find(row => row.adjustment_type === 'CANCEL' && row.course_code === slot.course_code &&
+        new Date(row.new_date!).getDay() === slot.day_of_week % 7 &&
+        new Date(row.new_date!).getHours() === Number(slot.start_time.slice(0,2)));
+      return { ...slot, display_status: cancellation ? 'CANCELLED' as const : undefined };
+    });
+    for (const row of approved.filter(item => item.adjustment_type === 'EXTRA_CLASS')) {
+      if (courseFilter && row.course_code !== courseFilter) continue;
+      const date = new Date(row.new_date!);
+      updated.push({ timetable_id: `extra-${row.adjustment_id}`, day_of_week: date.getDay() || 7,
+        start_time: `${String(date.getHours()).padStart(2,'0')}:${String(date.getMinutes()).padStart(2,'0')}`,
+        end_time: `${String(date.getHours() + 1).padStart(2,'0')}:${String(date.getMinutes()).padStart(2,'0')}`,
+        course_code: row.course_code, course_name: row.course_name, room: row.proposed_room ?? null,
+        section: null, display_status: 'EXTRA_CLASS' });
+    }
+    for (const move of moved.filter(item => inWeek(item.target_date))) {
+      if (courseFilter && move.course_code !== courseFilter) continue;
+      const target = new Date(`${String(move.target_date).slice(0,10)}T12:00:00`);
+      updated.push({ timetable_id: `moved-${move.move_id}`, day_of_week: target.getDay() || 7,
+        start_time: move.target_start_time, end_time: move.target_end_time,
+        room: move.target_room, course_code: move.course_code, course_name: move.course_name,
+        section: null, display_status: 'RESCHEDULED' });
+    }
+    return updated;
+  }, [visibleSchedule, adjustments, datedMoves, weekStart, courseFilter]);
+  const selectedSlot = gridSlots.find((slot) => slot.timetable_id === selectedSlotId) ?? null;
+
+  useEffect(() => {
+    if (form.adjustment_type !== 'EXTRA_CLASS' || !form.course_id || !form.date_part || isFacultyDemoSmokeId(form.course_id)) {
+      setSuggestions([]); setSuggestionsError(null); setSelectedRoom(null); return;
+    }
+    let active = true;
+    setSuggestionsLoading(true); setSuggestionsError(null); setSuggestions([]); setSelectedRoom(null);
+    void api.get<ExtraClassSlot[]>(`/api/academics/faculty/workspaces/adjustments/extra-class-slots?courseId=${encodeURIComponent(form.course_id)}&date=${encodeURIComponent(form.date_part)}`)
+      .then(rows => { if (active) setSuggestions(Array.isArray(rows) ? rows : []); })
+      .catch(reason => { if (active) setSuggestionsError(reason instanceof Error ? reason.message : String(reason)); })
+      .finally(() => { if (active) setSuggestionsLoading(false); });
+    return () => { active = false; };
+  }, [api, form.adjustment_type, form.course_id, form.date_part]);
 
 
   async function submitAdjustment(e: FormEvent) {
@@ -277,12 +347,18 @@ export default function FacultyTimetablePage() {
       return;
     }
 
+    if (form.adjustment_type === 'EXTRA_CLASS' && !isFacultyDemoSmokeId(form.course_id) &&
+        !suggestions.some(slot => slot.status === 'AVAILABLE' && slot.start_time === form.time_part && slot.room === selectedRoom)) {
+      toast.error('Choose an available suggested slot and room first');
+      return;
+    }
     setIsSubmitting(true);
     try {
       const payload = {
         course_id: form.course_id,
         adjustment_type: form.adjustment_type,
-        new_date,
+        new_date: `${new_date}+05:30`,
+        proposed_room: form.adjustment_type === 'EXTRA_CLASS' ? selectedRoom : undefined,
         reason: form.reason.trim() || undefined,
       };
 
@@ -429,54 +505,12 @@ export default function FacultyTimetablePage() {
             {visibleSchedule.length === 0 ? <p className="p-5 text-sm text-muted-foreground">No published classes match these filters.</p> : <div>
               <div className="min-w-0">
 
-            <div className="divide-y divide-border/50 lg:hidden">
-              {WEEK_DAYS.map((day) => {
-                const dayEntries = visibleSchedule
-                  .filter((entry) => entry.day_of_week === day.val)
-                  .sort((a, b) => a.start_time.localeCompare(b.start_time));
-                return (
-                  <div key={day.val} className="grid gap-3 px-4 py-4 sm:grid-cols-[5rem_1fr] sm:px-5">
-                    <div>
-                      <p className="text-xs font-black uppercase tracking-[0.16em] text-sgvu-navy">{day.label}</p>
-                      <p className="mt-1 text-[11px] text-muted-foreground">
-                        {dayEntries.length} {dayEntries.length === 1 ? 'class' : 'classes'}
-                      </p>
-                    </div>
-                    {dayEntries.length === 0 ? (
-                      <div className="rounded-lg border border-dashed border-border/70 bg-muted/20 px-3 py-3 text-xs text-muted-foreground">
-                        No classes scheduled
-                      </div>
-                    ) : (
-                      <div className="grid gap-2">
-                        {dayEntries.map((entry) => (
-                          <button key={entry.timetable_id} type="button" onClick={() => setSelectedSlotId(entry.timetable_id)}
-                            aria-pressed={selectedSlotId === entry.timetable_id}
-                            className={`w-full rounded-xl border bg-sgvu-navy/[0.035] p-3 text-left shadow-sm ${selectedSlotId === entry.timetable_id ? 'border-sgvu-gold ring-2 ring-sgvu-gold/50' : 'border-sgvu-navy/10'}`}>
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="min-w-0">
-                                <p className="font-bold text-sgvu-navy">{entry.course_code}</p>
-                                <p className="mt-0.5 text-xs text-foreground/75">{entry.course_name}</p>
-                              </div>
-                              <span className="shrink-0 rounded-md bg-sgvu-gold/15 px-2 py-1 text-[10px] font-bold text-sgvu-navy">
-                                {formatSlotTime(entry.start_time)}
-                              </span>
-                            </div>
-                            <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
-                              <span className="inline-flex items-center gap-1"><Clock className="h-3 w-3" />{formatSlotTime(entry.start_time)}–{formatSlotTime(entry.end_time)}</span>
-                              <span className="inline-flex items-center gap-1"><MapPin className="h-3 w-3" />{entry.room ?? 'Room TBA'}</span>
-                              <span>{entry.section || 'Whole course'} · {/(P|LAB)$/i.test(entry.course_code) ? 'Practical' : 'Class'}</span>
-                              <span>{entry.awaiting_confirmation ? 'Awaiting department confirmation' : 'Published'}</span>
-                            </div>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
+            <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
+              <button type="button" className="rounded-lg border px-3 py-1 text-sm hover:bg-slate-50" onClick={() => { setWeekOffset(value => value - 1); setSelectedSlotId(null); }} aria-label="Previous week">← Previous</button>
+              <span className="text-sm font-semibold text-sgvu-navy">{weekStart.toLocaleDateString('en-IN',{ day:'numeric',month:'short' })} – {new Date(weekStart.getFullYear(),weekStart.getMonth(),weekStart.getDate()+5).toLocaleDateString('en-IN',{ day:'numeric',month:'short',year:'numeric' })}</span>
+              <button type="button" className="rounded-lg border px-3 py-1 text-sm hover:bg-slate-50" onClick={() => { setWeekOffset(value => value + 1); setSelectedSlotId(null); }} aria-label="Next week">Next →</button>
             </div>
-
-            <div className="hidden lg:block"><PublishedTimetableGrid slots={visibleSchedule} selectedId={selectedSlotId} onSelect={(slot) => setSelectedSlotId(slot.timetable_id)} /></div>
+            <PublishedTimetableGrid slots={gridSlots} weekStart={weekStart} selectedId={selectedSlotId} onSelect={(slot) => setSelectedSlotId(slot.timetable_id)} />
               </div>
               {selectedSlot && <aside className="border-t border-border/50 bg-slate-50/70 p-4" aria-label="Selected class details">
                 <h3 className="text-sm font-bold text-sgvu-navy">Selected class</h3>
@@ -487,9 +521,9 @@ export default function FacultyTimetablePage() {
                     <dt className="text-muted-foreground">Time</dt><dd>{formatSlotTime(selectedSlot.start_time)}–{formatSlotTime(selectedSlot.end_time)}</dd>
                     <dt className="text-muted-foreground">Section</dt><dd>{selectedSlot.section || 'Whole course'}</dd>
                     <dt className="text-muted-foreground">Room</dt><dd>{selectedSlot.room || 'Not specified'}</dd>
-                    <dt className="text-muted-foreground">Status</dt><dd>{selectedSlot.awaiting_confirmation ? 'Awaiting department confirmation' : 'Published'}</dd>
+                    <dt className="text-muted-foreground">Status</dt><dd>{selectedSlot.display_status === 'CANCELLED' ? 'Cancelled for this date' : selectedSlot.display_status === 'EXTRA_CLASS' ? 'Approved extra class' : selectedSlot.display_status === 'RESCHEDULED' ? 'Approved moved class' : selectedSlot.awaiting_confirmation ? 'Awaiting department confirmation' : 'Published'}</dd>
                   </dl>
-                  {!isObserver && <div className="flex flex-wrap gap-2 border-t pt-3">
+                  {!isObserver && selectedSlot.display_status !== 'CANCELLED' && <div className="flex flex-wrap gap-2 border-t pt-3">
                     <p className="text-xs text-muted-foreground">Class changes require HOD approval. Selecting a class does not reserve a new slot.</p>
                     <Button size="sm" onClick={() => { setManageAction('substitute'); document.getElementById('faculty-manage-classes')?.scrollIntoView({ behavior: 'smooth' }); }}>Arrange substitute</Button>
                     <Button size="sm" variant="outline" onClick={() => { setManageAction('swap'); document.getElementById('faculty-manage-classes')?.scrollIntoView({ behavior: 'smooth' }); }}>Swap classes</Button>
@@ -654,6 +688,24 @@ export default function FacultyTimetablePage() {
                 />
               </label>
             </div>
+            {form.adjustment_type === 'EXTRA_CLASS' && form.course_id && form.date_part && !isFacultyDemoSmokeId(form.course_id) && <section className="rounded-xl border border-slate-200 bg-slate-50 p-3" aria-label="Suggested extra class slots">
+              <h3 className="text-sm font-bold text-sgvu-navy">Choose a verified slot</h3>
+              <p className="mb-3 text-xs text-muted-foreground">Checks faculty, enrolled students, exams, academic day and room. Cancelled classes free their original hour. HOD rechecks before approval.</p>
+              {suggestionsLoading && <p className="text-sm">Checking available times…</p>}
+              {suggestionsError && <p className="text-sm text-rose-700">{suggestionsError}</p>}
+              <div className="grid gap-2 sm:grid-cols-3">
+                {suggestions.map(slot => <button type="button" key={slot.start_time}
+                  disabled={slot.status !== 'AVAILABLE'}
+                  onClick={() => { setForm(current => ({ ...current, time_part: slot.start_time })); setSelectedRoom(slot.room); }}
+                  aria-pressed={slot.status === 'AVAILABLE' && form.time_part === slot.start_time && selectedRoom === slot.room}
+                  className={`rounded-lg border px-3 py-2 text-left text-xs ${slot.status === 'AVAILABLE' ? 'border-emerald-200 bg-emerald-50 hover:ring-2 hover:ring-emerald-300' : slot.status === 'CONFLICT' ? 'border-rose-200 bg-rose-50' : 'border-amber-200 bg-amber-50'} ${form.time_part === slot.start_time && selectedRoom === slot.room && slot.status === 'AVAILABLE' ? 'ring-2 ring-emerald-500' : ''}`}>
+                  <span className="block font-bold">{formatSlotTime(slot.start_time)} – {formatSlotTime(slot.end_time)}</span>
+                  <span className="block">{slot.status === 'AVAILABLE' ? `Available · ${slot.room}` : slot.status === 'CONFLICT' ? 'Conflict' : 'Requires review'}</span>
+                  {slot.reasons.length > 0 && <span className="mt-1 block text-[11px]">{slot.reasons.join('; ')}</span>}
+                </button>)}
+              </div>
+              {!suggestionsLoading && suggestions.length > 0 && !suggestions.some(slot => slot.status === 'AVAILABLE') && <p className="mt-2 text-xs text-amber-900">No fully verified slot on this date. Choose another date or ask your HOD to complete missing timetable, roster or room data.</p>}
+            </section>}
             {formDateTime ? (
               <p className="text-xs text-muted-foreground">
                 Scheduled for {new Date(formDateTime).toLocaleString('en-IN')}
@@ -668,7 +720,7 @@ export default function FacultyTimetablePage() {
               value={form.reason}
               onChange={(e) => setForm({ ...form, reason: e.target.value })}
             />
-            <Button type="submit" disabled={isSubmitting || courseOptions.length === 0}>
+            <Button type="submit" disabled={isSubmitting || courseOptions.length === 0 || (form.adjustment_type === 'EXTRA_CLASS' && !isFacultyDemoSmokeId(form.course_id) && !selectedRoom)}>
               {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Submit for HoD approval'}
             </Button>
           </form>
