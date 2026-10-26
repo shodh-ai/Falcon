@@ -131,6 +131,10 @@ describe('Faculty attendance uses the same scoped roster for reading and saving'
       if (sql.includes('SELECT proxy_faculty_id FROM academic_proxy_requests')) {
         return [{ proxy_faculty_id: 'substitute-1' }];
       }
+      if (sql.includes('SELECT t.day_of_week')) {
+        return [{ day_of_week: 0, valid_from: null, valid_to: null,
+          source_date: '2026-10-19', target_date: date }];
+      }
       return withinTransaction(sql);
     });
     const result = await service.saveCourseAttendanceLog('substitute-1', 'tenant-1', {
@@ -142,5 +146,55 @@ describe('Faculty attendance uses the same scoped roster for reading and saving'
       expect.stringContaining('marked_by_user_id'),
       expect.arrayContaining(['faculty-1', 'substitute-1']),
     );
+  });
+
+  it('blocks the original owner after an approved substitute takes the session', async () => {
+    const { service, manager, date } = setup();
+    const read = manager.query.getMockImplementation()!;
+    manager.query.mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT proxy_faculty_id FROM academic_proxy_requests')) {
+        return [{ proxy_faculty_id: 'substitute-1' }];
+      }
+      return read(sql);
+    });
+    await expect(service.saveCourseAttendanceLog('faculty-1', 'tenant-1', {
+      course_id: 'course-1', timetable_id: 'slot-1', date,
+      attendance_data: [{ student_id: qaStudent, status: 'PRESENT' }],
+    })).rejects.toThrow('assigned to an approved substitute');
+    expect(manager.query).not.toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO course_attendance_logs'), expect.anything(),
+    );
+  });
+
+  it('shows attendance alerts only for the selected class roster', async () => {
+    const { service, dataSource, date } = setup();
+    jest.spyOn(service, 'getCourseStudents').mockResolvedValue([
+      { student_id: qaStudent, name: 'QA Student One', roll_number: 'QA-1', photo_url: null },
+    ]);
+    dataSource.query.mockImplementation(async (sql: string) => {
+      if (sql.includes('scheduled_classes::text')) return [{ scheduled_classes: '1', conducted_classes: '1' }];
+      if (sql.includes('FROM student_course_enrollments e')) return [
+        { student_user_id: qaStudent, name: 'QA Student One', attendance_percent: '50' },
+        { student_user_id: unmappedStudent, name: 'Outside section', attendance_percent: '20' },
+      ];
+      if (sql.includes('WITH last_logs')) return [
+        { student_user_id: qaStudent, missed_count: 3 },
+        { student_user_id: unmappedStudent, missed_count: 3 },
+      ];
+      return [];
+    });
+    const result = await service.getAttendanceAnalytics('course-1', 'faculty-1', 'tenant-1', date, 'slot-1');
+    expect(result.defaulters.map((row: { student_user_id: string }) => row.student_user_id)).toEqual([qaStudent]);
+    expect(result.habitual_absentees.map((row: { student_user_id: string }) => row.student_user_id)).toEqual([qaStudent]);
+  });
+
+  it('cannot send a warning to another class roster', async () => {
+    const { service, date } = setup();
+    jest.spyOn(service, 'getCourseStudents').mockResolvedValue([
+      { student_id: qaStudent, name: 'QA Student One', roll_number: 'QA-1', photo_url: null },
+    ]);
+    await expect(service.sendAttendanceWarnings('course-1', 'faculty-1', 'tenant-1',
+      [unmappedStudent], date, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'))
+      .rejects.toThrow('only to students in this scheduled class');
   });
 });

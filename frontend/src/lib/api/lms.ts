@@ -50,6 +50,7 @@ export type StudentAssignmentRow = {
     max_marks: number;
     description?: string | null;
     has_reference_file?: boolean;
+    reference_file_extension?: string | null;
   };
   submission: {
     submission_id: string;
@@ -58,6 +59,7 @@ export type StudentAssignmentRow = {
     faculty_remarks: string | null;
     revision_due_at?: string | null;
     status?: string;
+    file_extension?: string | null;
   } | null;
   status: 'PENDING' | 'SUBMITTED' | 'GRADED' | 'OVERDUE' | 'RETURNED_FOR_REVISION';
   can_resubmit?: boolean;

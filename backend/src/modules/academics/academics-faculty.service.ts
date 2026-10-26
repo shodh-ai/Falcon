@@ -263,7 +263,7 @@ export class AcademicsFacultyService {
              AND cal.timetable_id = t.timetable_id AND cal.date = days.date) AS has_saved_attendance
        FROM days
        LEFT JOIN academic_timetables t ON t.tenant_id = $1 AND t.faculty_user_id = $2
-         AND ((t.deleted_at IS NULL AND t.valid_to IS NULL) OR t.valid_to >= days.date)
+         AND t.deleted_at IS NULL AND (t.valid_to IS NULL OR t.valid_to >= days.date)
          AND (t.valid_from IS NULL OR t.valid_from <= days.date)
          AND t.day_of_week = EXTRACT(ISODOW FROM days.date)
          AND t.course_id IN (SELECT course_id FROM faculty_courses)
@@ -280,7 +280,8 @@ export class AcademicsFacultyService {
        LEFT JOIN academic_courses c ON c.course_id = t.course_id AND c.tenant_id = t.tenant_id
        UNION ALL
        SELECT days.date::text, t.timetable_id::text, t.course_id, c.course_code, c.course_name,
-         t.start_time, t.end_time, t.room, t.section,
+         COALESCE(m.target_start_time,t.start_time),COALESCE(m.target_end_time,t.end_time),
+         COALESCE(m.target_room,t.room),t.section,
          EXISTS (SELECT 1 FROM course_attendance_logs cal
            WHERE cal.tenant_id=t.tenant_id AND cal.course_id=t.course_id
              AND cal.faculty_user_id=t.faculty_user_id AND cal.timetable_id=t.timetable_id
@@ -291,9 +292,12 @@ export class AcademicsFacultyService {
        JOIN academic_timetables t ON t.timetable_id=p.timetable_id AND t.tenant_id=p.tenant_id
          AND t.course_id=p.course_id AND t.faculty_user_id=p.absent_faculty_id
          AND t.deleted_at IS NULL
-         AND (t.valid_from IS NULL OR t.valid_from<=days.date)
-         AND (t.valid_to IS NULL OR t.valid_to>=days.date)
+       LEFT JOIN academic_class_moves m ON m.tenant_id=p.tenant_id
+         AND m.source_timetable_id=p.timetable_id AND m.target_date=days.date
+         AND m.status='APPROVED'
        JOIN academic_courses c ON c.course_id=t.course_id AND c.tenant_id=t.tenant_id
+       WHERE (t.valid_from IS NULL OR t.valid_from<=COALESCE(m.source_date,days.date))
+         AND (t.valid_to IS NULL OR t.valid_to>=COALESCE(m.source_date,days.date))
        UNION ALL
        SELECT m.target_date::text, t.timetable_id::text, t.course_id, c.course_code, c.course_name,
          m.target_start_time, m.target_end_time, m.target_room, t.section,
@@ -308,6 +312,9 @@ export class AcademicsFacultyService {
          AND m.target_date BETWEEN $4::date AND ($4::date + 6)
          AND m.status='APPROVED'
          AND m.course_id IN (SELECT course_id FROM faculty_courses)
+         AND NOT EXISTS (SELECT 1 FROM academic_proxy_requests p
+           WHERE p.tenant_id=m.tenant_id AND p.timetable_id=m.source_timetable_id
+             AND p.date_of_proxy=m.target_date AND p.status='APPROVED')
        UNION ALL
        SELECT days.date::text, 'held:' || e.source_key, e.course_id, c.course_code, c.course_name,
          (e.entry->>'start')::time, (e.entry->>'end')::time, e.entry->>'room', e.entry->>'batch', false
@@ -386,7 +393,7 @@ export class AcademicsFacultyService {
        INNER JOIN academic_courses c ON c.course_id = t.course_id AND c.tenant_id = t.tenant_id
        WHERE t.tenant_id = $1
          AND t.faculty_user_id = $2
-         AND ((t.deleted_at IS NULL AND t.valid_to IS NULL) OR t.valid_to >= $5::date)
+         AND t.deleted_at IS NULL AND (t.valid_to IS NULL OR t.valid_to >= $5::date)
          AND (t.valid_from IS NULL OR t.valid_from <= $5::date)
          AND t.day_of_week = $4
          AND NOT EXISTS (
@@ -401,7 +408,8 @@ export class AcademicsFacultyService {
          )
        UNION ALL
        SELECT t.timetable_id::text, t.course_id, c.course_code, c.course_name,
-         t.room, t.start_time, t.end_time, t.section,
+         COALESCE(m.target_room,t.room),COALESCE(m.target_start_time,t.start_time),
+         COALESCE(m.target_end_time,t.end_time),t.section,
          (UPPER(c.course_code) ~ '(P|LAB)$' OR c.course_name ILIKE '%practical%'
            OR c.course_name ILIKE '%lab%') AS is_practical,
          EXISTS (SELECT 1 FROM course_attendance_logs cal
@@ -412,11 +420,14 @@ export class AcademicsFacultyService {
        JOIN academic_timetables t ON t.timetable_id=p.timetable_id AND t.tenant_id=p.tenant_id
          AND t.course_id=p.course_id AND t.faculty_user_id=p.absent_faculty_id
          AND t.deleted_at IS NULL
-         AND (t.valid_from IS NULL OR t.valid_from<=$5::date)
-         AND (t.valid_to IS NULL OR t.valid_to>=$5::date)
+       LEFT JOIN academic_class_moves m ON m.tenant_id=p.tenant_id
+         AND m.source_timetable_id=p.timetable_id AND m.target_date=$5::date
+         AND m.status='APPROVED'
        JOIN academic_courses c ON c.course_id=t.course_id AND c.tenant_id=t.tenant_id
        WHERE p.tenant_id=$1 AND p.proxy_faculty_id=$2
          AND p.date_of_proxy=$5::date AND p.status='APPROVED'
+         AND (t.valid_from IS NULL OR t.valid_from<=COALESCE(m.source_date,$5::date))
+         AND (t.valid_to IS NULL OR t.valid_to>=COALESCE(m.source_date,$5::date))
        UNION ALL
        SELECT t.timetable_id::text, m.course_id, c.course_code, c.course_name,
          m.target_room, m.target_start_time, m.target_end_time, t.section,
@@ -432,6 +443,9 @@ export class AcademicsFacultyService {
        WHERE m.tenant_id=$1 AND m.original_faculty_id=$2
          AND m.target_date=$5::date AND m.status='APPROVED'
          AND m.course_id IN (SELECT course_id FROM faculty_courses)
+         AND NOT EXISTS (SELECT 1 FROM academic_proxy_requests p
+           WHERE p.tenant_id=m.tenant_id AND p.timetable_id=m.source_timetable_id
+             AND p.date_of_proxy=m.target_date AND p.status='APPROVED')
        UNION ALL
        SELECT 'held:' || e.source_key, e.course_id, c.course_code,c.course_name,e.entry->>'room',
          (e.entry->>'start')::time,(e.entry->>'end')::time,e.entry->>'batch',e.entry->>'session_type'='LAB',false
@@ -1035,8 +1049,13 @@ export class AcademicsFacultyService {
     facultyUserId: string,
     tenantId: string,
     date = localDateString(),
+    timetableId?: string,
   ) {
-    await this.assertFacultyTeachesCourse(courseId, facultyUserId, tenantId);
+    const scopedRoster = timetableId
+      ? await this.getCourseStudents(courseId, facultyUserId, tenantId, timetableId, date)
+      : null;
+    if (!timetableId) await this.assertFacultyTeachesCourse(courseId, facultyUserId, tenantId);
+    const scopedIds = scopedRoster ? new Set(scopedRoster.map((row) => row.student_id)) : null;
     const [health] = await this.dataSource.query<
       Array<{
         scheduled_classes: string;
@@ -1134,8 +1153,12 @@ export class AcademicsFacultyService {
           health?.average_attendance_percent ?? 0,
         ),
       },
-      defaulters,
-      habitual_absentees: habitualAbsentees,
+      defaulters: scopedIds
+        ? defaulters.filter((row: { student_user_id: string }) => scopedIds.has(row.student_user_id))
+        : defaulters,
+      habitual_absentees: scopedIds
+        ? habitualAbsentees.filter((row: { student_user_id: string }) => scopedIds.has(row.student_user_id))
+        : habitualAbsentees,
     };
   }
 
@@ -1144,11 +1167,25 @@ export class AcademicsFacultyService {
     facultyUserId: string,
     tenantId: string,
     studentIds: string[],
+    date: string,
+    timetableId: string,
   ) {
-    await this.assertFacultyTeachesCourse(courseId, facultyUserId, tenantId);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date ?? '') ||
+        Number.isNaN(Date.parse(`${date}T00:00:00Z`)) ||
+        new Date(`${date}T00:00:00Z`).toISOString().slice(0, 10) !== date) {
+      throw new BadRequestException('Choose a valid class date');
+    }
+    if (!timetableId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(timetableId)) {
+      throw new BadRequestException('Select a scheduled class before sending warnings');
+    }
+    const scopedRoster = await this.getCourseStudents(courseId, facultyUserId, tenantId, timetableId, date);
+    const allowed = new Set(scopedRoster.map((student) => student.student_id));
     const ids = [...new Set((studentIds ?? []).filter(Boolean))];
     if (!ids.length)
       throw new BadRequestException('Select at least one student');
+    if (ids.some((id) => !allowed.has(id))) {
+      throw new ForbiddenException('Warnings can be sent only to students in this scheduled class');
+    }
 
     const rows = await this.dataSource.query<
       Array<{
@@ -1162,7 +1199,8 @@ export class AcademicsFacultyService {
        INNER JOIN academic_courses c ON c.course_id = e.course_id AND c.tenant_id = e.tenant_id
        WHERE e.tenant_id = $1
          AND e.course_id = $2
-         AND e.student_user_id = ANY($3::uuid[])`,
+         AND e.student_user_id = ANY($3::uuid[])
+         AND e.status='ENROLLED' AND COALESCE(e.attendance_percent,0)<75`,
       [tenantId, courseId, ids],
     );
 

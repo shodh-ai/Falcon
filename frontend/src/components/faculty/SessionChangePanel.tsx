@@ -19,10 +19,6 @@ type Slot = {
 type Leg = {
   timetable_id: string;
   source_date: string;
-  target_date: string;
-  target_start_time: string;
-  target_end_time: string;
-  target_room: string;
 };
 type Change = {
   move_id: string;
@@ -34,15 +30,13 @@ type Change = {
   status: string;
 };
 const emptyLeg = (): Leg => ({
-  timetable_id: '', source_date: '', target_date: '',
-  target_start_time: '', target_end_time: '', target_room: '',
+  timetable_id: '', source_date: '',
 });
 const isoDay = (value: string) => value ? (new Date(`${value}T00:00:00Z`).getUTCDay() || 7) : 0;
 
 export function SessionChangePanel({ slots }: { slots: Slot[] }) {
   const api = useAuthedApi();
-  const [type, setType] = useState<'RESCHEDULE' | 'SWAP' | 'RESHUFFLE'>('RESCHEDULE');
-  const [legs, setLegs] = useState<Leg[]>([emptyLeg()]);
+  const [legs, setLegs] = useState<Leg[]>([emptyLeg(), emptyLeg()]);
   const [reason, setReason] = useState('');
   const [changes, setChanges] = useState<Change[]>([]);
   const [busy, setBusy] = useState(false);
@@ -62,25 +56,40 @@ export function SessionChangePanel({ slots }: { slots: Slot[] }) {
   function update(index: number, patch: Partial<Leg>) {
     setLegs((current) => current.map((leg, at) => at === index ? { ...leg, ...patch } : leg));
   }
-  function changeType(next: typeof type) {
-    setType(next);
-    setLegs(next === 'RESCHEDULE' ? [emptyLeg()] : [emptyLeg(), emptyLeg()]);
-  }
   async function submit() {
-    if (!reason.trim() || legs.some((leg) => !leg.timetable_id || !leg.source_date || !leg.target_date ||
-      !leg.target_start_time || !leg.target_end_time)) {
-      toast.error('Complete every class, original date, new date and time, and a reason');
+    const [first, second] = legs;
+    const firstSlot = slots.find((slot) => slot.timetable_id === first.timetable_id);
+    const secondSlot = slots.find((slot) => slot.timetable_id === second.timetable_id);
+    if (!reason.trim() || !first.source_date || !second.source_date || !firstSlot || !secondSlot) {
+      toast.error('Choose two dated classes and give a reason');
+      return;
+    }
+    if (first.timetable_id === second.timetable_id && first.source_date === second.source_date) {
+      toast.error('Choose two different class sessions');
+      return;
+    }
+    const duration = (slot: Slot) => {
+      const minutes = (value: string) => Number(value.slice(0, 2)) * 60 + Number(value.slice(3, 5));
+      return minutes(slot.end_time) - minutes(slot.start_time);
+    };
+    if (duration(firstSlot) !== duration(secondSlot)) {
+      toast.error('Both classes must have the same duration for an exact swap');
       return;
     }
     setBusy(true);
     try {
       await api.post('/api/academics/session-changes', {
-        move_type: type, reason: reason.trim(), legs: legs.map((leg) => ({ ...leg,
-          target_room: leg.target_room.trim() || undefined,
-        })),
+        move_type: 'SWAP', reason: reason.trim(), legs: [
+          { timetable_id: first.timetable_id, source_date: first.source_date,
+            target_date: second.source_date, target_start_time: secondSlot.start_time,
+            target_end_time: secondSlot.end_time, target_room: secondSlot.room },
+          { timetable_id: second.timetable_id, source_date: second.source_date,
+            target_date: first.source_date, target_start_time: firstSlot.start_time,
+            target_end_time: firstSlot.end_time, target_room: firstSlot.room },
+        ],
       });
-      toast.success('Class change sent for independent HOD approval');
-      setLegs(type === 'RESCHEDULE' ? [emptyLeg()] : [emptyLeg(), emptyLeg()]);
+      toast.success('Two-class swap sent for independent HOD approval');
+      setLegs([emptyLeg(), emptyLeg()]);
       setReason('');
       await load();
     } catch (error) {
@@ -88,54 +97,28 @@ export function SessionChangePanel({ slots }: { slots: Slot[] }) {
     } finally { setBusy(false); }
   }
 
-  return <section className="rounded-xl border bg-white p-4 space-y-4" aria-label="Reschedule, swap or reshuffle classes">
+  return <section className="rounded-xl border bg-white p-4 space-y-4" aria-label="Swap two classes">
     <div>
-      <h2 className="font-semibold text-sgvu-navy">Reschedule, swap or reshuffle</h2>
-      <p className="text-sm text-muted-foreground">Choose exact class dates. HOD approval checks teacher, room and student clashes again; the recurring timetable is not rewritten.</p>
+      <h2 className="font-semibold text-sgvu-navy">Swap two classes</h2>
+      <p className="text-sm text-muted-foreground">Choose the two exact dated sessions. Their times and rooms will exchange after independent HOD approval and clash checks. Attendance follows each class to its swapped slot; the recurring timetable stays unchanged.</p>
     </div>
-    <label className="grid gap-1 text-sm max-w-sm">Change type
-      <Select value={type} onChange={(event) => changeType(event.target.value as typeof type)}>
-        <option value="RESCHEDULE">Move one class</option>
-        <option value="SWAP">Exchange two exact class slots</option>
-        <option value="RESHUFFLE">Move 2–10 linked classes together</option>
-      </Select>
-    </label>
     {legs.map((leg, index) => {
       const choices = slots.filter((slot) => !leg.source_date || slot.day_of_week === isoDay(leg.source_date));
       return <div key={index} className="rounded-lg border bg-slate-50/50 p-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <p className="sm:col-span-2 lg:col-span-3 text-sm font-semibold">Class {index + 1}</p>
-        <label className="grid gap-1 text-sm">Original class date
+        <label className="grid gap-1 text-sm">Class {index + 1} date
           <Input type="date" value={leg.source_date} onChange={(event) => update(index, { source_date: event.target.value, timetable_id: '' })} />
         </label>
-        <label className="grid gap-1 text-sm">Scheduled class
+        <label className="grid gap-1 text-sm">Class {index + 1} session
           <Select value={leg.timetable_id} onChange={(event) => {
-            const selected = slots.find((slot) => slot.timetable_id === event.target.value);
-            update(index, { timetable_id: event.target.value,
-              target_start_time: selected?.start_time?.slice(0, 5) ?? '',
-              target_end_time: selected?.end_time?.slice(0, 5) ?? '',
-              target_room: selected?.room ?? '',
-            });
+            update(index, { timetable_id: event.target.value });
           }}>
             <option value="">Select the class on that day</option>
-            {choices.map((slot) => <option key={slot.timetable_id} value={slot.timetable_id}>{slot.course_code} · {slot.start_time.slice(0, 5)}–{slot.end_time.slice(0, 5)}</option>)}
+            {choices.map((slot) => <option key={slot.timetable_id} value={slot.timetable_id}>{slot.course_code} · {slot.start_time.slice(0, 5)}–{slot.end_time.slice(0, 5)} · {slot.room || 'No room'}</option>)}
           </Select>
         </label>
-        <label className="grid gap-1 text-sm">New date
-          <Input type="date" value={leg.target_date} onChange={(event) => update(index, { target_date: event.target.value })} />
-        </label>
-        <label className="grid gap-1 text-sm">New start
-          <Input type="time" value={leg.target_start_time.slice(0, 5)} onChange={(event) => update(index, { target_start_time: event.target.value })} />
-        </label>
-        <label className="grid gap-1 text-sm">New end
-          <Input type="time" value={leg.target_end_time.slice(0, 5)} onChange={(event) => update(index, { target_end_time: event.target.value })} />
-        </label>
-        <label className="grid gap-1 text-sm">Room
-          <Input value={leg.target_room} onChange={(event) => update(index, { target_room: event.target.value })} placeholder="Keep original room" />
-        </label>
-        {type === 'RESHUFFLE' && legs.length > 2 && <Button variant="outline" type="button" onClick={() => setLegs((rows) => rows.filter((_, at) => at !== index))}>Remove class</Button>}
       </div>;
     })}
-    {type === 'RESHUFFLE' && legs.length < 10 && <Button variant="outline" type="button" onClick={() => setLegs((rows) => [...rows, emptyLeg()])}>Add another class</Button>}
     <label className="grid gap-1 text-sm">Reason
       <Input value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Explain why this change is needed" />
     </label>
