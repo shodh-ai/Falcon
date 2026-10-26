@@ -16,11 +16,11 @@ const slot = {
   end_time: '10:00:00',
 };
 
-function setup(respond: (sql: string) => unknown[]) {
-  const manager = { query: jest.fn(async (sql: string) => respond(sql)) };
+function setup(respond: (sql: string, params?: unknown[]) => unknown[]) {
+  const manager = { query: jest.fn(async (sql: string, params?: unknown[]) => respond(sql, params)) };
   const dataSource = {
     transaction: jest.fn(async (run: (db: typeof manager) => Promise<unknown>) => run(manager)),
-    query: jest.fn(async (sql: string) => respond(sql)),
+    query: jest.fn(async (sql: string, params?: unknown[]) => respond(sql, params)),
   };
   const notify = { approvalRequired: jest.fn(), leaveApproved: jest.fn() };
   return { service: new AcademicProxyService(dataSource as never, notify as never),
@@ -28,6 +28,18 @@ function setup(respond: (sql: string) => unknown[]) {
 }
 
 describe('date-specific substitute class', () => {
+  it('lists only active dated classes and returns a date-only value', async () => {
+    const { service, dataSource } = setup(() => []);
+    await service.listLecturesForLeaveDates(OWNER, TENANT, '2026-10-26', '2026-10-27');
+    const sql = dataSource.query.mock.calls[0][0];
+    expect(sql).toContain('t.deleted_at IS NULL');
+    expect(sql).toContain('t.valid_from');
+    expect(sql).toContain('t.valid_to');
+    expect(sql).toContain('d::date::text AS lecture_date');
+    expect(sql).toContain("m.status='APPROVED'");
+    expect(sql).toContain('m.target_date::text AS lecture_date');
+  });
+
   it('rejects a date that does not match the original class day', async () => {
     const { service } = setup((sql) => sql.includes('FROM academic_timetables t') ? [slot] : []);
     await expect(service.createProxyRequest(OWNER, TENANT, {
@@ -46,6 +58,23 @@ describe('date-specific substitute class', () => {
       timetable_id: SLOT, proxy_faculty_id: SUBSTITUTE, date_of_proxy: '2026-10-26',
     })).rejects.toThrow('another class');
     expect(manager.query.mock.calls.some(([sql]) => String(sql).includes('INSERT INTO academic_proxy_requests'))).toBe(false);
+  });
+
+  it('offers substitution on an approved swapped date using the swapped time', async () => {
+    const { service, manager } = setup((sql) => {
+      if (sql.includes('FROM academic_timetables t') && sql.includes('t.timetable_id=$1::uuid')) return [slot];
+      if (sql.includes('SELECT source_date::text AS source_date,target_start_time')) {
+        return [{ source_date: '2026-10-26', target_start_time: '11:00:00', target_end_time: '12:00:00' }];
+      }
+      if (sql.includes('SELECT proxy.user_id')) return [{ user_id: SUBSTITUTE }];
+      if (sql.includes('INSERT INTO academic_proxy_requests')) return [{ proxy_id: REQUEST }];
+      return [];
+    });
+    await expect(service.createProxyRequest(OWNER, TENANT, {
+      timetable_id: SLOT, proxy_faculty_id: SUBSTITUTE, date_of_proxy: '2026-10-27',
+    })).resolves.toMatchObject({ proxy_id: REQUEST });
+    const conflict = manager.query.mock.calls.find(([sql]) => String(sql).includes('UNION ALL'));
+    expect(conflict?.[1]).toEqual([TENANT, SUBSTITUTE, '2026-10-27', SLOT, '11:00:00', '12:00:00']);
   });
 
   it('rejects a substitute who is on approved leave', async () => {

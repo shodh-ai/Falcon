@@ -10,12 +10,13 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { useAuth } from '@/context/AuthContext';
 import type { StudentAssignmentRow } from '@/lib/api/lms';
 import { formatDeadlineCountdown, postMultipart, downloadWithAuth, getBlobUrlWithAuth } from '@/lib/api/lms';
-import { PdfDropzone } from './PdfDropzone';
+import { AssignmentFileDropzone } from './AssignmentFileDropzone';
 
 type Props = {
   assignments: StudentAssignmentRow[];
   onSubmitted: () => void;
 };
+const isPdf = (extension?: string | null) => !extension || extension.toLowerCase() === '.pdf';
 
 export function StudentAssignmentsTab({ assignments, onSubmitted }: Props) {
   const { token } = useAuth();
@@ -34,7 +35,7 @@ export function StudentAssignmentsTab({ assignments, onSubmitted }: Props) {
 
   async function handlePreview(assignmentId: string, title: string, kind: 'reference' | 'submission' = 'reference') {
     if (!token) {
-      toast.error('Please sign in to preview PDFs');
+      toast.error('Please sign in to preview this PDF');
       return;
     }
     const request = ++previewRequest.current;
@@ -59,6 +60,16 @@ export function StudentAssignmentsTab({ assignments, onSubmitted }: Props) {
 
   function renderSubmissionPreview(row: StudentAssignmentRow) {
     if (!row.submission) return null;
+    if (!isPdf(row.submission.file_extension)) return (
+      <Button type="button" variant="outline" className="w-full sm:w-auto"
+        onClick={() => token && void downloadWithAuth(
+          `/api/academics/student/assignments/${row.assignment.assignment_id}/submission/download`,
+          token, `${row.assignment.title}_Submission`,
+        ).catch(() => toast.error('Could not download your submission'))}>
+        <Download className="h-4 w-4" aria-hidden="true" />
+        Download submission
+      </Button>
+    );
     return (
       <Button
         type="button"
@@ -201,7 +212,7 @@ export function StudentAssignmentsTab({ assignments, onSubmitted }: Props) {
                         <div>
                           <p className="mb-2 text-sm font-medium text-sgvu-navy">Question Paper</p>
                           <div className="flex gap-2">
-                            <Button
+                            {isPdf(row.assignment.reference_file_extension) && <Button
                               variant="outline"
                               size="sm"
                               className="gap-2"
@@ -210,7 +221,7 @@ export function StudentAssignmentsTab({ assignments, onSubmitted }: Props) {
                             >
                               <Eye className="h-4 w-4" />
                               View PDF
-                            </Button>
+                            </Button>}
                             <Button
                               variant="outline"
                               size="sm"
@@ -224,8 +235,8 @@ export function StudentAssignmentsTab({ assignments, onSubmitted }: Props) {
                                 void downloadWithAuth(
                                   `/api/academics/student/assignments/${row.assignment.assignment_id}/download`,
                                   token,
-                                  `${row.assignment.title}_Question_Paper.pdf`
-                                ).catch(() => toast.error('Failed to download PDF'));
+                                  `${row.assignment.title}_Question_Paper`
+                                ).catch(() => toast.error('Failed to download assignment attachment'));
                               }}
                             >
                               <Download className="h-4 w-4" />
@@ -238,9 +249,9 @@ export function StudentAssignmentsTab({ assignments, onSubmitted }: Props) {
                       {canUpload ? (
                         <div>
                           <p className="mb-2 text-sm font-medium text-sgvu-navy">
-                            {returned ? 'Check and Re-Upload' : 'Upload Solution PDF'}
+                            {returned ? 'Check and Re-Upload' : 'Upload solution file'}
                           </p>
-                          <PdfDropzone
+                          <AssignmentFileDropzone
                             key={dropzoneKeys[row.assignment.assignment_id] ?? 0}
                             disabled={uploading}
                             onFile={(file) =>
@@ -267,7 +278,7 @@ export function StudentAssignmentsTab({ assignments, onSubmitted }: Props) {
                                 Clear file
                               </Button>
                               <p className="text-xs text-muted-foreground">
-                                Review your PDF, then click Submit.
+                                Review your file, then click Submit.
                               </p>
                             </div>
                           )}
@@ -319,7 +330,7 @@ export function StudentAssignmentsTab({ assignments, onSubmitted }: Props) {
                 </div>
                 {row.assignment.has_reference_file && (
                   <div className="mt-3 flex gap-2 border-t pt-3">
-                    <Button
+                    {isPdf(row.assignment.reference_file_extension) && <Button
                       variant="outline"
                       size="sm"
                       className="gap-2"
@@ -328,7 +339,7 @@ export function StudentAssignmentsTab({ assignments, onSubmitted }: Props) {
                     >
                       <Eye className="h-4 w-4" />
                       View PDF
-                    </Button>
+                    </Button>}
                     <Button
                       variant="outline"
                       size="sm"
@@ -338,8 +349,8 @@ export function StudentAssignmentsTab({ assignments, onSubmitted }: Props) {
                         downloadWithAuth(
                           `/api/academics/student/assignments/${row.assignment.assignment_id}/download`,
                           token,
-                          `${row.assignment.title}_Question_Paper.pdf`
-                        ).catch((err) => toast.error('Failed to download PDF'))
+                          `${row.assignment.title}_Question_Paper`
+                        ).catch(() => toast.error('Failed to download assignment attachment'))
                       }
                     >
                       <Download className="h-4 w-4" />

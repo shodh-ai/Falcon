@@ -3,13 +3,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { StudentAssignmentsTab } from '@/components/lms/StudentAssignmentsTab';
 import type { StudentAssignmentRow } from '@/lib/api/lms';
 
-const mocks = vi.hoisted(() => ({ postMultipart: vi.fn(), getBlobUrlWithAuth: vi.fn(), revokeObjectURL: vi.fn(), success: vi.fn(), error: vi.fn() }));
+const mocks = vi.hoisted(() => ({ postMultipart: vi.fn(), downloadWithAuth: vi.fn(), getBlobUrlWithAuth: vi.fn(), revokeObjectURL: vi.fn(), success: vi.fn(), error: vi.fn() }));
 vi.mock('@/context/AuthContext', () => ({ useAuth: () => ({ token: 'student-test-token' }) }));
 vi.mock('@/lib/notifications/falcon-toast', () => ({ toast: { success: mocks.success, error: mocks.error } }));
 vi.mock('@/lib/api/lms', () => ({
   postMultipart: mocks.postMultipart,
   formatDeadlineCountdown: () => 'Assignment deadline',
-  downloadWithAuth: vi.fn(),
+  downloadWithAuth: mocks.downloadWithAuth,
   getBlobUrlWithAuth: mocks.getBlobUrlWithAuth,
 }));
 
@@ -74,12 +74,12 @@ describe('Student assignment upload action', () => {
     expect(upload).toBeVisible();
     expect(upload).toHaveAttribute('type', 'button');
     expect(upload).toHaveAttribute('aria-expanded', 'false');
-    expect(screen.queryByText('Upload Solution PDF')).not.toBeInTheDocument();
+    expect(screen.queryByText('Upload solution file')).not.toBeInTheDocument();
     fireEvent.click(upload);
     expect(upload).toHaveAttribute('aria-expanded', 'true');
     expect(document.getElementById(upload.getAttribute('aria-controls')!)).toBeInTheDocument();
-    expect(screen.getByText('Upload Solution PDF')).toBeVisible();
-    expect(screen.getByLabelText('Browse files')).toHaveAttribute('accept', '.pdf,application/pdf');
+    expect(screen.getByText('Upload solution file')).toBeVisible();
+    expect(screen.getByLabelText('Browse files')).toHaveAttribute('accept', '.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.png,.jpg,.jpeg,.txt');
     expect(document.querySelector('button button')).toBeNull();
     expect(mocks.postMultipart).not.toHaveBeenCalled();
   });
@@ -92,7 +92,7 @@ describe('Student assignment upload action', () => {
     expect(screen.getByRole('button', { name: 'Submit assignment', exact: true })).toBeEnabled();
   });
 
-  it('uses the existing authenticated PDF submission and refresh callback', async () => {
+  it('uses the existing authenticated file submission and refresh callback', async () => {
     const onSubmitted = vi.fn();
     render(<StudentAssignmentsTab assignments={[row()]} onSubmitted={onSubmitted} />);
     const file = openAndSelectPdf();
@@ -163,19 +163,48 @@ describe('Student assignment upload action', () => {
     expect(screen.queryByRole('button', { name: /^(Upload|Re-upload) Assignment$/ })).not.toBeInTheDocument();
   });
 
-  it.each(['not-a-pdf.txt', 'too-large.pdf'])('preserves PDF restrictions for %s', (name) => {
+  it.each(['not-allowed.exe', 'too-large.pdf'])('rejects unsupported or oversized assignment file %s', (name) => {
     render(<StudentAssignmentsTab assignments={[row()]} onSubmitted={vi.fn()} />);
     fireEvent.click(screen.getByRole('button', { name: 'Upload Assignment', exact: true }));
-    const file = new File(['test'], name, { type: name.endsWith('.pdf') ? 'application/pdf' : 'text/plain' });
-    if (name === 'too-large.pdf') Object.defineProperty(file, 'size', { value: 6 * 1024 * 1024 });
+    const file = new File(['test'], name, { type: name.endsWith('.pdf') ? 'application/pdf' : 'application/octet-stream' });
+    if (name === 'too-large.pdf') Object.defineProperty(file, 'size', { value: 11 * 1024 * 1024 });
     fireEvent.change(screen.getByLabelText('Browse files'), { target: { files: [file] } });
     expect(screen.queryByRole('button', { name: 'Submit assignment', exact: true })).not.toBeInTheDocument();
     expect(mocks.postMultipart).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ['solution.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+    ['slides.pptx', 'application/vnd.openxmlformats-officedocument.presentationml.presentation'],
+    ['working.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
+    ['notes.txt', 'text/plain'],
+  ])('accepts %s for submission', async (name, type) => {
+    const onSubmitted = vi.fn();
+    render(<StudentAssignmentsTab assignments={[row()]} onSubmitted={onSubmitted} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Upload Assignment', exact: true }));
+    const file = new File(['test content'], name, { type });
+    fireEvent.change(screen.getByLabelText('Browse files'), { target: { files: [file] } });
+    fireEvent.click(screen.getByRole('button', { name: 'Submit assignment', exact: true }));
+    await waitFor(() => expect(onSubmitted).toHaveBeenCalledTimes(1));
+    expect(mocks.postMultipart.mock.calls[0][2].get('file').name).toBe(name);
+  });
 });
 
 describe('Student submitted PDF preview', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => { vi.clearAllMocks(); mocks.downloadWithAuth.mockResolvedValue(undefined); });
+
+  it('downloads a non-PDF submission without trying the PDF preview', async () => {
+    const document = submitted();
+    document.submission!.file_extension = '.docx';
+    render(<StudentAssignmentsTab assignments={[document]} onSubmitted={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Download submission', exact: true }));
+    await waitFor(() => expect(mocks.downloadWithAuth).toHaveBeenCalledWith(
+      '/api/academics/student/assignments/assignment-1/submission/download',
+      'student-test-token',
+      'Programming Exercise_Submission',
+    ));
+    expect(mocks.getBlobUrlWithAuth).not.toHaveBeenCalled();
+  });
 
   it('places one preview action in the submitted card header instead of the submitted badge and footer', () => {
     render(<StudentAssignmentsTab assignments={[submitted()]} onSubmitted={vi.fn()} />);

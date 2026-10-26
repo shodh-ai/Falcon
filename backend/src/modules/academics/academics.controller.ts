@@ -25,8 +25,8 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import type { Response } from 'express';
 import {
-  assignmentPdfInterceptor,
-  assignmentReferencePdfInterceptor,
+  assignmentFileInterceptor,
+  assignmentReferenceFileInterceptor,
   courseMaterialInterceptor,
   courseMaterialsInterceptor,
 } from './lms-upload.config';
@@ -316,6 +316,7 @@ export class AcademicsController {
   getFacultyCourseAttendanceAnalytics(
     @Param('courseId') courseId: string,
     @Query('date') date: string | undefined,
+    @Query('timetableId') timetableId: string | undefined,
     @Req() req: { user: AuthUser },
   ) {
     return this.facultyAcademics.getAttendanceAnalytics(
@@ -323,6 +324,7 @@ export class AcademicsController {
       req.user.user_id,
       this.resolveTenantId(req.user),
       date,
+      timetableId,
     );
   }
 
@@ -331,13 +333,15 @@ export class AcademicsController {
   sendFacultyCourseAttendanceWarnings(
     @Param('courseId') courseId: string,
     @Req() req: { user: AuthUser },
-    @Body() dto: { student_ids?: string[] },
+    @Body() dto: { student_ids?: string[]; date: string; timetable_id: string },
   ) {
     return this.facultyAcademics.sendAttendanceWarnings(
       courseId,
       req.user.user_id,
       this.resolveTenantId(req.user),
       dto.student_ids ?? [],
+      dto.date,
+      dto.timetable_id,
     );
   }
 
@@ -394,7 +398,7 @@ export class AcademicsController {
 
   @Post('faculty/assignments')
   @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
-  @UseInterceptors(assignmentReferencePdfInterceptor())
+  @UseInterceptors(assignmentReferenceFileInterceptor())
   createFacultyAssignment(
     @Req() req: { user: AuthUser },
     @Body()
@@ -420,7 +424,7 @@ export class AcademicsController {
 
   @Patch('faculty/assignments/:assignmentId')
   @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
-  @UseInterceptors(assignmentReferencePdfInterceptor())
+  @UseInterceptors(assignmentReferenceFileInterceptor())
   updateFacultyAssignment(
     @Param('assignmentId') assignmentId: string,
     @Req() req: { user: AuthUser },
@@ -498,6 +502,8 @@ export class AcademicsController {
     );
     const file = await this.assignments.streamSubmissionFile(submission);
     res.setHeader('Content-Type', file.mimeType);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Cache-Control', 'private, no-store');
     res.setHeader(
       'Content-Disposition',
       `attachment; filename="${file.filename}"`,
@@ -2088,7 +2094,7 @@ export class AcademicsController {
 
   @Post('assignments/:assignmentId/submit')
   @Roles('Student')
-  @UseInterceptors(assignmentPdfInterceptor())
+  @UseInterceptors(assignmentFileInterceptor())
   submitAssignment(
     @Param('assignmentId') assignmentId: string,
     @Req() req: { user: AuthUser },
@@ -3089,6 +3095,8 @@ export class AcademicsController {
     );
     const file = await this.assignments.streamAssignmentFile(assignment);
     res.setHeader('Content-Type', file.mimeType);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Cache-Control', 'private, no-store');
     res.setHeader(
       'Content-Disposition',
       `attachment; filename="${file.filename}"`,
@@ -3109,10 +3117,10 @@ export class AcademicsController {
       assignmentId,
     );
     const file = await this.assignments.streamSubmissionFile(submission);
-    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Type', file.mimeType);
     res.setHeader(
       'Content-Disposition',
-      `inline; filename="${file.filename.replace(/["\r\n]/g, '_')}"`,
+      `${file.mimeType === 'application/pdf' ? 'inline' : 'attachment'}; filename="${file.filename.replace(/["\r\n]/g, '_')}"`,
     );
     res.setHeader('Cache-Control', 'private, no-store');
     res.setHeader('X-Content-Type-Options', 'nosniff');

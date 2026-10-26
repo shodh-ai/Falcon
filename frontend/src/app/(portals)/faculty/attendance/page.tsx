@@ -274,7 +274,7 @@ function MarkAttendanceContent() {
         ]);
         const courseAnalytics = await api
           .get<AttendanceAnalytics>(
-            `/api/academics/faculty/course/${selectedCourseId}/attendance/analytics?date=${selectedDate}`,
+            `/api/academics/faculty/course/${selectedCourseId}/attendance/analytics?date=${selectedDate}${timetableId ? `&timetableId=${encodeURIComponent(timetableId)}` : ''}`,
           )
           .catch(() => null);
         if (!Array.isArray(roster)) throw new Error('Student roster API returned an invalid response');
@@ -369,7 +369,7 @@ function MarkAttendanceContent() {
   }
 
   async function save() {
-    if (!selectedCourseId) return;
+    if (!selectedCourseId || rosterLoading) return;
     if (students.length === 0) {
       toast.error('No students on the roster — cannot save attendance.');
       return;
@@ -400,15 +400,15 @@ function MarkAttendanceContent() {
       setAttendanceRevision(value => value + 1);
       setClasses(rows => rows.map(row => row.timetable_id === timetableId && row.course_id === selectedCourseId
         ? { ...row, has_saved_attendance: true, attendance_locked: state.locked } : row));
-      const synced = result.attendance_updated?.length ?? 0;
-      if (synced === 0) {
-        toast.warning('Attendance saved to session log but no enrollment percentages were updated. Check student IDs.');
+      const saved = result.saved ?? payload.length;
+      if ((result.attendance_updated?.length ?? 0) === 0) {
+        toast.warning(`Attendance saved for ${saved} student${saved === 1 ? '' : 's'} in this class, but enrollment percentages could not be refreshed.`);
       } else {
-        toast.success(`Attendance saved · ${synced} student${synced === 1 ? '' : 's'} synced to enrollment %`);
+        toast.success(`Attendance saved for ${saved} student${saved === 1 ? '' : 's'} in this class.`);
       }
       const courseAnalytics = await api
         .get<AttendanceAnalytics>(
-          `/api/academics/faculty/course/${selectedCourseId}/attendance/analytics?date=${selectedDate}`,
+          `/api/academics/faculty/course/${selectedCourseId}/attendance/analytics?date=${selectedDate}${timetableId ? `&timetableId=${encodeURIComponent(timetableId)}` : ''}`,
         )
         .catch(() => null);
       setAnalytics(courseAnalytics);
@@ -420,12 +420,13 @@ function MarkAttendanceContent() {
   }
 
   async function sendWarnings() {
-    if (!selectedCourseId || !analytics?.defaulters.length) return;
+    if (!selectedCourseId || !selectedTimetableId || !analytics?.defaulters.length) return;
 
     try {
       const result = await api.post<{ notified: number }>(
         `/api/academics/faculty/course/${selectedCourseId}/attendance/warnings`,
-        { student_ids: analytics.defaulters.map((row) => row.student_user_id) },
+        { student_ids: analytics.defaulters.map((row) => row.student_user_id),
+          date: selectedDate, timetable_id: selectedTimetableId },
       );
       toast.success(`Warning sent to ${result.notified} student${result.notified === 1 ? '' : 's'} and linked parents`);
     } catch (e) {
@@ -563,6 +564,8 @@ function MarkAttendanceContent() {
                       disabled={c.awaiting_confirmation}
                       onClick={() => {
                         setRosterLoading(true);
+                        setStudents([]);
+                        setAnalytics(null);
                         setSelectedCourseId(c.course_id);
                         setSelectedTimetableId(c.timetable_id);
                       }}
@@ -592,7 +595,7 @@ function MarkAttendanceContent() {
 
           <FacultyPanel
             title={selectedClass ? `${selectedClass.course_code} — roster` : 'Student roster'}
-            description={selectedClass ? `${selectedClass.room ?? 'Room TBA'} · ${selectedClass.student_count} enrolled` : undefined}
+            description={selectedClass ? `${selectedClass.room ?? 'Room TBA'} · ${rosterLoading ? 'Loading roster' : `${students.length} in this class`}` : undefined}
           >
             {!selectedClass ? (
               <FacultyEmptyState description="Select a class from the list to load the roster." />
@@ -752,7 +755,7 @@ function MarkAttendanceContent() {
                   </p>
                   <Button
                     className="sm:min-w-[10rem]"
-                    disabled={locked || saving || students.length === 0}
+                    disabled={locked || saving || rosterLoading || students.length === 0}
                     onClick={() => void save()}
                   >
                     {saving ? 'Saving…' : 'Save attendance'}
@@ -765,7 +768,7 @@ function MarkAttendanceContent() {
                       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                         <div>
                           <p className="text-sm font-bold text-red-950">Danger Zone: Below 75%</p>
-                          <p className="text-xs text-red-900/80">Pre-filtered defaulters list</p>
+                          <p className="text-xs text-red-900/80">Below 75% in this selected class only</p>
                         </div>
                         <Button
                           type="button"

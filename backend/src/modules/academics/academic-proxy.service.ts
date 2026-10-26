@@ -27,14 +27,29 @@ export class AcademicProxyService {
     const rows = await this.dataSource.query(
       `SELECT t.timetable_id, t.course_id, t.day_of_week, t.start_time, t.end_time, t.room,
               c.course_code, c.course_name,
-              d::date AS lecture_date
+              d::date::text AS lecture_date
        FROM academic_timetables t
-       INNER JOIN academic_courses c ON c.course_id = t.course_id
+       INNER JOIN academic_courses c ON c.course_id = t.course_id AND c.tenant_id=t.tenant_id
        CROSS JOIN generate_series($3::date, $4::date, '1 day'::interval) AS d
        WHERE t.tenant_id = $1
          AND t.faculty_user_id = $2
+         AND t.deleted_at IS NULL
+         AND (t.valid_from IS NULL OR t.valid_from<=d::date)
+         AND (t.valid_to IS NULL OR t.valid_to>=d::date)
          AND t.day_of_week = CASE WHEN EXTRACT(ISODOW FROM d::date) = 0 THEN 7 ELSE EXTRACT(ISODOW FROM d::date)::int END
-       ORDER BY d::date ASC, t.start_time ASC`,
+         AND NOT EXISTS (SELECT 1 FROM academic_class_moves m
+           WHERE m.tenant_id=t.tenant_id AND m.source_timetable_id=t.timetable_id
+             AND m.source_date=d::date AND m.status='APPROVED')
+       UNION ALL
+       SELECT t.timetable_id,t.course_id,t.day_of_week,
+              m.target_start_time,m.target_end_time,m.target_room,
+              c.course_code,c.course_name,m.target_date::text AS lecture_date
+       FROM academic_class_moves m
+       JOIN academic_timetables t ON t.tenant_id=m.tenant_id AND t.timetable_id=m.source_timetable_id
+       JOIN academic_courses c ON c.tenant_id=t.tenant_id AND c.course_id=t.course_id
+       WHERE m.tenant_id=$1 AND m.original_faculty_id=$2 AND m.status='APPROVED'
+         AND m.target_date BETWEEN $3::date AND $4::date
+       ORDER BY lecture_date ASC,start_time ASC`,
       [tenantId, facultyUserId, startDate, endDate],
     );
     return rows;
@@ -81,19 +96,34 @@ export class AcademicProxyService {
       const [slot] = await manager.query<Array<{
         timetable_id: string; course_id: string; start_time: string; end_time: string;
         day_of_week: number; faculty_user_id: string;
+        valid_from: string | null; valid_to: string | null;
       }>>(
         `SELECT t.timetable_id, t.course_id, t.start_time, t.end_time,
-                t.day_of_week, t.faculty_user_id
+                t.day_of_week, t.faculty_user_id,
+                t.valid_from::text AS valid_from,t.valid_to::text AS valid_to
          FROM academic_timetables t
          WHERE t.timetable_id=$1::uuid AND t.tenant_id=$2 AND t.faculty_user_id=$3
-           AND t.deleted_at IS NULL
-           AND (t.valid_from IS NULL OR t.valid_from <= $4::date)
-           AND (t.valid_to IS NULL OR t.valid_to >= $4::date)`,
-        [dto.timetable_id, tenantId, absentFacultyId, date],
+           AND t.deleted_at IS NULL`,
+        [dto.timetable_id, tenantId, absentFacultyId],
       );
       if (!slot) throw new NotFoundException('Timetable slot not found for this faculty and date');
+      const [approvedTarget] = await manager.query<Array<{
+        source_date: string; target_start_time: string; target_end_time: string;
+      }>>(
+        `SELECT source_date::text AS source_date,target_start_time,target_end_time
+         FROM academic_class_moves WHERE tenant_id=$1 AND source_timetable_id=$2::uuid
+           AND target_date=$3::date AND status='APPROVED' LIMIT 1`,
+        [tenantId,dto.timetable_id,date],
+      );
+      const scheduledDate = approvedTarget?.source_date ?? date;
+      if ((slot.valid_from && slot.valid_from > scheduledDate) ||
+          (slot.valid_to && slot.valid_to < scheduledDate)) {
+        throw new BadRequestException('This class slot is not active on the selected date');
+      }
       const isoDay = new Date(`${date}T00:00:00Z`).getUTCDay() || 7;
-      if (isoDay !== slot.day_of_week) throw new BadRequestException('The date does not match this class slot');
+      if (!approvedTarget && isoDay !== slot.day_of_week) {
+        throw new BadRequestException('The date does not match this class slot');
+      }
       const existing = await manager.query(
         `SELECT 1 FROM academic_proxy_requests
          WHERE tenant_id=$1 AND timetable_id=$2::uuid AND date_of_proxy=$3::date
@@ -106,14 +136,18 @@ export class AcademicProxyService {
            AND source_date=$3::date AND status IN ('PENDING_HOD_APPROVAL','APPROVED') LIMIT 1`,
         [tenantId,dto.timetable_id,date],
       );
-      if (moved.length) throw new BadRequestException('This class already has a pending or approved time change');
+      if (moved.length && !approvedTarget) {
+        throw new BadRequestException('This class already has a pending or approved swap');
+      }
       const recorded = await manager.query(
         `SELECT 1 FROM course_attendance_logs
          WHERE tenant_id=$1 AND timetable_id=$2::uuid AND date=$3::date LIMIT 1`,
         [tenantId, dto.timetable_id, date],
       );
       if (recorded.length) throw new BadRequestException('Attendance has already been recorded for this class');
-      await this.assertCandidateAvailable(manager, tenantId, absentFacultyId, dto.proxy_faculty_id, date, slot);
+      await this.assertCandidateAvailable(manager, tenantId, absentFacultyId, dto.proxy_faculty_id, date,
+        approvedTarget ? { ...slot, start_time: approvedTarget.target_start_time,
+          end_time: approvedTarget.target_end_time } : slot);
       const rows = await manager.query(
         `INSERT INTO academic_proxy_requests (
            tenant_id, timetable_id, absent_faculty_id, proxy_faculty_id, course_id,
@@ -188,9 +222,13 @@ export class AcademicProxyService {
        UNION ALL
        SELECT 1 FROM academic_proxy_requests p
        JOIN academic_timetables t ON t.timetable_id=p.timetable_id AND t.tenant_id=p.tenant_id
+       LEFT JOIN academic_class_moves moved ON moved.tenant_id=p.tenant_id
+         AND moved.source_timetable_id=p.timetable_id AND moved.target_date=p.date_of_proxy
+         AND moved.status='APPROVED'
        WHERE p.tenant_id=$1 AND p.proxy_faculty_id=$2 AND p.date_of_proxy=$3::date
          AND p.timetable_id<>$4::uuid AND p.status='APPROVED'
-         AND t.start_time<$6::time AND t.end_time>$5::time
+         AND COALESCE(moved.target_start_time,t.start_time)<$6::time
+         AND COALESCE(moved.target_end_time,t.end_time)>$5::time
        UNION ALL
        SELECT 1 FROM academic_class_moves m
        WHERE m.tenant_id=$1 AND m.original_faculty_id=$2
@@ -426,15 +464,31 @@ export class AcademicProxyService {
              AND source_date=$3::date AND status IN ('PENDING_HOD_APPROVAL','APPROVED') LIMIT 1`,
           [tenantId,current.timetable_id,current.proxy_date],
         );
-        if (moved.length) throw new BadRequestException('Resolve the class move before approving substitution');
+        const [approvedTarget] = await manager.query<Array<{
+          target_start_time: string; target_end_time: string;
+        }>>(
+          `SELECT target_start_time,target_end_time FROM academic_class_moves
+           WHERE tenant_id=$1 AND source_timetable_id=$2::uuid AND target_date=$3::date
+             AND status='APPROVED' LIMIT 1`,
+          [tenantId,current.timetable_id,current.proxy_date],
+        );
+        if (moved.length && !approvedTarget) {
+          throw new BadRequestException('Resolve the class swap before approving substitution');
+        }
         const [slot] = await manager.query<Array<{
           timetable_id: string; start_time: string; end_time: string;
         }>>(
           `SELECT timetable_id,start_time,end_time FROM academic_timetables
            WHERE tenant_id=$1 AND timetable_id=$2::uuid AND course_id=$3
              AND faculty_user_id=$4 AND deleted_at IS NULL
-             AND (valid_from IS NULL OR valid_from<=$5::date)
-             AND (valid_to IS NULL OR valid_to>=$5::date)`,
+             AND (valid_from IS NULL OR valid_from<=COALESCE(
+               (SELECT source_date FROM academic_class_moves WHERE tenant_id=$1
+                 AND source_timetable_id=$2::uuid AND target_date=$5::date
+                 AND status='APPROVED' LIMIT 1),$5::date))
+             AND (valid_to IS NULL OR valid_to>=COALESCE(
+               (SELECT source_date FROM academic_class_moves WHERE tenant_id=$1
+                 AND source_timetable_id=$2::uuid AND target_date=$5::date
+                 AND status='APPROVED' LIMIT 1),$5::date))`,
           [tenantId, current.timetable_id, current.course_id,
             current.absent_faculty_id, current.proxy_date],
         );
@@ -446,7 +500,9 @@ export class AcademicProxyService {
         );
         if (attendance.length) throw new BadRequestException('Attendance already exists for this class; cover cannot be changed');
         await this.assertCandidateAvailable(manager, tenantId, current.absent_faculty_id,
-          current.proxy_faculty_id, current.proxy_date, slot);
+          current.proxy_faculty_id, current.proxy_date,
+          approvedTarget ? { ...slot, start_time: approvedTarget.target_start_time,
+            end_time: approvedTarget.target_end_time } : slot);
       }
       await manager.query(
         `UPDATE academic_proxy_requests

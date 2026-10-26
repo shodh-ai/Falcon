@@ -105,7 +105,7 @@ export class AcademicSessionChangesService {
     const targetDate = this.date(input.target_date);
     const today = campusToday();
     if (sourceDate < today || targetDate < today) {
-      throw new BadRequestException('Past class sessions cannot be rescheduled');
+      throw new BadRequestException('Past class sessions cannot be swapped');
     }
     const start = this.time(input.target_start_time);
     const end = this.time(input.target_end_time);
@@ -213,11 +213,15 @@ export class AcademicSessionChangesService {
       start_time: string; end_time: string; room: string | null; section: string | null;
     }>>(
       `SELECT m.source_timetable_id AS timetable_id,m.course_id,
-              m.original_faculty_id AS faculty_user_id,m.target_date::text AS date,
+              COALESCE(p.proxy_faculty_id,m.original_faculty_id) AS faculty_user_id,
+              m.target_date::text AS date,
               m.target_start_time AS start_time,m.target_end_time AS end_time,
               m.target_room AS room,t.section
        FROM academic_class_moves m
        JOIN academic_timetables t ON t.timetable_id=m.source_timetable_id AND t.tenant_id=m.tenant_id
+       LEFT JOIN academic_proxy_requests p ON p.tenant_id=m.tenant_id
+         AND p.timetable_id=m.source_timetable_id AND p.date_of_proxy=m.target_date
+         AND p.status='APPROVED'
        WHERE m.tenant_id=$1 AND m.status='APPROVED' AND m.target_date=ANY($2::date[])`,
       [tenantId, targetDates],
     );
@@ -264,13 +268,13 @@ export class AcademicSessionChangesService {
   }
 
   async propose(actorId: string, tenantId: string, moveType: MoveType, inputs: MoveInput[], reason: string) {
-    if (!['RESCHEDULE', 'SWAP', 'RESHUFFLE'].includes(moveType) ||
-        !Array.isArray(inputs) ||
-        (moveType === 'RESCHEDULE' && inputs.length !== 1) ||
-        (moveType === 'SWAP' && inputs.length !== 2) ||
-        (moveType === 'RESHUFFLE' && (inputs.length < 2 || inputs.length > 10)) ||
-        !reason?.trim()) {
-      throw new BadRequestException('Provide a reason and 1 reschedule, 2 swap, or 2–10 reshuffle legs');
+    // Historical moves remain readable, but new one-way reschedules and
+    // multi-class reshuffles are disabled at the API as well as in the UI.
+    if (moveType !== 'SWAP') {
+      throw new BadRequestException('Only an exact two-class swap is available');
+    }
+    if (!Array.isArray(inputs) || inputs.length !== 2 || !reason?.trim()) {
+      throw new BadRequestException('Choose two classes to exchange and provide a reason');
     }
     const result = await this.dataSource.transaction(async (manager) => {
       const actor = await this.actorScope(manager, tenantId, actorId);
