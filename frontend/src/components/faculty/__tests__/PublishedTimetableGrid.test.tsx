@@ -17,6 +17,17 @@ describe('Exact published timetable grid', () => {
     expect(container.querySelectorAll('button[aria-pressed]')).toHaveLength(2);
     expect(container.querySelector('table')).toBeNull();
   });
+  it('shows dated changes and class types with distinct colors on one time axis', () => {
+    render(<PublishedTimetableGrid slots={[
+      { ...slot, timetable_id: 'practical', display_status: 'PRACTICAL' },
+      { ...slot, timetable_id: 'extra', day_of_week: 3, display_status: 'EXTRA_CLASS' },
+      { ...slot, timetable_id: 'cancelled', day_of_week: 4, display_status: 'CANCELLED' },
+    ]} weekStart={new Date(2026,9,26)} />);
+    expect(screen.getByRole('button', { name: /cancelled/i })).toHaveClass('bg-rose-50');
+    expect(screen.getByText('Extra · BP307P').closest('button')).toHaveClass('bg-amber-50');
+    expect(screen.getAllByRole('button', { name: /Microbiology Practical/i })[0]).toHaveClass('bg-emerald-50');
+    expect(screen.getByLabelText('Mon')).toBeInTheDocument();
+  });
   it('does not drop simultaneous batches', () => {
     render(<PublishedTimetableGrid slots={[slot,{...slot,timetable_id:'other',section:'BATCH-A'}]} />);
     expect(screen.getByText('BATCH-C · LT-28')).toBeInTheDocument();

@@ -2340,6 +2340,18 @@ export class AcademicsController {
     );
   }
 
+  @Get('faculty/workspaces/adjustments/extra-class-slots')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  suggestExtraClassSlots(
+    @Req() req: { user: AuthUser },
+    @Query('courseId') courseId: string,
+    @Query('date') date: string,
+  ) {
+    return this.facultyWorkspaces.suggestExtraClassSlots(
+      req.user.user_id, this.resolveTenantId(req.user), courseId, date,
+    );
+  }
+
   @Post('faculty/workspaces/adjustments')
   @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
   createAdjustment(
@@ -2667,16 +2679,20 @@ export class AcademicsController {
 
   @Get('faculty/workspaces/analytics/students/:studentUserId/report')
   @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
-  facultySubjectStudentReport(
+  async facultySubjectStudentReport(
     @Req() req: { user: AuthUser },
     @Param('studentUserId') studentUserId: string,
     @Query('courseId') courseId: string,
   ) {
+    // Match the exact allocation-scoped roster exposed in the course workspace.
+    // Owning a shared course code must not reveal another section's student record.
+    const tenantId = this.resolveTenantId(req.user);
+    const roster = await this.facultyAcademics.getCourseStudents(courseId, req.user.user_id, tenantId);
+    if (!roster.some((student: { student_id: string }) => student.student_id === studentUserId)) {
+      throw new ForbiddenException('Student is not in your allocated course roster');
+    }
     return this.facultyWorkspaces.getFacultySubjectStudentReport(
-      req.user.user_id,
-      this.resolveTenantId(req.user),
-      courseId,
-      studentUserId,
+      req.user.user_id, tenantId, courseId, studentUserId,
     );
   }
 
