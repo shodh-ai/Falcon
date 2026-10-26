@@ -400,13 +400,13 @@ export class AcademicProxyService {
               af.name AS absent_faculty_name, pf.name AS proxy_faculty_name,
               t.start_time, t.end_time, t.room
        FROM academic_proxy_requests p
-       INNER JOIN users af ON af.user_id = p.absent_faculty_id
-       INNER JOIN users pf ON pf.user_id = p.proxy_faculty_id
+       INNER JOIN users af ON af.user_id = p.absent_faculty_id AND af.tenant_id = p.tenant_id
+       INNER JOIN users pf ON pf.user_id = p.proxy_faculty_id AND pf.tenant_id = p.tenant_id
        LEFT JOIN departments d ON d.dept_id=af.dept_id
        LEFT JOIN schools s ON s.school_id=d.school_id
-       LEFT JOIN academic_timetables t ON t.timetable_id = p.timetable_id
-       LEFT JOIN academic_courses c ON c.course_id = p.course_id
-       WHERE p.tenant_id = $1 AND p.status = 'PENDING_HOD_APPROVAL'
+       LEFT JOIN academic_timetables t ON t.timetable_id = p.timetable_id AND t.tenant_id = p.tenant_id
+       LEFT JOIN academic_courses c ON c.course_id = p.course_id AND c.tenant_id = p.tenant_id
+       WHERE p.tenant_id = $1 AND p.status IN ('PENDING_SUBSTITUTE_ACCEPTANCE', 'PENDING_HOD_APPROVAL')
          AND ($3::boolean OR af.dept_id = ANY($2::int[])
            OR ($4::boolean AND s.dean_user_id=$5::uuid))
        ORDER BY p.date_of_proxy ASC`,
