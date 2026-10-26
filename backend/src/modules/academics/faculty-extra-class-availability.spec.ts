@@ -20,6 +20,7 @@ function setup(options: { timetable?: unknown[]; changes?: unknown[]; exams?: un
     if (sql.includes('SELECT course_id,original_faculty_id,target_room FROM academic_class_moves')) return [];
     if (sql.includes('FROM exam_schedules x')) return options.exams ?? [];
     if (sql.includes('FROM academic_proxy_requests p') || sql.includes('FROM staff_leave_requests')) return [];
+    if (sql.includes('FROM timetable_room_allocations ra')) return [];
     if (sql.includes('SELECT capacity FROM campus_spaces')) return options.missingRoom ? [] : [{ capacity: 30 }];
     return [];
   });

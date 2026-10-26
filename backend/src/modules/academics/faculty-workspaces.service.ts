@@ -1664,7 +1664,7 @@ export class FacultyWorkspacesService {
     if (!course) throw new NotFoundException('Course not found');
     const [roster] = await db.query<Array<{ count: number }>>(
       `SELECT count(DISTINCT student_user_id)::int AS count FROM student_course_enrollments
-       WHERE tenant_id=$1 AND course_id=$2 AND status IN ('ENROLLED','COMPLETED','FAILED')`, [tenantId, courseId]);
+       WHERE tenant_id=$1 AND course_id=$2 AND status='ENROLLED'`, [tenantId, courseId]);
     if (!roster?.count) review.push('Course student roster is not mapped');
     const [calendar] = await db.query<Array<{ kind_of_day: string | null }>>(
       `SELECT kind_of_day FROM academic_calendar_days WHERE tenant_id=$1 AND calendar_date=$2::date`, [tenantId, date]);
@@ -1698,7 +1698,7 @@ export class FacultyWorkspacesService {
     const courseIds = [...new Set([courseId, ...busy.map(slot => slot.course_id)])];
     const memberships = await db.query<Array<{ course_id: string; student_user_id: string }>>(
       `SELECT course_id,student_user_id FROM student_course_enrollments
-       WHERE tenant_id=$1 AND course_id=ANY($2::uuid[]) AND status IN ('ENROLLED','COMPLETED','FAILED')`, [tenantId,courseIds]);
+       WHERE tenant_id=$1 AND course_id=ANY($2::uuid[]) AND status='ENROLLED'`, [tenantId,courseIds]);
     const ownStudents = new Set(memberships.filter(row => row.course_id === courseId).map(row => row.student_user_id));
     for (const slot of busy) {
       if (slot.faculty_user_id === facultyUserId) reasons.push('Faculty already has a class at this time');
@@ -1715,7 +1715,7 @@ export class FacultyWorkspacesService {
       if (room && moves.some(move => move.target_room?.trim().toLowerCase() === room.trim().toLowerCase())) reasons.push('Room has an approved moved class');
       const moveCourses = [...new Set(moves.map(move => move.course_id))];
       const moveMembers = await db.query<Array<{ course_id: string; student_user_id: string }>>(
-        `SELECT course_id,student_user_id FROM student_course_enrollments WHERE tenant_id=$1 AND course_id=ANY($2::uuid[]) AND status IN ('ENROLLED','COMPLETED','FAILED')`, [tenantId,moveCourses]);
+        `SELECT course_id,student_user_id FROM student_course_enrollments WHERE tenant_id=$1 AND course_id=ANY($2::uuid[]) AND status='ENROLLED'`, [tenantId,moveCourses]);
       if (moveMembers.some(row => ownStudents.has(row.student_user_id))) reasons.push('Enrolled students have an approved moved class');
       if (!moveMembers.length) review.push('Moved class roster could not be verified');
     }
@@ -1740,6 +1740,14 @@ export class FacultyWorkspacesService {
     if (leave.length) reasons.push('Faculty is on approved leave');
     if (!room) review.push('A suitable free room is not confirmed');
     else {
+      const reservations = await db.query(`SELECT 1 FROM timetable_room_allocations ra
+        JOIN campus_spaces space ON space.space_id=ra.space_id AND space.tenant_id=ra.tenant_id
+        WHERE ra.tenant_id=$1 AND space.building_name || ' - ' || space.room_number=$2
+          AND (ra.allocation_date=$3::date OR (ra.allocation_date IS NULL AND ra.day_of_week=$4))
+          AND ra.start_time<$6::time AND ra.end_time>$5::time
+          AND (ra.course_id IS NULL OR ra.course_id<>$7::uuid) LIMIT 1`,
+        [tenantId,room,date,day,startTime,endTime,courseId]);
+      if (reservations.length) reasons.push(`${room} has a room booking at this time`);
       const [space] = await db.query<Array<{ capacity: number }>>(
         `SELECT capacity FROM campus_spaces WHERE tenant_id=$1 AND status='AVAILABLE'
            AND building_name || ' - ' || room_number=$2 AND space_type=$3 LIMIT 1`,
@@ -1760,7 +1768,7 @@ export class FacultyWorkspacesService {
       `SELECT course_name FROM academic_courses WHERE tenant_id=$1 AND course_id=$2`, [tenantId,courseId]);
     const practical = /practical|laboratory|\blab\b/i.test(course?.course_name ?? '');
     const [roster] = await this.dataSource.query<Array<{ count: number }>>(
-      `SELECT count(DISTINCT student_user_id)::int AS count FROM student_course_enrollments WHERE tenant_id=$1 AND course_id=$2 AND status IN ('ENROLLED','COMPLETED','FAILED')`, [tenantId,courseId]);
+      `SELECT count(DISTINCT student_user_id)::int AS count FROM student_course_enrollments WHERE tenant_id=$1 AND course_id=$2 AND status='ENROLLED'`, [tenantId,courseId]);
     const spaces = await this.dataSource.query<Array<{ room_name: string }>>(
       `SELECT building_name || ' - ' || room_number AS room_name FROM campus_spaces
        WHERE tenant_id=$1 AND status='AVAILABLE' AND space_type=$2
