@@ -151,6 +151,9 @@ export default function FacultyTimetablePage() {
   const { activeDeptId, loading: deptLoading } = useTeachingDepartment();
   const { courses, loading: coursesLoading, error: coursesError } = useFacultyCourses();
   const [schedule, setSchedule] = useState<TimetableRow[]>([]);
+  const [courseFilter, setCourseFilter] = useState('');
+  const [sectionFilter, setSectionFilter] = useState('');
+  const [selectedSlotId, setSelectedSlotId] = useState<string | null>(null);
   const [scheduleError, setScheduleError] = useState<string | null>(null);
   const [stats, setStats] = useState<TimetableStats | null>(null);
   const [adjustments, setAdjustments] = useState<Adjustment[]>([]);
@@ -206,6 +209,19 @@ export default function FacultyTimetablePage() {
     () => uniqueFacultyCoursesByCourseId(courses),
     [courses],
   );
+  const scheduleCourses = useMemo(
+    () => [...new Map(schedule.map((slot) => [slot.course_code, slot.course_name])).entries()].sort(([a], [b]) => a.localeCompare(b)),
+    [schedule],
+  );
+  const scheduleSections = useMemo(
+    () => [...new Set(schedule.map((slot) => slot.section).filter((section): section is string => Boolean(section)))].sort(),
+    [schedule],
+  );
+  const visibleSchedule = useMemo(
+    () => schedule.filter((slot) => (!courseFilter || slot.course_code === courseFilter) && (!sectionFilter || slot.section === sectionFilter)),
+    [schedule, courseFilter, sectionFilter],
+  );
+  const selectedSlot = visibleSchedule.find((slot) => slot.timetable_id === selectedSlotId) ?? null;
 
 
   async function submitAdjustment(e: FormEvent) {
@@ -362,7 +378,7 @@ export default function FacultyTimetablePage() {
       <FacultyPanel
         title="Weekly schedule"
         count={schedule.length}
-        description="Your published teaching plan for the week"
+        description="Your recurring published teaching plan. Select a class to see its details and available actions."
         contentClassName="p-0"
       >
         {scheduleError ? <p role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm">{scheduleError}</p> : schedule.length === 0 ? (
@@ -382,7 +398,7 @@ export default function FacultyTimetablePage() {
                 <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-sgvu-navy/5 text-sgvu-navy">
                   <BookOpen className="h-3.5 w-3.5" />
                 </span>
-                <span><strong className="text-sgvu-navy">{schedule.length}</strong> classes across {WEEK_DAYS.length} teaching days</span>
+                <span><strong className="text-sgvu-navy">{visibleSchedule.length}</strong> of {schedule.length} weekly classes</span>
               </div>
               <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
                 <span className="h-2 w-2 rounded-full bg-sgvu-gold" />
@@ -390,9 +406,27 @@ export default function FacultyTimetablePage() {
               </div>
             </div>
 
+            <div className="grid gap-3 border-b border-border/50 bg-muted/20 px-4 py-3 sm:grid-cols-2 sm:px-5">
+              <label className="grid gap-1 text-xs font-semibold text-sgvu-navy">Course
+                <Select value={courseFilter} onChange={(event) => { setCourseFilter(event.target.value); setSelectedSlotId(null); }}>
+                  <option value="">All courses</option>
+                  {scheduleCourses.map(([code, name]) => <option key={code} value={code}>{code} — {name}</option>)}
+                </Select>
+              </label>
+              <label className="grid gap-1 text-xs font-semibold text-sgvu-navy">Section
+                <Select value={sectionFilter} onChange={(event) => { setSectionFilter(event.target.value); setSelectedSlotId(null); }}>
+                  <option value="">All sections</option>
+                  {scheduleSections.map((section) => <option key={section} value={section}>{section}</option>)}
+                </Select>
+              </label>
+            </div>
+
+            {visibleSchedule.length === 0 ? <p className="p-5 text-sm text-muted-foreground">No published classes match these filters.</p> : <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_19rem]">
+              <div className="min-w-0">
+
             <div className="divide-y divide-border/50 lg:hidden">
               {WEEK_DAYS.map((day) => {
-                const dayEntries = schedule
+                const dayEntries = visibleSchedule
                   .filter((entry) => entry.day_of_week === day.val)
                   .sort((a, b) => a.start_time.localeCompare(b.start_time));
                 return (
@@ -410,7 +444,9 @@ export default function FacultyTimetablePage() {
                     ) : (
                       <div className="grid gap-2">
                         {dayEntries.map((entry) => (
-                          <div key={entry.timetable_id} className="rounded-xl border border-sgvu-navy/10 bg-sgvu-navy/[0.035] p-3 shadow-sm">
+                          <button key={entry.timetable_id} type="button" onClick={() => setSelectedSlotId(entry.timetable_id)}
+                            aria-pressed={selectedSlotId === entry.timetable_id}
+                            className={`w-full rounded-xl border bg-sgvu-navy/[0.035] p-3 text-left shadow-sm ${selectedSlotId === entry.timetable_id ? 'border-sgvu-gold ring-2 ring-sgvu-gold/50' : 'border-sgvu-navy/10'}`}>
                             <div className="flex items-start justify-between gap-3">
                               <div className="min-w-0">
                                 <p className="font-bold text-sgvu-navy">{entry.course_code}</p>
@@ -426,7 +462,7 @@ export default function FacultyTimetablePage() {
                               <span>{entry.section || 'Whole course'} · {/(P|LAB)$/i.test(entry.course_code) ? 'Practical' : 'Class'}</span>
                               <span>{entry.awaiting_confirmation ? 'Awaiting department confirmation' : 'Published'}</span>
                             </div>
-                          </div>
+                          </button>
                         ))}
                       </div>
                     )}
@@ -435,7 +471,27 @@ export default function FacultyTimetablePage() {
               })}
             </div>
 
-            <div className="hidden lg:block"><PublishedTimetableGrid slots={schedule} /></div>
+            <div className="hidden lg:block"><PublishedTimetableGrid slots={visibleSchedule} selectedId={selectedSlotId} onSelect={(slot) => setSelectedSlotId(slot.timetable_id)} /></div>
+              </div>
+              <aside className="border-t border-border/50 bg-slate-50/70 p-4 lg:border-l lg:border-t-0" aria-label="Selected class details">
+                <h3 className="text-sm font-bold text-sgvu-navy">Selected class</h3>
+                {selectedSlot ? <div className="mt-3 space-y-3 text-sm">
+                  <div><p className="font-bold text-sgvu-navy">{selectedSlot.course_name}</p><p className="text-xs text-muted-foreground">{selectedSlot.course_code}</p></div>
+                  <dl className="grid grid-cols-[5rem_1fr] gap-x-2 gap-y-2 text-xs">
+                    <dt className="text-muted-foreground">Day</dt><dd>{WEEK_DAYS.find((day) => day.val === selectedSlot.day_of_week)?.label ?? 'Sun'}</dd>
+                    <dt className="text-muted-foreground">Time</dt><dd>{formatSlotTime(selectedSlot.start_time)}–{formatSlotTime(selectedSlot.end_time)}</dd>
+                    <dt className="text-muted-foreground">Section</dt><dd>{selectedSlot.section || 'Whole course'}</dd>
+                    <dt className="text-muted-foreground">Room</dt><dd>{selectedSlot.room || 'Not specified'}</dd>
+                    <dt className="text-muted-foreground">Status</dt><dd>{selectedSlot.awaiting_confirmation ? 'Awaiting department confirmation' : 'Published'}</dd>
+                  </dl>
+                  {!isObserver && <div className="space-y-2 border-t pt-3">
+                    <p className="text-xs text-muted-foreground">Class changes require HOD approval. Selecting a class does not reserve a new slot.</p>
+                    <Button size="sm" className="w-full" onClick={() => document.getElementById('faculty-substitute-class')?.scrollIntoView({ behavior: 'smooth' })}>Arrange substitute</Button>
+                    <Button size="sm" variant="outline" className="w-full" onClick={() => document.getElementById('faculty-swap-classes')?.scrollIntoView({ behavior: 'smooth' })}>Swap classes</Button>
+                  </div>}
+                </div> : <p className="mt-3 text-xs text-muted-foreground">Choose a class in the timetable to see its details.</p>}
+              </aside>
+            </div>}
           </div>
         )}
       </FacultyPanel>
@@ -552,6 +608,7 @@ export default function FacultyTimetablePage() {
       </div>}
 
       {!isObserver && <FacultyPanel
+        id="faculty-substitute-class"
         title="Substitute a specific class"
         description="Propose a colleague for one dated class. They must accept, then your HOD approves. The weekly timetable remains unchanged."
       >
@@ -578,7 +635,7 @@ export default function FacultyTimetablePage() {
         </div>
       </FacultyPanel>}
 
-      {!isObserver && <SessionChangePanel slots={schedule.filter((slot) => !slot.awaiting_confirmation)} />}
+      {!isObserver && <div id="faculty-swap-classes"><SessionChangePanel slots={schedule.filter((slot) => !slot.awaiting_confirmation)} /></div>}
 
       <FacultyPanel title="Teaching progress by course" count={stats?.courses.length ?? 0}>
         {!stats || stats.courses.length === 0 ? (
