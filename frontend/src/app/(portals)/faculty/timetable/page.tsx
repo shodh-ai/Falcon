@@ -521,9 +521,9 @@ export default function FacultyTimetablePage() {
                     <dt className="text-muted-foreground">Time</dt><dd>{formatSlotTime(selectedSlot.start_time)}–{formatSlotTime(selectedSlot.end_time)}</dd>
                     <dt className="text-muted-foreground">Section</dt><dd>{selectedSlot.section || 'Whole course'}</dd>
                     <dt className="text-muted-foreground">Room</dt><dd>{selectedSlot.room || 'Not specified'}</dd>
-                    <dt className="text-muted-foreground">Status</dt><dd>{selectedSlot.awaiting_confirmation ? 'Awaiting department confirmation' : 'Published'}</dd>
+                    <dt className="text-muted-foreground">Status</dt><dd>{selectedSlot.display_status === 'CANCELLED' ? 'Cancelled for this date' : selectedSlot.display_status === 'EXTRA_CLASS' ? 'Approved extra class' : selectedSlot.display_status === 'RESCHEDULED' ? 'Approved moved class' : selectedSlot.awaiting_confirmation ? 'Awaiting department confirmation' : 'Published'}</dd>
                   </dl>
-                  {!isObserver && <div className="flex flex-wrap gap-2 border-t pt-3">
+                  {!isObserver && selectedSlot.display_status !== 'CANCELLED' && <div className="flex flex-wrap gap-2 border-t pt-3">
                     <p className="text-xs text-muted-foreground">Class changes require HOD approval. Selecting a class does not reserve a new slot.</p>
                     <Button size="sm" onClick={() => { setManageAction('substitute'); document.getElementById('faculty-manage-classes')?.scrollIntoView({ behavior: 'smooth' }); }}>Arrange substitute</Button>
                     <Button size="sm" variant="outline" onClick={() => { setManageAction('swap'); document.getElementById('faculty-manage-classes')?.scrollIntoView({ behavior: 'smooth' }); }}>Swap classes</Button>

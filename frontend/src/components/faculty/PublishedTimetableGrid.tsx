@@ -70,7 +70,7 @@ export function PublishedTimetableGrid({ slots, selectedId, onSelect, weekStart 
               const status = publishedSlotStatus(slot);
               return <button key={`${slot.timetable_id}-${slotIndex}`} type="button" onClick={() => onSelect?.(slot)}
                 aria-pressed={selectedId === slot.timetable_id}
-                aria-label={`${slot.course_code} ${slot.course_name}, ${display(from)} to ${display(to)}, ${slot.section || 'whole course'}${status === 'CANCELLED' ? ', cancelled' : ''}`}
+                aria-label={`${slot.course_code} ${slot.course_name}, ${display(from)} to ${display(to)}, ${slot.section || 'whole course'}${status === 'CANCELLED' ? ', cancelled' : status === 'EXTRA_CLASS' ? ', extra class' : status === 'RESCHEDULED' ? ', moved class' : ''}`}
                 className={`absolute z-10 overflow-hidden rounded-md border p-1.5 text-left shadow-sm transition-shadow hover:z-20 hover:shadow-md focus-visible:z-20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-sgvu-gold ${slotStyle[status]} ${selectedId === slot.timetable_id ? 'ring-2 ring-sgvu-gold' : ''}`}
                 style={{ top: (from - start) / 60 * 76 + 2, height: Math.max(38, (to - from) / 60 * 76 - 4), left: `calc(${peerIndex / peers.length * 100}% + 2px)`, width: `calc(${100 / peers.length}% - 4px)` }}>
                 <span className="block truncate font-bold">{status === 'CANCELLED' ? 'Cancelled · ' : status === 'EXTRA_CLASS' ? 'Extra · ' : ''}{slot.course_code}</span>
