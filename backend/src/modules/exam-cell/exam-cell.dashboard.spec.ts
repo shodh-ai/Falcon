@@ -50,6 +50,31 @@ async function reportQuery() {
 }
 
 describe('Examination dashboard declared result outcomes', () => {
+  it('uses the campus date and excludes cancelled or deleted sessions from schedule counts', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-10-25T20:00:00.000Z'));
+    try {
+      const { service, query } = createDashboard();
+      await service.dashboard('tenant-a');
+      const scheduleCalls = query.mock.calls.filter(([sql]) =>
+        sql.includes('FROM exam_schedules WHERE tenant_id'),
+      );
+      expect(scheduleCalls).toHaveLength(3);
+      expect(scheduleCalls[1][1]).toEqual(['tenant-a', '2026-10-26']);
+      expect(scheduleCalls[2][1]).toEqual(['tenant-a', '2026-10-26']);
+      for (const [sql] of scheduleCalls) {
+        expect(sql).toContain('deleted_at IS NULL');
+        expect(sql).toContain("status <> 'CANCELLED'");
+      }
+      const attendanceCall = query.mock.calls.find(([sql]) =>
+        sql.includes('FROM exam_day_attendance da'),
+      );
+      expect(attendanceCall?.[0]).toContain('es.tenant_id = da.tenant_id');
+      expect(attendanceCall?.[1]).toEqual(['tenant-a', '2026-10-26']);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it('returns actual outcome counts and derives the declared total from the same rows', async () => {
     const outcomes = [
       { label: 'ABSENT', count: 1 },

@@ -95,7 +95,14 @@ export class ExamCellService {
   }
 
   async dashboard(tenantId: string) {
-    const today = new Date().toISOString().slice(0, 10);
+    // Examination dates follow the campus calendar, including the hours when
+    // the UTC date differs from the date in India.
+    const today = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Kolkata',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date());
     const [
       [schedules],
       [upcoming],
@@ -116,15 +123,15 @@ export class ExamCellService {
       [formRegistrations],
     ] = await Promise.all([
       this.queryOrEmpty<{ c: number }>(
-        `SELECT COUNT(*)::int AS c FROM exam_schedules WHERE tenant_id = $1`,
+        `SELECT COUNT(*)::int AS c FROM exam_schedules WHERE tenant_id = $1 AND deleted_at IS NULL AND status <> 'CANCELLED'`,
         [tenantId],
       ),
       this.queryOrEmpty<{ c: number }>(
-        `SELECT COUNT(*)::int AS c FROM exam_schedules WHERE tenant_id = $1 AND exam_date > $2::date`,
+        `SELECT COUNT(*)::int AS c FROM exam_schedules WHERE tenant_id = $1 AND exam_date > $2::date AND deleted_at IS NULL AND status <> 'CANCELLED'`,
         [tenantId, today],
       ),
       this.queryOrEmpty<{ c: number }>(
-        `SELECT COUNT(*)::int AS c FROM exam_schedules WHERE tenant_id = $1 AND exam_date = $2::date`,
+        `SELECT COUNT(*)::int AS c FROM exam_schedules WHERE tenant_id = $1 AND exam_date = $2::date AND deleted_at IS NULL AND status <> 'CANCELLED'`,
         [tenantId, today],
       ),
       this.queryOrEmpty<{ c: number }>(
@@ -175,8 +182,9 @@ export class ExamCellService {
       this.queryOrEmpty<{ c: number }>(
         `SELECT COUNT(DISTINCT d.faculty_user_id)::int AS c
          FROM exam_invigilation_duties d
-         JOIN exam_schedules es ON es.exam_schedule_id = d.exam_schedule_id
-         WHERE d.tenant_id = $1 AND es.exam_date = $2::date AND d.published = true`,
+         JOIN exam_schedules es ON es.exam_schedule_id = d.exam_schedule_id AND es.tenant_id = d.tenant_id
+         WHERE d.tenant_id = $1 AND es.exam_date = $2::date AND d.published = true
+           AND es.deleted_at IS NULL AND es.status <> 'CANCELLED'`,
         [tenantId, today],
       ),
       this.queryOrEmpty<{ c: number }>(
@@ -196,8 +204,10 @@ export class ExamCellService {
         [tenantId],
       ),
       this.queryOrEmpty<{ c: number }>(
-        `SELECT COUNT(*)::int AS c FROM exam_day_attendance
-         WHERE tenant_id = $1 AND marked_at::date = $2::date`,
+        `SELECT COUNT(*)::int AS c FROM exam_day_attendance da
+         JOIN exam_schedules es ON es.exam_schedule_id = da.exam_schedule_id AND es.tenant_id = da.tenant_id
+         WHERE da.tenant_id = $1 AND es.exam_date = $2::date
+           AND es.deleted_at IS NULL AND es.status <> 'CANCELLED'`,
         [tenantId, today],
       ),
       this.queryOrEmpty<{ c: number }>(

@@ -33,6 +33,10 @@ import { ResultControlService } from './result-control.service';
 import { SemesterResultsService } from './semester-results.service';
 import { ExamCellAuditService } from './exam-cell-audit.service';
 import { ExamCellSessionsService } from './exam-cell-sessions.service';
+import {
+  CreateExamSessionDto,
+  UpdateExamSessionStatusDto,
+} from './dto/exam-session.dto';
 import { ExamCellOperationsService } from './exam-cell-operations.service';
 import { ExamCellEnterpriseService } from './exam-cell-enterprise.service';
 import { ExamCellDevService } from './exam-cell-dev.service';
@@ -892,13 +896,13 @@ export class ExamCellController {
   @Post('sessions')
   createExamSession(
     @Req() req: { user: AuthUser },
-    @Body() dto: Record<string, unknown>,
+    @Body() dto: CreateExamSessionDto,
   ) {
     this.requireAction(req, 'manage_sessions');
     return this.sessions.createSession(
       this.tenant(req),
       req.user.user_id,
-      dto as never,
+      dto,
     );
   }
 
@@ -906,7 +910,7 @@ export class ExamCellController {
   updateExamSessionStatus(
     @Req() req: { user: AuthUser },
     @Param('sessionId', new ParseUUIDPipe()) sessionId: string,
-    @Body() dto: { status: string },
+    @Body() dto: UpdateExamSessionStatusDto,
   ) {
     this.requireAction(req, 'manage_sessions');
     return this.sessions.updateSessionStatus(

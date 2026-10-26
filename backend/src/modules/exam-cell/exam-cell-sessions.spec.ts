@@ -1,171 +1,338 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { ExamCellAuditService } from './exam-cell-audit.service';
 import { ExamCellSessionsService } from './exam-cell-sessions.service';
+import type {
+  CreateExamSessionDto,
+  ExamSessionStatus,
+} from './dto/exam-session.dto';
 
-describe('Examination session dates', () => {
-  function setup() {
-    const query = jest
-      .fn<Promise<Array<{ session_id: string }>>, [string, unknown[]]>()
-      .mockResolvedValue([{ session_id: 'session' }]);
-    const service = new ExamCellSessionsService(
-      {
-        transaction: (work: (manager: unknown) => unknown) => work({ query }),
-      } as never,
-      { log: jest.fn() } as never,
-    );
-    return { query, service };
-  }
-  const input = {
+describe('ExamCellSessionsService', () => {
+  const tenantId = '10000000-0000-4000-8000-000000000001';
+  const actorId = 'actor-a';
+  const sessionId = '20000000-0000-4000-8000-000000000001';
+  const input: CreateExamSessionDto = {
     academic_year: '2026-27',
-    session_name: 'Synthetic session',
-    cycle_type: 'END_SEMESTER' as const,
+    session_name: 'End semester',
+    cycle_type: 'END_SEMESTER',
+    semester: 4,
+    program_label: 'B.Tech',
+    start_date: '2026-11-01',
+    end_date: '2026-11-30',
   };
 
-  it('accepts optional empty dates from the creation form as null', async () => {
-    const { query, service } = setup();
-    await service.createSession('tenant', 'actor', {
+  function setup(
+    options: {
+      currentStatus?: ExamSessionStatus;
+      missing?: boolean;
+      duplicate?: boolean;
+      failOn?: string;
+    } = {},
+  ) {
+    const events: string[] = [];
+    const row = {
+      session_id: sessionId,
+      tenant_id: tenantId,
+      status: options.currentStatus ?? 'DRAFT',
+    };
+    const query = jest.fn((sql: string, params: unknown[]) => {
+      events.push(sql);
+      if (options.failOn && sql.includes(options.failOn)) {
+        return Promise.reject(new Error('required write failed'));
+      }
+      if (sql.includes('SELECT session_id FROM exam_sessions')) {
+        return Promise.resolve(options.duplicate ? [row] : []);
+      }
+      if (sql.includes('SELECT * FROM exam_sessions')) {
+        return Promise.resolve(options.missing ? [] : [{ ...row }]);
+      }
+      if (sql.includes('UPDATE exam_sessions')) {
+        row.status = params[2] as ExamSessionStatus;
+        return Promise.resolve([{ ...row }]);
+      }
+      if (sql.includes('INSERT INTO exam_sessions'))
+        return Promise.resolve([{ ...row }]);
+      return Promise.resolve([]);
+    });
+    const manager = { query };
+    const db = {
+      query: jest.fn().mockResolvedValue([]),
+      transaction: jest.fn(
+        async (callback: (m: typeof manager) => Promise<unknown>) => {
+          try {
+            const result = await callback(manager);
+            events.push('commit');
+            return result;
+          } catch (error) {
+            events.push('rollback');
+            throw error;
+          }
+        },
+      ),
+    };
+    const audit = new ExamCellAuditService(db as never);
+    const auditLog = jest.spyOn(audit, 'log');
+    const service = new ExamCellSessionsService(db as never, audit);
+    return { service, db, query, manager, auditLog, events };
+  }
+
+  it('creates a draft with its audit in one transaction and locks before duplicate lookup', async () => {
+    const { service, db, query, manager, auditLog, events } = setup();
+
+    await expect(
+      service.createSession(tenantId, actorId, input),
+    ).resolves.toMatchObject({ status: 'DRAFT' });
+
+    expect(db.transaction).toHaveBeenCalledTimes(1);
+    expect(db.query).not.toHaveBeenCalled();
+    expect(query.mock.calls[0][0]).toContain('pg_advisory_xact_lock');
+    expect(query.mock.calls[1][0]).toContain('SELECT session_id');
+    expect(query.mock.calls[2]).toEqual([
+      expect.stringContaining("'DRAFT'"),
+      [
+        tenantId,
+        input.academic_year,
+        input.session_name,
+        input.cycle_type,
+        4,
+        'B.Tech',
+        input.start_date,
+        input.end_date,
+        actorId,
+      ],
+    ]);
+    expect(auditLog).toHaveBeenCalledWith(
+      tenantId,
+      actorId,
+      expect.objectContaining({
+        action: 'EXAM_SESSION_CREATED',
+        resource_id: sessionId,
+      }),
+      manager,
+    );
+    expect(events[events.length - 1]).toBe('commit');
+    expect(events[events.length - 2]).toContain('INSERT INTO exam_audit_logs');
+  });
+
+  it('normalizes optional blanks to SQL null without fabricating dates or programme', async () => {
+    const { service, query } = setup();
+    await service.createSession(tenantId, actorId, {
       ...input,
+      program_label: '',
       start_date: '',
       end_date: '',
+      semester: undefined,
     });
-    expect(query.mock.calls[0][1].slice(6, 8)).toEqual([null, null]);
+    expect(query.mock.calls[2][1]).toEqual([
+      tenantId,
+      input.academic_year,
+      input.session_name,
+      input.cycle_type,
+      null,
+      null,
+      null,
+      null,
+      actorId,
+    ]);
+  });
+
+  it('rejects an exact existing configuration before any insert or audit', async () => {
+    const { service, query, auditLog, events } = setup({ duplicate: true });
+    await expect(
+      service.createSession(tenantId, actorId, input),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(query).toHaveBeenCalledTimes(2);
+    expect(auditLog).not.toHaveBeenCalled();
+    expect(events[events.length - 1]).toBe('rollback');
+  });
+
+  it('compares all configuration fields rather than forbidding reused names', async () => {
+    const { service, query } = setup();
+    await service.createSession(tenantId, actorId, input);
+    const [sql, params] = query.mock.calls[1];
+    for (const field of [
+      'academic_year',
+      'session_name',
+      'cycle_type',
+      'semester',
+      'program_label',
+      'start_date',
+      'end_date',
+    ]) {
+      expect(sql).toContain(field);
+    }
+    expect(params).toHaveLength(8);
+    expect(sql).not.toContain('status =');
   });
 
   it.each([
-    { start_date: '2026-02-30' },
-    { start_date: 'not-a-date' },
-    { start_date: '2026-11-20', end_date: '2026-11-10' },
+    { ...input, session_name: '  ' },
+    { ...input, cycle_type: 'INVALID' },
+    { ...input, status: 'ACTIVE' },
+    { ...input, semester: 0 },
+    { ...input, semester: 2147483648 },
+    { ...input, end_date: '2026-10-01' },
+    { ...input, start_date: '2026-02-30' },
   ])(
-    'rejects invalid dates or reversed ranges before database writes: %o',
-    async (dates) => {
-      const { query, service } = setup();
+    'rejects invalid creation before opening a transaction: %j',
+    async (invalid) => {
+      const { service, db } = setup();
       await expect(
-        service.createSession('tenant', 'actor', { ...input, ...dates }),
+        service.createSession(
+          tenantId,
+          actorId,
+          invalid as CreateExamSessionDto,
+        ),
       ).rejects.toBeInstanceOf(BadRequestException);
-      expect(query).not.toHaveBeenCalled();
+      expect(db.transaction).not.toHaveBeenCalled();
     },
   );
-});
 
-describe('Examination session mutation audit atomicity', () => {
-  const input = {
-    academic_year: '2026-27',
-    session_name: 'Synthetic session',
-    cycle_type: 'END_SEMESTER' as const,
-  };
+  it.each(['INSERT INTO exam_sessions', 'INSERT INTO exam_audit_logs'])(
+    'propagates required creation write failure: %s',
+    async (failOn) => {
+      const { service, events } = setup({ failOn });
+      await expect(
+        service.createSession(tenantId, actorId, input),
+      ).rejects.toThrow('required write failed');
+      expect(events).toContain('rollback');
+      expect(events).not.toContain('commit');
+    },
+  );
 
-  function setup(auditFails = false, initialStatus?: string) {
-    const outsideQuery = jest.fn();
-    let committedSessions = initialStatus
-      ? [{ session_id: 'session', status: initialStatus }]
-      : [];
-    let committedAudits: unknown[][] = [];
-    const transaction = jest.fn(
-      async (work: (manager: unknown) => Promise<unknown>) => {
-        const sessions = committedSessions.map((row) => ({ ...row }));
-        const audits = [...committedAudits];
-        const query = jest.fn((sql: string, params: unknown[]) =>
-          Promise.resolve().then(() => {
-            if (sql.includes('INSERT INTO exam_sessions')) {
-              const row = { session_id: 'session', status: String(params[8]) };
-              sessions.push(row);
-              return [row];
-            }
-            if (sql.includes('UPDATE exam_sessions')) {
-              const row = sessions.find(
-                (item) => item.session_id === params[0],
-              );
-              if (!row) return [];
-              row.status = String(params[2]);
-              return [row];
-            }
-            if (sql.includes('INSERT INTO exam_audit_logs')) {
-              if (auditFails) throw new Error('audit write failed');
-              audits.push(params);
-              return [];
-            }
-            throw new Error(`Unexpected transaction query: ${sql}`);
-          }),
-        );
-        const result = await work({ query });
-        committedSessions = sessions;
-        committedAudits = audits;
-        return result;
-      },
-    );
-    const db = { query: outsideQuery, transaction };
-    const service = new ExamCellSessionsService(
-      db as never,
-      new ExamCellAuditService(db as never),
-    );
-    return {
-      service,
-      outsideQuery,
-      transaction,
-      state: () => ({ sessions: committedSessions, audits: committedAudits }),
-    };
-  }
+  it.each<[ExamSessionStatus, ExamSessionStatus]>([
+    ['DRAFT', 'OPEN'],
+    ['OPEN', 'ACTIVE'],
+    ['ACTIVE', 'CLOSED'],
+  ])(
+    'allows existing workflow transition %s → %s with tenant row lock and transactional audit',
+    async (from, to) => {
+      const { service, db, query, manager, auditLog } = setup({
+        currentStatus: from,
+      });
+      await expect(
+        service.updateSessionStatus(tenantId, sessionId, actorId, to),
+      ).resolves.toMatchObject({ status: to });
+      expect(db.query).not.toHaveBeenCalled();
+      expect(query.mock.calls[0]).toEqual([
+        expect.stringMatching(/tenant_id = \$2 FOR UPDATE/),
+        [sessionId, tenantId],
+      ]);
+      expect(query.mock.calls[1][1]).toEqual([sessionId, tenantId, to]);
+      expect(auditLog).toHaveBeenCalledWith(
+        tenantId,
+        actorId,
+        expect.objectContaining({
+          old_value: { status: from },
+          new_value: { status: to },
+        }),
+        manager,
+      );
+    },
+  );
 
-  it('commits creation and its audit together, returning the created row', async () => {
-    const test = setup();
+  it.each<[ExamSessionStatus, ExamSessionStatus]>([
+    ['DRAFT', 'ACTIVE'],
+    ['DRAFT', 'CLOSED'],
+    ['OPEN', 'DRAFT'],
+    ['ACTIVE', 'OPEN'],
+    ['CLOSED', 'OPEN'],
+    ['CLOSED', 'ARCHIVED'],
+    ['ARCHIVED', 'DRAFT'],
+  ])(
+    'rejects an unsupported transition %s → %s without writes',
+    async (from, to) => {
+      const { service, query, auditLog } = setup({ currentStatus: from });
+      await expect(
+        service.updateSessionStatus(tenantId, sessionId, actorId, to),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(query).toHaveBeenCalledTimes(1);
+      expect(auditLog).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each<ExamSessionStatus>(['DRAFT', 'OPEN', 'ACTIVE', 'CLOSED', 'ARCHIVED'])(
+    'does not duplicate a same-state %s request or audit',
+    async (status) => {
+      const { service, query, auditLog } = setup({ currentStatus: status });
+      await expect(
+        service.updateSessionStatus(tenantId, sessionId, actorId, status),
+      ).resolves.toMatchObject({ status });
+      expect(query).toHaveBeenCalledTimes(1);
+      expect(auditLog).not.toHaveBeenCalled();
+    },
+  );
+
+  it('rejects a missing or other-tenant session with no writes', async () => {
+    const { service, query, auditLog } = setup({ missing: true });
     await expect(
-      test.service.createSession('tenant', 'actor', input),
-    ).resolves.toEqual({
-      session_id: 'session',
-      status: 'DRAFT',
-    });
-    expect(test.state().sessions).toHaveLength(1);
-    expect(test.state().audits).toHaveLength(1);
-    expect(test.state().audits[0].slice(0, 5)).toEqual([
-      'tenant',
-      'actor',
-      'EXAM_SESSION_CREATED',
-      'exam_session',
-      'session',
-    ]);
-    expect(test.transaction).toHaveBeenCalledTimes(1);
-    expect(test.outsideQuery).not.toHaveBeenCalled();
-  });
-
-  it('rolls back session creation if its audit cannot be written', async () => {
-    const test = setup(true);
-    await expect(
-      test.service.createSession('tenant', 'actor', input),
-    ).rejects.toThrow('audit write failed');
-    expect(test.state()).toEqual({ sessions: [], audits: [] });
-    expect(test.outsideQuery).not.toHaveBeenCalled();
-  });
-
-  it('commits a status change and audit together, returning a row object', async () => {
-    const test = setup(false, 'DRAFT');
-    await expect(
-      test.service.updateSessionStatus('tenant', 'session', 'actor', 'ACTIVE'),
-    ).resolves.toEqual({
-      session_id: 'session',
-      status: 'ACTIVE',
-    });
-    expect(test.state().audits).toHaveLength(1);
-    expect(test.outsideQuery).not.toHaveBeenCalled();
-  });
-
-  it('rolls back the status change if its audit cannot be written', async () => {
-    const test = setup(true, 'DRAFT');
-    await expect(
-      test.service.updateSessionStatus('tenant', 'session', 'actor', 'ACTIVE'),
-    ).rejects.toThrow('audit write failed');
-    expect(test.state()).toEqual({
-      sessions: [{ session_id: 'session', status: 'DRAFT' }],
-      audits: [],
-    });
-    expect(test.outsideQuery).not.toHaveBeenCalled();
-  });
-
-  it('does not write an audit when the requested session does not exist', async () => {
-    const test = setup();
-    await expect(
-      test.service.updateSessionStatus('tenant', 'missing', 'actor', 'ACTIVE'),
+      service.updateSessionStatus(tenantId, sessionId, actorId, 'OPEN'),
     ).rejects.toBeInstanceOf(NotFoundException);
-    expect(test.state()).toEqual({ sessions: [], audits: [] });
-    expect(test.outsideQuery).not.toHaveBeenCalled();
+    expect(query).toHaveBeenCalledTimes(1);
+    expect(auditLog).not.toHaveBeenCalled();
+  });
+
+  it.each(['UPDATE exam_sessions', 'INSERT INTO exam_audit_logs'])(
+    'propagates required transition write failure: %s',
+    async (failOn) => {
+      const { service, events } = setup({ failOn });
+      await expect(
+        service.updateSessionStatus(tenantId, sessionId, actorId, 'OPEN'),
+      ).rejects.toThrow('required write failed');
+      expect(events).toContain('rollback');
+      expect(events).not.toContain('commit');
+    },
+  );
+
+  it('rejects unknown state and missing tenant before opening a transaction', async () => {
+    const { service, db } = setup();
+    await expect(
+      service.updateSessionStatus(tenantId, sessionId, actorId, 'INVALID'),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      service.createSession(' ', actorId, input),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(
+      service.updateSessionStatus('', sessionId, actorId, 'OPEN'),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(db.transaction).not.toHaveBeenCalled();
+  });
+
+  it('rejects malformed authenticated tenant context on reads and writes before database access', async () => {
+    const { service, db } = setup();
+    expect(() => service.listSessions('not-a-tenant-uuid')).toThrow(
+      ForbiddenException,
+    );
+    await expect(
+      service.createSession('not-a-tenant-uuid', actorId, input),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(
+      service.updateSessionStatus(
+        'not-a-tenant-uuid',
+        sessionId,
+        actorId,
+        'OPEN',
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(db.query).not.toHaveBeenCalled();
+    expect(db.transaction).not.toHaveBeenCalled();
+  });
+
+  it('rejects a malformed session ID in direct service calls before database access', async () => {
+    const { service, db } = setup();
+    await expect(
+      service.updateSessionStatus(
+        tenantId,
+        'not-a-session-uuid',
+        actorId,
+        'OPEN',
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(db.query).not.toHaveBeenCalled();
+    expect(db.transaction).not.toHaveBeenCalled();
   });
 });
