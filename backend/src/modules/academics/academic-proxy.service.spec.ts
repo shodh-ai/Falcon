@@ -47,6 +47,7 @@ describe('date-specific substitute class', () => {
     const sql = dataSource.query.mock.calls.find(([query]) =>
       String(query).includes('FROM academic_proxy_requests p'))?.[0];
     expect(sql).toContain('p.tenant_id = $1');
+    expect(sql).toContain("p.status IN ('PENDING_SUBSTITUTE_ACCEPTANCE', 'PENDING_HOD_APPROVAL')");
     expect(sql).toContain('d.dept_id=af.dept_id');
     expect(sql).not.toContain('d.tenant_id');
   });

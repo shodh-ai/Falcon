@@ -1,6 +1,7 @@
 'use client';
 
 import { Select } from '@/components/ui/select';
+import Link from 'next/link';
 import { PublishedTimetableGrid } from '@/components/faculty/PublishedTimetableGrid';
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -99,11 +100,14 @@ type Adjustment = {
 
 type ProxyOffer = {
   proxy_id: string;
+  absent_faculty_id: string;
   proxy_faculty_id: string;
   course_code: string;
   course_name: string;
   absent_faculty_name: string;
+  proxy_faculty_name: string;
   date_of_proxy: string;
+  class_date?: string;
   status: string;
 };
 
@@ -168,8 +172,25 @@ export default function FacultyTimetablePage() {
   const [viewAdjustment, setViewAdjustment] = useState<Adjustment | null>(null);
   const [coverDate, setCoverDate] = useState('');
   const [proxyOffers, setProxyOffers] = useState<ProxyOffer[]>([]);
+  const [proxyLoading, setProxyLoading] = useState(true);
+  const [proxyError, setProxyError] = useState<string | null>(null);
   const [offerBusy, setOfferBusy] = useState<string | null>(null);
   const formDateTime = toDateTimeLocalValue(form.date_part, form.time_part);
+
+  const loadProxyOffers = useCallback(async () => {
+    if (isObserver) return;
+    setProxyLoading(true);
+    try {
+      const offers = await api.get<ProxyOffer[]>('/api/academics/faculty/proxy-requests');
+      if (!Array.isArray(offers)) throw new Error('The substitute inbox returned an invalid response');
+      setProxyOffers(offers);
+      setProxyError(null);
+    } catch (error) {
+      setProxyError(error instanceof Error ? error.message : 'Could not load substitute offers');
+    } finally {
+      setProxyLoading(false);
+    }
+  }, [api, isObserver]);
 
   const loadPageData = useCallback(async () => {
     try {
@@ -182,10 +203,6 @@ export default function FacultyTimetablePage() {
       setScheduleError(null);
       setStats(withFacultyDemoFallback(statsData, facultyDemoTimetableStats()));
       setAdjustments(withFacultyDemoFallback(adjustmentData, facultyDemoAdjustments(), isEmptyArray));
-      if (!isObserver) {
-        const offers = await api.get<ProxyOffer[]>('/api/academics/faculty/proxy-requests').catch(() => []);
-        setProxyOffers(Array.isArray(offers) ? offers : []);
-      }
     } catch {
       setScheduleError('Could not load the published timetable. Please retry; this does not mean there are no classes.');
       setSchedule(withFacultyDemoFallback([], facultyDemoTimetable(), isEmptyArray));
@@ -199,6 +216,22 @@ export default function FacultyTimetablePage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadPageData();
   }, [loadPageData, deptLoading]);
+
+  useEffect(() => {
+    if (isObserver) return;
+    void loadProxyOffers();
+    const timer = window.setInterval(() => void loadProxyOffers(), 30_000);
+    return () => window.clearInterval(timer);
+  }, [isObserver, loadProxyOffers]);
+
+  const incomingOffers = useMemo(
+    () => proxyOffers.filter((offer) => offer.proxy_faculty_id === user?.user_id),
+    [proxyOffers, user?.user_id],
+  );
+  const mySubstituteRequests = useMemo(
+    () => proxyOffers.filter((offer) => offer.absent_faculty_id === user?.user_id),
+    [proxyOffers, user?.user_id],
+  );
 
   const pendingAdjustments = useMemo(
     () => adjustments.filter((a) => a.status.includes('PENDING')),
@@ -314,8 +347,8 @@ export default function FacultyTimetablePage() {
     setOfferBusy(proxyId);
     try {
       await api.patch(`/api/academics/faculty/proxy-requests/${proxyId}/offer`, { action });
-      setProxyOffers(await api.get<ProxyOffer[]>('/api/academics/faculty/proxy-requests'));
-      toast.success(action === 'ACCEPT' ? 'Accepted. Waiting for HOD approval.' : 'Substitute offer declined.');
+      await loadProxyOffers();
+      toast.success(action === 'ACCEPT' ? 'Accepted. HOD approval is still required before you can mark attendance.' : 'Substitute offer declined.');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Could not respond to substitute offer');
     } finally {
@@ -327,8 +360,38 @@ export default function FacultyTimetablePage() {
     <FacultyPageShell>
       <FacultyPageHeader
         title="Timetable"
-        description="Weekly L-T-P schedule, teaching progress, and schedule change requests."
+        description="Your classes, substitute offers, and approved changes."
       />
+
+      {!isObserver && <section id="substitute-offers" aria-label="Substitute offers for you" className="overflow-hidden rounded-2xl border border-sgvu-navy/15 bg-white shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-sgvu-navy/10 bg-sgvu-navy/[0.035] px-4 py-4 sm:px-5">
+          <div>
+            <h2 className="text-base font-bold text-sgvu-navy">Substitute offers for you</h2>
+            <p className="mt-1 text-sm text-muted-foreground">Accept or decline a colleague&apos;s request here. After you accept, the HOD must approve it before the class appears in Mark Attendance.</p>
+          </div>
+          <Button size="sm" variant="outline" disabled={proxyLoading} onClick={() => void loadProxyOffers()}>
+            {proxyLoading ? 'Refreshing…' : 'Refresh offers'}
+          </Button>
+        </div>
+        <div className="space-y-3 p-4 sm:p-5" aria-live="polite">
+          {proxyError && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">Could not load substitute offers: {proxyError}. Use Refresh offers to retry.</div>}
+          {proxyLoading && incomingOffers.length === 0 && !proxyError && <p className="text-sm text-muted-foreground">Loading your offers…</p>}
+          {!proxyLoading && !proxyError && incomingOffers.length === 0 && <p className="text-sm text-muted-foreground">No colleague has offered you a class to cover yet.</p>}
+          {incomingOffers.map((offer) => <div key={offer.proxy_id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-sgvu-navy/10 p-4">
+            <div className="min-w-0">
+              <p className="font-semibold text-sgvu-navy">{offer.course_code} · {offer.course_name}</p>
+              <p className="text-sm text-muted-foreground">{offer.class_date ?? String(offer.date_of_proxy).slice(0, 10)} · For {offer.absent_faculty_name}</p>
+              <p className="mt-1 text-xs font-medium text-sgvu-navy">{offer.status === 'PENDING_SUBSTITUTE_ACCEPTANCE' ? 'Your response is needed' : offer.status === 'PENDING_HOD_APPROVAL' ? 'Accepted · awaiting HOD approval' : offer.status === 'APPROVED' ? 'Approved · attendance access is active for this class' : offer.status.replaceAll('_', ' ')}</p>
+            </div>
+            {offer.status === 'PENDING_SUBSTITUTE_ACCEPTANCE' && <div className="flex gap-2">
+              <Button size="sm" disabled={offerBusy === offer.proxy_id} onClick={() => void answerProxyOffer(offer.proxy_id, 'ACCEPT')}>Accept class</Button>
+              <Button size="sm" variant="outline" disabled={offerBusy === offer.proxy_id} onClick={() => void answerProxyOffer(offer.proxy_id, 'DECLINE')}>Decline</Button>
+            </div>}
+            {offer.status === 'APPROVED' && <Link href="/faculty/attendance" className="rounded-lg bg-sgvu-navy px-3 py-2 text-sm font-semibold text-white">Mark attendance</Link>}
+          </div>)}
+          <p className="text-xs text-muted-foreground">Request sent → Substitute accepts → HOD approves → Attendance access opens for that dated class.</p>
+        </div>
+      </section>}
 
       {stats ? (
         <>
@@ -620,17 +683,13 @@ export default function FacultyTimetablePage() {
           startDate={coverDate}
           endDate={coverDate}
           reason="Faculty-requested class cover"
-          onDone={() => { setCoverDate(''); void loadPageData(); }}
+          onDone={() => { setCoverDate(''); void loadProxyOffers(); void loadPageData(); }}
         />}
         <div className="mt-4 space-y-2">
-          <p className="text-sm font-semibold text-sgvu-navy">My substitute arrangements</p>
-          {proxyOffers.length === 0 && <p className="text-sm text-muted-foreground">No requests yet.</p>}
-          {proxyOffers.map((offer) => <div key={offer.proxy_id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3 text-sm">
-            <span>{offer.course_code} · {String(offer.date_of_proxy).slice(0, 10)} · {offer.absent_faculty_name} · <strong>{offer.status.replaceAll('_', ' ')}</strong></span>
-            {offer.proxy_faculty_id === user?.user_id && offer.status === 'PENDING_SUBSTITUTE_ACCEPTANCE' && <span className="flex gap-2">
-              <Button size="sm" disabled={offerBusy === offer.proxy_id} onClick={() => void answerProxyOffer(offer.proxy_id, 'ACCEPT')}>Accept</Button>
-              <Button size="sm" variant="outline" disabled={offerBusy === offer.proxy_id} onClick={() => void answerProxyOffer(offer.proxy_id, 'DECLINE')}>Decline</Button>
-            </span>}
+          <p className="text-sm font-semibold text-sgvu-navy">Requests you sent</p>
+          {!proxyLoading && !proxyError && mySubstituteRequests.length === 0 && <p className="text-sm text-muted-foreground">No substitute requests sent yet.</p>}
+          {mySubstituteRequests.map((offer) => <div key={offer.proxy_id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3 text-sm">
+            <span>{offer.course_code} · {String(offer.date_of_proxy).slice(0, 10)} · Proposed: {offer.proxy_faculty_name} · <strong>{offer.status.replaceAll('_', ' ')}</strong></span>
           </div>)}
         </div>
       </FacultyPanel>}
