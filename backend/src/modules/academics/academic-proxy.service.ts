@@ -350,7 +350,7 @@ export class AcademicProxyService {
         `SELECT d.hod_user_id,s.dean_user_id,p.requested_by_user_id
          FROM academic_proxy_requests p
          JOIN users u ON u.user_id=p.absent_faculty_id AND u.tenant_id=p.tenant_id
-         LEFT JOIN departments d ON d.dept_id=u.dept_id AND d.tenant_id=u.tenant_id
+         LEFT JOIN departments d ON d.dept_id=u.dept_id
          LEFT JOIN schools s ON s.school_id=d.school_id
          WHERE p.tenant_id=$1 AND p.proxy_id=$2::uuid`,
         [tenantId, proxyId],
@@ -400,7 +400,7 @@ export class AcademicProxyService {
        FROM academic_proxy_requests p
        INNER JOIN users af ON af.user_id = p.absent_faculty_id
        INNER JOIN users pf ON pf.user_id = p.proxy_faculty_id
-       LEFT JOIN departments d ON d.dept_id=af.dept_id AND d.tenant_id=p.tenant_id
+       LEFT JOIN departments d ON d.dept_id=af.dept_id
        LEFT JOIN schools s ON s.school_id=d.school_id
        LEFT JOIN academic_timetables t ON t.timetable_id = p.timetable_id
        LEFT JOIN academic_courses c ON c.course_id = p.course_id
@@ -440,7 +440,7 @@ export class AcademicProxyService {
       if (current.status !== 'PENDING_HOD_APPROVAL') throw new BadRequestException('Request is not awaiting HOD approval');
       const [scope] = await manager.query(
         `SELECT 1 FROM users h JOIN roles r ON r.role_id=h.role_id
-         LEFT JOIN departments d ON d.tenant_id=h.tenant_id AND d.dept_id=$3::int
+         LEFT JOIN departments d ON d.dept_id=$3::int
          LEFT JOIN schools s ON s.school_id=d.school_id
          WHERE h.user_id=$1 AND h.tenant_id=$2
            AND h.is_active=true AND r.role_name IN ('HOD','Dean','SuperAdmin')

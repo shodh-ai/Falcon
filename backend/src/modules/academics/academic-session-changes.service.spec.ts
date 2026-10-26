@@ -47,6 +47,18 @@ describe('dated class changes', () => {
     jest.setSystemTime(new Date('2026-10-24T09:00:00Z'));
   });
   afterAll(() => jest.useRealTimers());
+  it('loads pending HOD changes without joining a nonexistent department tenant column', async () => {
+    const { service, dataSource } = setup((sql) =>
+      sql.includes('FROM users u JOIN roles r')
+        ? [{ dept_id: 7, role_name: 'HOD' }] : []);
+    await expect(service.listPendingForHod(HOD,TENANT)).resolves.toEqual([]);
+    const sql = dataSource.query.mock.calls.find(([query]) =>
+      String(query).includes('FROM academic_class_moves m'))?.[0];
+    expect(sql).toContain('m.tenant_id=$1');
+    expect(sql).toContain('d.dept_id=u.dept_id');
+    expect(sql).not.toContain('d.tenant_id');
+  });
+
   it('rejects an original date that is not the class weekday', async () => {
     const { service } = setup(basic);
     await expect(service.propose(OWNER, TENANT, 'SWAP', [{ ...move, source_date: '2026-10-27' }, otherMove], 'Swap'))

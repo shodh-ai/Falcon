@@ -91,7 +91,8 @@ export class AcademicSessionChangesService {
     }
     const rows = await manager.query<Array<{ dept_id: number }>>(
       `SELECT d.dept_id FROM departments d JOIN schools s ON s.school_id=d.school_id
-       WHERE d.tenant_id=$1 AND d.dept_id=ANY($2::int[]) AND s.dean_user_id=$3::uuid`,
+       JOIN users dean ON dean.user_id=s.dean_user_id AND dean.tenant_id=$1
+       WHERE d.dept_id=ANY($2::int[]) AND s.dean_user_id=$3::uuid`,
       [tenantId,expected,deanId],
     );
     if (rows.length !== expected.length) {
@@ -334,7 +335,7 @@ export class AcademicSessionChangesService {
     const hods = await this.dataSource.query<Array<{ hod_user_id: string }>>(
       `SELECT DISTINCT d.hod_user_id FROM academic_class_moves m
        JOIN users u ON u.user_id=m.original_faculty_id AND u.tenant_id=m.tenant_id
-       JOIN departments d ON d.dept_id=u.dept_id AND d.tenant_id=u.tenant_id
+       JOIN departments d ON d.dept_id=u.dept_id
        WHERE m.tenant_id=$1 AND m.change_group_id=$2::uuid AND d.hod_user_id IS NOT NULL`,
       [tenantId,result.change_group_id],
     );
@@ -370,7 +371,7 @@ export class AcademicSessionChangesService {
        FROM academic_class_moves m
        JOIN academic_courses c ON c.course_id=m.course_id AND c.tenant_id=m.tenant_id
        JOIN users u ON u.user_id=m.original_faculty_id AND u.tenant_id=m.tenant_id
-       LEFT JOIN departments d ON d.tenant_id=m.tenant_id AND d.dept_id=u.dept_id
+       LEFT JOIN departments d ON d.dept_id=u.dept_id
        LEFT JOIN schools s ON s.school_id=d.school_id
        WHERE m.tenant_id=$1 AND m.status='PENDING_HOD_APPROVAL'
        GROUP BY m.change_group_id,m.move_type,m.reason,m.requested_by_user_id
