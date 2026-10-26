@@ -1884,6 +1884,18 @@ export class AcademicsController {
     );
   }
 
+  @Patch('faculty/proxy-requests/:proxyId/cancel')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  cancelProxyRequest(
+    @Req() req: { user: AuthUser },
+    @Param('proxyId') proxyId: string,
+    @Body() body: { reason: string },
+  ) {
+    return this.academicProxy.cancelProxyRequest(
+      req.user.user_id, this.resolveTenantId(req.user), proxyId, body.reason,
+    );
+  }
+
   @Patch('faculty/proxy-requests/:proxyId/offer')
   @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
   respondToProxyOffer(

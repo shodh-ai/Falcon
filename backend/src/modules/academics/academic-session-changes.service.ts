@@ -138,13 +138,21 @@ export class AcademicSessionChangesService {
       [tenantId, input.timetable_id, sourceDate],
     );
     if (existing.length) throw new BadRequestException('This dated class already has a pending or approved move');
-    const covered = await manager.query(
-      `SELECT 1 FROM academic_proxy_requests WHERE tenant_id=$1 AND timetable_id=$2::uuid
-         AND date_of_proxy=$3::date AND status IN
+    const covered = await manager.query<Array<{ proxy_id: string; status: string; department_hod_name: string | null }>>(
+      `SELECT p.proxy_id,p.status,hod.name AS department_hod_name
+       FROM academic_proxy_requests p
+       JOIN users af ON af.user_id=p.absent_faculty_id AND af.tenant_id=p.tenant_id
+       LEFT JOIN departments d ON d.dept_id=af.dept_id
+       LEFT JOIN users hod ON hod.user_id=d.hod_user_id AND hod.tenant_id=p.tenant_id
+       WHERE p.tenant_id=$1 AND p.timetable_id=$2::uuid
+         AND p.date_of_proxy=$3::date AND p.status IN
          ('PENDING_SUBSTITUTE_ACCEPTANCE','PENDING_HOD_APPROVAL','APPROVED') LIMIT 1`,
       [tenantId, input.timetable_id, sourceDate],
     );
-    if (covered.length) throw new BadRequestException('Resolve the substitute arrangement before moving this class');
+    if (covered.length) throw new BadRequestException(
+      `Class cover ${covered[0].proxy_id} is ${covered[0].status.replaceAll('_', ' ').toLowerCase()}. ` +
+      `Resolve it in Class cover${covered[0].department_hod_name ? ` with ${covered[0].department_hod_name}` : ' with the source department HOD'} before requesting a swap.`,
+    );
     const attendance = await manager.query(
       `SELECT 1 FROM course_attendance_logs WHERE tenant_id=$1 AND timetable_id=$2::uuid
          AND date=$3::date LIMIT 1`,
