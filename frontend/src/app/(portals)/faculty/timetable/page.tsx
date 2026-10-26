@@ -106,6 +106,7 @@ type ProxyOffer = {
   course_name: string;
   absent_faculty_name: string;
   proxy_faculty_name: string;
+  department_hod_name?: string | null;
   date_of_proxy: string;
   class_date?: string;
   status: string;
@@ -171,10 +172,13 @@ export default function FacultyTimetablePage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [viewAdjustment, setViewAdjustment] = useState<Adjustment | null>(null);
   const [coverDate, setCoverDate] = useState('');
+  const [manageAction, setManageAction] = useState<'adjust' | 'substitute' | 'swap' | null>(null);
   const [proxyOffers, setProxyOffers] = useState<ProxyOffer[]>([]);
   const [proxyLoading, setProxyLoading] = useState(true);
   const [proxyError, setProxyError] = useState<string | null>(null);
   const [offerBusy, setOfferBusy] = useState<string | null>(null);
+  const [cancellingCoverId, setCancellingCoverId] = useState<string | null>(null);
+  const [cancelCoverReason, setCancelCoverReason] = useState('');
   const formDateTime = toDateTimeLocalValue(form.date_part, form.time_part);
 
   const loadProxyOffers = useCallback(async () => {
@@ -219,7 +223,7 @@ export default function FacultyTimetablePage() {
 
   useEffect(() => {
     if (isObserver) return;
-    void loadProxyOffers();
+    queueMicrotask(() => void loadProxyOffers());
     const timer = window.setInterval(() => void loadProxyOffers(), 30_000);
     return () => window.clearInterval(timer);
   }, [isObserver, loadProxyOffers]);
@@ -356,6 +360,19 @@ export default function FacultyTimetablePage() {
     }
   }
 
+  async function cancelMyCover(proxyId: string) {
+    if (!cancelCoverReason.trim()) { toast.error('Enter a reason for cancelling the substitute offer'); return; }
+    setOfferBusy(proxyId);
+    try {
+      await api.patch(`/api/academics/faculty/proxy-requests/${proxyId}/cancel`, { reason: cancelCoverReason.trim() });
+      await loadProxyOffers();
+      setCancellingCoverId(null); setCancelCoverReason('');
+      toast.success('Pending substitute offer cancelled');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not cancel substitute offer');
+    } finally { setOfferBusy(null); }
+  }
+
   return (
     <FacultyPageShell>
       <FacultyPageHeader
@@ -363,7 +380,129 @@ export default function FacultyTimetablePage() {
         description="Your classes, substitute offers, and approved changes."
       />
 
-      {!isObserver && <section id="substitute-offers" aria-label="Substitute offers for you" className="overflow-hidden rounded-2xl border border-sgvu-navy/15 bg-white shadow-sm">
+      <FacultyPanel
+        title="Weekly schedule"
+        count={schedule.length}
+        description="Your recurring published teaching plan. Select a class to see its details and available actions."
+        contentClassName="p-0"
+      >
+        {scheduleError ? <p role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm">{scheduleError}</p> : schedule.length === 0 ? (
+          <div className="p-4 sm:p-5">
+            <FacultyEmptyState
+              description={
+                courseOptions.length > 0
+                  ? 'Your course allocation is active. The department has not published timetable slots for these courses yet.'
+                  : 'No active courses or timetable slots are assigned yet.'
+              }
+            />
+          </div>
+        ) : (
+          <div>
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/50 bg-background px-4 py-3 sm:px-5">
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-sgvu-navy/5 text-sgvu-navy">
+                  <BookOpen className="h-3.5 w-3.5" />
+                </span>
+                <span><strong className="text-sgvu-navy">{visibleSchedule.length}</strong> of {schedule.length} weekly classes</span>
+              </div>
+              <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                <span className="h-2 w-2 rounded-full bg-sgvu-gold" />
+                Published timetable
+              </div>
+            </div>
+
+            <div className="grid gap-3 border-b border-border/50 bg-muted/20 px-4 py-3 sm:grid-cols-2 sm:px-5">
+              <label className="grid gap-1 text-xs font-semibold text-sgvu-navy">Course
+                <Select value={courseFilter} onChange={(event) => { setCourseFilter(event.target.value); setSelectedSlotId(null); }}>
+                  <option value="">All courses</option>
+                  {scheduleCourses.map(([code, name]) => <option key={code} value={code}>{code} — {name}</option>)}
+                </Select>
+              </label>
+              <label className="grid gap-1 text-xs font-semibold text-sgvu-navy">Section
+                <Select value={sectionFilter} onChange={(event) => { setSectionFilter(event.target.value); setSelectedSlotId(null); }}>
+                  <option value="">All sections</option>
+                  {scheduleSections.map((section) => <option key={section} value={section}>{section}</option>)}
+                </Select>
+              </label>
+            </div>
+
+            {visibleSchedule.length === 0 ? <p className="p-5 text-sm text-muted-foreground">No published classes match these filters.</p> : <div>
+              <div className="min-w-0">
+
+            <div className="divide-y divide-border/50 lg:hidden">
+              {WEEK_DAYS.map((day) => {
+                const dayEntries = visibleSchedule
+                  .filter((entry) => entry.day_of_week === day.val)
+                  .sort((a, b) => a.start_time.localeCompare(b.start_time));
+                return (
+                  <div key={day.val} className="grid gap-3 px-4 py-4 sm:grid-cols-[5rem_1fr] sm:px-5">
+                    <div>
+                      <p className="text-xs font-black uppercase tracking-[0.16em] text-sgvu-navy">{day.label}</p>
+                      <p className="mt-1 text-[11px] text-muted-foreground">
+                        {dayEntries.length} {dayEntries.length === 1 ? 'class' : 'classes'}
+                      </p>
+                    </div>
+                    {dayEntries.length === 0 ? (
+                      <div className="rounded-lg border border-dashed border-border/70 bg-muted/20 px-3 py-3 text-xs text-muted-foreground">
+                        No classes scheduled
+                      </div>
+                    ) : (
+                      <div className="grid gap-2">
+                        {dayEntries.map((entry) => (
+                          <button key={entry.timetable_id} type="button" onClick={() => setSelectedSlotId(entry.timetable_id)}
+                            aria-pressed={selectedSlotId === entry.timetable_id}
+                            className={`w-full rounded-xl border bg-sgvu-navy/[0.035] p-3 text-left shadow-sm ${selectedSlotId === entry.timetable_id ? 'border-sgvu-gold ring-2 ring-sgvu-gold/50' : 'border-sgvu-navy/10'}`}>
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <p className="font-bold text-sgvu-navy">{entry.course_code}</p>
+                                <p className="mt-0.5 text-xs text-foreground/75">{entry.course_name}</p>
+                              </div>
+                              <span className="shrink-0 rounded-md bg-sgvu-gold/15 px-2 py-1 text-[10px] font-bold text-sgvu-navy">
+                                {formatSlotTime(entry.start_time)}
+                              </span>
+                            </div>
+                            <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
+                              <span className="inline-flex items-center gap-1"><Clock className="h-3 w-3" />{formatSlotTime(entry.start_time)}–{formatSlotTime(entry.end_time)}</span>
+                              <span className="inline-flex items-center gap-1"><MapPin className="h-3 w-3" />{entry.room ?? 'Room TBA'}</span>
+                              <span>{entry.section || 'Whole course'} · {/(P|LAB)$/i.test(entry.course_code) ? 'Practical' : 'Class'}</span>
+                              <span>{entry.awaiting_confirmation ? 'Awaiting department confirmation' : 'Published'}</span>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="hidden lg:block"><PublishedTimetableGrid slots={visibleSchedule} selectedId={selectedSlotId} onSelect={(slot) => setSelectedSlotId(slot.timetable_id)} /></div>
+              </div>
+              {selectedSlot && <aside className="border-t border-border/50 bg-slate-50/70 p-4" aria-label="Selected class details">
+                <h3 className="text-sm font-bold text-sgvu-navy">Selected class</h3>
+                {selectedSlot ? <div className="mt-3 space-y-3 text-sm">
+                  <div><p className="font-bold text-sgvu-navy">{selectedSlot.course_name}</p><p className="text-xs text-muted-foreground">{selectedSlot.course_code}</p></div>
+                  <dl className="grid grid-cols-[5rem_1fr] gap-x-2 gap-y-2 text-xs">
+                    <dt className="text-muted-foreground">Day</dt><dd>{WEEK_DAYS.find((day) => day.val === selectedSlot.day_of_week)?.label ?? 'Sun'}</dd>
+                    <dt className="text-muted-foreground">Time</dt><dd>{formatSlotTime(selectedSlot.start_time)}–{formatSlotTime(selectedSlot.end_time)}</dd>
+                    <dt className="text-muted-foreground">Section</dt><dd>{selectedSlot.section || 'Whole course'}</dd>
+                    <dt className="text-muted-foreground">Room</dt><dd>{selectedSlot.room || 'Not specified'}</dd>
+                    <dt className="text-muted-foreground">Status</dt><dd>{selectedSlot.awaiting_confirmation ? 'Awaiting department confirmation' : 'Published'}</dd>
+                  </dl>
+                  {!isObserver && <div className="flex flex-wrap gap-2 border-t pt-3">
+                    <p className="text-xs text-muted-foreground">Class changes require HOD approval. Selecting a class does not reserve a new slot.</p>
+                    <Button size="sm" onClick={() => { setManageAction('substitute'); document.getElementById('faculty-manage-classes')?.scrollIntoView({ behavior: 'smooth' }); }}>Arrange substitute</Button>
+                    <Button size="sm" variant="outline" onClick={() => { setManageAction('swap'); document.getElementById('faculty-manage-classes')?.scrollIntoView({ behavior: 'smooth' }); }}>Swap classes</Button>
+                  </div>}
+                </div> : <p className="mt-3 text-xs text-muted-foreground">Choose a class in the timetable to see its details.</p>}
+              </aside>}
+            </div>}
+          </div>
+        )}
+      </FacultyPanel>
+
+
+      {!isObserver && (proxyError || incomingOffers.some((offer) => offer.status.startsWith('PENDING_'))) && <section id="substitute-offers" aria-label="Substitute offers for you" className="overflow-hidden rounded-2xl border border-sgvu-navy/15 bg-white shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-3 border-b border-sgvu-navy/10 bg-sgvu-navy/[0.035] px-4 py-4 sm:px-5">
           <div>
             <h2 className="text-base font-bold text-sgvu-navy">Substitute offers for you</h2>
@@ -438,129 +577,34 @@ export default function FacultyTimetablePage() {
         </>
       ) : null}
 
-      <FacultyPanel
-        title="Weekly schedule"
-        count={schedule.length}
-        description="Your recurring published teaching plan. Select a class to see its details and available actions."
-        contentClassName="p-0"
-      >
-        {scheduleError ? <p role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm">{scheduleError}</p> : schedule.length === 0 ? (
-          <div className="p-4 sm:p-5">
-            <FacultyEmptyState
-              description={
-                courseOptions.length > 0
-                  ? 'Your course allocation is active. The department has not published timetable slots for these courses yet.'
-                  : 'No active courses or timetable slots are assigned yet.'
-              }
-            />
-          </div>
-        ) : (
-          <div>
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/50 bg-background px-4 py-3 sm:px-5">
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-sgvu-navy/5 text-sgvu-navy">
-                  <BookOpen className="h-3.5 w-3.5" />
-                </span>
-                <span><strong className="text-sgvu-navy">{visibleSchedule.length}</strong> of {schedule.length} weekly classes</span>
-              </div>
-              <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-                <span className="h-2 w-2 rounded-full bg-sgvu-gold" />
-                Published timetable
-              </div>
-            </div>
 
-            <div className="grid gap-3 border-b border-border/50 bg-muted/20 px-4 py-3 sm:grid-cols-2 sm:px-5">
-              <label className="grid gap-1 text-xs font-semibold text-sgvu-navy">Course
-                <Select value={courseFilter} onChange={(event) => { setCourseFilter(event.target.value); setSelectedSlotId(null); }}>
-                  <option value="">All courses</option>
-                  {scheduleCourses.map(([code, name]) => <option key={code} value={code}>{code} — {name}</option>)}
-                </Select>
-              </label>
-              <label className="grid gap-1 text-xs font-semibold text-sgvu-navy">Section
-                <Select value={sectionFilter} onChange={(event) => { setSectionFilter(event.target.value); setSelectedSlotId(null); }}>
-                  <option value="">All sections</option>
-                  {scheduleSections.map((section) => <option key={section} value={section}>{section}</option>)}
-                </Select>
-              </label>
-            </div>
+      {!isObserver && <section id="faculty-manage-classes" className="rounded-xl border bg-white p-4 shadow-sm" aria-label="Manage classes">
+        <h2 className="font-bold text-sgvu-navy">Manage classes</h2>
+        <p className="mt-1 text-sm text-muted-foreground">Choose one action. Requests stay separate from the published weekly timetable until approved.</p>
+        {mySubstituteRequests.filter((offer) => offer.status === 'APPROVED' || offer.status.startsWith('PENDING_')).length > 0 &&
+          <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
+            <p className="font-semibold">Active class cover</p>
+            <p className="text-xs">A pending or approved cover blocks swapping that dated class until it is resolved.</p>
+            <div className="mt-2 space-y-2">{mySubstituteRequests.filter((offer) => offer.status === 'APPROVED' || offer.status.startsWith('PENDING_')).map((offer) =>
+              <div key={offer.proxy_id} className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-white p-2">
+                <span>{offer.course_code} · {String(offer.date_of_proxy).slice(0, 10)} · {offer.proxy_faculty_name} · {offer.status.replaceAll('_', ' ')}</span>
+                {offer.status.startsWith('PENDING_') ? cancellingCoverId === offer.proxy_id ? <div className="flex flex-wrap gap-2">
+                  <Input aria-label="Cancellation reason" placeholder="Reason for cancellation" value={cancelCoverReason} onChange={(event) => setCancelCoverReason(event.target.value)} />
+                  <Button size="sm" disabled={offerBusy === offer.proxy_id || !cancelCoverReason.trim()} onClick={() => void cancelMyCover(offer.proxy_id)}>Confirm cancellation</Button>
+                  <Button size="sm" variant="outline" onClick={() => { setCancellingCoverId(null); setCancelCoverReason(''); }}>Keep offer</Button>
+                </div> : <Button size="sm" variant="outline" onClick={() => { setCancellingCoverId(offer.proxy_id); setCancelCoverReason(''); }}>Cancel offer</Button> :
+                  <span className="text-xs">{offer.department_hod_name || 'Your department HOD'} can withdraw approved cover in Class cover.</span>}
+              </div>)}</div>
+          </div>}
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Button size="sm" variant={manageAction === 'substitute' ? 'default' : 'outline'} onClick={() => setManageAction(manageAction === 'substitute' ? null : 'substitute')}>Arrange substitute</Button>
+          <Button size="sm" variant={manageAction === 'swap' ? 'default' : 'outline'} onClick={() => setManageAction(manageAction === 'swap' ? null : 'swap')}>Swap classes</Button>
+          <Button size="sm" variant={manageAction === 'adjust' ? 'default' : 'outline'} onClick={() => setManageAction(manageAction === 'adjust' ? null : 'adjust')}>Extra or cancel class</Button>
+        </div>
+      </section>}
 
-            {visibleSchedule.length === 0 ? <p className="p-5 text-sm text-muted-foreground">No published classes match these filters.</p> : <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_19rem]">
-              <div className="min-w-0">
-
-            <div className="divide-y divide-border/50 lg:hidden">
-              {WEEK_DAYS.map((day) => {
-                const dayEntries = visibleSchedule
-                  .filter((entry) => entry.day_of_week === day.val)
-                  .sort((a, b) => a.start_time.localeCompare(b.start_time));
-                return (
-                  <div key={day.val} className="grid gap-3 px-4 py-4 sm:grid-cols-[5rem_1fr] sm:px-5">
-                    <div>
-                      <p className="text-xs font-black uppercase tracking-[0.16em] text-sgvu-navy">{day.label}</p>
-                      <p className="mt-1 text-[11px] text-muted-foreground">
-                        {dayEntries.length} {dayEntries.length === 1 ? 'class' : 'classes'}
-                      </p>
-                    </div>
-                    {dayEntries.length === 0 ? (
-                      <div className="rounded-lg border border-dashed border-border/70 bg-muted/20 px-3 py-3 text-xs text-muted-foreground">
-                        No classes scheduled
-                      </div>
-                    ) : (
-                      <div className="grid gap-2">
-                        {dayEntries.map((entry) => (
-                          <button key={entry.timetable_id} type="button" onClick={() => setSelectedSlotId(entry.timetable_id)}
-                            aria-pressed={selectedSlotId === entry.timetable_id}
-                            className={`w-full rounded-xl border bg-sgvu-navy/[0.035] p-3 text-left shadow-sm ${selectedSlotId === entry.timetable_id ? 'border-sgvu-gold ring-2 ring-sgvu-gold/50' : 'border-sgvu-navy/10'}`}>
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="min-w-0">
-                                <p className="font-bold text-sgvu-navy">{entry.course_code}</p>
-                                <p className="mt-0.5 text-xs text-foreground/75">{entry.course_name}</p>
-                              </div>
-                              <span className="shrink-0 rounded-md bg-sgvu-gold/15 px-2 py-1 text-[10px] font-bold text-sgvu-navy">
-                                {formatSlotTime(entry.start_time)}
-                              </span>
-                            </div>
-                            <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
-                              <span className="inline-flex items-center gap-1"><Clock className="h-3 w-3" />{formatSlotTime(entry.start_time)}–{formatSlotTime(entry.end_time)}</span>
-                              <span className="inline-flex items-center gap-1"><MapPin className="h-3 w-3" />{entry.room ?? 'Room TBA'}</span>
-                              <span>{entry.section || 'Whole course'} · {/(P|LAB)$/i.test(entry.course_code) ? 'Practical' : 'Class'}</span>
-                              <span>{entry.awaiting_confirmation ? 'Awaiting department confirmation' : 'Published'}</span>
-                            </div>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-
-            <div className="hidden lg:block"><PublishedTimetableGrid slots={visibleSchedule} selectedId={selectedSlotId} onSelect={(slot) => setSelectedSlotId(slot.timetable_id)} /></div>
-              </div>
-              <aside className="border-t border-border/50 bg-slate-50/70 p-4 lg:border-l lg:border-t-0" aria-label="Selected class details">
-                <h3 className="text-sm font-bold text-sgvu-navy">Selected class</h3>
-                {selectedSlot ? <div className="mt-3 space-y-3 text-sm">
-                  <div><p className="font-bold text-sgvu-navy">{selectedSlot.course_name}</p><p className="text-xs text-muted-foreground">{selectedSlot.course_code}</p></div>
-                  <dl className="grid grid-cols-[5rem_1fr] gap-x-2 gap-y-2 text-xs">
-                    <dt className="text-muted-foreground">Day</dt><dd>{WEEK_DAYS.find((day) => day.val === selectedSlot.day_of_week)?.label ?? 'Sun'}</dd>
-                    <dt className="text-muted-foreground">Time</dt><dd>{formatSlotTime(selectedSlot.start_time)}–{formatSlotTime(selectedSlot.end_time)}</dd>
-                    <dt className="text-muted-foreground">Section</dt><dd>{selectedSlot.section || 'Whole course'}</dd>
-                    <dt className="text-muted-foreground">Room</dt><dd>{selectedSlot.room || 'Not specified'}</dd>
-                    <dt className="text-muted-foreground">Status</dt><dd>{selectedSlot.awaiting_confirmation ? 'Awaiting department confirmation' : 'Published'}</dd>
-                  </dl>
-                  {!isObserver && <div className="space-y-2 border-t pt-3">
-                    <p className="text-xs text-muted-foreground">Class changes require HOD approval. Selecting a class does not reserve a new slot.</p>
-                    <Button size="sm" className="w-full" onClick={() => document.getElementById('faculty-substitute-class')?.scrollIntoView({ behavior: 'smooth' })}>Arrange substitute</Button>
-                    <Button size="sm" variant="outline" className="w-full" onClick={() => document.getElementById('faculty-swap-classes')?.scrollIntoView({ behavior: 'smooth' })}>Swap classes</Button>
-                  </div>}
-                </div> : <p className="mt-3 text-xs text-muted-foreground">Choose a class in the timetable to see its details.</p>}
-              </aside>
-            </div>}
-          </div>
-        )}
-      </FacultyPanel>
-
-      {!isObserver && <div className="grid gap-4 lg:grid-cols-2">
-        <FacultyPanel title="Schedule change request" description="Extra class, cancel, or substitute">
+      {!isObserver && <div className="grid gap-4">
+        {manageAction === 'adjust' && <FacultyPanel title="Schedule change request" description="Extra or cancel class">
           {coursesError && (
             <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
               {coursesError}
@@ -628,7 +672,7 @@ export default function FacultyTimetablePage() {
               {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Submit for HoD approval'}
             </Button>
           </form>
-        </FacultyPanel>
+        </FacultyPanel>}
 
         <FacultyPanel id="falcon-pending-requests" title="My pending requests" count={pendingAdjustments.length}>
           {pendingAdjustments.length === 0 ? (
@@ -670,7 +714,7 @@ export default function FacultyTimetablePage() {
         </FacultyPanel>
       </div>}
 
-      {!isObserver && <FacultyPanel
+      {!isObserver && manageAction === 'substitute' && <FacultyPanel
         id="faculty-substitute-class"
         title="Substitute a specific class"
         description="Propose a colleague for one dated class. They must accept, then your HOD approves. The weekly timetable remains unchanged."
@@ -685,16 +729,9 @@ export default function FacultyTimetablePage() {
           reason="Faculty-requested class cover"
           onDone={() => { setCoverDate(''); void loadProxyOffers(); void loadPageData(); }}
         />}
-        <div className="mt-4 space-y-2">
-          <p className="text-sm font-semibold text-sgvu-navy">Requests you sent</p>
-          {!proxyLoading && !proxyError && mySubstituteRequests.length === 0 && <p className="text-sm text-muted-foreground">No substitute requests sent yet.</p>}
-          {mySubstituteRequests.map((offer) => <div key={offer.proxy_id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3 text-sm">
-            <span>{offer.course_code} · {String(offer.date_of_proxy).slice(0, 10)} · Proposed: {offer.proxy_faculty_name} · <strong>{offer.status.replaceAll('_', ' ')}</strong></span>
-          </div>)}
-        </div>
       </FacultyPanel>}
 
-      {!isObserver && <div id="faculty-swap-classes"><SessionChangePanel slots={schedule.filter((slot) => !slot.awaiting_confirmation)} /></div>}
+      {!isObserver && manageAction === 'swap' && <div id="faculty-swap-classes"><SessionChangePanel slots={schedule.filter((slot) => !slot.awaiting_confirmation)} /></div>}
 
       <FacultyPanel title="Teaching progress by course" count={stats?.courses.length ?? 0}>
         {!stats || stats.courses.length === 0 ? (

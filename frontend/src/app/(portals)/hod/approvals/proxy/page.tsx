@@ -11,7 +11,7 @@ import { useAuthedApi } from '@/lib/api';
 type Row = {
   proxy_id: string;
   date_of_proxy: string;
-  status: 'PENDING_SUBSTITUTE_ACCEPTANCE' | 'PENDING_HOD_APPROVAL';
+  status: 'PENDING_SUBSTITUTE_ACCEPTANCE' | 'PENDING_HOD_APPROVAL' | 'APPROVED';
   course_code: string;
   course_name: string;
   absent_faculty_name: string;
@@ -44,6 +44,8 @@ export default function HodProxyApprovalsPage() {
   const [reason, setReason] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [moves, setMoves] = useState<MoveGroup[]>([]);
+  const [withdrawingId, setWithdrawingId] = useState<string | null>(null);
+  const [withdrawReason, setWithdrawReason] = useState('');
 
   const loadRequests = useCallback(async () => {
     setLoading(true);
@@ -59,7 +61,7 @@ export default function HodProxyApprovalsPage() {
     }
   }, [api]);
 
-  useEffect(() => { void loadRequests(); }, [loadRequests]);
+  useEffect(() => { queueMicrotask(() => void loadRequests()); }, [loadRequests]);
 
   useEffect(() => {
     void api.get<Faculty[]>('/api/academics/hod/proxy/faculty')
@@ -124,8 +126,21 @@ export default function HodProxyApprovalsPage() {
     }
   }
 
+  async function revoke(proxyId: string) {
+    if (!withdrawReason.trim()) { toast.error('Enter a reason for withdrawing class cover'); return; }
+    try {
+      await api.patch(`/api/academics/faculty/proxy-requests/${proxyId}/cancel`, { reason: withdrawReason.trim() });
+      toast.success('Class cover withdrawn. The original faculty and substitute have been notified.');
+      setWithdrawingId(null); setWithdrawReason('');
+      await loadRequests();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not withdraw class cover');
+    }
+  }
+
   const awaitingAcceptance = rows.filter((row) => row.status === 'PENDING_SUBSTITUTE_ACCEPTANCE');
   const awaitingDecision = rows.filter((row) => row.status === 'PENDING_HOD_APPROVAL');
+  const approved = rows.filter((row) => row.status === 'APPROVED');
 
   return (
     <HodPageFrame>
@@ -164,6 +179,20 @@ export default function HodProxyApprovalsPage() {
           ]}
         />
       </section>
+      <section className="mb-5 rounded-xl border bg-white p-4 shadow-sm" aria-label="Approved class cover">
+        <h2 className="font-semibold text-sgvu-navy">Approved class cover ({approved.length})</h2>
+        <p className="mt-1 text-sm text-muted-foreground">These dated arrangements remain active and can block a swap. Withdraw only when cover is no longer needed; recorded attendance prevents withdrawal.</p>
+        {approved.length === 0 ? <p className="mt-3 text-sm text-muted-foreground">No approved cover in your department.</p> :
+          <div className="mt-3 divide-y rounded-lg border">{approved.map((row) => <div key={row.proxy_id} className="flex flex-wrap items-center justify-between gap-3 p-3 text-sm">
+            <div><strong>{row.course_code}</strong> · {String(row.date_of_proxy).slice(0, 10)} · {String(row.start_time).slice(0, 5)}–{String(row.end_time).slice(0, 5)}<br />
+              <span className="text-muted-foreground">{row.absent_faculty_name} → {row.proxy_faculty_name}</span></div>
+            {withdrawingId === row.proxy_id ? <div className="flex flex-wrap items-center gap-2">
+              <Input aria-label="Withdrawal reason" placeholder="Reason for withdrawal" value={withdrawReason} onChange={(event) => setWithdrawReason(event.target.value)} />
+              <Button size="sm" disabled={!withdrawReason.trim()} onClick={() => void revoke(row.proxy_id)}>Confirm withdrawal</Button>
+              <Button size="sm" variant="outline" onClick={() => { setWithdrawingId(null); setWithdrawReason(''); }}>Keep cover</Button>
+            </div> : <Button size="sm" variant="outline" onClick={() => { setWithdrawingId(row.proxy_id); setWithdrawReason(''); }}>Withdraw cover</Button>}
+          </div>)}</div>}
+      </section>
       <section className="mb-5 rounded-xl border bg-white p-4 shadow-sm" aria-label="Offers awaiting substitute response">
         <h2 className="font-semibold text-sgvu-navy">Waiting for substitute ({awaitingAcceptance.length})</h2>
         <p className="mt-1 text-sm text-muted-foreground">The proposed faculty member must accept before this can be approved.</p>
@@ -171,7 +200,12 @@ export default function HodProxyApprovalsPage() {
           <p className="mt-3 text-sm text-muted-foreground">No offers are waiting for a response.</p> :
           <div className="mt-3 divide-y rounded-lg border">{awaitingAcceptance.map((row) => <div key={row.proxy_id} className="flex flex-wrap items-center justify-between gap-2 p-3 text-sm">
             <span><strong>{row.course_code}</strong> · {String(row.date_of_proxy).slice(0, 10)} · {row.absent_faculty_name} → {row.proxy_faculty_name}</span>
-            <span className="rounded-full bg-amber-50 px-2 py-1 text-xs font-medium text-amber-800">Awaiting response</span>
+            <div className="flex items-center gap-2"><span className="rounded-full bg-amber-50 px-2 py-1 text-xs font-medium text-amber-800">Awaiting response</span>
+              {withdrawingId === row.proxy_id ? <div className="flex flex-wrap gap-2">
+                <Input aria-label="Cancellation reason" placeholder="Reason for cancellation" value={withdrawReason} onChange={(event) => setWithdrawReason(event.target.value)} />
+                <Button size="sm" disabled={!withdrawReason.trim()} onClick={() => void revoke(row.proxy_id)}>Confirm cancellation</Button>
+                <Button size="sm" variant="outline" onClick={() => { setWithdrawingId(null); setWithdrawReason(''); }}>Keep offer</Button>
+              </div> : <Button size="sm" variant="outline" onClick={() => { setWithdrawingId(row.proxy_id); setWithdrawReason(''); }}>Cancel offer</Button>}</div>
           </div>)}</div>}
       </section>
       <section className="mb-5 grid gap-3 rounded-xl border bg-white p-4 shadow-sm sm:grid-cols-2" aria-label="Arrange a substitute">

@@ -47,7 +47,7 @@ describe('date-specific substitute class', () => {
     const sql = dataSource.query.mock.calls.find(([query]) =>
       String(query).includes('FROM academic_proxy_requests p'))?.[0];
     expect(sql).toContain('p.tenant_id = $1');
-    expect(sql).toContain("p.status IN ('PENDING_SUBSTITUTE_ACCEPTANCE', 'PENDING_HOD_APPROVAL')");
+    expect(sql).toContain("p.status IN ('PENDING_SUBSTITUTE_ACCEPTANCE', 'PENDING_HOD_APPROVAL', 'APPROVED')");
     expect(sql).toContain('d.dept_id=af.dept_id');
     expect(sql).not.toContain('d.tenant_id');
   });
@@ -147,5 +147,35 @@ describe('date-specific substitute class', () => {
       ? [{ proxy_faculty_id: SUBSTITUTE, status: 'PENDING_SUBSTITUTE_ACCEPTANCE' }] : []);
     await expect(service.actOnProxyOffer(OWNER, TENANT, REQUEST, 'ACCEPT'))
       .rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('requires department approval to withdraw approved cover', async () => {
+    const { service, manager } = setup((sql) => {
+      if (sql.includes('FROM academic_proxy_requests p') && sql.includes('FOR UPDATE OF p')) return [{
+        proxy_id: REQUEST, status: 'APPROVED', timetable_id: SLOT,
+        proxy_date: '2026-10-29', absent_faculty_id: OWNER,
+        proxy_faculty_id: SUBSTITUTE, faculty_dept_id: 7,
+      }];
+      return [];
+    });
+    await expect(service.cancelProxyRequest(OWNER, TENANT, REQUEST, 'Change of plan'))
+      .rejects.toBeInstanceOf(ForbiddenException);
+    expect(manager.query.mock.calls.some(([sql]) => String(sql).includes("status='CANCELLED'"))).toBe(false);
+  });
+
+  it('keeps cover active if attendance was already recorded', async () => {
+    const { service, manager } = setup((sql) => {
+      if (sql.includes('FROM academic_proxy_requests p') && sql.includes('FOR UPDATE OF p')) return [{
+        proxy_id: REQUEST, status: 'APPROVED', timetable_id: SLOT,
+        proxy_date: '2026-10-29', absent_faculty_id: OWNER,
+        proxy_faculty_id: SUBSTITUTE, faculty_dept_id: 7,
+      }];
+      if (sql.includes('SELECT 1 AS one FROM users h')) return [{ one: 1 }];
+      if (sql.includes('FROM course_attendance_logs')) return [{ one: 1 }];
+      return [];
+    });
+    await expect(service.cancelProxyRequest(OWNER, TENANT, REQUEST, 'Change of plan'))
+      .rejects.toThrow('Attendance is already recorded');
+    expect(manager.query.mock.calls.some(([sql]) => String(sql).includes("status='CANCELLED'"))).toBe(false);
   });
 });

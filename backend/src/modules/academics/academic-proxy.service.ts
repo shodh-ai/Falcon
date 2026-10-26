@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -244,11 +245,14 @@ export class AcademicProxyService {
   async listMyProxyRequests(facultyUserId: string, tenantId: string) {
     return this.dataSource.query(
       `SELECT p.*, p.date_of_proxy::text AS class_date, c.course_code, c.course_name,
-              af.name AS absent_faculty_name, pf.name AS proxy_faculty_name
+              af.name AS absent_faculty_name, pf.name AS proxy_faculty_name,
+              hod.name AS department_hod_name
        FROM academic_proxy_requests p
        LEFT JOIN academic_courses c ON c.course_id = p.course_id AND c.tenant_id = p.tenant_id
        LEFT JOIN users af ON af.user_id = p.absent_faculty_id AND af.tenant_id = p.tenant_id
        LEFT JOIN users pf ON pf.user_id = p.proxy_faculty_id AND pf.tenant_id = p.tenant_id
+       LEFT JOIN departments d ON d.dept_id = af.dept_id
+       LEFT JOIN users hod ON hod.user_id = d.hod_user_id AND hod.tenant_id = p.tenant_id
        WHERE p.tenant_id = $1 AND (p.absent_faculty_id = $2 OR p.proxy_faculty_id = $2)
        ORDER BY p.created_at DESC`,
       [tenantId, facultyUserId],
@@ -406,13 +410,81 @@ export class AcademicProxyService {
        LEFT JOIN schools s ON s.school_id=d.school_id
        LEFT JOIN academic_timetables t ON t.timetable_id = p.timetable_id AND t.tenant_id = p.tenant_id
        LEFT JOIN academic_courses c ON c.course_id = p.course_id AND c.tenant_id = p.tenant_id
-       WHERE p.tenant_id = $1 AND p.status IN ('PENDING_SUBSTITUTE_ACCEPTANCE', 'PENDING_HOD_APPROVAL')
+       WHERE p.tenant_id = $1 AND p.status IN ('PENDING_SUBSTITUTE_ACCEPTANCE', 'PENDING_HOD_APPROVAL', 'APPROVED')
          AND ($3::boolean OR af.dept_id = ANY($2::int[])
            OR ($4::boolean AND s.dean_user_id=$5::uuid))
        ORDER BY p.date_of_proxy ASC`,
       [tenantId, deptIds, actor.role_name === 'SuperAdmin',
         actor.role_name === 'Dean', hodUserId],
     );
+  }
+
+  /** Release a dated class cover without deleting its audit trail. The original
+   * faculty can withdraw an unapproved offer; only the department approver can
+   * revoke cover after approval. Attendance makes the arrangement immutable. */
+  async cancelProxyRequest(actorId: string, tenantId: string, proxyId: string, reason: string) {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(proxyId)) {
+      throw new BadRequestException('Invalid substitute request');
+    }
+    if (!reason?.trim()) throw new BadRequestException('Give a reason for cancelling class cover');
+    const result = await this.dataSource.transaction(async (manager) => {
+      const [current] = await manager.query<Array<{
+        proxy_id: string; status: string; tenant_id: string; timetable_id: string;
+        date_of_proxy: string; proxy_date: string; absent_faculty_id: string;
+        proxy_faculty_id: string; faculty_dept_id: number;
+      }>>(
+        `SELECT p.*,p.date_of_proxy::text AS proxy_date,af.dept_id AS faculty_dept_id
+         FROM academic_proxy_requests p JOIN users af ON af.user_id=p.absent_faculty_id AND af.tenant_id=p.tenant_id
+         WHERE p.tenant_id=$1 AND p.proxy_id=$2::uuid FOR UPDATE OF p`,
+        [tenantId, proxyId],
+      );
+      if (!current) throw new NotFoundException('Substitute request not found');
+      if (!['PENDING_SUBSTITUTE_ACCEPTANCE', 'PENDING_HOD_APPROVAL', 'APPROVED'].includes(current.status)) {
+        throw new ConflictException('This substitute request is no longer active');
+      }
+      const [approver] = await manager.query<Array<{ one: number }>>(
+        `SELECT 1 AS one FROM users h JOIN roles r ON r.role_id=h.role_id
+         LEFT JOIN departments d ON d.dept_id=$3::int
+         LEFT JOIN schools s ON s.school_id=d.school_id
+         WHERE h.user_id=$1 AND h.tenant_id=$2 AND h.is_active=true
+           AND (r.role_name='SuperAdmin'
+             OR (r.role_name='Dean' AND s.dean_user_id=$1)
+             OR (r.role_name='HOD' AND (d.hod_user_id=$1 OR h.dept_id=$3::int)))`,
+        [actorId, tenantId, current.faculty_dept_id],
+      );
+      if (current.status === 'APPROVED' ? !approver :
+          !approver && current.absent_faculty_id !== actorId) {
+        throw new ForbiddenException('Only the original faculty or department approver may cancel pending cover; approved cover requires a department approver');
+      }
+      await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))',
+        [`class-move:${tenantId}:${current.proxy_date}`]);
+      await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))',
+        [`proxy:${tenantId}:${current.timetable_id}:${current.proxy_date}`]);
+      const attendance = await manager.query(
+        `SELECT 1 FROM course_attendance_logs WHERE tenant_id=$1 AND timetable_id=$2::uuid
+         AND date=$3::date LIMIT 1`,
+        [tenantId, current.timetable_id, current.proxy_date],
+      );
+      if (attendance.length) throw new ConflictException('Attendance is already recorded; this class cover cannot be cancelled');
+      const [updated] = await manager.query(
+        `UPDATE academic_proxy_requests SET status='CANCELLED',hod_remarks=$3,
+         decided_by_user_id=$4::uuid,updated_at=NOW() WHERE tenant_id=$1 AND proxy_id=$2::uuid RETURNING *`,
+        [tenantId, proxyId, reason.trim(), actorId],
+      );
+      await manager.query(
+        `INSERT INTO system_audit_logs (table_name,record_id,action,old_value,new_value,changed_by_user_id)
+         VALUES ('academic_proxy_requests',$1::uuid,'UPDATE',$2::jsonb,$3::jsonb,$4::uuid)`,
+        [proxyId, JSON.stringify(current), JSON.stringify(updated), actorId],
+      );
+      return { status: 'CANCELLED', absent_faculty_id: current.absent_faculty_id,
+        proxy_faculty_id: current.proxy_faculty_id, date: current.proxy_date };
+    });
+    for (const userId of new Set([result.absent_faculty_id, result.proxy_faculty_id])) {
+      this.notify.leaveApproved({ tenantId, userId, title: 'Class cover cancelled',
+        message: `The substitute arrangement for ${result.date} was cancelled. Check the timetable before marking attendance.`,
+        actionLink: '/faculty/timetable' });
+    }
+    return { proxy_id: proxyId, status: result.status };
   }
 
   async actOnProxyRequest(
