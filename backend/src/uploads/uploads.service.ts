@@ -90,9 +90,7 @@ export class UploadsService {
            AND t.tenant_id = $1 AND t.student_user_id = $2 AND t.status = 'SUCCESS'
          ${
            student
-             ? `UNION ALL SELECT file_url FROM university_policies
-         WHERE tenant_id = $1 AND status = 'ACTIVE'
-         UNION ALL SELECT t.question_paper_url FROM weekly_tests t
+             ? `UNION ALL SELECT t.question_paper_url FROM weekly_tests t
          JOIN student_course_enrollments e ON e.course_id = t.course_id
            AND e.tenant_id = t.tenant_id AND e.student_user_id = $2
            AND e.status = 'ENROLLED' AND e.deleted_at IS NULL
@@ -112,6 +110,32 @@ export class UploadsService {
         )
       )
         return;
+
+      // Campus policies are optional in older tenant schemas. Their missing
+      // table must not prevent a student from opening an authorized test paper
+      // or another file returned by the query above.
+      if (student) {
+        const [policyTable] = await this.dataSource.query<
+          Array<{ relation: string | null }>
+        >("SELECT to_regclass('university_policies') AS relation");
+        if (policyTable?.relation) {
+          const policies = await this.dataSource.query<
+            Array<{ file_reference: string | null }>
+          >(
+            `SELECT file_url AS file_reference FROM university_policies
+             WHERE tenant_id = $1 AND status = 'ACTIVE'`,
+            [tenantId],
+          );
+          if (
+            policies.some(
+              (policy) =>
+                this.canonicalKey(policy.file_reference ?? '', tenantId) ===
+                key,
+            )
+          )
+            return;
+        }
+      }
     } catch {
       // A failed ownership lookup must never become unrestricted storage access.
       throw new NotFoundException('File not found');
