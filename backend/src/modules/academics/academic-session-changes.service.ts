@@ -29,6 +29,12 @@ type Slot = {
   room: string | null;
   section: string | null;
 };
+type CohortAllocation = {
+  course_id: string;
+  academic_year: string;
+  program_name: string | null;
+  semester: string | null;
+};
 type Leg = MoveInput & {
   course_id: string;
   original_faculty_id: string;
@@ -42,6 +48,29 @@ const academicYearForDate = (date: string) => {
   const year = Number(date.slice(0, 4));
   const start = Number(date.slice(5, 7)) >= 7 ? year : year - 1;
   return `${start}-${start + 1}`;
+};
+const sameCohort = (
+  first: { course_id: string; section: string | null; source_date: string },
+  second: { course_id: string; section: string | null; source_date: string },
+  allocations: CohortAllocation[],
+) => {
+  const scope = (row: typeof first) => allocations.filter((item) =>
+    item.course_id === row.course_id && item.academic_year === academicYearForDate(row.source_date));
+  const a = scope(first);
+  const b = scope(second);
+  if (!a.length || !b.length) return false;
+  const valid = (row: CohortAllocation) => row.program_name?.trim() &&
+    parseAllocationSemester(row.semester).semesterNum != null;
+  if ([...a, ...b].some((row) => !valid(row))) return false;
+  const matches = (left: CohortAllocation, right: CohortAllocation) => {
+    const x = parseAllocationSemester(left.semester);
+    const y = parseAllocationSemester(right.semester);
+    return x.semesterNum === y.semesterNum &&
+      programsMatch(left.program_name, right.program_name);
+  };
+  // A and B sections can exchange times if the real rosters and clash checks
+  // permit it. Never treat different programmes or semesters as interchangeable.
+  return a.every((left) => b.every((right) => matches(left, right)));
 };
 const campusToday = () => {
   const parts = new Intl.DateTimeFormat('en-GB', {
@@ -143,7 +172,8 @@ export class AcademicSessionChangesService {
     }
     const existing = await manager.query(
       `SELECT 1 FROM academic_class_moves WHERE tenant_id=$1 AND source_timetable_id=$2::uuid
-         AND source_date=$3::date AND status IN ('PENDING_HOD_APPROVAL','APPROVED') LIMIT 1`,
+         AND source_date=$3::date AND status IN
+           ('PENDING_FACULTY_ACCEPTANCE','PENDING_HOD_APPROVAL','APPROVED') LIMIT 1`,
       [tenantId, input.timetable_id, sourceDate],
     );
     if (existing.length) throw new BadRequestException('This dated class already has a pending or approved move');
@@ -342,6 +372,79 @@ export class AcademicSessionChangesService {
     }
   }
 
+  async swapCandidates(actorId: string, tenantId: string, timetableId: string,
+    sourceDateValue: string, otherDateValue: string) {
+    if (!UUID.test(timetableId || '')) throw new BadRequestException('Choose your first class');
+    const sourceDate = this.date(sourceDateValue);
+    const otherDate = this.date(otherDateValue);
+    if (sourceDate < campusToday() || otherDate < campusToday()) {
+      throw new BadRequestException('Choose future class dates');
+    }
+    const [actor] = await this.dataSource.query<Array<{ dept_id: number | null }>>(
+      `SELECT dept_id FROM users WHERE tenant_id=$1 AND user_id=$2 AND is_active=true`,
+      [tenantId, actorId],
+    );
+    if (!actor?.dept_id) throw new ForbiddenException('A department assignment is required for class swaps');
+    const [source] = await this.dataSource.query<Array<Slot>>(
+      `SELECT t.timetable_id,t.course_id,t.faculty_user_id,u.dept_id AS faculty_dept_id,
+              t.section,t.day_of_week,t.start_time,t.end_time,t.room
+       FROM academic_timetables t JOIN users u ON u.tenant_id=t.tenant_id AND u.user_id=t.faculty_user_id
+       WHERE t.tenant_id=$1 AND t.timetable_id=$2::uuid AND t.deleted_at IS NULL
+         AND t.faculty_user_id=$3::uuid AND u.dept_id=$4::int
+         AND t.day_of_week=EXTRACT(ISODOW FROM $5::date)::int
+         AND (t.valid_from IS NULL OR t.valid_from<=$5::date)
+         AND (t.valid_to IS NULL OR t.valid_to>=$5::date)`,
+      [tenantId, timetableId, actorId, actor.dept_id, sourceDate],
+    );
+    if (!source) throw new NotFoundException('Choose one of your published classes on the first date');
+    const candidates = await this.dataSource.query<Array<Slot & {
+      course_code: string; course_name: string; faculty_name: string;
+    }>>(
+      `SELECT t.timetable_id,t.course_id,t.faculty_user_id,u.dept_id AS faculty_dept_id,
+              t.section,t.day_of_week,t.start_time,t.end_time,t.room,
+              c.course_code,c.course_name,u.name AS faculty_name
+       FROM academic_timetables t
+       JOIN users u ON u.tenant_id=t.tenant_id AND u.user_id=t.faculty_user_id AND u.is_active=true
+       JOIN academic_courses c ON c.tenant_id=t.tenant_id AND c.course_id=t.course_id
+       WHERE t.tenant_id=$1 AND u.dept_id=$2::int AND t.deleted_at IS NULL
+         AND t.day_of_week=EXTRACT(ISODOW FROM $3::date)::int
+         AND (t.valid_from IS NULL OR t.valid_from<=$3::date)
+         AND (t.valid_to IS NULL OR t.valid_to>=$3::date)
+         AND NOT (t.timetable_id=$4::uuid AND $3::date=$5::date)
+         AND NOT EXISTS (SELECT 1 FROM academic_class_moves m
+           WHERE m.tenant_id=t.tenant_id AND m.source_timetable_id=t.timetable_id
+             AND m.source_date=$3::date AND m.status IN
+               ('PENDING_FACULTY_ACCEPTANCE','PENDING_HOD_APPROVAL','APPROVED'))
+         AND NOT EXISTS (SELECT 1 FROM academic_proxy_requests p
+           WHERE p.tenant_id=t.tenant_id AND p.timetable_id=t.timetable_id
+             AND p.date_of_proxy=$3::date AND p.status IN
+               ('PENDING_SUBSTITUTE_ACCEPTANCE','PENDING_HOD_APPROVAL','APPROVED'))
+         AND NOT EXISTS (SELECT 1 FROM course_attendance_logs a
+           WHERE a.tenant_id=t.tenant_id AND a.timetable_id=t.timetable_id AND a.date=$3::date)
+       ORDER BY t.start_time,c.course_code,u.name`,
+      [tenantId, actor.dept_id, otherDate, timetableId, sourceDate],
+    );
+    const allocations = await this.dataSource.query<CohortAllocation[]>(
+      `SELECT course_id,academic_year,program_name,semester FROM academic_course_allocations
+       WHERE tenant_id=$1 AND status='ACTIVE' AND course_id=ANY($2::uuid[])
+         AND academic_year=ANY($3::text[])`,
+      [tenantId, [...new Set([source.course_id, ...candidates.map((row) => row.course_id)])],
+        [...new Set([academicYearForDate(sourceDate), academicYearForDate(otherDate)])]],
+    );
+    const duration = (row: Slot) => Date.parse(`1970-01-01T${row.end_time}Z`) -
+      Date.parse(`1970-01-01T${row.start_time}Z`);
+    const eligible = candidates.filter((row) => duration(row) === duration(source) &&
+      sameCohort({ ...source, source_date: sourceDate },
+        { ...row, source_date: otherDate }, allocations));
+    return { candidates: eligible.map((row) => ({
+      timetable_id: row.timetable_id, course_code: row.course_code,
+      course_name: row.course_name, faculty_name: row.faculty_name,
+      start_time: row.start_time, end_time: row.end_time, room: row.room,
+      section: row.section,
+    })), message: eligible.length ? null :
+      'No class in the same programme and semester with equal duration was found on that date.' };
+  }
+
   async propose(actorId: string, tenantId: string, moveType: MoveType, inputs: MoveInput[], reason: string) {
     // Historical moves remain readable, but new one-way reschedules and
     // multi-class reshuffles are disabled at the API as well as in the UI.
@@ -360,19 +463,30 @@ export class AcademicSessionChangesService {
       if (new Set(legs.map((leg) => `${leg.timetable_id}|${leg.source_date}`)).size !== legs.length) {
         throw new BadRequestException('A class may appear only once in a change group');
       }
-      const isHod = ['HOD','Dean','SuperAdmin'].includes(actor.role_name);
-      if (legs.some((leg) => leg.original_faculty_id !== actorId) && !isHod) {
-        throw new ForbiddenException('Faculty can move only their own classes');
-      }
-      if (isHod && legs.some((leg) => Number(leg.faculty_dept_id) !== Number(actor.dept_id)) &&
-          actor.role_name === 'HOD') {
-        throw new ForbiddenException('HOD can move only classes in their department');
-      }
       if (actor.role_name === 'Dean') {
         await this.assertDeanDepartments(manager, tenantId, actorId, legs.map((leg) => leg.faculty_dept_id));
       }
+      if (!legs.some((leg) => leg.original_faculty_id === actorId)) {
+        throw new ForbiddenException('Choose at least one class that you teach');
+      }
+      if (legs.some((leg) => leg.faculty_dept_id == null ||
+          Number(leg.faculty_dept_id) !== Number(actor.dept_id))) {
+        throw new ForbiddenException('Both classes must belong to your department');
+      }
       if (moveType === 'SWAP') {
         const [a, b] = legs;
+        const allocations = await manager.query<CohortAllocation[]>(
+          `SELECT course_id,academic_year,program_name,semester FROM academic_course_allocations
+           WHERE tenant_id=$1 AND status='ACTIVE' AND course_id=ANY($2::uuid[])
+             AND academic_year=ANY($3::text[])`,
+          [tenantId, [...new Set(legs.map((leg) => leg.course_id))],
+            [...new Set(legs.map((leg) => academicYearForDate(leg.source_date)))]],
+        );
+        if (!sameCohort(a, b, allocations)) {
+          throw new BadRequestException(
+            'Swap classes must serve the same programme and semester; verify both course allocations',
+          );
+        }
         const [first, second] = inputs;
         const [sourceA] = await manager.query<Array<Slot>>(
           `SELECT start_time,end_time,room FROM academic_timetables WHERE tenant_id=$1 AND timetable_id=$2::uuid`,
@@ -391,6 +505,8 @@ export class AcademicSessionChangesService {
       }
       await this.assertNoCollisions(manager, tenantId, legs);
       const groupId = randomUUID();
+      const counterpart = legs.find((leg) => leg.original_faculty_id !== actorId)?.original_faculty_id;
+      const status = counterpart ? 'PENDING_FACULTY_ACCEPTANCE' : 'PENDING_HOD_APPROVAL';
       for (const leg of legs) {
         await manager.query(
           `INSERT INTO academic_class_moves (
@@ -398,14 +514,22 @@ export class AcademicSessionChangesService {
              source_date,target_date,target_start_time,target_end_time,target_room,
              move_type,status,reason,requested_by_user_id
            ) VALUES ($1::uuid,$2,$3::uuid,$4,$5,$6::date,$7::date,$8::time,$9::time,$10,
-             $11,'PENDING_HOD_APPROVAL',$12,$13::uuid)`,
+             $11,$12,$13,$14::uuid)`,
           [groupId,tenantId,leg.timetable_id,leg.course_id,leg.original_faculty_id,
             leg.source_date,leg.target_date,leg.target_start_time,leg.target_end_time,
-            leg.target_room,moveType,reason.trim(),actorId],
+            leg.target_room,moveType,status,reason.trim(),actorId],
         );
       }
-      return { change_group_id: groupId, status: 'PENDING_HOD_APPROVAL', legs: legs.length };
+      return { change_group_id: groupId, status, legs: legs.length, counterpart };
     });
+    if (result.counterpart) {
+      this.notify.approvalRequired({ tenantId, userId: result.counterpart,
+        title: 'A colleague proposes swapping a class with you',
+        message: 'Review the two dated classes. Your acceptance is needed before HOD approval.',
+        actionLink: '/faculty/timetable', requestType: 'CLASS_TIMETABLE_CHANGE',
+      });
+      return result;
+    }
     const hods = await this.dataSource.query<Array<{ hod_user_id: string }>>(
       `SELECT DISTINCT d.hod_user_id FROM academic_class_moves m
        JOIN users u ON u.user_id=m.original_faculty_id AND u.tenant_id=m.tenant_id
@@ -422,10 +546,72 @@ export class AcademicSessionChangesService {
     return result;
   }
 
+  async respondToSwap(actorId: string, tenantId: string, groupId: string,
+    action: 'ACCEPT' | 'DECLINE') {
+    if (!UUID.test(groupId || '') || !['ACCEPT', 'DECLINE'].includes(action)) {
+      throw new BadRequestException('Invalid swap response');
+    }
+    const result = await this.dataSource.transaction(async (manager) => {
+      await this.actorScope(manager, tenantId, actorId);
+      const rows = await manager.query<Array<{
+        status: string; original_faculty_id: string; requested_by_user_id: string;
+      }>>(
+        `SELECT status,original_faculty_id,requested_by_user_id FROM academic_class_moves
+         WHERE tenant_id=$1 AND change_group_id=$2::uuid FOR UPDATE`,
+        [tenantId, groupId],
+      );
+      if (rows.length !== 2 || rows.some((row) => row.status !== 'PENDING_FACULTY_ACCEPTANCE')) {
+        throw new BadRequestException('This swap is no longer awaiting faculty acceptance');
+      }
+      const requester = rows[0].requested_by_user_id;
+      if (requester === actorId || rows.some((row) => row.requested_by_user_id !== requester) ||
+          !rows.some((row) => row.original_faculty_id === actorId)) {
+        throw new ForbiddenException('Only the other class faculty may respond to this swap');
+      }
+      const next = action === 'ACCEPT' ? 'PENDING_HOD_APPROVAL' : 'REJECTED';
+      await manager.query(
+        `UPDATE academic_class_moves SET status=$3,counterpart_responded_by_user_id=$4::uuid,
+           counterpart_responded_at=NOW(),counterpart_response=$5
+         WHERE tenant_id=$1 AND change_group_id=$2::uuid
+             AND status='PENDING_FACULTY_ACCEPTANCE'`,
+        [tenantId, groupId, next, actorId, action],
+      );
+      return { change_group_id: groupId, status: next, requester };
+    });
+    if (action === 'ACCEPT') {
+      const hods = await this.dataSource.query<Array<{ hod_user_id: string }>>(
+        `SELECT DISTINCT d.hod_user_id FROM academic_class_moves m
+         JOIN users u ON u.user_id=m.original_faculty_id AND u.tenant_id=m.tenant_id
+         JOIN departments d ON d.dept_id=u.dept_id
+         WHERE m.tenant_id=$1 AND m.change_group_id=$2::uuid AND d.hod_user_id IS NOT NULL`,
+        [tenantId, groupId],
+      );
+      for (const hod of hods) this.notify.approvalRequired({
+        tenantId, userId: hod.hod_user_id,
+        title: 'Accepted class swap awaits HOD approval',
+        message: 'Both faculty are ready; review the clash-checked dated class swap.',
+        actionLink: '/hod/approvals/proxy', requestType: 'CLASS_TIMETABLE_CHANGE',
+      });
+    }
+    this.notify.timetableChanged({
+      tenantId, userId: result.requester, courseName: 'Your proposed swap',
+      changeSummary: action === 'ACCEPT'
+        ? 'The other faculty accepted. The HOD will review the request.'
+        : 'The other faculty declined. No classes were changed.',
+      actionLink: '/faculty/timetable',
+    });
+    return result;
+  }
+
   async listMy(actorId: string, tenantId: string) {
     return this.dataSource.query(
-      `SELECT m.*,c.course_code,c.course_name
-       FROM academic_class_moves m JOIN academic_courses c ON c.course_id=m.course_id AND c.tenant_id=m.tenant_id
+      `SELECT m.*,c.course_code,c.course_name,u.name AS faculty_name,
+              t.start_time AS original_start_time,t.end_time AS original_end_time,
+              t.room AS original_room
+       FROM academic_class_moves m
+       JOIN academic_courses c ON c.course_id=m.course_id AND c.tenant_id=m.tenant_id
+       JOIN academic_timetables t ON t.timetable_id=m.source_timetable_id AND t.tenant_id=m.tenant_id
+       JOIN users u ON u.user_id=m.original_faculty_id AND u.tenant_id=m.tenant_id
        WHERE m.tenant_id=$1 AND (m.requested_by_user_id=$2 OR m.original_faculty_id=$2)
        ORDER BY m.created_at DESC LIMIT 200`,
       [tenantId,actorId],
@@ -496,6 +682,16 @@ export class AcademicSessionChangesService {
         const legs = rows.map((row) => ({
           ...row, source_date: row.source_date_text, target_date: row.target_date_text,
         }));
+        const allocations = await manager.query<CohortAllocation[]>(
+          `SELECT course_id,academic_year,program_name,semester FROM academic_course_allocations
+           WHERE tenant_id=$1 AND status='ACTIVE' AND course_id=ANY($2::uuid[])
+             AND academic_year=ANY($3::text[])`,
+          [tenantId, [...new Set(legs.map((leg) => leg.course_id))],
+            [...new Set(legs.map((leg) => academicYearForDate(leg.source_date)))]],
+        );
+        if (legs.length !== 2 || !sameCohort(legs[0], legs[1], allocations)) {
+          throw new BadRequestException('The classes no longer have the same programme and semester');
+        }
         const today = campusToday();
         if (legs.some((leg) => leg.source_date < today || leg.target_date < today)) {
           throw new BadRequestException('This class change is now past due; create a new request');

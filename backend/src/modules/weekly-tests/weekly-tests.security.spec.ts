@@ -112,6 +112,9 @@ describe('weekly test student security', () => {
       expect(query.mock.calls[0][0]).toContain('e.tenant_id = t.tenant_id');
       expect(query.mock.calls[0][0]).toContain("e.status = 'ENROLLED'");
       expect(query.mock.calls[0][0]).toContain('e.deleted_at IS NULL');
+      if (method === 'getTestForAttempt') {
+        expect(query.mock.calls[0][0]).toContain('c.course_code, c.course_name');
+      }
       expect(query.mock.calls[0][1].slice(0, 2)).toEqual([tenantId, studentId]);
     },
   );

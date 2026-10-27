@@ -34,6 +34,9 @@ function setup(respond: (sql: string, params?: unknown[]) => unknown[]) {
 
 const basic = (sql: string, params?: unknown[]): unknown[] => {
   if (sql.includes('FROM users u JOIN roles r')) return [{ dept_id: 7, role_name: 'Faculty' }];
+  if (sql.includes('SELECT course_id,academic_year,program_name,semester')) {
+    return [{ course_id: COURSE, academic_year: '2026-2027', program_name: 'BTECH-CSE', semester: 'VI' }];
+  }
   if (sql.includes('FROM academic_timetables t JOIN users u') ||
       sql.includes('SELECT start_time,end_time,room FROM academic_timetables')) {
     return [params?.[1] === SECOND_SLOT ? secondSlot : slot];
@@ -111,6 +114,80 @@ describe('dated class changes', () => {
     expect(result).toMatchObject({ status: 'PENDING_HOD_APPROVAL', legs: 2 });
     expect(manager.query.mock.calls.filter(([sql]) => String(sql).includes('INSERT INTO academic_class_moves'))).toHaveLength(2);
     expect(manager.query.mock.calls.some(([sql]) => String(sql).includes('UPDATE academic_timetables'))).toBe(false);
+  });
+
+  it('routes a same-cohort cross-faculty swap to the other faculty before HOD approval', async () => {
+    const otherFaculty = '55555555-5555-4555-8555-555555555555';
+    const { service, manager, notify } = setup((sql, params) => {
+      if (sql.includes('FROM academic_timetables t JOIN users u') ||
+          sql.includes('SELECT start_time,end_time,room FROM academic_timetables')) {
+        return [params?.[1] === SECOND_SLOT ? { ...secondSlot, section: 'B', faculty_user_id: otherFaculty } : slot];
+      }
+      return basic(sql, params);
+    });
+    await expect(service.propose(OWNER, TENANT, 'SWAP', [move, otherMove], 'Swap'))
+      .resolves.toMatchObject({ status: 'PENDING_FACULTY_ACCEPTANCE', counterpart: otherFaculty });
+    const inserts = manager.query.mock.calls.filter(([sql]) => String(sql).includes('INSERT INTO academic_class_moves'));
+    expect(inserts).toHaveLength(2);
+    expect(inserts.every(([, params]) => params?.[11] === 'PENDING_FACULTY_ACCEPTANCE')).toBe(true);
+    expect(notify.approvalRequired).toHaveBeenCalledWith(expect.objectContaining({ userId: otherFaculty }));
+  });
+
+  it('offers another faculty class in the same programme and semester, including another section', async () => {
+    const otherFaculty = '55555555-5555-4555-8555-555555555555';
+    const { service } = setup((sql, params) => {
+      if (sql.startsWith('SELECT dept_id FROM users')) return [{ dept_id: 7 }];
+      if (sql.includes('FROM academic_timetables t JOIN users u')) return [slot];
+      if (sql.includes('FROM academic_timetables t\n')) return [
+        { ...secondSlot, section: 'B', course_id: OTHER_COURSE, faculty_user_id: otherFaculty,
+          faculty_name: 'Faculty Two', course_code: 'CSY102', course_name: 'Another course' },
+      ];
+      if (sql.includes('SELECT course_id,academic_year,program_name,semester')) return [
+        { course_id: COURSE, academic_year: '2026-2027', program_name: 'BTECH-CSE', semester: 'VI-A' },
+        { course_id: OTHER_COURSE, academic_year: '2026-2027', program_name: 'BTECH-CSE', semester: 'VI-A' },
+      ];
+      return basic(sql, params);
+    });
+    await expect(service.swapCandidates(OWNER, TENANT, SLOT, '2026-10-26', '2026-10-26'))
+      .resolves.toMatchObject({ candidates: [expect.objectContaining({
+        course_code: 'CSY102', faculty_name: 'Faculty Two',
+      })] });
+  });
+
+  it('rejects a swap between different semesters before creating either leg', async () => {
+    const { service, manager } = setup((sql, params) => {
+      if (sql.includes('SELECT course_id,academic_year,program_name,semester')) return [
+        { course_id: COURSE, academic_year: '2026-2027', program_name: 'BTECH-CSE', semester: 'VI' },
+        { course_id: OTHER_COURSE, academic_year: '2026-2027', program_name: 'BTECH-CSE', semester: 'III' },
+      ];
+      if (sql.includes('FROM academic_timetables t JOIN users u')) {
+        return [params?.[1] === SECOND_SLOT ? { ...secondSlot, course_id: OTHER_COURSE } : slot];
+      }
+      return basic(sql, params);
+    });
+    await expect(service.propose(OWNER, TENANT, 'SWAP', [move, otherMove], 'Swap'))
+      .rejects.toThrow('same programme and semester');
+    expect(manager.query.mock.calls.some(([sql]) => String(sql).includes('INSERT INTO academic_class_moves'))).toBe(false);
+  });
+
+  it('only the other faculty can accept a pending cross-faculty swap', async () => {
+    const otherFaculty = '55555555-5555-4555-8555-555555555555';
+    const { service, manager, notify } = setup((sql, params) => {
+      if (sql.includes('FROM academic_class_moves') && sql.includes('FOR UPDATE')) return [
+        { status: 'PENDING_FACULTY_ACCEPTANCE', original_faculty_id: OWNER, requested_by_user_id: OWNER },
+        { status: 'PENDING_FACULTY_ACCEPTANCE', original_faculty_id: otherFaculty, requested_by_user_id: OWNER },
+      ];
+      return basic(sql, params);
+    });
+    await expect(service.respondToSwap(OWNER, TENANT, GROUP, 'ACCEPT'))
+      .rejects.toThrow('Only the other class faculty');
+    await expect(service.respondToSwap(otherFaculty, TENANT, GROUP, 'ACCEPT'))
+      .resolves.toMatchObject({ status: 'PENDING_HOD_APPROVAL' });
+    expect(manager.query.mock.calls.some(([sql, params]) => String(sql).includes('UPDATE academic_class_moves') &&
+      params?.[2] === 'PENDING_HOD_APPROVAL')).toBe(true);
+    expect(manager.query.mock.calls.some(([sql, params]) =>
+      String(sql).includes('counterpart_responded_by_user_id') && params?.[4] === 'ACCEPT')).toBe(true);
+    expect(notify.timetableChanged).toHaveBeenCalledWith(expect.objectContaining({ userId: OWNER }));
   });
 
   it('exchanges a room-assigned Wednesday class with a roomless Thursday class', async () => {
@@ -203,6 +280,31 @@ describe('dated class changes', () => {
     });
     await expect(service.decide(HOD, TENANT, GROUP, 'APPROVE'))
       .rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('blocks HOD approval if a course allocation changed to another semester after the request', async () => {
+    const { service, manager } = setup((sql) => {
+      if (sql.includes('FROM users u JOIN roles r')) return [{ dept_id: 7, role_name: 'HOD' }];
+      if (sql.includes('FROM academic_class_moves m') && sql.includes('FOR UPDATE OF m')) return [
+        { ...move, timetable_id: SLOT, course_id: COURSE, original_faculty_id: OWNER,
+          faculty_dept_id: 7, section: 'A', requested_by_user_id: OWNER,
+          status: 'PENDING_HOD_APPROVAL', source_date_text: move.source_date,
+          target_date_text: move.target_date },
+        { ...otherMove, timetable_id: SECOND_SLOT, course_id: OTHER_COURSE,
+          original_faculty_id: '55555555-5555-4555-8555-555555555555',
+          faculty_dept_id: 7, section: 'B', requested_by_user_id: OWNER,
+          status: 'PENDING_HOD_APPROVAL', source_date_text: otherMove.source_date,
+          target_date_text: otherMove.target_date },
+      ];
+      if (sql.includes('SELECT course_id,academic_year,program_name,semester')) return [
+        { course_id: COURSE, academic_year: '2026-2027', program_name: 'BTECH-CSE', semester: 'VI' },
+        { course_id: OTHER_COURSE, academic_year: '2026-2027', program_name: 'BTECH-CSE', semester: 'V' },
+      ];
+      return [];
+    });
+    await expect(service.decide(HOD, TENANT, GROUP, 'APPROVE'))
+      .rejects.toThrow('no longer have the same programme and semester');
+    expect(manager.query.mock.calls.some(([sql]) => String(sql).includes('UPDATE academic_class_moves'))).toBe(false);
   });
 
   it('does not let a Dean propose changes in another school', async () => {

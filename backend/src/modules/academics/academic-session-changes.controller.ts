@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -20,6 +20,16 @@ export class AcademicSessionChangesController {
     return this.changes.listMy(req.user.user_id, requireTenantId(req.user.tenant_id));
   }
 
+  @Get('swap-candidates')
+  @Roles('Faculty','HOD','Dean','SuperAdmin')
+  swapCandidates(@Req() req: { user: AuthUser },
+    @Query('source_timetable_id') timetableId: string,
+    @Query('source_date') sourceDate: string,
+    @Query('other_date') otherDate: string) {
+    return this.changes.swapCandidates(req.user.user_id, requireTenantId(req.user.tenant_id),
+      timetableId, sourceDate, otherDate);
+  }
+
   @Post()
   @Roles('Faculty','HOD','Dean','SuperAdmin')
   propose(@Req() req: { user: AuthUser }, @Body() body: {
@@ -36,6 +46,14 @@ export class AcademicSessionChangesController {
   }) {
     return this.changes.propose(req.user.user_id, requireTenantId(req.user.tenant_id),
       body.move_type, body.legs, body.reason);
+  }
+
+  @Patch('swap/:groupId/respond')
+  @Roles('Faculty','HOD','Dean','SuperAdmin')
+  respond(@Req() req: { user: AuthUser }, @Param('groupId') groupId: string,
+    @Body() body: { action: 'ACCEPT' | 'DECLINE' }) {
+    return this.changes.respondToSwap(req.user.user_id, requireTenantId(req.user.tenant_id),
+      groupId, body.action);
   }
 
   @Get('hod/pending')

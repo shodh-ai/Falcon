@@ -8,7 +8,7 @@ import WeeklyTestsPage from '@/app/(portals)/student/weekly-tests/page';
 const mocks = vi.hoisted(() => ({
   query: '',
   router: { replace: vi.fn() },
-  api: { get: vi.fn(), post: vi.fn() },
+  api: { get: vi.fn(), getBlob: vi.fn(), post: vi.fn() },
   toast: { error: vi.fn(), success: vi.fn(), info: vi.fn() },
 }));
 
@@ -28,7 +28,10 @@ vi.mock('@/components/student/StudentTabBar', () => ({
 }));
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  vi.resetAllMocks();
+  mocks.api.getBlob.mockResolvedValue(new Blob(['%PDF-1.7'], { type: 'application/pdf' }));
+  URL.createObjectURL = vi.fn(() => 'blob:weekly-test-paper');
+  URL.revokeObjectURL = vi.fn();
   mocks.query = '';
   Object.defineProperty(document, 'fullscreenElement', { configurable: true, value: null });
   Object.defineProperty(document.documentElement, 'requestFullscreen', { configurable: true, value: vi.fn().mockResolvedValue(undefined) });
@@ -64,6 +67,11 @@ describe('student workflow reliability', () => {
       render(<Suspense fallback={<div>Loading route</div>}><AttemptTestPage params={params} /></Suspense>);
       await params;
     });
+    await waitFor(() => expect(mocks.api.getBlob).toHaveBeenCalledWith(
+      '/api/uploads/download?path=%2Fuploads%2Fpaper.pdf',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    ));
+    await waitFor(() => expect(screen.getByRole('button', { name: /Enter Full Screen/ })).toBeEnabled());
     await act(async () => {
       fireEvent.click(await screen.findByRole('button', { name: /Enter Full Screen/ }));
     });
@@ -76,7 +84,7 @@ describe('student workflow reliability', () => {
     await startAttempt();
     const paper = screen.getByTitle('Question Paper');
     const src = paper.getAttribute('src');
-    expect(src).toContain('access_token=test-token');
+    expect(src).toBe('blob:weekly-test-paper#toolbar=0');
     fireEvent.click(screen.getAllByRole('radio')[0]);
     expect(paper.getAttribute('src')).toBe(src);
     fireEvent.click(screen.getByRole('button', { name: 'Final Submit' }));
@@ -87,6 +95,23 @@ describe('student workflow reliability', () => {
     });
     await act(async () => finish({}));
     expect(mocks.router.replace).toHaveBeenCalledWith('/student/weekly-tests');
+  });
+
+  it('does not start an attempt when the question paper cannot be fetched', async () => {
+    mocks.api.getBlob.mockRejectedValueOnce(new Error('File not found'));
+    mocks.api.get.mockResolvedValue({
+      course_code: 'CS101', course_name: 'Programming', test_type: 'WT1',
+      question_paper_url: '/uploads/paper.pdf', question_count: 10,
+      max_marks: 10, scoring_version: 2,
+    });
+    const params = Promise.resolve({ testId: 'weekly-test' });
+    await act(async () => {
+      render(<Suspense fallback={<div>Loading route</div>}><AttemptTestPage params={params} /></Suspense>);
+      await params;
+    });
+    expect(await screen.findByRole('alert')).toHaveTextContent('File not found');
+    expect(screen.getByRole('button', { name: /Loading question paper/ })).toBeDisabled();
+    expect(document.documentElement.requestFullscreen).not.toHaveBeenCalled();
   });
 
   it('shows and submits exactly the configured number of questions', async () => {
