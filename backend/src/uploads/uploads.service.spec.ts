@@ -85,7 +85,29 @@ describe('Student upload download authorization', () => {
     expect(sql).toContain(
       'r.student_user_id = $2 AND r.submitted_at IS NOT NULL',
     );
-    expect(sql).toContain("WHERE tenant_id = $1 AND status = 'ACTIVE'");
+    expect(sql).not.toContain('university_policies');
+  });
+
+  it('keeps test-paper access independent of an uninstalled policy table', async () => {
+    query.mockResolvedValueOnce([{ file_reference: `/uploads/${key}` }]);
+    await service.assertStudentDownloadAccess(student, key);
+    expect(query).toHaveBeenCalledTimes(1);
+  });
+
+  it('checks policy files only when the optional policy table exists', async () => {
+    query
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ relation: 'university_policies' }])
+      .mockResolvedValueOnce([{ file_reference: `/uploads/${key}` }]);
+    await service.assertStudentDownloadAccess(student, key);
+    expect(query).toHaveBeenCalledTimes(3);
+  });
+
+  it('fails closed for unmatched files when the policy table is absent', async () => {
+    query.mockResolvedValueOnce([]).mockResolvedValueOnce([{ relation: null }]);
+    await expect(
+      service.assertStudentDownloadAccess(student, key),
+    ).rejects.toBeInstanceOf(NotFoundException);
   });
 
   it('gives Applicants only owned references without campus policies or test papers', async () => {
