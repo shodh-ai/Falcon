@@ -7,8 +7,6 @@ import { Loader2, Maximize, AlertTriangle, Send } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAuthedApi } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
-import { getApiBaseUrl } from '@/lib/api-base-url';
-import { withAccessToken } from '@/lib/authenticated-download-url';
 
 type WeeklyTestDetails = {
   course_code: string;
@@ -23,7 +21,7 @@ type WeeklyTestDetails = {
 export default function AttemptTestPage({ params }: { params: Promise<{ testId: string }> }) {
   const router = useRouter();
   const api = useAuthedApi();
-  const { user, token } = useAuth();
+  const { user } = useAuth();
   
   const { testId } = use(params);
   
@@ -34,6 +32,9 @@ export default function AttemptTestPage({ params }: { params: Promise<{ testId: 
   const [submitting, setSubmitting] = useState(false);
   const [answers, setAnswers] = useState<string[]>(Array(10).fill(''));
   const [isLocked, setIsLocked] = useState(false);
+  const [paperUrl, setPaperUrl] = useState<string | null>(null);
+  const [paperError, setPaperError] = useState<string | null>(null);
+  const [paperRetry, setPaperRetry] = useState(0);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const submissionInFlight = useRef(false);
@@ -64,6 +65,30 @@ export default function AttemptTestPage({ params }: { params: Promise<{ testId: 
     })();
     return () => { cancelled = true; };
   }, [api, testId, router]);
+
+  useEffect(() => {
+    if (!test?.question_paper_url) return;
+    const controller = new AbortController();
+    let objectUrl: string | null = null;
+    void api.getBlob(`/api/uploads/download?path=${encodeURIComponent(test.question_paper_url)}`,
+      { signal: controller.signal })
+      .then((blob) => {
+        if (blob.type !== 'application/pdf') throw new Error('The uploaded question paper is not a PDF');
+        if (controller.signal.aborted) return;
+        objectUrl = URL.createObjectURL(blob);
+        setPaperUrl(objectUrl);
+        setPaperError(null);
+      })
+      .catch((error) => {
+        if (!controller.signal.aborted) setPaperError(
+          error instanceof Error ? error.message : 'Could not load the question paper',
+        );
+      });
+    return () => {
+      controller.abort();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [api, test?.question_paper_url, paperRetry]);
 
   const submitTest = useCallback(async (isAutoSubmit = false, violationCount = warnings) => {
     if (submissionInFlight.current) return;
@@ -113,6 +138,7 @@ export default function AttemptTestPage({ params }: { params: Promise<{ testId: 
   }, [hasStarted, submitTest]);
 
   const startTest = async () => {
+    if (!paperUrl) return;
     try {
       await document.documentElement.requestFullscreen();
       setHasStarted(true);
@@ -148,9 +174,16 @@ export default function AttemptTestPage({ params }: { params: Promise<{ testId: 
             <p><strong>Questions:</strong> {test.question_count}</p>
             {test.scoring_version === 2 && <p><strong>Maximum Marks:</strong> {test.max_marks}</p>}
           </div>
-          <Button onClick={startTest} className="w-full h-12 text-lg">
+          {paperError && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+            Question paper could not be opened: {paperError}
+            <Button type="button" variant="outline" size="sm" className="mt-2 block"
+              onClick={() => { setPaperUrl(null); setPaperError(null); setPaperRetry((value) => value + 1); }}>
+              Try loading again
+            </Button>
+          </div>}
+          <Button onClick={startTest} disabled={!paperUrl || !!paperError} className="w-full h-12 text-lg">
             <Maximize className="w-5 h-5 mr-2" />
-            Enter Full Screen & Start
+            {paperUrl ? 'Enter Full Screen & Start' : 'Loading question paper…'}
           </Button>
         </div>
       </div>
@@ -183,7 +216,7 @@ export default function AttemptTestPage({ params }: { params: Promise<{ testId: 
         {/* PDF Viewer (Left) */}
         <div className="flex-1 border-r bg-muted/20 relative">
           <iframe 
-            src={`${withAccessToken(`${getApiBaseUrl()}/api/uploads/download?path=${encodeURIComponent(test.question_paper_url)}`, token)}#toolbar=0`}
+            src={`${paperUrl}#toolbar=0`}
             className="w-full h-full border-0" 
             title="Question Paper"
             onLoad={() => {

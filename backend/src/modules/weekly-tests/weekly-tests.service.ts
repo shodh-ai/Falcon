@@ -13,6 +13,8 @@ import { requireTenantId } from '../../common/utils/require-tenant-id';
 type StudentWeeklyTest = {
   test_id: string;
   course_id: string;
+  course_code?: string;
+  course_name?: string;
   test_type: string;
   question_paper_url: string;
   question_count: number;
@@ -256,7 +258,9 @@ export class WeeklyTestsService {
 
   async getTestForAttempt(tenantId: string, studentId: string, testId: string) {
     const test = await this.dataSource.query<StudentWeeklyTest[]>(
-      `SELECT t.test_id, t.course_id, t.test_type, t.question_paper_url, t.question_count, t.max_marks, t.scoring_version, t.start_time, t.end_time, t.status, t.is_active
+      `SELECT t.test_id, t.course_id, c.course_code, c.course_name, t.test_type,
+              t.question_paper_url, t.question_count, t.max_marks, t.scoring_version,
+              t.start_time, t.end_time, t.status, t.is_active
        FROM weekly_tests t
        JOIN academic_courses c ON c.course_id = t.course_id AND c.tenant_id = t.tenant_id
        WHERE t.test_id = $3 AND t.tenant_id = $1
