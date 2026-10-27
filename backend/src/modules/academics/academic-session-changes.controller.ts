@@ -31,7 +31,7 @@ export class AcademicSessionChangesController {
       target_date: string;
       target_start_time: string;
       target_end_time: string;
-      target_room?: string;
+      target_room?: string | null;
     }>;
   }) {
     return this.changes.propose(req.user.user_id, requireTenantId(req.user.tenant_id),

@@ -112,6 +112,31 @@ describe('dated class changes', () => {
     expect(manager.query.mock.calls.some(([sql]) => String(sql).includes('UPDATE academic_timetables'))).toBe(false);
   });
 
+  it('exchanges a room-assigned Wednesday class with a roomless Thursday class', async () => {
+    const first = { ...slot, day_of_week: 3, start_time: '11:00:00',
+      end_time: '12:00:00', room: 'QA-ROOM-1' };
+    const second = { ...secondSlot, day_of_week: 4, start_time: '09:00:00',
+      end_time: '10:00:00', room: null };
+    const { service, manager } = setup((sql, params) => {
+      if (sql.includes('FROM academic_timetables t JOIN users u') ||
+          sql.includes('SELECT start_time,end_time,room FROM academic_timetables')) {
+        return [params?.[1] === SECOND_SLOT ? second : first];
+      }
+      return basic(sql, params);
+    });
+    const result = await service.propose(OWNER, TENANT, 'SWAP', [
+      { timetable_id: SLOT, source_date: '2026-10-28', target_date: '2026-10-29',
+        target_start_time: '09:00:00', target_end_time: '10:00:00', target_room: null },
+      { timetable_id: SECOND_SLOT, source_date: '2026-10-29', target_date: '2026-10-28',
+        target_start_time: '11:00:00', target_end_time: '12:00:00', target_room: 'QA-ROOM-1' },
+    ], 'Exchange the two dated sessions');
+    expect(result).toMatchObject({ status: 'PENDING_HOD_APPROVAL', legs: 2 });
+    const inserts = manager.query.mock.calls.filter(([sql]) => String(sql).includes('INSERT INTO academic_class_moves'));
+    expect(inserts).toHaveLength(2);
+    expect(inserts.map(([, params]) => params?.[9])).toEqual([null, 'QA-ROOM-1']);
+    expect(manager.query.mock.calls.some(([sql]) => String(sql).includes('UPDATE academic_timetables'))).toBe(false);
+  });
+
   it('rejects a swap that does not exchange exact dated class slots', async () => {
     const { service } = setup(basic);
     await expect(service.propose(OWNER, TENANT, 'SWAP', [

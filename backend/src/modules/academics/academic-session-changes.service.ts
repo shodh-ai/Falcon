@@ -121,12 +121,15 @@ export class AcademicSessionChangesService {
       [tenantId, input.timetable_id, sourceDate],
     );
     if (!slot) throw new NotFoundException('Original class slot is not active on this date');
+    // An explicit null exchanges a room-assigned class into a roomless slot.
+    // Only an omitted target_room means the original room should be retained.
+    const targetRoom = input.target_room === undefined ? slot.room : input.target_room?.trim() || null;
     const seconds = (time: string) => time.split(':').reduce((total, segment) => total * 60 + Number(segment), 0);
     if (seconds(end) - seconds(start) !== seconds(slot.end_time) - seconds(slot.start_time)) {
       throw new BadRequestException('A moved class must retain its scheduled duration');
     }
     if (sourceDate === targetDate && start === slot.start_time && end === slot.end_time &&
-        (input.target_room?.trim() || slot.room) === slot.room) {
+        targetRoom === slot.room) {
       throw new BadRequestException('Choose a new time, date or room for this class');
     }
     if ((new Date(`${sourceDate}T00:00:00Z`).getUTCDay() || 7) !== Number(slot.day_of_week)) {
@@ -165,7 +168,7 @@ export class AcademicSessionChangesService {
       target_date: targetDate,
       target_start_time: start,
       target_end_time: end,
-      target_room: input.target_room?.trim() || slot.room,
+      target_room: targetRoom,
       course_id: slot.course_id,
       original_faculty_id: slot.faculty_user_id,
       faculty_dept_id: slot.faculty_dept_id,
