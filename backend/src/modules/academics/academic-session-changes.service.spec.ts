@@ -282,6 +282,31 @@ describe('dated class changes', () => {
       .rejects.toBeInstanceOf(ForbiddenException);
   });
 
+  it('blocks HOD approval if a course allocation changed to another semester after the request', async () => {
+    const { service, manager } = setup((sql) => {
+      if (sql.includes('FROM users u JOIN roles r')) return [{ dept_id: 7, role_name: 'HOD' }];
+      if (sql.includes('FROM academic_class_moves m') && sql.includes('FOR UPDATE OF m')) return [
+        { ...move, timetable_id: SLOT, course_id: COURSE, original_faculty_id: OWNER,
+          faculty_dept_id: 7, section: 'A', requested_by_user_id: OWNER,
+          status: 'PENDING_HOD_APPROVAL', source_date_text: move.source_date,
+          target_date_text: move.target_date },
+        { ...otherMove, timetable_id: SECOND_SLOT, course_id: OTHER_COURSE,
+          original_faculty_id: '55555555-5555-4555-8555-555555555555',
+          faculty_dept_id: 7, section: 'B', requested_by_user_id: OWNER,
+          status: 'PENDING_HOD_APPROVAL', source_date_text: otherMove.source_date,
+          target_date_text: otherMove.target_date },
+      ];
+      if (sql.includes('SELECT course_id,academic_year,program_name,semester')) return [
+        { course_id: COURSE, academic_year: '2026-2027', program_name: 'BTECH-CSE', semester: 'VI' },
+        { course_id: OTHER_COURSE, academic_year: '2026-2027', program_name: 'BTECH-CSE', semester: 'V' },
+      ];
+      return [];
+    });
+    await expect(service.decide(HOD, TENANT, GROUP, 'APPROVE'))
+      .rejects.toThrow('no longer have the same programme and semester');
+    expect(manager.query.mock.calls.some(([sql]) => String(sql).includes('UPDATE academic_class_moves'))).toBe(false);
+  });
+
   it('does not let a Dean propose changes in another school', async () => {
     const { service, manager } = setup((sql, params) => {
       if (sql.includes('FROM users u JOIN roles r')) return [{ dept_id: 2, role_name: 'Dean' }];
