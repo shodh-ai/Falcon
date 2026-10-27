@@ -83,6 +83,7 @@ type TimetableRow = {
   room: string | null;
   course_code: string;
   course_name: string;
+  faculty_user_id?: string | null;
   section?: string | null;
   awaiting_confirmation?: boolean;
 };
@@ -99,7 +100,7 @@ type Adjustment = {
   proposed_room?: string | null;
 };
 
-type DatedMove = { move_id: string; source_timetable_id: string; source_date: string; target_date: string; target_start_time: string; target_end_time: string; target_room: string | null; course_code: string; course_name: string; status: string };
+type DatedMove = { move_id: string; source_timetable_id: string; source_date: string; target_date: string; target_start_time: string; target_end_time: string; target_room: string | null; course_code: string; course_name: string; status: string; requested_by_user_id: string; original_faculty_id: string };
 
 type ExtraClassSlot = { date: string; start_time: string; end_time: string; status: 'AVAILABLE' | 'CONFLICT' | 'REQUIRES_REVIEW'; reasons: string[]; room: string | null };
 
@@ -250,6 +251,10 @@ export default function FacultyTimetablePage() {
     () => proxyOffers.filter((offer) => offer.absent_faculty_id === user?.user_id),
     [proxyOffers, user?.user_id],
   );
+  const pendingSwapOffers = useMemo(() => datedMoves.filter((move) =>
+    move.status === 'PENDING_FACULTY_ACCEPTANCE' &&
+    move.original_faculty_id === user?.user_id && move.requested_by_user_id !== user?.user_id),
+  [datedMoves, user?.user_id]);
 
   const pendingAdjustments = useMemo(
     () => adjustments.filter((a) => a.status.includes('PENDING')),
@@ -632,7 +637,9 @@ export default function FacultyTimetablePage() {
           </div>}
         <div className="mt-3 flex flex-wrap gap-2">
           <Button size="sm" variant={manageAction === 'substitute' ? 'default' : 'outline'} onClick={() => setManageAction(manageAction === 'substitute' ? null : 'substitute')}>Arrange substitute</Button>
-          <Button size="sm" variant={manageAction === 'swap' ? 'default' : 'outline'} onClick={() => setManageAction(manageAction === 'swap' ? null : 'swap')}>Swap classes</Button>
+          <Button size="sm" variant={manageAction === 'swap' ? 'default' : 'outline'} onClick={() => setManageAction(manageAction === 'swap' ? null : 'swap')}>
+            Swap classes{pendingSwapOffers.length ? ` · ${new Set(pendingSwapOffers.map((move) => move.source_timetable_id)).size} response needed` : ''}
+          </Button>
           <Button size="sm" variant={manageAction === 'adjust' ? 'default' : 'outline'} onClick={() => setManageAction(manageAction === 'adjust' ? null : 'adjust')}>Extra or cancel class</Button>
         </div>
       </section>}
@@ -783,7 +790,8 @@ export default function FacultyTimetablePage() {
         />}
       </FacultyPanel>}
 
-      {!isObserver && manageAction === 'swap' && <div id="faculty-swap-classes"><SessionChangePanel slots={schedule.filter((slot) => !slot.awaiting_confirmation)} /></div>}
+      {!isObserver && manageAction === 'swap' && <div id="faculty-swap-classes"><SessionChangePanel slots={schedule.filter((slot) =>
+        !slot.awaiting_confirmation && (!slot.faculty_user_id || slot.faculty_user_id === user?.user_id))} /></div>}
 
       <FacultyPanel title="Teaching progress by course" count={stats?.courses.length ?? 0}>
         {!stats || stats.courses.length === 0 ? (
