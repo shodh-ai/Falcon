@@ -7,6 +7,7 @@ const HOD = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 const SLOT = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
 const SECOND_SLOT = '22222222-2222-4222-8222-222222222222';
 const COURSE = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+const OTHER_COURSE = '44444444-4444-4444-8444-444444444444';
 const STUDENT = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
 const GROUP = '11111111-1111-4111-8111-111111111111';
 
@@ -135,6 +136,52 @@ describe('dated class changes', () => {
     expect(inserts).toHaveLength(2);
     expect(inserts.map(([, params]) => params?.[9])).toEqual([null, 'QA-ROOM-1']);
     expect(manager.query.mock.calls.some(([sql]) => String(sql).includes('UPDATE academic_timetables'))).toBe(false);
+  });
+
+  const unmappedOverlap = {
+    ...slot, timetable_id: '33333333-3333-4333-8333-333333333333',
+    course_id: OTHER_COURSE, course_code: 'BP102T',
+    faculty_user_id: '55555555-5555-4555-8555-555555555555',
+    date: '2026-10-26', room: 'OTHER-ROOM',
+  };
+  const withUnmappedOverlap = (allocation: string | null, activity = false) =>
+    setup((sql, params) => {
+      if (sql.includes('FROM unnest')) return [unmappedOverlap];
+      if (sql.includes('SELECT course_id,academic_year,program_name,semester')) {
+        return [
+          { course_id: COURSE, academic_year: '2026-2027', program_name: 'BTECH-CSE', semester: 'VI' },
+          ...(allocation ? [{ course_id: OTHER_COURSE, academic_year: '2026-2027',
+            program_name: allocation, semester: allocation === 'B.Pharm' ? 'I' : 'VI' }] : []),
+        ];
+      }
+      if (sql.includes('FROM student_course_enrollments e') && params?.[1] === OTHER_COURSE) return [];
+      if (sql.includes('AS has_enrollment') && sql.includes('AS has_attendance')) {
+        return [{ has_enrollment: false, has_attendance: activity }];
+      }
+      return basic(sql, params);
+    });
+
+  it('does not block an exact swap on a different programme with no mapped roster', async () => {
+    const { service, manager } = withUnmappedOverlap('B.Pharm');
+    await expect(service.propose(OWNER, TENANT, 'SWAP', [move, otherMove], 'Swap'))
+      .resolves.toMatchObject({ status: 'PENDING_HOD_APPROVAL', legs: 2 });
+    expect(manager.query.mock.calls.filter(([sql]) => String(sql).includes('INSERT INTO academic_class_moves'))).toHaveLength(2);
+  });
+
+  it('rejects an unmapped overlapping class in the same programme and semester', async () => {
+    const { service, manager } = withUnmappedOverlap('BTECH-CSE');
+    await expect(service.propose(OWNER, TENANT, 'SWAP', [move, otherMove], 'Swap'))
+      .rejects.toThrow('Cannot verify student groups for overlapping BP102T');
+    expect(manager.query.mock.calls.some(([sql]) => String(sql).includes('INSERT INTO academic_class_moves'))).toBe(false);
+  });
+
+  it('ignores a rosterless unallocated timetable only if it has no enrollment or attendance', async () => {
+    const empty = withUnmappedOverlap(null);
+    await expect(empty.service.propose(OWNER, TENANT, 'SWAP', [move, otherMove], 'Swap'))
+      .resolves.toMatchObject({ status: 'PENDING_HOD_APPROVAL' });
+    const active = withUnmappedOverlap(null, true);
+    await expect(active.service.propose(OWNER, TENANT, 'SWAP', [move, otherMove], 'Swap'))
+      .rejects.toThrow('Cannot verify student groups for overlapping BP102T');
   });
 
   it('rejects a swap that does not exchange exact dated class slots', async () => {

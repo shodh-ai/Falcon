@@ -7,6 +7,7 @@ import {
 import { DataSource, EntityManager } from 'typeorm';
 import { randomUUID } from 'crypto';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
+import { parseAllocationSemester, programsMatch } from './allocation-semester.util';
 
 type MoveType = 'RESCHEDULE' | 'SWAP' | 'RESHUFFLE';
 type MoveInput = {
@@ -37,6 +38,11 @@ type Leg = MoveInput & {
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const TIME = /^([01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/;
+const academicYearForDate = (date: string) => {
+  const year = Number(date.slice(0, 4));
+  const start = Number(date.slice(5, 7)) >= 7 ? year : year - 1;
+  return `${start}-${start + 1}`;
+};
 const campusToday = () => {
   const parts = new Intl.DateTimeFormat('en-GB', {
     timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit',
@@ -202,8 +208,9 @@ export class AcademicSessionChangesService {
     const recurring = await manager.query<Array<{
       timetable_id: string; course_id: string; faculty_user_id: string; date: string;
       start_time: string; end_time: string; room: string | null; section: string | null;
+      course_code: string;
     }>>(
-      `SELECT t.timetable_id,t.course_id,
+      `SELECT t.timetable_id,t.course_id,c.course_code,
               COALESCE(p.proxy_faculty_id,t.faculty_user_id) AS faculty_user_id,
               d.day::text AS date,
               t.start_time,t.end_time,t.room,t.section
@@ -212,6 +219,7 @@ export class AcademicSessionChangesService {
          AND t.day_of_week=EXTRACT(ISODOW FROM d.day)::int AND t.deleted_at IS NULL
          AND (t.valid_from IS NULL OR t.valid_from<=d.day)
          AND (t.valid_to IS NULL OR t.valid_to>=d.day)
+       JOIN academic_courses c ON c.course_id=t.course_id AND c.tenant_id=t.tenant_id
        LEFT JOIN academic_proxy_requests p ON p.tenant_id=t.tenant_id
          AND p.timetable_id=t.timetable_id AND p.date_of_proxy=d.day
          AND p.status='APPROVED'
@@ -223,14 +231,16 @@ export class AcademicSessionChangesService {
     const moved = await manager.query<Array<{
       timetable_id: string; course_id: string; faculty_user_id: string; date: string;
       start_time: string; end_time: string; room: string | null; section: string | null;
+      course_code: string;
     }>>(
-      `SELECT m.source_timetable_id AS timetable_id,m.course_id,
+      `SELECT m.source_timetable_id AS timetable_id,m.course_id,c.course_code,
               COALESCE(p.proxy_faculty_id,m.original_faculty_id) AS faculty_user_id,
               m.target_date::text AS date,
               m.target_start_time AS start_time,m.target_end_time AS end_time,
               m.target_room AS room,t.section
        FROM academic_class_moves m
        JOIN academic_timetables t ON t.timetable_id=m.source_timetable_id AND t.tenant_id=m.tenant_id
+       JOIN academic_courses c ON c.course_id=m.course_id AND c.tenant_id=m.tenant_id
        LEFT JOIN academic_proxy_requests p ON p.tenant_id=m.tenant_id
          AND p.timetable_id=m.source_timetable_id AND p.date_of_proxy=m.target_date
          AND p.status='APPROVED'
@@ -245,12 +255,54 @@ export class AcademicSessionChangesService {
       start_time: leg.target_start_time, end_time: leg.target_end_time,
       room: leg.target_room ?? null, section: leg.section,
     }));
+    const years = [...new Set(targetDates.map(academicYearForDate))];
+    const courseIds = [...new Set([...existing, ...targets].map((row) => row.course_id))];
+    const allocationRows = await manager.query<Array<{
+      course_id: string; academic_year: string; program_name: string | null; semester: string | null;
+    }>>(
+      `SELECT course_id,academic_year,program_name,semester
+       FROM academic_course_allocations
+       WHERE tenant_id=$1 AND status='ACTIVE'
+         AND course_id=ANY($2::uuid[]) AND academic_year=ANY($3::text[])`,
+      [tenantId, courseIds, years],
+    );
+    const scopes = (courseId: string, date: string) => allocationRows.filter((row) =>
+      row.course_id === courseId && row.academic_year === academicYearForDate(date));
+    const provablySeparate = (target: typeof targets[number], other: typeof targets[number]) => {
+      const own = scopes(target.course_id, target.date);
+      const theirs = scopes(other.course_id, other.date);
+      if (!own.length || !theirs.length) return false;
+      const parsed = [...own, ...theirs].map((row) => ({
+        program: row.program_name,
+        semester: parseAllocationSemester(row.semester).semesterNum,
+      }));
+      if (parsed.some((row) => !row.program?.trim() || row.semester == null)) return false;
+      return own.every((a) => theirs.every((b) =>
+        parseAllocationSemester(a.semester).semesterNum !== parseAllocationSemester(b.semester).semesterNum ||
+        !programsMatch(a.program_name, b.program_name)));
+    };
     const rosterCache = new Map<string, Set<string>>();
     const roster = async (row: typeof targets[number]) => {
       const key = `${row.course_id}|${row.section ?? ''}`;
       if (!rosterCache.has(key)) rosterCache.set(key,
         await this.studentIds(manager, tenantId, row.course_id, row.section));
       return rosterCache.get(key)!;
+    };
+    const orphanCache = new Map<string, boolean>();
+    const hasNoCohortEvidence = async (courseId: string) => {
+      if (!orphanCache.has(courseId)) {
+        const [activity] = await manager.query<Array<{
+          has_enrollment: boolean; has_attendance: boolean;
+        }>>(
+          `SELECT EXISTS (SELECT 1 FROM student_course_enrollments
+                          WHERE tenant_id=$1 AND course_id=$2) AS has_enrollment,
+                  EXISTS (SELECT 1 FROM course_attendance_logs
+                          WHERE tenant_id=$1 AND course_id=$2) AS has_attendance`,
+          [tenantId, courseId],
+        );
+        orphanCache.set(courseId, !activity?.has_enrollment && !activity?.has_attendance);
+      }
+      return orphanCache.get(courseId)!;
     };
     for (const target of targets) {
       const ownStudents = await roster(target);
@@ -271,7 +323,18 @@ export class AcademicSessionChangesService {
           throw new BadRequestException('Room is already occupied at the proposed time');
         }
         const otherStudents = await roster(other);
-        if (!otherStudents.size) throw new BadRequestException('Cannot prove student groups are disjoint at the proposed time');
+        if (!otherStudents.size) {
+          // A tenant-wide timetable includes other programmes and orphaned
+          // legacy slots. A missing roster is only safe to disregard when
+          // current allocations prove distinct cohorts, or the course has no
+          // active allocation, enrollment or attendance at all.
+          if (provablySeparate(target, other) ||
+              (!scopes(other.course_id, other.date).length &&
+                await hasNoCohortEvidence(other.course_id))) continue;
+          throw new BadRequestException(
+            `Cannot verify student groups for overlapping ${'course_code' in other ? other.course_code : other.course_id}; map its roster or current allocation`,
+          );
+        }
         if ([...ownStudents].some((id) => otherStudents.has(id))) {
           throw new BadRequestException('Student group has another class at the proposed time');
         }
