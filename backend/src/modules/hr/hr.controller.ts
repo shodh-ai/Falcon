@@ -53,7 +53,11 @@ import { HrWorkflowBuilderService } from './hr-workflow-builder.service';
 import { HrChecklistService } from './hr-checklist.service';
 import { HrOnboardingWorkflowService } from './hr-onboarding-workflow.service';
 import { HrDashboardService } from './hr-dashboard.service';
-import { WORKFORCE_SELF_SERVICE_ROLES } from './hr-workforce.constants';
+import {
+  EXAM_CELL_SELF_SERVICE_ROLES,
+  HR_EMPLOYEE_SELF_SERVICE_ROLES,
+  WORKFORCE_SELF_SERVICE_ROLES,
+} from './hr-workforce.constants';
 import { HrReportsService } from './hr-reports.service';
 import { HrDocumentVaultService } from './hr-document-vault.service';
 import { HrEmployeeBulkService } from './hr-employee-bulk.service';
@@ -221,14 +225,14 @@ export class HrController {
 
   @Get('leaves/my-balances')
   @SkipEntityScope()
-  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
+  @Roles(...HR_EMPLOYEE_SELF_SERVICE_ROLES)
   myLeaveBalances(@Req() req: { user: AuthUser }) {
     return this.hr.listBalances(req.user.user_id);
   }
 
   @Get('payslips/my-payslips')
   @SkipEntityScope()
-  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
+  @Roles(...HR_EMPLOYEE_SELF_SERVICE_ROLES)
   myPayslips(@Req() req: { user: AuthUser }) {
     return this.hr.listMyPayslips(
       req.user.user_id,
@@ -238,7 +242,7 @@ export class HrController {
 
   @Get('payslips/download-requests/mine')
   @SkipEntityScope()
-  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
+  @Roles(...HR_EMPLOYEE_SELF_SERVICE_ROLES)
   myPayslipDownloadRequests(@Req() req: { user: AuthUser }) {
     return this.hr.listMyPayslipDownloadRequests(
       req.user.user_id,
@@ -257,7 +261,7 @@ export class HrController {
 
   @Post('payslips/request-download')
   @SkipEntityScope()
-  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
+  @Roles(...HR_EMPLOYEE_SELF_SERVICE_ROLES)
   requestPayslipDownload(
     @Req() req: { user: AuthUser },
     @Body() body: { period_from: string; period_to: string; reason: string },
@@ -288,7 +292,7 @@ export class HrController {
 
   @Get('payslips/download-requests/:requestId/download')
   @SkipEntityScope()
-  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
+  @Roles(...HR_EMPLOYEE_SELF_SERVICE_ROLES)
   async downloadApprovedPayslipRequest(
     @Req() req: { user: AuthUser },
     @Res({ passthrough: true }) res: Response,
@@ -1138,7 +1142,7 @@ export class HrController {
 
   @Get('attendance/calendar')
   @SkipEntityScope()
-  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
+  @Roles(...HR_EMPLOYEE_SELF_SERVICE_ROLES)
   attendanceCalendar(
     @Req() req: { user: AuthUser },
     @Query('month') month?: string,
@@ -1630,7 +1634,7 @@ export class HrController {
   }
 
   @Get('ess/calendar')
-  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
+  @Roles(...HR_EMPLOYEE_SELF_SERVICE_ROLES)
   async essCalendar(
     @Req() req: { user: AuthUser },
     @Query('month') month?: string,
@@ -2010,7 +2014,7 @@ export class HrController {
   }
 
   @Get('documents/:docId/download')
-  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
+  @Roles(...HR_EMPLOYEE_SELF_SERVICE_ROLES)
   async downloadDocument(
     @Param('docId') docId: string,
     @Req() req: { user: AuthUser },
@@ -2024,7 +2028,7 @@ export class HrController {
   }
 
   @Get('documents/:docId/file')
-  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
+  @Roles(...HR_EMPLOYEE_SELF_SERVICE_ROLES)
   async streamDocumentFile(
     @Param('docId') docId: string,
     @Req() req: { user: AuthUser },
@@ -2195,7 +2199,7 @@ export class HrController {
   }
 
   @Get('ess/documents')
-  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
+  @Roles(...HR_EMPLOYEE_SELF_SERVICE_ROLES)
   async essDocuments(
     @Req() req: { user: AuthUser },
     @Query('entity_id') entityId?: string,
@@ -2206,7 +2210,7 @@ export class HrController {
   }
 
   @Post('ess/documents')
-  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
+  @Roles(...HR_EMPLOYEE_SELF_SERVICE_ROLES)
   async uploadEssDocument(
     @Req() req: { user: AuthUser },
     @Query('entity_id') entityId: string | undefined,
@@ -2221,7 +2225,7 @@ export class HrController {
       req.user.user_id,
       req.user.user_id,
       body,
-      { autoVerify: false },
+      { autoVerify: false, requireUploaderOwnership: true },
     );
   }
 
@@ -2346,14 +2350,14 @@ export class HrController {
   }
 
   @Get('workforce/today')
-  @Roles(...WORKFORCE_SELF_SERVICE_ROLES)
+  @Roles(...WORKFORCE_SELF_SERVICE_ROLES, ...EXAM_CELL_SELF_SERVICE_ROLES)
   workforceToday(@Req() req: { user: AuthUser }) {
     return this.workforce.getTodayWidget(req.user.user_id);
   }
 
   @Post('workforce/requests')
   @SkipEntityScope()
-  @Roles(...WORKFORCE_SELF_SERVICE_ROLES)
+  @Roles(...WORKFORCE_SELF_SERVICE_ROLES, ...EXAM_CELL_SELF_SERVICE_ROLES)
   workforceApply(
     @Req() req: { user: AuthUser },
     @Body()
@@ -2389,7 +2393,7 @@ export class HrController {
 
   @Get('workforce/my-requests')
   @SkipEntityScope()
-  @Roles(...WORKFORCE_SELF_SERVICE_ROLES)
+  @Roles(...WORKFORCE_SELF_SERVICE_ROLES, ...EXAM_CELL_SELF_SERVICE_ROLES)
   workforceMyRequests(@Req() req: { user: AuthUser }) {
     return this.workforce.listMyRequests(
       req.user.user_id,

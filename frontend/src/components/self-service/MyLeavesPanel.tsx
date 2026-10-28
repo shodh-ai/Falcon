@@ -52,7 +52,7 @@ function statusBadgeVariant(status: string): 'default' | 'secondary' | 'destruct
   return 'outline';
 }
 
-export function MyLeavesPanel() {
+export function MyLeavesPanel({ allowDemoFallback = true, enableTeachingProxy = true }: { allowDemoFallback?: boolean; enableTeachingProxy?: boolean } = {}) {
   const api = useAuthedApi();
   const { user, token } = useAuth();
   const [balances, setBalances] = useState<Balance[]>([]);
@@ -74,19 +74,19 @@ export function MyLeavesPanel() {
 
     if (balanceResult.status === 'fulfilled') {
       const b = balanceResult.value;
-      setBalances(withFacultyDemoFallback(b, facultyDemoLeaveBalances() as Balance[], isEmptyArray));
+      setBalances(withFacultyDemoFallback(b, facultyDemoLeaveBalances() as Balance[], isEmptyArray, allowDemoFallback));
     } else {
       setBalances(
-        withFacultyDemoFallback([], facultyDemoLeaveBalances() as Balance[], isEmptyArray),
+        withFacultyDemoFallback([], facultyDemoLeaveBalances() as Balance[], isEmptyArray, allowDemoFallback),
       );
     }
 
     if (requestResult.status === 'fulfilled') {
       const r = requestResult.value;
-      setRequests(withFacultyDemoFallback(r, facultyDemoLeaveRequests() as Request[], isEmptyArray));
+      setRequests(withFacultyDemoFallback(r, facultyDemoLeaveRequests() as Request[], isEmptyArray, allowDemoFallback));
     } else {
       setRequests(
-        withFacultyDemoFallback([], facultyDemoLeaveRequests() as Request[], isEmptyArray),
+        withFacultyDemoFallback([], facultyDemoLeaveRequests() as Request[], isEmptyArray, allowDemoFallback),
       );
     }
 
@@ -151,7 +151,7 @@ export function MyLeavesPanel() {
       setForm({ leave_type: 'CL', start_date: '', end_date: '', start_time: '', end_time: '', reason: '' });
       setPartialDay(false);
       setAttachment(null);
-      if (applyMode === 'LEAVE') {
+      if (applyMode === 'LEAVE' && enableTeachingProxy) {
         setProxyLeaveRange({ start: form.start_date, end: form.end_date });
       }
       await load();
