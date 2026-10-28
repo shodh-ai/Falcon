@@ -459,6 +459,7 @@ export default function FacultyTimetablePage() {
       <FacultyPageHeader
         title="Timetable"
         description="Your classes, substitute offers, and approved changes."
+        actions={<Button asChild variant="outline" size="sm"><Link href="/faculty/profile?tab=workload">View my workload</Link></Button>}
       />
 
       <FacultyPanel
