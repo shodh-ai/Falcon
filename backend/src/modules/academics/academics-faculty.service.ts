@@ -78,6 +78,15 @@ function academicYearForDate(value?: string): string {
   return `${start}-${start + 1}`;
 }
 
+function extraClassId(timetableId?: string): string | null {
+  if (!timetableId?.startsWith('extra:')) return null;
+  const id = timetableId.slice('extra:'.length);
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+    throw new BadRequestException('Invalid extra class session');
+  }
+  return id;
+}
+
 @Injectable()
 export class AcademicsFacultyService {
   constructor(
@@ -96,6 +105,25 @@ export class AcademicsFacultyService {
     private readonly notificationEmitter: NotificationEmitterService,
     private readonly teachingDepartments: FacultyTeachingDepartmentsService,
   ) {}
+
+  private async assertApprovedExtraClass(
+    db: DataSource | EntityManager,
+    tenantId: string,
+    courseId: string,
+    facultyUserId: string,
+    date: string,
+    adjustmentId: string,
+  ) {
+    const [row] = await db.query<Array<{ adjustment_id: string }>>(
+      `SELECT adjustment_id FROM class_adjustments
+       WHERE tenant_id=$1 AND course_id=$2 AND faculty_user_id=$3
+         AND adjustment_id=$4::uuid AND adjustment_type='EXTRA_CLASS'
+         AND status IN ('APPROVED','NOTIFIED')
+         AND (new_date AT TIME ZONE 'Asia/Kolkata')::date=$5::date`,
+      [tenantId, courseId, facultyUserId, adjustmentId, date],
+    );
+    if (!row) throw new ForbiddenException('Extra class is not approved for this faculty, course and date');
+  }
 
   async getFacultyTodayClasses(
     facultyUserId: string,
@@ -316,6 +344,22 @@ export class AcademicsFacultyService {
            WHERE p.tenant_id=m.tenant_id AND p.timetable_id=m.source_timetable_id
              AND p.date_of_proxy=m.target_date AND p.status='APPROVED')
        UNION ALL
+       SELECT (a.new_date AT TIME ZONE 'Asia/Kolkata')::date::text,
+         'extra:' || a.adjustment_id::text, a.course_id, c.course_code, c.course_name,
+         (a.new_date AT TIME ZONE 'Asia/Kolkata')::time,
+         ((a.new_date AT TIME ZONE 'Asia/Kolkata') + interval '1 hour')::time,
+         a.proposed_room, NULL::text,
+         EXISTS (SELECT 1 FROM course_attendance_logs cal
+           WHERE cal.tenant_id=a.tenant_id AND cal.course_id=a.course_id
+             AND cal.faculty_user_id=a.faculty_user_id
+             AND cal.class_adjustment_id=a.adjustment_id)
+       FROM class_adjustments a
+       JOIN academic_courses c ON c.course_id=a.course_id AND c.tenant_id=a.tenant_id
+       WHERE a.tenant_id=$1 AND a.faculty_user_id=$2
+         AND a.adjustment_type='EXTRA_CLASS' AND a.status IN ('APPROVED','NOTIFIED')
+         AND (a.new_date AT TIME ZONE 'Asia/Kolkata')::date BETWEEN $4::date AND ($4::date + 6)
+         AND a.course_id IN (SELECT course_id FROM faculty_courses)
+       UNION ALL
        SELECT days.date::text, 'held:' || e.source_key, e.course_id, c.course_code, c.course_name,
          (e.entry->>'start')::time, (e.entry->>'end')::time, e.entry->>'room', e.entry->>'batch', false
        FROM days JOIN academic_timetable_source_entries e ON e.tenant_id=$1 AND e.state='HELD'
@@ -447,6 +491,23 @@ export class AcademicsFacultyService {
            WHERE p.tenant_id=m.tenant_id AND p.timetable_id=m.source_timetable_id
              AND p.date_of_proxy=m.target_date AND p.status='APPROVED')
        UNION ALL
+       SELECT 'extra:' || a.adjustment_id::text, a.course_id, c.course_code, c.course_name,
+         a.proposed_room, (a.new_date AT TIME ZONE 'Asia/Kolkata')::time,
+         ((a.new_date AT TIME ZONE 'Asia/Kolkata') + interval '1 hour')::time,
+         NULL::text,
+         -- Extra-class requests currently name a whole course, not a batch.
+         false AS is_practical,
+         EXISTS (SELECT 1 FROM course_attendance_logs cal
+           WHERE cal.tenant_id=a.tenant_id AND cal.course_id=a.course_id
+             AND cal.faculty_user_id=a.faculty_user_id
+             AND cal.class_adjustment_id=a.adjustment_id) AS has_saved_attendance
+       FROM class_adjustments a
+       JOIN academic_courses c ON c.course_id=a.course_id AND c.tenant_id=a.tenant_id
+       WHERE a.tenant_id=$1 AND a.faculty_user_id=$2
+         AND a.adjustment_type='EXTRA_CLASS' AND a.status IN ('APPROVED','NOTIFIED')
+         AND (a.new_date AT TIME ZONE 'Asia/Kolkata')::date=$5::date
+         AND a.course_id IN (SELECT course_id FROM faculty_courses)
+       UNION ALL
        SELECT 'held:' || e.source_key, e.course_id, c.course_code,c.course_name,e.entry->>'room',
          (e.entry->>'start')::time,(e.entry->>'end')::time,e.entry->>'batch',e.entry->>'session_type'='LAB',false
        FROM academic_timetable_source_entries e
@@ -524,6 +585,12 @@ export class AcademicsFacultyService {
     // validating writes against all course enrollments rejects a complete UI roster.
     const db = manager ?? this.dataSource;
     const enrollmentRepo = manager?.getRepository(StudentCourseEnrollment) ?? this.enrollmentRepo;
+    const adjustmentId = extraClassId(timetableId);
+    if (adjustmentId) {
+      if (!date) throw new BadRequestException('Date is required for an extra class roster');
+      await this.assertApprovedExtraClass(db, tenantId, courseId, facultyUserId, date, adjustmentId);
+      timetableId = undefined;
+    }
     const [approvedCover] = date && timetableId
       ? await db.query<Array<{ absent_faculty_id: string }>>(
           `SELECT absent_faculty_id FROM academic_proxy_requests
@@ -885,6 +952,19 @@ export class AcademicsFacultyService {
     date = localDateString(),
     timetableId?: string,
   ) {
+    const adjustmentId = extraClassId(timetableId);
+    if (adjustmentId) {
+      await this.assertApprovedExtraClass(this.dataSource, tenantId, courseId, facultyUserId, date, adjustmentId);
+      await this.assertCanMarkAttendance(courseId, facultyUserId, tenantId);
+      const [saved] = await this.dataSource.query<Array<{ attendance_data: unknown }>>(
+        `SELECT attendance_data FROM course_attendance_logs
+         WHERE tenant_id=$1 AND course_id=$2 AND faculty_user_id=$3
+           AND date=$4::date AND class_adjustment_id=$5::uuid`,
+        [tenantId, courseId, facultyUserId, date, adjustmentId],
+      );
+      return { course_id: courseId, date, timetable_id: timetableId,
+        locked: this.isAttendanceLocked(date), attendance_data: saved?.attendance_data ?? null };
+    }
     if (timetableId && this.isAttendanceLocked(date)) {
       const [saved] = await this.dataSource.query(`SELECT cal.attendance_data FROM course_attendance_logs cal
         JOIN academic_timetables t ON t.timetable_id=cal.timetable_id AND t.tenant_id=cal.tenant_id
@@ -1063,12 +1143,19 @@ export class AcademicsFacultyService {
         average_attendance_percent: string | null;
       }>
     >(
-      `WITH day_slots AS (
-         SELECT COUNT(*)::int AS scheduled_classes
-         FROM academic_timetables t
-         WHERE t.tenant_id = $1
-           AND t.faculty_user_id = $3
-           AND t.day_of_week = EXTRACT(ISODOW FROM $4::date)::int
+       `WITH day_slots AS (
+         SELECT (
+           (SELECT COUNT(*) FROM academic_timetables t
+            WHERE t.tenant_id=$1 AND t.faculty_user_id=$3
+              AND t.deleted_at IS NULL
+              AND t.day_of_week=EXTRACT(ISODOW FROM $4::date)::int)
+           +
+           (SELECT COUNT(*) FROM class_adjustments a
+            WHERE a.tenant_id=$1 AND a.faculty_user_id=$3
+              AND a.adjustment_type='EXTRA_CLASS'
+              AND a.status IN ('APPROVED','NOTIFIED')
+              AND (a.new_date AT TIME ZONE 'Asia/Kolkata')::date=$4::date)
+         )::int AS scheduled_classes
        ),
        day_conducted AS (
          SELECT COUNT(*)::int AS conducted_classes
@@ -1076,7 +1163,7 @@ export class AcademicsFacultyService {
          WHERE cal.tenant_id = $1
            AND cal.faculty_user_id = $3
            AND cal.date = $4::date
-           AND cal.timetable_id IS NOT NULL
+           AND (cal.timetable_id IS NOT NULL OR cal.class_adjustment_id IS NOT NULL)
        ),
        conducted AS (
          SELECT
@@ -1265,6 +1352,11 @@ export class AcademicsFacultyService {
     if (dto.timetable_id?.startsWith('held:')) {
       throw new BadRequestException('This class is awaiting department confirmation. Attendance cannot be recorded.');
     }
+    const adjustmentId = extraClassId(dto.timetable_id);
+    const timetableId = adjustmentId ? null : dto.timetable_id ?? null;
+    if (adjustmentId) {
+      await this.assertApprovedExtraClass(this.dataSource, tenantId, dto.course_id, facultyUserId, date, adjustmentId);
+    }
     if (!dto.timetable_id) {
       const [publication] = await this.dataSource.query(`SELECT EXISTS (
         SELECT 1 FROM academic_timetable_source_entries e
@@ -1280,14 +1372,14 @@ export class AcademicsFacultyService {
       facultyUserId,
       tenantId,
       date,
-      dto.timetable_id,
+      timetableId ?? undefined,
     );
     const effectiveFacultyId = await this.resolveAttendanceFacultyId(
       dto.course_id,
       facultyUserId,
       tenantId,
       date,
-      dto.timetable_id,
+      timetableId ?? undefined,
     );
     if (this.isAttendanceLocked(date)) {
       throw new ForbiddenException(
@@ -1298,7 +1390,6 @@ export class AcademicsFacultyService {
       throw new BadRequestException('Attendance data cannot be empty');
     }
 
-    const timetableId = dto.timetable_id ?? null;
     // The selected timetable is the authority for a practical batch.  Never
     // accept a student from another section, and require the complete slot
     // roster so a search result cannot silently reset everyone else to absent.
@@ -1331,6 +1422,11 @@ export class AcademicsFacultyService {
       throw new ForbiddenException('Practical batch is not mapped to a student section');
     }
     await this.dataSource.transaction(async (manager) => {
+      if (adjustmentId) {
+        await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))',
+          [`class-move:${tenantId}:${date}`]);
+        await this.assertApprovedExtraClass(manager, tenantId, dto.course_id, facultyUserId, date, adjustmentId);
+      }
       if (timetableId) {
         await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))',
           [`class-move:${tenantId}:${date}`]);
@@ -1398,24 +1494,28 @@ export class AcademicsFacultyService {
       // practical batch with a stale roster.
       await manager.query(
         `SELECT pg_advisory_xact_lock(hashtext($1))`,
-        [`${tenantId}:${dto.course_id}:${effectiveFacultyId}:${date}:${timetableId ?? 'none'}`],
+        [`${tenantId}:${dto.course_id}:${effectiveFacultyId}:${date}:${adjustmentId ?? timetableId ?? 'none'}`],
       );
       await manager.query(
         `DELETE FROM course_attendance_logs
          WHERE tenant_id = $1 AND course_id = $2 AND faculty_user_id = $3
            AND date = $4::date
-           AND (($5::uuid IS NULL AND timetable_id IS NULL) OR timetable_id = $5::uuid)`,
-        [tenantId, dto.course_id, effectiveFacultyId, date, timetableId],
+           AND (($6::uuid IS NOT NULL AND class_adjustment_id=$6::uuid)
+             OR ($6::uuid IS NULL AND class_adjustment_id IS NULL
+               AND (($5::uuid IS NULL AND timetable_id IS NULL) OR timetable_id=$5::uuid)))`,
+        [tenantId, dto.course_id, effectiveFacultyId, date, timetableId, adjustmentId],
       );
       await manager.query(
-        `INSERT INTO course_attendance_logs (tenant_id, course_id, faculty_user_id, date, timetable_id, attendance_data, marked_by_user_id)
-         VALUES ($1, $2, $3, $4, $5::uuid, $6::jsonb, $7::uuid)`,
+        `INSERT INTO course_attendance_logs (tenant_id, course_id, faculty_user_id, date,
+           timetable_id, class_adjustment_id, attendance_data, marked_by_user_id)
+         VALUES ($1, $2, $3, $4, $5::uuid, $6::uuid, $7::jsonb, $8::uuid)`,
         [
           tenantId,
           dto.course_id,
           effectiveFacultyId,
           date,
           timetableId,
+          adjustmentId,
           JSON.stringify(dto.attendance_data),
           facultyUserId,
         ],

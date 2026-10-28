@@ -66,6 +66,15 @@ describe('Faculty attendance date and practical batch safety', () => {
     expect(roster).not.toHaveBeenCalled();
     expect(dataSource.query).toHaveBeenCalledWith(expect.stringContaining('generate_series(0, 6)'),['tenant-1','faculty-1',43,'2026-10-12']);
   });
+  it('keeps an approved extra class and its saved status visible in the attendance week', async () => {
+    const adjustment = '33333333-3333-4333-8333-333333333333';
+    const { service, dataSource } = createService({ timetableRows: [
+      { date: '2026-10-28', timetable_id: `extra:${adjustment}`, course_id: 'course-1', has_saved_attendance: true },
+    ] });
+    const week = await service.getFacultyAttendanceWeek('faculty-1', 'tenant-1', null, '2026-10-28');
+    expect(week[0].sessions[0]).toMatchObject({ timetable_id: `extra:${adjustment}`, has_saved_attendance: true });
+    expect(dataSource.query.mock.calls[0][0]).toContain('cal.class_adjustment_id=a.adjustment_id');
+  });
   it('rejects invalid week input before querying', async () => {
     const {service,dataSource}=createService();
     await expect(service.getFacultyAttendanceWeek('f','t',null,'2026-02-30')).rejects.toBeInstanceOf(BadRequestException);
