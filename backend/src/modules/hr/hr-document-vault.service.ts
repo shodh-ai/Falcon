@@ -98,7 +98,6 @@ export class HrDocumentVaultService {
         "Document must reference an uploaded file in this tenant's secure storage",
       );
     }
-
     if (options?.requireUploaderOwnership) {
       const canonicalKey =
         key ??
@@ -108,6 +107,16 @@ export class HrDocumentVaultService {
       if (hrUploadOwner(canonicalKey) !== uploadedBy) {
         throw new ForbiddenException(
           'Upload this document from your own account before adding it to your vault',
+        );
+      }
+    }
+
+    if (key && this.storage.isEnabled()) {
+      try {
+        await this.storage.assertObjectExists(key);
+      } catch {
+        throw new BadRequestException(
+          'Document file is unavailable in secure storage. Upload it again',
         );
       }
     }
