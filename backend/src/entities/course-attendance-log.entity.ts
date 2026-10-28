@@ -43,6 +43,9 @@ export class CourseAttendanceLog extends BaseTenantEntity {
   timetable_id: string | null;
 
   @Column({ type: 'uuid', nullable: true })
+  class_adjustment_id: string | null;
+
+  @Column({ type: 'uuid', nullable: true })
   marked_by_user_id: string | null;
 
   @Column({ type: 'jsonb' })

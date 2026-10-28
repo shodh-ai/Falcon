@@ -670,6 +670,7 @@ export const facultyPortal: PortalConfig = {
       title: 'Academics & Teaching',
       items: [
         { label: 'Timetable & Classes', href: '/faculty/timetable', icon: CalendarClock, keywords: ['schedule', 'slots', 'substitute', 'cancel', 'ltp', 'extra class'] },
+        { label: 'My Workload', href: '/faculty/workload', icon: BookOpen, keywords: ['weekly workload', 'teaching hours', 'extra class', 'cancelled class'] },
         { label: 'Mark Attendance', href: '/faculty/attendance', icon: ClipboardCheck, keywords: ['attendance', 'present', 'absent'] },
         { label: 'My Courses', href: '/faculty/courses', icon: BookOpen, keywords: ['lesson plan', 'handout', 'course page', 'workspace'] },
         { label: 'Assignments', href: '/faculty/assignments', icon: ClipboardList, keywords: ['da', 'digital assignment', 'submission', 'deadline', 'grade'] },
@@ -740,6 +741,7 @@ export const facultyPortal: PortalConfig = {
       title: 'Academics & Teaching',
       items: [
         { label: 'Timetable & Classes', href: '/faculty/timetable', icon: CalendarClock, keywords: ['schedule', 'slots', 'substitute', 'cancel', 'ltp', 'extra'] },
+        { label: 'My Workload', href: '/faculty/workload', icon: BookOpen, keywords: ['weekly workload', 'teaching hours', 'extra class', 'cancelled class'] },
         { label: 'Mark Attendance', href: '/faculty/attendance', icon: ClipboardCheck, keywords: ['attendance', 'present', 'absent'] },
         { label: 'My Courses', href: '/faculty/courses', icon: BookOpen, keywords: ['lesson plan', 'handout', 'course page', 'workspace'] },
         { label: 'Assignments', href: '/faculty/assignments', icon: ClipboardList, keywords: ['da', 'digital assignment', 'submission', 'deadline', 'grade'] },

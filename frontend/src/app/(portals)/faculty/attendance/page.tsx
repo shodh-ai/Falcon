@@ -53,6 +53,10 @@ type FacultyClass = {
   awaiting_confirmation?: boolean;
 };
 
+function isExtraClass(slotId: string | null | undefined) {
+  return Boolean(slotId?.startsWith('extra:'));
+}
+
 type Student = {
   student_id: string;
   name: string;
@@ -577,6 +581,7 @@ function MarkAttendanceContent() {
                       )}
                     >
                       <p className="font-semibold text-sgvu-navy">{c.course_code}</p>
+                      {isExtraClass(c.timetable_id) ? <span className="text-xs font-semibold text-amber-800">Approved extra class</span> : null}
                       <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{c.course_name}</p>
                       <p className="mt-1 text-[11px] text-muted-foreground">
                         {String(c.start_time).slice(0, 5)}–{String(c.end_time).slice(0, 5)} · {c.student_count} students
@@ -661,9 +666,9 @@ function MarkAttendanceContent() {
                       <X className="mr-1 h-3.5 w-3.5" />
                       All absent
                     </Button>
-                    <Button type="button" size="sm" variant="secondary" onClick={() => void copyPreviousAttendance()}>
+                    {!isExtraClass(selectedTimetableId) ? <Button type="button" size="sm" variant="secondary" onClick={() => void copyPreviousAttendance()}>
                       Take Same Attendance as Previous
-                    </Button>
+                    </Button> : null}
                   </div>
                 )}
 
@@ -774,7 +779,7 @@ function MarkAttendanceContent() {
                           type="button"
                           size="sm"
                           variant="destructive"
-                          disabled={analytics.defaulters.length === 0}
+                          disabled={analytics.defaulters.length === 0 || isExtraClass(selectedTimetableId)}
                           onClick={() => void sendWarnings()}
                           className="gap-1.5"
                         >

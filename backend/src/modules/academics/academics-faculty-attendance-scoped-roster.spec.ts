@@ -6,6 +6,7 @@ import { AcademicsFacultyService } from './academics-faculty.service';
 const qaStudent = '00000000-0000-4000-8000-000000000001';
 const unmappedStudent = '11111111-1111-4111-8111-111111111111';
 const secondVisibleStudent = '22222222-2222-4222-8222-222222222222';
+const extraAdjustment = '33333333-3333-4333-8333-333333333333';
 
 function todayIso() {
   const date = new Date();
@@ -84,6 +85,46 @@ describe('Faculty attendance uses the same scoped roster for reading and saving'
     expect(manager.query).toHaveBeenCalledWith(
       expect.stringContaining('INSERT INTO course_attendance_logs'),
       expect.arrayContaining([JSON.stringify([{ student_id: qaStudent, status: 'ABSENT' }])]),
+    );
+  });
+
+  it('saves approved extra-class attendance under its own session and reads it back', async () => {
+    const { service, manager, dataSource, date } = setup();
+    const originalQuery = dataSource.query.getMockImplementation()!;
+    dataSource.query.mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT adjustment_id FROM class_adjustments')) return [{ adjustment_id: extraAdjustment }];
+      if (sql.includes('SELECT attendance_data FROM course_attendance_logs')) {
+        return [{ attendance_data: [{ student_id: qaStudent, status: 'PRESENT' }] }];
+      }
+      return originalQuery(sql);
+    });
+    const originalManagerQuery = manager.query.getMockImplementation()!;
+    manager.query.mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT adjustment_id FROM class_adjustments')) return [{ adjustment_id: extraAdjustment }];
+      return originalManagerQuery(sql);
+    });
+
+    const result = await service.saveCourseAttendanceLog('faculty-1', 'tenant-1', {
+      course_id: 'course-1', timetable_id: `extra:${extraAdjustment}`, date,
+      attendance_data: [{ student_id: qaStudent, status: 'PRESENT' }],
+    });
+    expect(result.saved).toBe(1);
+    expect(manager.query).toHaveBeenCalledWith(
+      expect.stringContaining('class_adjustment_id, attendance_data'),
+      expect.arrayContaining([null, extraAdjustment, JSON.stringify([{ student_id: qaStudent, status: 'PRESENT' }])]),
+    );
+    const reloaded = await service.getCourseAttendanceState('course-1', 'faculty-1', 'tenant-1', date, `extra:${extraAdjustment}`);
+    expect(reloaded.attendance_data).toEqual([{ student_id: qaStudent, status: 'PRESENT' }]);
+  });
+
+  it('rejects an extra-class session that is not approved for this faculty', async () => {
+    const { service, manager, date } = setup();
+    await expect(service.saveCourseAttendanceLog('faculty-1', 'tenant-1', {
+      course_id: 'course-1', timetable_id: `extra:${extraAdjustment}`, date,
+      attendance_data: [{ student_id: qaStudent, status: 'PRESENT' }],
+    })).rejects.toThrow('Extra class is not approved');
+    expect(manager.query).not.toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO course_attendance_logs'), expect.anything(),
     );
   });
 

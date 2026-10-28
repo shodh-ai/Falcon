@@ -68,7 +68,7 @@ function shiftWeek(weekStart: string, days: number) {
   return date.toISOString().slice(0, 10);
 }
 
-function WeeklyWorkloadPanel({ api }: {
+export function WeeklyWorkloadPanel({ api }: {
   api: ReturnType<typeof useAuthedApi>;
 }) {
   const [week, setWeek] = useState<WeeklyWorkload | null>(null);
