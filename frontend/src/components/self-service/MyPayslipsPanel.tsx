@@ -54,6 +54,7 @@ export function MyPayslipsPanel() {
   const [published, setPublished] = useState<PublishedMonth[]>([]);
   const [requests, setRequests] = useState<DownloadRequest[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [periodFrom, setPeriodFrom] = useState('');
   const [periodTo, setPeriodTo] = useState('');
@@ -86,6 +87,7 @@ export function MyPayslipsPanel() {
 
   async function load() {
     setLoading(true);
+    setLoadError(null);
     try {
       const [months, reqs] = await Promise.all([
         api.get<PublishedMonth[]>('/api/hr/payslips/my-payslips'),
@@ -120,10 +122,14 @@ export function MyPayslipsPanel() {
           setPeriodTo(keys[keys.length - 1]!);
         }
         if (demo.length === 0) {
-          toast.error(e instanceof Error ? e.message : 'Failed to load payslips');
+          const message = e instanceof Error ? e.message : 'Failed to load payslips';
+          setLoadError(message);
+          toast.error(message);
         }
       } else {
-        toast.error(e instanceof Error ? e.message : 'Failed to load payslips');
+        const message = e instanceof Error ? e.message : 'Failed to load payslips';
+        setLoadError(message);
+        toast.error(message);
       }
     } finally {
       setLoading(false);
@@ -205,6 +211,13 @@ export function MyPayslipsPanel() {
       </div>
     );
   }
+
+  if (loadError) return (
+    <div role="alert" className="space-y-3 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+      <p>Payslips could not be loaded. {loadError}</p>
+      <Button type="button" variant="outline" onClick={() => void load()}>Retry</Button>
+    </div>
+  );
 
   if (!published.length) {
     return (
