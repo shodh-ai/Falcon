@@ -15,6 +15,7 @@ function makeService(enabled = true) {
     {
       isEnabled: () => enabled,
       getBucketName: () => 'falcon-uploads',
+      assertObjectExists: jest.fn().mockResolvedValue(undefined),
     } as never,
   );
   return { service, query };
