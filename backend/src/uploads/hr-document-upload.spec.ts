@@ -49,7 +49,14 @@ function makeController(enabled = true) {
       upload,
       getDownloadStream,
     } as never,
-    { query: jest.fn() } as never,
+    {
+      query: jest.fn(),
+      canonicalKey: (key: string, scopedTenantId: string) =>
+        key.startsWith(`${scopedTenantId}/`) ? key : null,
+      assertStudentDownloadAccess: jest.fn(),
+      getUploadPath: () =>
+        process.env.UPLOAD_PATH ?? '/tmp/falcon-hr-upload-test',
+    } as never,
   );
   return { controller, upload, getDownloadStream, pipe };
 }

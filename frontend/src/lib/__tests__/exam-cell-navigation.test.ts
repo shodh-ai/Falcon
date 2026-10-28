@@ -1,22 +1,13 @@
 import { describe, expect, it } from 'vitest';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   examCellPortal,
   withAccountSettingsNav,
-  withRoleAwareDofaInboxNav,
 } from '@/lib/navigation';
-import { filterPortalConfigForLaunchModules } from '@/lib/launch-modules';
 
-// Preserve the original Examination Cell destinations and the new account links.
-const originalPaths = [
-  'dashboard', 'live-dashboard', 'calendar', 'my-tasks', 'search', 'student-timeline',
-  'sessions', 'deadlines', 'audit-log', 'schedule', 'form-fillup', 'eligibility',
-  'hall-ticket-approvals', 'exam-centres', 'admit-cards', 'attendance-exemptions',
-  'product-viva', 'seating', 'seating-plans', 'resource-allocation', 'invigilation',
-  'print-hub', 'question-papers', 'exam-day', 'answer-sheets', 'documents', 'results',
-  'grade-cards', 'approvals/grade-change', 'approvals/dofa-inbox', 'course-grades',
-  'backlog-exams', 're-evaluations', 'ufm-cases', 'transcripts', 'portfolio-transcripts',
-  'degree-audit', 'reports', 'analytics', 'notifications', 'settings', 'profile',
-].map((path) => `/exam-cell/${path}`);
+const collectNavHrefs = (groups: typeof examCellPortal.navGroups) =>
+  groups.flatMap((group) => group.items.map((item) => item.href));
 
 describe('Examination Cell navigation', () => {
   it('restores the original sidebar groups and specialist ordering', () => {
