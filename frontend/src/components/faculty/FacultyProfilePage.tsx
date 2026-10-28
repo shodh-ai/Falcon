@@ -5,6 +5,8 @@ import { FormEvent, useCallback, useEffect, useRef, useState, type ReactNode } f
 import { useSearchParams } from 'next/navigation';
 import {
   BookOpen,
+  ChevronLeft,
+  ChevronRight,
   Briefcase,
   Camera,
   Eye,
@@ -46,6 +48,88 @@ import { FacultyPortfolioPanel } from '@/components/faculty/FacultyPortfolioPane
 import { formatTeachingDuration } from '@/lib/faculty/workload-duration';
 
 type ProfileTab = 'overview' | 'personal' | 'qualifications' | 'research' | 'portfolio' | 'workload' | 'documents';
+
+type WeeklyWorkload = {
+  week_start: string;
+  scheduled_sessions: number;
+  scheduled_minutes: number;
+  cancelled_sessions: number;
+  cancelled_minutes: number;
+  extra_sessions: number;
+  extra_minutes: number;
+  effective_sessions: number;
+  effective_minutes: number;
+  unmatched_cancellations: number;
+};
+
+function shiftWeek(weekStart: string, days: number) {
+  const date = new Date(`${weekStart}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function WeeklyWorkloadPanel({ api }: {
+  api: ReturnType<typeof useAuthedApi>;
+}) {
+  const [week, setWeek] = useState<WeeklyWorkload | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadWeek = useCallback(async (weekStart?: string) => {
+    setRefreshing(true);
+    setError(null);
+    try {
+      setWeek(await api.get<WeeklyWorkload>(`/api/academics/faculty/profile/workload${weekStart ? `?week_start=${weekStart}` : ''}`));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not refresh workload');
+    } finally {
+      setRefreshing(false);
+    }
+  }, [api]);
+
+  useEffect(() => { void loadWeek(); }, [loadWeek]);
+
+  const end = week ? shiftWeek(week.week_start, 6) : null;
+  return (
+    <FacultyPanel title="Teaching workload" description="Your assigned classes for the selected week, including approved cover and swaps">
+      {week ? (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Button type="button" variant="outline" size="sm" aria-label="Previous week" disabled={refreshing} onClick={() => void loadWeek(shiftWeek(week.week_start, -7))}>
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <span className="min-w-44 text-center text-sm font-semibold text-sgvu-navy">{week.week_start} to {end}</span>
+            <Button type="button" variant="outline" size="sm" aria-label="Next week" disabled={refreshing} onClick={() => void loadWeek(shiftWeek(week.week_start, 7))}>
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
+          <Button type="button" variant="outline" size="sm" disabled={refreshing} onClick={() => void loadWeek(week.week_start)}>
+            {refreshing ? 'Refreshing…' : 'Refresh'}
+          </Button>
+        </div>
+      ) : (
+        <p className="text-sm text-muted-foreground">{refreshing ? 'Loading this week’s workload…' : 'Workload unavailable'}</p>
+      )}
+      {error && <p role="alert" className="mt-3 text-sm text-red-700">{error}</p>}
+      {week && (
+        <>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <FacultyStatCard label="Assigned sessions" value={formatTeachingDuration(week.scheduled_minutes / 60)} sub={`${week.scheduled_sessions} classes before cancellations and extras`} />
+            <FacultyStatCard label="Approved cancellations" value={`− ${formatTeachingDuration(week.cancelled_minutes / 60)}`} sub={`${week.cancelled_sessions} classes`} />
+            <FacultyStatCard label="Approved extra classes" value={`+ ${formatTeachingDuration(week.extra_minutes / 60)}`} sub={`${week.extra_sessions} classes`} />
+            <FacultyStatCard label="Adjusted workload" value={formatTeachingDuration(week.effective_minutes / 60)} sub={`${week.effective_sessions} classes this week`} />
+          </div>
+          {week.unmatched_cancellations > 0 && (
+            <p className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+              {week.unmatched_cancellations} approved cancellation{week.unmatched_cancellations === 1 ? '' : 's'} could not be matched to one exact published class. Ask the department office to check the timetable; the adjusted total excludes these uncertain changes.
+            </p>
+          )}
+          <p className="mt-3 text-xs text-muted-foreground">Pending and rejected requests are excluded. This is scheduled teaching time, not attendance or completed-class time.</p>
+        </>
+      )}
+    </FacultyPanel>
+  );
+}
 
 type Qualification = {
   qual_id: string;
@@ -914,8 +998,9 @@ export function FacultyProfilePage() {
 
       {tab === 'workload' && (
         <div className="space-y-5">
+          <WeeklyWorkloadPanel api={api} />
           <div className="grid gap-4 sm:grid-cols-3">
-            <FacultyStatCard label="Weekly teaching time" value={profile.workload.weekly_teaching_hours ? formatTeachingDuration(profile.workload.weekly_teaching_hours) : 'Not scheduled'} sub={profile.workload.pending_sessions ? `${profile.workload.pending_sessions} sessions (${formatTeachingDuration((profile.workload.pending_minutes || 0) / 60)}) excluded: awaiting confirmation` : profile.workload.weekly_teaching_hours ? 'Sum of published scheduled class durations' : 'No published sessions; this is not a no-load declaration'} icon={BookOpen} />
+            <FacultyStatCard label="Recurring weekly plan" value={profile.workload.weekly_teaching_hours ? formatTeachingDuration(profile.workload.weekly_teaching_hours) : 'Not scheduled'} sub={profile.workload.pending_sessions ? `${profile.workload.pending_sessions} sessions (${formatTeachingDuration((profile.workload.pending_minutes || 0) / 60)}) excluded: awaiting confirmation` : profile.workload.weekly_teaching_hours ? 'Published weekly timetable before dated changes' : 'No published sessions; this is not a no-load declaration'} icon={BookOpen} />
             <FacultyStatCard label="B.Tech project guides" value={profile.workload.project_guides_count} />
             <FacultyStatCard label="PhD scholars" value={profile.workload.phd_scholars_count} />
           </div>

@@ -6,6 +6,7 @@ import {
   Headers,
   Patch,
   Post,
+  Query,
   Req,
   Res,
   UploadedFile,
@@ -39,6 +40,11 @@ export class FacultyProfileController {
   @Get()
   getProfile(@Req() req: { user: AuthUser }) {
     return this.profile.getProfile(this.tenant(req.user), req.user.user_id);
+  }
+
+  @Get('workload')
+  getWorkload(@Req() req: { user: AuthUser }, @Query('week_start') weekStart?: string) {
+    return this.profile.getWeeklyWorkload(this.tenant(req.user), req.user.user_id, weekStart);
   }
 
   @Get('compliance')
