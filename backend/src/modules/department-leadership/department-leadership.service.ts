@@ -45,6 +45,8 @@ export class DepartmentLeadershipService {
 
   private async scope(actor: ScopedAuthUser, deptId: number) {
     if (!actor.tenant_id || !actor.user_id) throw new ForbiddenException();
+    if(![...(actor.roles??[]),actor.role??''].some(role=>['campusadmin','superadmin'].includes(role.trim().toLowerCase())))
+      throw new ForbiddenException('Only Campus/Super Admin may manage department offices');
     if (!Number.isInteger(deptId) || deptId < 1)
       throw new BadRequestException('Invalid department');
     const campuses = await this.campus.resolveCampusIds(actor);

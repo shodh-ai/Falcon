@@ -145,6 +145,7 @@ export class SuperAdminService {
       throw new BadRequestException('entity_id is required');
     }
     if(dto.entity_type==='DEPARTMENT' && dto.assignment_type==='HOD'){
+      if(!Number.isInteger(Number(entityId)) || Number(entityId)<=0)throw new BadRequestException('Department ID must be a positive number');
       const managed=await this.dataSource.query('SELECT 1 FROM department_leadership WHERE tenant_id=$1 AND dept_id=$2',[tenantId,Number(entityId)]);
       if(managed.length)throw new ConflictException('Use Department leadership & officeholders to change this managed HOD office');
     }
