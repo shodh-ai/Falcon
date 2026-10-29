@@ -103,4 +103,37 @@ describe("AcquisitionWorkspace persona queue", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("Upload completed template")).toBeInTheDocument();
   });
+
+  it("explains when no scoped funding source is available and blocks the selector", async () => {
+    mocks.get.mockImplementation((path: string) =>
+      Promise.resolve(
+        path.includes("funding-sources")
+          ? []
+          : [
+              {
+                acquisition_id: "acq-1",
+                acquisition_number: "ACQ-2099-000001",
+                acquisition_version_id: "version-1",
+                version_number: 1,
+                status: "PENDING_DOFA",
+                priority: "HIGH",
+                required_by_date: "2099-02-01",
+                estimated_total: 1250,
+                currency: "INR",
+                source: "FALCON",
+                created_at: "2099-01-01T00:00:00Z",
+              },
+            ],
+      ),
+    );
+
+    render(<AcquisitionWorkspace />);
+    await screen.findByText("ACQ-2099-000001");
+    fireEvent.click(screen.getByRole("button", { name: /New acquisition/i }));
+
+    expect(
+      await screen.findByText(/No active funding sources are available for your scope/),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Funding source" })).toBeDisabled();
+  });
 });
