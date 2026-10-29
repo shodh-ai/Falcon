@@ -185,6 +185,17 @@ describe('Student dashboard reliability', () => {
     expect(greeting.closest('p')?.querySelector('svg')).toBeNull();
   });
 
+  it('includes and identifies approved extras in today\'s schedule for an enrolled course', async () => {
+    mocks.api.get.mockImplementation((path: string) => Promise.resolve(path.endsWith('/today')
+      ? [{ ...timetableRow('extra:environment-adjustment', 'current-course'), is_extra_class: true,
+        session_date: '2026-10-28', start_time: '14:30', end_time: '15:30' }]
+      : response(path)));
+    render(<StudentEnterpriseDashboard />);
+    expect(await screen.findByText('Approved extra class')).toBeInTheDocument();
+    expect(dashboardPanel("Today's Schedule").getByText('Current semester subject')).toBeInTheDocument();
+    expect(dashboardPanel("Today's Schedule").getByText('2:30 PM – 3:30 PM')).toBeInTheDocument();
+  });
+
   it('uses white text while retaining the original badge backgrounds', async () => {
     mocks.api.get.mockImplementation((path: string) => Promise.resolve(path.endsWith('/profile')
       ? { name: 'Student A', program: 'Computer Science', semester: 6, enrollment_no: 'SGVU-2026-1001' }
