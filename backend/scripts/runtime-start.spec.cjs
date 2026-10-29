@@ -4,7 +4,7 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const path=require('node:path');
 const {spawnSync}=require('node:child_process');
-const {databasePolicy,verifyDatabase,runRuntime,MATERIALIZED_VIEWS,ROLE_QUERY}=require('./runtime-start.cjs');
+const {databasePolicy,verifyDatabase,runRuntime,MATERIALIZED_VIEWS,ROLE_QUERY,LIMITED_BUSINESS_TABLES}=require('./runtime-start.cjs');
 const policy={host:'isolated-db',port:5432,name:'fixture',role:'fixture_runtime',enforce_least_privilege:true};
 const env={NODE_ENV:'production',DB_HOST:policy.host,DB_PORT:'5432',DB_DATABASE:policy.name,
   DB_USERNAME:policy.role,DB_PASSWORD:'synthetic-only',DB_SYNCHRONIZE:'false'};
@@ -129,7 +129,8 @@ test('each forbidden authority or missing business permission prevents startup',
   }
 });
 test('unknown privilege values and actual connected identity mismatch are refused',async()=>{
-  for(const override of [{rolsuper:null},{role_name:'postgres'},{database_name:'other'}]){
+  for(const override of [{rolsuper:null},{missing_business_access:null},{missing_business_access:undefined},
+    {role_name:'postgres'},{database_name:'other'}]){
     const {Client}=client(override);
     await assert.rejects(verifyDatabase({env,policy,Client}),/boundary check failed/);
   }
@@ -162,4 +163,42 @@ test('database denial prevents app bootstrap and no secret is logged',async()=>{
     verifyDb:async()=>{throw new Error('boundary denied');},
     loadApplication:()=>assert.fail('app'),log:x=>output.push(x)}));
   assert.deepEqual(output,[]);
+});
+
+const limitedPolicy={
+  department_leadership:{insert:true,updateColumns:['structure','higher_officer_id','revision']},
+  department_offices:{insert:true,updateColumns:['login_alias']},
+  department_office_appointments:{insert:true,updateColumns:['valid_to']},
+  department_office_session_revisions:{insert:true,updateColumns:['revision']},
+  department_leadership_events:{insert:true,updateColumns:[]},
+  student_identity_email_changes:{insert:false,updateColumns:[]},
+};
+test('leadership boundary lists only six exact immutable object policies',()=>{
+  assert.deepEqual(LIMITED_BUSINESS_TABLES,limitedPolicy);
+  assert.ok(Object.isFrozen(LIMITED_BUSINESS_TABLES));
+  for(const table of Object.values(LIMITED_BUSINESS_TABLES)){
+    assert.ok(Object.isFrozen(table));
+    assert.ok(Object.isFrozen(table.updateColumns));
+  }
+  assert.equal(Object.hasOwn(LIMITED_BUSINESS_TABLES,'business_records'),false);
+  assert.equal(Object.hasOwn(LIMITED_BUSINESS_TABLES,'schema_migrations'),false);
+});
+test('leadership metadata query checks effective column permissions without a schema mutation',()=>{
+  for(const name of Object.keys(limitedPolicy)) assert.ok(ROLE_QUERY.includes(name));
+  assert.match(ROLE_QUERY,/has_column_privilege/);
+  assert.match(ROLE_QUERY,/has_any_column_privilege/);
+  assert.match(ROLE_QUERY,/pg_attribute/);
+  assert.doesNotMatch(ROLE_QUERY,/\b(?:GRANT|REVOKE|ALTER|CREATE|DROP|TRUNCATE)\s+(?:ON|TABLE|SCHEMA|ROLE|ALL)\b/);
+});
+
+test('runtime launcher and both reviewed SQL policies share exactly the same limited matrix',()=>{
+  const directory=path.join(__dirname,'../../ops/deployment-safety');
+  const expected=Object.fromEntries(Object.entries(limitedPolicy).map(([name,entry])=>
+    [name,{insert:entry.insert,update_columns:entry.updateColumns}]));
+  for(const file of ['runtime-role.sql','department-leadership-grants.sql']){
+    const sql=fs.readFileSync(path.join(directory,file),'utf8');
+    const match=sql.match(/limited_business_tables\s+constant\s+jsonb\s*:=\s*'([\s\S]*?)'::jsonb/);
+    assert.ok(match,'exact JSON matrix missing from '+file);
+    assert.deepEqual(JSON.parse(match[1]),expected,file+' differs from runtime policy');
+  }
 });
