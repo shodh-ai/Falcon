@@ -142,6 +142,8 @@ type ScheduleItem = {
   start: string;
   end: string;
   status: 'upcoming' | 'ongoing' | 'done';
+  isExtraClass?: boolean;
+  cancelled?: boolean;
 };
 
 type AssignmentItem = {
@@ -228,6 +230,7 @@ function slotCountdownLabel(
   slot: ScheduleItem,
   nowMinutes: number,
 ): string | null {
+  if (slot.cancelled) return null;
   const start = timeStringToMinutes(slot.start);
   const end = timeStringToMinutes(slot.end);
   if (Number.isNaN(start) || Number.isNaN(end)) return null;
@@ -522,6 +525,8 @@ function StudentDashboardWorkspace({ disabledModules }: { disabledModules: Busin
             start,
             end,
             status: getTimetableSlotStatus(start, end, now),
+            isExtraClass: row.is_extra_class === true,
+            cancelled: row.cancelled === true,
           };
         });
         setSchedule(mapped);
@@ -699,12 +704,12 @@ function StudentDashboardWorkspace({ disabledModules }: { disabledModules: Busin
   }, [schedule, nowMinutes]);
 
   const scheduleHeadline = useMemo(() => {
-    const live = sortedSchedule.find((s) => s.status === 'ongoing');
+    const live = sortedSchedule.find((s) => !s.cancelled && s.status === 'ongoing');
     if (live) {
       const label = slotCountdownLabel(live, nowMinutes);
       return label ? `${live.subject} · ${label}` : `${live.subject} · Live now`;
     }
-    const next = sortedSchedule.find((s) => s.status === 'upcoming');
+    const next = sortedSchedule.find((s) => !s.cancelled && s.status === 'upcoming');
     if (next) {
       const label = slotCountdownLabel(next, nowMinutes);
       return label ? `Next: ${next.subject} · ${label}` : `Next: ${next.subject}`;
@@ -1090,14 +1095,17 @@ function StudentDashboardWorkspace({ disabledModules }: { disabledModules: Busin
                       className={cn(
                         'block rounded-xl border px-3 py-2.5 transition',
                         'hover:-translate-y-0.5 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sgvu-gold/50',
-                        slot.status === 'ongoing' && 'border-sgvu-gold/60 bg-sgvu-gold/15 shadow-sm shadow-sgvu-gold/10',
-                        slot.status === 'upcoming' && 'border-sgvu-navy/10 bg-white hover:border-sgvu-gold/40',
-                        slot.status === 'done' && 'border-border/60 bg-slate-50 opacity-70 hover:opacity-90',
+                        slot.cancelled && 'border-red-200 bg-red-50 opacity-80',
+                        !slot.cancelled && slot.status === 'ongoing' && 'border-sgvu-gold/60 bg-sgvu-gold/15 shadow-sm shadow-sgvu-gold/10',
+                        !slot.cancelled && slot.status === 'upcoming' && 'border-sgvu-navy/10 bg-white hover:border-sgvu-gold/40',
+                        !slot.cancelled && slot.status === 'done' && 'border-border/60 bg-slate-50 opacity-70 hover:opacity-90',
                       )}
                     >
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
                           <p className="truncate text-sm font-semibold text-sgvu-navy">{slot.subject}</p>
+                          {slot.isExtraClass && <Badge variant="outline">Approved extra class</Badge>}
+                          {slot.cancelled && <Badge variant="destructive">Cancelled · no attendance</Badge>}
                           <p className="mt-0.5 text-xs text-muted-foreground">
                             {slot.faculty} · <MapPin className="mr-0.5 inline h-3 w-3" />
                             {slot.room}
@@ -1121,11 +1129,11 @@ function StudentDashboardWorkspace({ disabledModules }: { disabledModules: Busin
                             variant="outline"
                             className={cn(
                               'mt-1 text-[10px]',
-                              slot.status === 'ongoing' &&
+                              !slot.cancelled && slot.status === 'ongoing' &&
                                 'animate-pulse border-sgvu-gold/50 bg-sgvu-gold/30 text-sgvu-navy',
                             )}
                           >
-                            {slot.status === 'ongoing'
+                            {slot.cancelled ? 'Cancelled' : slot.status === 'ongoing'
                               ? 'Live'
                               : slot.status === 'upcoming'
                                 ? 'Up next'

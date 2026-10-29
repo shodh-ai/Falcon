@@ -51,6 +51,7 @@ type FacultyClass = {
   has_saved_attendance?: boolean;
   attendance_locked?: boolean;
   awaiting_confirmation?: boolean;
+  cancelled?: boolean;
 };
 
 function isExtraClass(slotId: string | null | undefined) {
@@ -205,7 +206,7 @@ function MarkAttendanceContent() {
         if (!Array.isArray(data)) throw new Error('Timetable API returned an invalid response');
         setClassesError(null);
         setClasses(data);
-        const selectable = data.filter(c => !c.awaiting_confirmation);
+        const selectable = data.filter(c => !c.awaiting_confirmation && !c.cancelled);
         if (selectable.length === 0) {
           setSelectedCourseId(null);
           setSelectedTimetableId(null);
@@ -239,6 +240,13 @@ function MarkAttendanceContent() {
 
   useEffect(() => {
     if (!selectedCourseId) return;
+    if (selectedClass?.cancelled) {
+      setStudents([]);
+      setUnmappedCourseStudents([]);
+      setRosterLoading(false);
+      setRosterError(null);
+      return;
+    }
     let cancelled = false;
     const timetableId = selectedTimetableId ?? selectedClass?.timetable_id;
 
@@ -300,7 +308,7 @@ function MarkAttendanceContent() {
     return () => {
       cancelled = true;
     };
-  }, [api, selectedCourseId, selectedDate, selectedTimetableId, selectedClass?.timetable_id, selectedClass?.is_practical, rosterRefresh]);
+  }, [api, selectedCourseId, selectedDate, selectedTimetableId, selectedClass?.timetable_id, selectedClass?.is_practical, selectedClass?.cancelled, rosterRefresh]);
 
   async function openBatchEditor(target: PracticalBatchSlot) {
     setBatchTarget(target);
@@ -374,6 +382,10 @@ function MarkAttendanceContent() {
 
   async function save() {
     if (!selectedCourseId || rosterLoading) return;
+    if (selectedClass?.cancelled) {
+      toast.error('This class was cancelled. Attendance cannot be recorded.');
+      return;
+    }
     if (students.length === 0) {
       toast.error('No students on the roster — cannot save attendance.');
       return;
@@ -581,13 +593,14 @@ function MarkAttendanceContent() {
                       )}
                     >
                       <p className="font-semibold text-sgvu-navy">{c.course_code}</p>
+                      {c.cancelled ? <Badge variant="destructive" className="ml-2">Cancelled</Badge> : null}
                       {isExtraClass(c.timetable_id) ? <span className="text-xs font-semibold text-amber-800">Approved extra class</span> : null}
                       <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{c.course_name}</p>
                       <p className="mt-1 text-[11px] text-muted-foreground">
                         {String(c.start_time).slice(0, 5)}–{String(c.end_time).slice(0, 5)} · {c.student_count} students
                       </p>
                       <p className={cn('mt-2 text-xs font-medium', c.has_saved_attendance ? 'text-emerald-700' : 'text-amber-800')}>
-                        {c.awaiting_confirmation ? 'Awaiting department confirmation' : c.has_saved_attendance === true ? 'Attendance recorded'
+                        {c.cancelled ? 'No attendance needed · class cancelled' : c.awaiting_confirmation ? 'Awaiting department confirmation' : c.has_saved_attendance === true ? 'Attendance recorded'
                           : c.has_saved_attendance === false ? c.attendance_locked ? 'Not recorded · date locked' : 'Attendance pending'
                           : 'Attendance status unavailable'}
                       </p>
@@ -604,6 +617,10 @@ function MarkAttendanceContent() {
           >
             {!selectedClass ? (
               <FacultyEmptyState description="Select a class from the list to load the roster." />
+            ) : selectedClass.cancelled ? (
+              <p role="status" className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-900">
+                This dated class was cancelled. There is no attendance to mark for this session.
+              </p>
             ) : rosterLoading ? (
               <FacultyInlineLoading label="Loading roster…" />
             ) : rosterError ? (

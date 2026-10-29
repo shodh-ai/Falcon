@@ -370,12 +370,26 @@ export class AcademicsFacultyService {
        ORDER BY date, start_time, timetable_id`,
       [tenantId, facultyUserId, deptId ?? null, start],
     );
+    const cancellationRows = rows.length ? await this.dataSource.query<Array<{
+      course_id: string; session_date: string; start_time: string;
+    }>>(
+      `SELECT DISTINCT course_id,
+              (new_date AT TIME ZONE 'Asia/Kolkata')::date::text AS session_date,
+              to_char(new_date AT TIME ZONE 'Asia/Kolkata', 'HH24:MI') AS start_time
+       FROM class_adjustments
+       WHERE tenant_id=$1 AND course_id=ANY($2::uuid[])
+         AND adjustment_type='CANCEL' AND status IN ('APPROVED','NOTIFIED')
+         AND (new_date AT TIME ZONE 'Asia/Kolkata')::date BETWEEN $3::date AND ($3::date + 6)`,
+      [tenantId, [...new Set(rows.map(row => row.course_id).filter(Boolean))], start],
+    ) : [];
+    const cancelledWeekSessions = new Set(cancellationRows.map(row => `${row.session_date}|${row.course_id}|${row.start_time}`));
     return Array.from({ length: 7 }, (_, index) => {
       const date = new Date(parsed);
       date.setUTCDate(date.getUTCDate() + index);
       const key = date.toISOString().slice(0, 10);
       return { date: key, sessions: rows.filter(row => row.date === key && row.timetable_id).map(row => ({
         ...row, has_saved_attendance: Boolean(row.has_saved_attendance), attendance_locked: this.isAttendanceLocked(key),
+        cancelled: cancelledWeekSessions.has(`${key}|${row.course_id}|${String(row.start_time).slice(0, 5)}`),
         awaiting_confirmation: String(row.timetable_id).startsWith('held:'),
       })) };
     });
@@ -519,6 +533,19 @@ export class AcademicsFacultyService {
       [tenantId, facultyUserId, deptId ?? null, isoDay, date],
     );
 
+    const cancellations = rows.length ? await this.dataSource.query<Array<{
+      course_id: string; start_time: string;
+    }>>(
+      `SELECT DISTINCT course_id,
+              to_char(new_date AT TIME ZONE 'Asia/Kolkata', 'HH24:MI') AS start_time
+       FROM class_adjustments
+       WHERE tenant_id=$1 AND course_id=ANY($2::uuid[])
+         AND adjustment_type='CANCEL' AND status IN ('APPROVED','NOTIFIED')
+         AND (new_date AT TIME ZONE 'Asia/Kolkata')::date=$3::date`,
+      [tenantId, [...new Set(rows.map(row => row.course_id))], date],
+    ) : [];
+    const cancelledSessions = new Set(cancellations.map(row => `${row.course_id}|${row.start_time}`));
+
     return Promise.all(
       rows.map(async (row) => ({
         timetable_id: row.timetable_id,
@@ -532,6 +559,7 @@ export class AcademicsFacultyService {
         is_practical: Boolean(row.is_practical),
         has_saved_attendance: Boolean(row.has_saved_attendance),
         attendance_locked: this.isAttendanceLocked(date),
+        cancelled: cancelledSessions.has(`${row.course_id}|${String(row.start_time).slice(0, 5)}`),
         awaiting_confirmation: row.timetable_id.startsWith('held:'),
         student_count: row.timetable_id.startsWith('held:') || row.is_practical && !row.section
           ? 0
@@ -1445,6 +1473,23 @@ export class AcademicsFacultyService {
           [tenantId,timetableId,dto.course_id,date],
         );
         if (!effective) throw new ForbiddenException('Selected class is no longer scheduled');
+        const [cancellation] = await manager.query<Array<{ cancelled: boolean }>>(
+          `SELECT EXISTS (
+             SELECT 1 FROM class_adjustments a
+             JOIN academic_timetables t ON t.tenant_id=a.tenant_id AND t.course_id=a.course_id
+             LEFT JOIN academic_class_moves m ON m.tenant_id=t.tenant_id
+               AND m.source_timetable_id=t.timetable_id AND m.target_date=$4::date
+               AND m.status='APPROVED'
+             WHERE a.tenant_id=$1 AND t.timetable_id=$2::uuid AND a.course_id=$3
+               AND a.adjustment_type='CANCEL' AND a.status IN ('APPROVED','NOTIFIED')
+               AND (a.new_date AT TIME ZONE 'Asia/Kolkata')::date=$4::date
+               AND (a.new_date AT TIME ZONE 'Asia/Kolkata')::time=COALESCE(m.target_start_time,t.start_time)
+           ) AS cancelled`,
+          [tenantId, timetableId, dto.course_id, date],
+        );
+        if (cancellation?.cancelled) {
+          throw new ForbiddenException('This class was cancelled. Attendance cannot be recorded.');
+        }
         const isoDay = new Date(`${date}T00:00:00Z`).getUTCDay() || 7;
         if (effective.source_date === date && effective.target_date !== date) {
           throw new ForbiddenException('This class was moved to another date');

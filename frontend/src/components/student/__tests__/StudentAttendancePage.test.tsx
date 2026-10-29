@@ -179,7 +179,7 @@ describe('Student attendance page', () => {
     render(<StudentAttendancePage />);
 
     fireEvent.mouseDown(await screen.findByRole('tab', { name: 'Semester 1' }), { button: 0 });
-    expect(screen.getByText('Not recorded')).toBeInTheDocument();
+    expect(screen.getAllByText('Not recorded')).toHaveLength(3); // Summary, desktop row and mobile card.
     expect(screen.getByText('No classes have been marked for Semester 1 yet.')).toBeInTheDocument();
     expect(screen.queryByText('0%')).not.toBeInTheDocument();
     expect(screen.queryByText('83.33%')).not.toBeInTheDocument();
@@ -198,6 +198,22 @@ describe('Student attendance page', () => {
     expect(await screen.findByText('0%')).toBeInTheDocument();
     expect(screen.getByText('0 of 5 classes attended · Below 75% minimum — review subject-wise')).toBeInTheDocument();
     expect(screen.queryByText('Not recorded')).not.toBeInTheDocument();
+    expect(screen.getAllByText('0.0%')).toHaveLength(2);
+  });
+
+  it('derives desktop and mobile subject badges from marked counts rather than a stale stored percentage', async () => {
+    mocks.get.mockResolvedValue({
+      overall_percent: 100, current_semester: 2,
+      subject_wise: [{ ...subject(2), attendance_percent: '100', present_count: 2, absent_count: 1, total_classes: 3 }],
+      progression: [],
+    });
+    render(<StudentAttendancePage />);
+    const table = await screen.findByRole('table', { name: 'Semester 2 course attendance' });
+    const cards = screen.getByRole('list', { name: 'Semester 2 attendance cards' });
+    for (const view of [table, cards]) {
+      expect(within(view).getByText('66.7%')).toBeInTheDocument();
+      expect(within(view).queryByText('100.0%')).not.toBeInTheDocument();
+    }
   });
 
   it('derives sorted unique semester tabs from real subjects rather than fixed semesters or future progression', async () => {
