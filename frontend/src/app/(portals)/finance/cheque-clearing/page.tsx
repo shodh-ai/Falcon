@@ -22,6 +22,7 @@ export default function ChequeClearingPage() {
   const api = useAuthedApi();
   const [rows, setRows] = useState<ChequeTxn[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [form, setForm] = useState({
     student_user_id: '',
     demand_id: '',
@@ -32,11 +33,13 @@ export default function ChequeClearingPage() {
 
   async function load() {
     setLoading(true);
+    setLoadError(null);
     try {
       const data = await api.get<ChequeTxn[]>('/finance/cheques/pending');
-      setRows(data);
-    } catch {
+      setRows(Array.isArray(data) ? data : []);
+    } catch (error) {
       setRows([]);
+      setLoadError(error instanceof Error ? error.message : 'Cheque queue could not be loaded');
     } finally {
       setLoading(false);
     }
@@ -100,6 +103,7 @@ export default function ChequeClearingPage() {
       <FinancePageHeader title="Cheque Clearing" description="Deposit cheques, track clearance, and handle bounces" />
 
       <form onSubmit={logCheque} className="grid gap-3 rounded-xl border p-4 md:grid-cols-3">
+        <p className="text-sm text-muted-foreground md:col-span-3">Log a cheque only for a verified student payment. Use the student and demand records from this tenant.</p>
         <Input aria-label="Student user UUID" placeholder="Student user UUID (not enrollment number)" value={form.student_user_id} onChange={(e) => setForm((f) => ({ ...f, student_user_id: e.target.value }))} required />
         <Input aria-label="Fee demand UUID" placeholder="Fee demand UUID (optional)" value={form.demand_id} onChange={(e) => setForm((f) => ({ ...f, demand_id: e.target.value }))} />
         <Input placeholder="Amount" type="number" min="0.01" step="0.01" value={form.amount} onChange={(e) => setForm((f) => ({ ...f, amount: e.target.value }))} required />
@@ -122,8 +126,10 @@ export default function ChequeClearingPage() {
           <tbody>
             {loading ? (
               <tr><td className="p-4 text-muted-foreground" colSpan={5}>Loading…</td></tr>
+            ) : loadError ? (
+              <tr><td role="alert" className="p-4 text-red-800" colSpan={5}>Could not load pending cheques. {loadError} <Button size="sm" variant="outline" onClick={() => void load()}>Retry</Button></td></tr>
             ) : rows.length === 0 ? (
-              <tr><td className="p-4 text-muted-foreground" colSpan={5}>No pending cheques</td></tr>
+              <tr><td className="p-4 text-muted-foreground" colSpan={5}>No pending cheques. Log a verified deposit above when one is received.</td></tr>
             ) : (
               rows.map((r) => (
                 <tr key={r.transaction_id} className="border-t">

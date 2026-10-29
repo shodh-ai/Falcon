@@ -63,6 +63,20 @@ describe('DoFA module route authorization', () => {
     expect(canRoleAccessPath('SanitizationOperator', '/finance/asset-service')).toBe(false);
   });
 
+  it('limits the Finance Policy Vault navigation link to backend read-authorized roles', () => {
+    expect(normalize(financeNavItem('/finance/dofa-policy-vault')?.roles ?? [])).toEqual(
+      normalize([
+        'CampusAdmin',
+        'SuperAdmin',
+        'CIO',
+        'CFO',
+        'Chairman',
+        'President',
+        'InternalAuditor',
+      ]),
+    );
+  });
+
   it('denies unrelated and anonymous users across every DoFA module route', () => {
     for (const path of Object.keys(DOFA_FINANCE_MODULE_PATH_ROLES)) {
       expect(canRoleAccessPath('Student', path)).toBe(false);
