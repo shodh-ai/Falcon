@@ -2,11 +2,21 @@
 
 Monorepo: `backend/` (NestJS API), `frontend/` (Next.js portals), `tests/` (unified test suite), `docs/`.
 
+Team development follows [DEVELOPMENT_WORKFLOW.md](./DEVELOPMENT_WORKFLOW.md):
+`feature/*` or `fix/*` → reviewed PR into `staging` → verified staging release →
+reviewed PR into `main`. Hosting and database prerequisites are in
+[STAGING_SETUP.md](./docs/STAGING_SETUP.md); no shared staging website is verified yet.
+
 Falcon is the unified operating system for **Suresh Gyan Vihar University** — academic governance from Faculty through HOD, Dean, Exam Cell, and Registrar (future), plus HR, finance, hostel, placements, and executive dashboards.
 
 ---
 
 ## Quick start (local)
+
+The commands below are for a reviewed disposable local database only. Historical
+migrations include data changes; do not use this quick start to initialize shared
+staging or production. Read the
+[staging database plan](./docs/STAGING_DATABASE_PLAN.md) before database operations.
 
 ```bash
 # From the repository root
