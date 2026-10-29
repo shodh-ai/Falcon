@@ -87,7 +87,7 @@ export function PrincipalReportingRequests() {
         <div>
           <h2 className="text-lg font-bold">Assigned reporting requests</h2>
           <p className="mt-2 text-sm text-muted-foreground">
-            Only the existing workflow's current decision owner may act. New
+            Only the current decision owner in the existing workflow may act. New
             routine requests go to HOD; previously assigned requests retain
             their recorded approver and downstream review.
           </p>
