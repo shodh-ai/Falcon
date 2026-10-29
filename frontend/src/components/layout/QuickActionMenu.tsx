@@ -55,7 +55,7 @@ export function QuickActionMenu() {
     end_date: '',
     reason: '',
   });
-  const [odForm, setOdForm] = useState({ start_date: '', end_date: '', reason: '' });
+  const [odForm, setOdForm] = useState({ date: '', start_time: '', end_time: '', reason: '' });
   const [ticketForm, setTicketForm] = useState({ category: 'IT', subject: '', description: '' });
   const [roomForm, setRoomForm] = useState({ date: '', slot: '10:00', room: '', purpose: '' });
 
@@ -81,13 +81,15 @@ export function QuickActionMenu() {
       await api.post(workforceRequestsApi(user, pathname), {
         request_type: 'ON_DUTY',
         leave_type: 'OD',
-        start_date: odForm.start_date,
-        end_date: odForm.end_date,
+        start_date: odForm.date,
+        end_date: odForm.date,
+        start_time: odForm.start_time,
+        end_time: odForm.end_time,
         reason: odForm.reason,
       });
       toast.success('On-duty request submitted');
       setOpen(null);
-      setOdForm({ start_date: '', end_date: '', reason: '' });
+      setOdForm({ date: '', start_time: '', end_time: '', reason: '' });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Submit failed');
     } finally {
@@ -231,26 +233,53 @@ export function QuickActionMenu() {
             <DialogTitle>Apply On Duty (OD)</DialogTitle>
           </DialogHeader>
           <form onSubmit={submitOd} className="grid gap-3">
-            <Input
-              type="date"
-              min={workforceMinDate()}
-              value={odForm.start_date}
-              onChange={(e) => setOdForm((f) => ({ ...f, start_date: e.target.value }))}
-              required
-            />
-            <Input
-              type="date"
-              min={workforceMinDate()}
-              value={odForm.end_date}
-              onChange={(e) => setOdForm((f) => ({ ...f, end_date: e.target.value }))}
-              required
-            />
-            <Input
-              placeholder="Purpose / venue"
-              value={odForm.reason}
-              onChange={(e) => setOdForm((f) => ({ ...f, reason: e.target.value }))}
-              required
-            />
+            <label htmlFor="on-duty-date" className="grid gap-1 text-sm font-medium">
+              On Duty Date
+              <Input
+                id="on-duty-date"
+                aria-label="On Duty Date"
+                type="date"
+                min={workforceMinDate()}
+                value={odForm.date}
+                onChange={(e) => setOdForm((f) => ({ ...f, date: e.target.value }))}
+                required
+              />
+            </label>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label htmlFor="on-duty-start-time" className="grid gap-1 text-sm font-medium">
+                Departure Time
+                <Input
+                  id="on-duty-start-time"
+                  aria-label="Departure Time"
+                  type="time"
+                  value={odForm.start_time}
+                  onChange={(e) => setOdForm((f) => ({ ...f, start_time: e.target.value }))}
+                  required
+                />
+              </label>
+              <label htmlFor="on-duty-end-time" className="grid gap-1 text-sm font-medium">
+                Expected Return Time
+                <Input
+                  id="on-duty-end-time"
+                  aria-label="Expected Return Time"
+                  type="time"
+                  min={odForm.start_time || undefined}
+                  value={odForm.end_time}
+                  onChange={(e) => setOdForm((f) => ({ ...f, end_time: e.target.value }))}
+                  required
+                />
+              </label>
+            </div>
+            <label htmlFor="on-duty-purpose" className="grid gap-1 text-sm font-medium">
+              Purpose / Venue
+              <Input
+                id="on-duty-purpose"
+                aria-label="Purpose / Venue"
+                value={odForm.reason}
+                onChange={(e) => setOdForm((f) => ({ ...f, reason: e.target.value }))}
+                required
+              />
+            </label>
             <Button type="submit" disabled={submitting}>
               {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Submit OD'}
             </Button>

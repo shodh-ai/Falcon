@@ -56,6 +56,16 @@ const DOMAINS = [
   'SPACE',
 ] as const;
 
+const POLICY_READ_ROLES = [
+  'campusadmin',
+  'superadmin',
+  'cio',
+  'cfo',
+  'chairman',
+  'president',
+  'internalauditor',
+] as const;
+
 function BandNode({ data }: { data: Record<string, unknown> }) {
   const roles = (data.required_roles as string[]) ?? [];
   return (
@@ -155,6 +165,7 @@ export function DofaPolicyVault() {
   const api = useAuthedApi();
   const { user } = useAuth();
   const r = rolesOf(user);
+  const canRead = r.some((role) => POLICY_READ_ROLES.includes(role as (typeof POLICY_READ_ROLES)[number]));
   const canPropose = r.some((x) =>
     ['campusadmin', 'superadmin', 'cio'].includes(x),
   );
@@ -168,6 +179,8 @@ export function DofaPolicyVault() {
   const [tab, setTab] = useState<'board' | 'audit'>('board');
   const [domain, setDomain] = useState<string>('P2P');
   const [graphs, setGraphs] = useState<GraphMeta[]>([]);
+  const [graphsLoading, setGraphsLoading] = useState(true);
+  const [graphsError, setGraphsError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selected, setSelected] = useState<GraphMeta | null>(null);
   const [audit, setAudit] = useState<AuditRow[]>([]);
@@ -180,19 +193,33 @@ export function DofaPolicyVault() {
   const editable = canPropose && selected?.status === 'DRAFT';
 
   const loadGraphs = useCallback(() => {
+    if (!canRead) {
+      setGraphsLoading(false);
+      setGraphs([]);
+      setGraphsError(null);
+      return;
+    }
+    setGraphsLoading(true);
+    setGraphsError(null);
     void api
       .get<GraphMeta[]>(`/api/dofa/policy/graphs?domain=${domain}`)
       .then((list) => {
-        setGraphs(list);
+        setGraphs(Array.isArray(list) ? list : []);
         const pub = list.find((g) => g.status === 'PUBLISHED') ?? list[0];
-        if (pub) setSelectedId(pub.graph_id);
+        setSelectedId(pub?.graph_id ?? null);
       })
-      .catch(() => setGraphs([]));
-  }, [api, domain]);
+      .catch((error) => {
+        setGraphs([]);
+        setSelectedId(null);
+        setGraphsError(error instanceof Error ? error.message : 'Could not load policy graphs');
+      })
+      .finally(() => setGraphsLoading(false));
+  }, [api, domain, canRead]);
 
   useEffect(() => {
-    loadGraphs();
-  }, [loadGraphs]);
+    if (!canRead) return;
+    void Promise.resolve().then(loadGraphs);
+  }, [canRead, loadGraphs]);
 
   useEffect(() => {
     if (!selectedId) return;
@@ -306,8 +333,8 @@ export function DofaPolicyVault() {
       toast.success('Draft created (live matrices untouched)');
       setSelectedId(g.graph_id);
       loadGraphs();
-    } catch (e: any) {
-      toast.error(String(e?.message ?? e));
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : String(e));
     }
   }
 
@@ -322,8 +349,8 @@ export function DofaPolicyVault() {
       });
       toast.success('Draft saved');
       loadGraphs();
-    } catch (e: any) {
-      toast.error(String(e?.message ?? e));
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : String(e));
     }
   }
 
@@ -343,8 +370,8 @@ export function DofaPolicyVault() {
       setSelected(g);
       toast.success('Frozen — awaiting CFO unlock');
       loadGraphs();
-    } catch (e: any) {
-      toast.error(String(e?.message ?? e));
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : String(e));
     }
   }
 
@@ -361,8 +388,8 @@ export function DofaPolicyVault() {
       } else {
         toast.success('OTP sent to CFO channel');
       }
-    } catch (e: any) {
-      toast.error(String(e?.message ?? e));
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : String(e));
     }
   }
 
@@ -376,8 +403,8 @@ export function DofaPolicyVault() {
       setSelected(g);
       toast.success('Unlocked & published to live matrices');
       loadGraphs();
-    } catch (e: any) {
-      toast.error(String(e?.message ?? e));
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : String(e));
     }
   }
 
@@ -398,6 +425,18 @@ export function DofaPolicyVault() {
           },
         };
       }),
+    );
+  }
+
+  if (!canRead) {
+    return (
+      <div className="p-6">
+        <div role="alert" className="mx-auto max-w-3xl rounded-lg border border-amber-300 bg-amber-50 p-5 text-sm text-amber-950">
+          <h1 className="text-lg font-bold">Policy Vault access required</h1>
+          <p className="mt-2">Your current role cannot view this dual-key policy workspace. Ask an administrator to use an authorized account if you need to review the policy.</p>
+          <p className="mt-2 text-xs">Roles with read access: CampusAdmin, SuperAdmin, CIO, CFO, Chairman, President, InternalAuditor.</p>
+        </div>
+      </div>
     );
   }
 
@@ -457,6 +496,17 @@ export function DofaPolicyVault() {
           </span>
         )}
       </div>
+
+      {graphsError ? (
+        <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-900">
+          <p>Could not load the policy graph. {graphsError}</p>
+          <Button size="sm" variant="outline" onClick={loadGraphs}>Retry</Button>
+        </div>
+      ) : !graphsLoading && graphs.length === 0 ? (
+        <div className="rounded-md border border-slate-200 bg-white p-3 text-sm text-muted-foreground">
+          No policy graph is configured for {domain}. An authorized policy administrator must create or publish one before this board can show approval stages.
+        </div>
+      ) : null}
 
       {tab === 'audit' ? (
         <div className="flex-1 overflow-auto border rounded-md bg-white p-4">

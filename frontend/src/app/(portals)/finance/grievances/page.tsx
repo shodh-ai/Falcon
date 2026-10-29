@@ -22,17 +22,21 @@ export default function FinanceGrievancesPage() {
   const api = useAuthedApi();
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedTicket, setSelectedTicket] = useState<Row | null>(null);
   const [message, setMessage] = useState('');
   const [resolving, setResolving] = useState(false);
 
   const loadRows = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const data = await api.get<Row[]>('/api/helpdesk/tickets/finance-grievances');
       setRows(Array.isArray(data) ? data : []);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed to load grievances');
+      const message = e instanceof Error ? e.message : 'Failed to load grievances';
+      setLoadError(message);
+      toast.error(message);
       setRows([]);
     } finally {
       setLoading(false);
@@ -40,7 +44,7 @@ export default function FinanceGrievancesPage() {
   }, [api]);
 
   useEffect(() => {
-    void loadRows();
+    void Promise.resolve().then(loadRows);
   }, [loadRows]);
 
   const handleResolve = async () => {
@@ -71,7 +75,7 @@ export default function FinanceGrievancesPage() {
             Finance helpdesk tickets (fee, refund, payment disputes) escalated to the finance desk.
           </p>
           <div className="flex items-center gap-3">
-            <p className="text-sm font-medium">{rows.length} open ticket{rows.length === 1 ? '' : 's'}</p>
+            <p className="text-sm font-medium">{loading ? 'Loading tickets…' : loadError ? 'Tickets unavailable' : `${rows.length} open ticket${rows.length === 1 ? '' : 's'}`}</p>
             <Button size="sm" variant="outline" onClick={() => void loadRows()} disabled={loading}>
               Refresh
             </Button>
@@ -91,6 +95,13 @@ export default function FinanceGrievancesPage() {
               <tbody>
                 {loading ? (
                   <tr><td colSpan={4} className="p-4 text-center">Loading...</td></tr>
+                ) : loadError ? (
+                  <tr>
+                    <td colSpan={4} className="p-4 text-center text-red-800">
+                      Could not load finance grievances. {loadError}{' '}
+                      <Button size="sm" variant="outline" onClick={() => void loadRows()} disabled={loading}>Retry</Button>
+                    </td>
+                  </tr>
                 ) : rows.length === 0 ? (
                   <tr><td colSpan={4} className="p-4 text-center text-muted-foreground">No open finance grievances.</td></tr>
                 ) : (

@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  ForbiddenException,
   Get,
   Header,
   Param,
@@ -59,7 +60,10 @@ export class FinanceController {
   ) {}
 
   private tenant(req: { user: AuthUser }) {
-    return req.user.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
+    if (!req.user.tenant_id) {
+      throw new ForbiddenException('Authenticated tenant context required');
+    }
+    return req.user.tenant_id;
   }
 
   @Get('dashboard')

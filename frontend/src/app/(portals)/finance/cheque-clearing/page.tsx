@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useState } from 'react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { FinancePageHeader } from '@/components/finance/FinancePageHeader';
 import { Button } from '@/components/ui/button';
@@ -22,6 +22,7 @@ export default function ChequeClearingPage() {
   const api = useAuthedApi();
   const [rows, setRows] = useState<ChequeTxn[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [form, setForm] = useState({
     student_user_id: '',
     demand_id: '',
@@ -30,21 +31,23 @@ export default function ChequeClearingPage() {
     bank_name: '',
   });
 
-  async function load() {
+  const load = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const data = await api.get<ChequeTxn[]>('/finance/cheques/pending');
-      setRows(data);
-    } catch {
+      setRows(Array.isArray(data) ? data : []);
+    } catch (error) {
       setRows([]);
+      setLoadError(error instanceof Error ? error.message : 'Could not load pending cheques');
     } finally {
       setLoading(false);
     }
-  }
+  }, [api]);
 
   useEffect(() => {
-    void load();
-  }, [api]);
+    void Promise.resolve().then(load);
+  }, [load]);
 
   async function logCheque(e: FormEvent) {
     e.preventDefault();
@@ -96,6 +99,9 @@ export default function ChequeClearingPage() {
       <FinancePageHeader title="Cheque Clearing" description="Deposit cheques, track clearance, and handle bounces" />
 
       <form onSubmit={logCheque} className="grid gap-3 rounded-xl border p-4 md:grid-cols-3">
+        <p className="text-sm text-muted-foreground md:col-span-3">
+          Log a cheque only for a verified student payment. Use the student and demand records from this tenant; the queue shows deposits awaiting clearance.
+        </p>
         <Input placeholder="Student user ID" value={form.student_user_id} onChange={(e) => setForm((f) => ({ ...f, student_user_id: e.target.value }))} required />
         <Input placeholder="Demand ID (optional)" value={form.demand_id} onChange={(e) => setForm((f) => ({ ...f, demand_id: e.target.value }))} />
         <Input placeholder="Amount" type="number" value={form.amount} onChange={(e) => setForm((f) => ({ ...f, amount: e.target.value }))} required />
@@ -103,6 +109,13 @@ export default function ChequeClearingPage() {
         <Input placeholder="Bank name" value={form.bank_name} onChange={(e) => setForm((f) => ({ ...f, bank_name: e.target.value }))} required />
         <Button type="submit">Log cheque deposit</Button>
       </form>
+
+      {loadError && (
+        <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-900">
+          <p>Could not load the pending cheque queue. {loadError}</p>
+          <Button variant="outline" onClick={() => void load()} disabled={loading}>Retry</Button>
+        </div>
+      )}
 
       <div className="rounded-xl border overflow-hidden">
         <table className="w-full text-sm">
@@ -119,7 +132,9 @@ export default function ChequeClearingPage() {
             {loading ? (
               <tr><td className="p-4 text-muted-foreground" colSpan={5}>Loading…</td></tr>
             ) : rows.length === 0 ? (
-              <tr><td className="p-4 text-muted-foreground" colSpan={5}>No pending cheques</td></tr>
+              <tr><td className="p-4 text-muted-foreground" colSpan={5}>
+                {loadError ? 'Queue unavailable; retry to check pending deposits.' : 'No pending cheques. Log a verified deposit above when one is received.'}
+              </td></tr>
             ) : (
               rows.map((r) => (
                 <tr key={r.transaction_id} className="border-t">

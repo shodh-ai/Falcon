@@ -60,23 +60,38 @@ export function AcquisitionWorkspace() {
   const [fundingSources, setFundingSources] = useState<
     AcquisitionFundingSource[]
   >([]);
+  const [fundingSourcesLoading, setFundingSourcesLoading] = useState(false);
+  const [fundingSourcesError, setFundingSourcesError] = useState<string | null>(null);
+  const [queueError, setQueueError] = useState<string | null>(null);
 
   const reload = useCallback(
-    () =>
-      api
+    () => {
+      return api
         .list()
-        .then(setRows)
-        .catch((error) => toast.error(error.message)),
+        .then((data) => {
+          setRows(data);
+          setQueueError(null);
+        })
+        .catch((error) => {
+          setQueueError(error instanceof Error ? error.message : "Could not load acquisitions");
+          toast.error(error instanceof Error ? error.message : "Could not load acquisitions");
+        });
+    },
     [api],
   );
   useEffect(() => {
-    void reload();
+    void Promise.resolve().then(reload);
   }, [reload]);
   useEffect(() => {
     if (!showWizard) return;
-    void api
-      .fundingSources()
-      .then((sources) => {
+    let cancelled = false;
+    void Promise.resolve().then(async () => {
+      if (cancelled) return;
+      setFundingSourcesLoading(true);
+      setFundingSourcesError(null);
+      try {
+        const sources = await api.fundingSources();
+        if (cancelled) return;
         setFundingSources(sources);
         if (sources.length === 1) {
           setDraft((current) => ({
@@ -86,8 +101,19 @@ export function AcquisitionWorkspace() {
             funding_source_id: sources[0].funding_source_id,
           }));
         }
-      })
-      .catch((error) => toast.error(error.message));
+      } catch (error) {
+        if (cancelled) return;
+        const message = error instanceof Error ? error.message : "Could not load funding sources";
+        setFundingSources([]);
+        setFundingSourcesError(message);
+        toast.error(message);
+      } finally {
+        if (!cancelled) setFundingSourcesLoading(false);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [api, showWizard]);
 
   const setLine = (index: number, patch: Partial<AcquisitionLineInput>) =>
@@ -111,6 +137,22 @@ export function AcquisitionWorkspace() {
   );
 
   async function save() {
+    if (!draft.required_by_date) {
+      toast.error("Required-by date is required");
+      return;
+    }
+    if (!draft.intended_use_case.trim()) {
+      toast.error("Intended use case is required");
+      return;
+    }
+    if (!fundingSources.some((source) => source.funding_source_id === draft.funding_source_id)) {
+      toast.error("Select an active funding source");
+      return;
+    }
+    if (!draft.lines.length) {
+      toast.error("Add at least one product line");
+      return;
+    }
     setBusy(true);
     try {
       const created = await api.create(draft);
@@ -235,16 +277,20 @@ export function AcquisitionWorkspace() {
           </CardHeader>
           <CardContent className="space-y-5">
             <div className="grid gap-3 md:grid-cols-3">
-              <Input
-                placeholder="Intended department, lab or project"
-                value={draft.intended_lab_or_project ?? ""}
-                onChange={(e) =>
-                  setDraft({
-                    ...draft,
-                    intended_lab_or_project: e.target.value,
-                  })
-                }
-              />
+              <label className="space-y-1 text-sm">
+                <span className="font-medium">Intended department, lab or project</span>
+                <Input
+                  aria-label="Intended department, lab or project"
+                  placeholder="Name the intended department, lab or project"
+                  value={draft.intended_lab_or_project ?? ""}
+                  onChange={(e) =>
+                    setDraft({
+                      ...draft,
+                      intended_lab_or_project: e.target.value,
+                    })
+                  }
+                />
+              </label>
               <label className="space-y-1 text-sm">
                 <span className="font-medium">Required by date</span>
                 <Input
@@ -264,24 +310,29 @@ export function AcquisitionWorkspace() {
                   current date, fund-release date, or fund-utilization date.
                 </span>
               </label>
-              <select
-                className="h-10 rounded-md border bg-background px-3 text-sm"
-                value={draft.priority}
-                onChange={(e) =>
-                  setDraft({
-                    ...draft,
-                    priority: e.target
-                      .value as AcquisitionDraftInput["priority"],
-                  })
-                }
-              >
-                <option>NORMAL</option>
-                <option>HIGH</option>
-                <option>URGENT</option>
-                <option>LOW</option>
-              </select>
+              <label className="space-y-1 text-sm">
+                <span className="font-medium">Priority</span>
+                <select
+                  aria-label="Priority"
+                  className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+                  value={draft.priority}
+                  onChange={(e) =>
+                    setDraft({
+                      ...draft,
+                      priority: e.target
+                        .value as AcquisitionDraftInput["priority"],
+                    })
+                  }
+                >
+                  <option>NORMAL</option>
+                  <option>HIGH</option>
+                  <option>URGENT</option>
+                  <option>LOW</option>
+                </select>
+              </label>
               <Input
                 className="md:col-span-2"
+                aria-label="Intended use case"
                 placeholder="Intended use case"
                 value={draft.intended_use_case}
                 onChange={(e) =>
@@ -300,6 +351,7 @@ export function AcquisitionWorkspace() {
                   aria-label="Funding source"
                   className="h-10 w-full rounded-md border bg-background px-3 text-sm"
                   value={draft.funding_source_id}
+                  disabled={fundingSourcesLoading || fundingSources.length === 0 || !!fundingSourcesError}
                   onChange={(e) => {
                     const selected = fundingSources.find(
                       (source) => source.funding_source_id === e.target.value,
@@ -313,7 +365,9 @@ export function AcquisitionWorkspace() {
                     });
                   }}
                 >
-                  <option value="">Select funding source</option>
+                  <option value="">
+                    {fundingSourcesLoading ? "Loading funding sources…" : "Select funding source"}
+                  </option>
                   {fundingSources.map((source) => (
                     <option
                       key={source.funding_source_id}
@@ -327,6 +381,15 @@ export function AcquisitionWorkspace() {
                   This is the approved budget, program or grant that will fund
                   the request. You do not need to enter an ID.
                 </p>
+                {fundingSourcesError ? (
+                  <p role="alert" className="text-xs text-red-700">
+                    Funding sources could not be verified. Retry by closing and reopening the wizard.
+                  </p>
+                ) : !fundingSourcesLoading && fundingSources.length === 0 ? (
+                  <p className="text-xs text-amber-800">
+                    No active funding sources are available for your scope. Finance must create or activate an approved source before this request can be saved.
+                  </p>
+                ) : null}
               </div>
               <Textarea
                 className="md:col-span-2"
@@ -360,28 +423,36 @@ export function AcquisitionWorkspace() {
                       </Button>
                     )}
                   </div>
-                  <div className="grid gap-3 md:grid-cols-4">
-                    <select
-                      className="h-10 rounded-md border bg-background px-3 text-sm"
-                      value={line.acquisition_layout}
-                      onChange={(e) =>
-                        setLine(index, {
-                          acquisition_layout: e.target
-                            .value as AcquisitionLineInput["acquisition_layout"],
-                        })
-                      }
-                    >
-                      <option>GENERAL</option>
-                      <option>ONLINE</option>
-                      <option>OFFLINE</option>
-                    </select>
-                    <Input
-                      placeholder="Product"
-                      value={line.product_name}
-                      onChange={(e) =>
-                        setLine(index, { product_name: e.target.value })
-                      }
-                    />
+                  <div className="grid items-start gap-4 md:grid-cols-2 xl:grid-cols-4">
+                    <label className="space-y-1 text-sm">
+                      <span className="font-medium">Product layout</span>
+                      <select
+                        aria-label={`Product line ${index + 1} layout`}
+                        className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+                        value={line.acquisition_layout}
+                        onChange={(e) =>
+                          setLine(index, {
+                            acquisition_layout: e.target
+                              .value as AcquisitionLineInput["acquisition_layout"],
+                          })
+                        }
+                      >
+                        <option>GENERAL</option>
+                        <option>ONLINE</option>
+                        <option>OFFLINE</option>
+                      </select>
+                    </label>
+                    <label className="space-y-1 text-sm">
+                      <span className="font-medium">Product or service</span>
+                      <Input
+                        aria-label={`Product line ${index + 1} product or service`}
+                        placeholder="Product or service"
+                        value={line.product_name}
+                        onChange={(e) =>
+                          setLine(index, { product_name: e.target.value })
+                        }
+                      />
+                    </label>
                     <label className="space-y-1 text-sm">
                       <span className="font-medium">Category</span>
                       <select
@@ -402,35 +473,43 @@ export function AcquisitionWorkspace() {
                         <option value="SERVICE">Service</option>
                       </select>
                     </label>
-                    <Input
-                      type="number"
-                      min="1"
-                      step="1"
-                      inputMode="numeric"
-                      placeholder="Quantity (whole number)"
-                      value={line.quantity}
-                      onKeyDown={(e) => {
-                        if ([".", "e", "E", "+", "-"].includes(e.key))
-                          e.preventDefault();
-                      }}
-                      onChange={(e) => {
-                        const quantity = Number(e.target.value);
-                        if (Number.isInteger(quantity) && quantity >= 0)
-                          setLine(index, { quantity });
-                      }}
-                    />
-                    <Input
-                      type="number"
-                      min="0"
-                      aria-label="Price per unit"
-                      placeholder="Price per unit"
-                      value={line.estimated_unit_price}
-                      onChange={(e) =>
-                        setLine(index, {
-                          estimated_unit_price: Number(e.target.value),
-                        })
-                      }
-                    />
+                    <label className="space-y-1 text-sm">
+                      <span className="font-medium">Quantity (whole units)</span>
+                      <Input
+                        type="number"
+                        min="1"
+                        step="1"
+                        inputMode="numeric"
+                        aria-label={`Product line ${index + 1} quantity`}
+                        value={line.quantity}
+                        onKeyDown={(e) => {
+                          if ([".", "e", "E", "+", "-"].includes(e.key))
+                            e.preventDefault();
+                        }}
+                        onChange={(e) => {
+                          const quantity = Number(e.target.value);
+                          if (Number.isInteger(quantity) && quantity >= 1)
+                            setLine(index, { quantity });
+                        }}
+                      />
+                      <span className="block text-xs text-muted-foreground">Enter a whole number of items.</span>
+                    </label>
+                    <label className="space-y-1 text-sm">
+                      <span className="font-medium">Estimated price per unit (₹)</span>
+                      <Input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        aria-label={`Product line ${index + 1} price per unit`}
+                        value={line.estimated_unit_price}
+                        onChange={(e) =>
+                          setLine(index, {
+                            estimated_unit_price: Number(e.target.value),
+                          })
+                        }
+                      />
+                      <span className="block text-xs text-muted-foreground">The server calculates the final total.</span>
+                    </label>
                     <Textarea
                       className="md:col-span-4"
                       aria-label="Notes and General info (optional)"
@@ -599,7 +678,16 @@ export function AcquisitionWorkspace() {
           {!visible.length && (
             <div className="py-12 text-center text-muted-foreground">
               <ShieldCheck className="mx-auto mb-3 h-8 w-8" />
-              No acquisitions in this queue.
+              {queueError ? (
+                <div role="alert" className="space-y-3">
+                  <p>Could not load the scoped acquisition queue.</p>
+                  <Button size="sm" variant="outline" onClick={() => void reload()}>Retry</Button>
+                </div>
+              ) : filter === "ALL" ? (
+                <>No acquisitions are available in your scope yet. Create a real request with an approved funding source to start the workflow.</>
+              ) : (
+                <>No acquisitions match this status filter.</>
+              )}
             </div>
           )}
         </CardContent>

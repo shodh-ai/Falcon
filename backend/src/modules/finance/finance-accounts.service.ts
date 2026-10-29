@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -595,7 +596,7 @@ export class FinanceAccountsService {
     );
   }
 
-  upsertBudget(
+  async upsertBudget(
     tenantId: string,
     dto: {
       department_id: number;
@@ -603,14 +604,56 @@ export class FinanceAccountsService {
       allocated_amount: number;
     },
   ) {
-    return this.dataSource.query(
-      `INSERT INTO fin_budgets (tenant_id, department_id, financial_year, allocated_amount)
+    if (!Number.isInteger(dto.department_id) || dto.department_id <= 0) {
+      throw new BadRequestException('Select a valid department');
+    }
+    if (!/^\d{4}-\d{4}$/.test(dto.financial_year?.trim() ?? '')) {
+      throw new BadRequestException('Financial year must use YYYY-YYYY format');
+    }
+    if (!Number.isFinite(dto.allocated_amount) || dto.allocated_amount <= 0) {
+      throw new BadRequestException(
+        'Allocation amount must be greater than zero',
+      );
+    }
+
+    const departments = await this.dataSource.query<Array<{ dept_id: number }>>(
+      `SELECT d.dept_id
+       FROM fin_dept_budgets scoped_budget
+       INNER JOIN departments d ON d.dept_id = scoped_budget.department_id
+       WHERE scoped_budget.tenant_id = $1
+         AND scoped_budget.department_id = $2
+         AND scoped_budget.deleted_at IS NULL
+         AND d.deleted_at IS NULL
+       LIMIT 1`,
+      [tenantId, dto.department_id],
+    );
+    if (!departments[0]) {
+      throw new BadRequestException(
+        'Department is not available in this tenant’s finance budget scope',
+      );
+    }
+
+    const saved = await this.dataSource.query<Array<{ budget_id: string }>>(
+      `INSERT INTO fin_dept_budgets (tenant_id, department_id, financial_year, allocated_amount)
        VALUES ($1, $2, $3, $4)
        ON CONFLICT (tenant_id, department_id, financial_year)
        DO UPDATE SET allocated_amount = EXCLUDED.allocated_amount
+       WHERE fin_dept_budgets.status <> 'LOCKED'
+         AND fin_dept_budgets.deleted_at IS NULL
        RETURNING *`,
-      [tenantId, dto.department_id, dto.financial_year, dto.allocated_amount],
+      [
+        tenantId,
+        dto.department_id,
+        dto.financial_year.trim(),
+        dto.allocated_amount,
+      ],
     );
+    if (!saved[0]) {
+      throw new ConflictException(
+        'This department allocation is locked or archived and cannot be changed',
+      );
+    }
+    return saved;
   }
 
   private parsePayrollMonth(month?: string) {

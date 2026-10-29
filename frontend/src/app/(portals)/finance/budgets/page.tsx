@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { FinancePageHeader, formatInr } from '@/components/finance/FinancePageHeader';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -12,6 +12,7 @@ import { useAuthedApi } from '@/lib/api';
 
 type Budget = {
   budget_id: string;
+  department_id: number;
   department_name: string;
   financial_year: string;
   allocated_amount: string;
@@ -23,27 +24,69 @@ type Budget = {
 export default function FinanceBudgetsPage() {
   const api = useAuthedApi();
   const [rows, setRows] = useState<Budget[]>([]);
-  const [deptId, setDeptId] = useState('1');
-  const [year, setYear] = useState('2026-2027');
-  const [amount, setAmount] = useState('5000000');
+  const [deptId, setDeptId] = useState('');
+  const [year, setYear] = useState('');
+  const [amount, setAmount] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
-  const load = () => void api.get<Budget[]>('/finance/budgets').then(setRows).catch(() => setRows([]));
-
-  useEffect(() => {
-    load();
+  const load = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const result = await api.get<Budget[]>('/finance/budgets');
+      setRows(Array.isArray(result) ? result : []);
+    } catch (error) {
+      setRows([]);
+      setLoadError(error instanceof Error ? error.message : 'Could not load department budgets');
+    } finally {
+      setLoading(false);
+    }
   }, [api]);
 
+  const departments = useMemo(() => {
+    const unique = new Map<number, string>();
+    for (const row of rows) {
+      if (Number.isInteger(Number(row.department_id)) && row.department_name?.trim()) {
+        unique.set(Number(row.department_id), row.department_name.trim());
+      }
+    }
+    return [...unique.entries()].map(([id, name]) => ({ id, name }));
+  }, [rows]);
+
+  useEffect(() => {
+    void Promise.resolve().then(load);
+  }, [load]);
+
   async function allocate() {
+    const departmentId = Number(deptId);
+    const allocation = Number(amount);
+    if (!departments.some((department) => department.id === departmentId)) {
+      toast.error('Select a department in your current finance budget scope');
+      return;
+    }
+    if (!/^\d{4}-\d{4}$/.test(year.trim())) {
+      toast.error('Enter the financial year as YYYY-YYYY');
+      return;
+    }
+    if (!Number.isFinite(allocation) || allocation <= 0) {
+      toast.error('Enter an allocation amount greater than zero');
+      return;
+    }
+    setSaving(true);
     try {
       await api.post('/finance/budgets', {
-        department_id: Number(deptId),
-        financial_year: year,
-        allocated_amount: Number(amount),
+        department_id: departmentId,
+        financial_year: year.trim(),
+        allocated_amount: allocation,
       });
       toast.success('Budget allocated');
-      load();
+      await load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed');
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -74,13 +117,55 @@ export default function FinanceBudgetsPage() {
         <CardHeader>
           <CardTitle className="text-base">Allocate annual budget (legacy)</CardTitle>
         </CardHeader>
-        <CardContent className="flex flex-wrap gap-2">
-          <Input placeholder="Department ID" value={deptId} onChange={(e) => setDeptId(e.target.value)} />
-          <Input placeholder="FY e.g. 2026-2027" value={year} onChange={(e) => setYear(e.target.value)} />
-          <Input placeholder="Amount (₹)" value={amount} onChange={(e) => setAmount(e.target.value)} />
-          <Button onClick={() => void allocate()}>Save allocation</Button>
+        <CardContent className="grid gap-4 md:grid-cols-[1.4fr_1fr_1fr_auto] md:items-end">
+          <label className="space-y-1 text-sm">
+            <span className="font-medium">Department</span>
+            <select
+              aria-label="Department"
+              className="h-10 w-full rounded-md border bg-background px-3"
+              value={deptId}
+              onChange={(event) => setDeptId(event.target.value)}
+              disabled={loading || departments.length === 0}
+              required
+            >
+              <option value="">Select a department</option>
+              {departments.map((department) => (
+                <option key={department.id} value={department.id}>
+                  {department.name}
+                </option>
+              ))}
+            </select>
+            <span className="block text-xs text-muted-foreground">
+              Departments come from this tenant’s current finance budget records.
+            </span>
+          </label>
+          <label className="space-y-1 text-sm">
+            <span className="font-medium">Financial year</span>
+            <Input aria-label="Financial year" placeholder="YYYY-YYYY" value={year} onChange={(e) => setYear(e.target.value)} required />
+          </label>
+          <label className="space-y-1 text-sm">
+            <span className="font-medium">Allocation amount (₹)</span>
+            <Input aria-label="Allocation amount" type="number" min="0.01" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} required />
+          </label>
+          <Button onClick={() => void allocate()} disabled={saving || loading || departments.length === 0}>
+            {saving ? 'Saving…' : 'Save allocation'}
+          </Button>
         </CardContent>
       </Card>
+      {loadError ? (
+        <Card role="alert" className="border-red-200 bg-red-50/50">
+          <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4 text-sm">
+            <p>Could not load the current tenant’s department budget list: {loadError}</p>
+            <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}>Retry</Button>
+          </CardContent>
+        </Card>
+      ) : !loading && departments.length === 0 ? (
+        <Card>
+          <CardContent className="p-4 text-sm text-muted-foreground">
+            No department budgets are available in this tenant yet. Create or activate the department allocation in the authorized budget workflow before adding a legacy annual allocation.
+          </CardContent>
+        </Card>
+      ) : null}
       {rows.map((r) => (
         <Card key={r.budget_id}>
           <CardContent className="space-y-2 p-4">
