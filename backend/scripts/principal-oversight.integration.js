@@ -374,6 +374,13 @@ async function main() {
       )[0].status,
       'REJECTED',
     );
+    await c.query('DELETE FROM academic_class_moves');group=await source();
+    state=await svc.create(h,'HOD',{kind:'TIMETABLE',source_id:group,title:'Recover blocked application',reason:'HOD recommends a review of this blocked request'},randomUUID());
+    await c.query("INSERT INTO staff_leave_requests VALUES($1,$2,'HOD_APPROVED','2030-07-01','2030-07-01')",[tenant,teacher]);
+    state=await svc.act(p,'PRINCIPAL',group,1,{action:'APPROVE',note:'Approval remains subject to source validation'},randomUUID());assert.equal(state.status,'APPLICATION_FAILED');
+    state=await svc.act(p,'PRINCIPAL',group,state.revision,{action:'RETURN',note:'Please resolve this request through HOD review'},randomUUID());assert.equal(state.status,'RETURNED');
+    assert.equal((await changes.listPendingForHod(hod,tenant)).length,1);
+    await changes.decide(hod,tenant,group,'REJECT');await c.query('DELETE FROM staff_leave_requests');
     // Returned requests use one case history; concurrent recommendations cannot create a second owner.
     await c.query('DELETE FROM academic_class_moves');
     group = await source();

@@ -400,7 +400,7 @@ export class PrincipalOversightService {
           if (state.created_by === actor.user_id)
             throw new ForbiddenException('No self-approval');
           if (
-            state.status === 'PENDING_PRINCIPAL' &&
+            ['PENDING_PRINCIPAL','APPLICATION_FAILED'].includes(state.status) &&
             input.action === 'RETURN'
           ) {
             next.status = 'RETURNED';

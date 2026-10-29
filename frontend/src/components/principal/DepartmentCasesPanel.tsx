@@ -263,7 +263,7 @@ export function DepartmentCasesPanel({
                     ? row.status === "PENDING_PRINCIPAL"
                       ? ["APPROVE", "REJECT", "RETURN"]
                       : row.status === "APPLICATION_FAILED"
-                        ? ["RETRY"]
+                        ? ["RETRY", "RETURN"]
                         : []
                     : row.status === "PENDING_PRINCIPAL"
                       ? ["CLOSE", "RETURN"]
