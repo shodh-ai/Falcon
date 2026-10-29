@@ -253,7 +253,7 @@ export function withRoleAwareDofaInboxNav(
   config: PortalConfig,
   inboxHref: string | null,
 ): PortalConfig {
-  if (!inboxHref || portalHasDofaInboxLink(config)) return config;
+  if (!inboxHref || portalHasDofaInboxLink(config) || config.navGroups.some(group => group.items.some(item => item.href === inboxHref))) return config;
 
   const inboxItem: NavItem = {
     label: 'DOFA Inbox (Universal)',
@@ -903,6 +903,7 @@ export const hodPortal: PortalConfig = {
         { label: 'Team Directory (Zimyo)', href: '/hod/reporting-directory?tab=dashboard&scope=dept', icon: Users, keywords: ['zimyo', 'reporting', 'directory', 'attendance', 'leave', 'gate pass', 'hrms', 'dashboard', 'reports', 'probation', 'pending approvals', 'inbox', 'team requests'] },
         { label: 'Resignations & Offboarding', href: '/hod/approvals/resignations', icon: DoorOpen, keywords: ['resignation', 'exit', 'separation', 'fnf', 'offboarding'] },
         { label: 'Profile Corrections', href: '/hod/approvals/profile-corrections', icon: ClipboardCheck, keywords: ['student profile', 'edit', 'correction'] },
+        { label: 'Principal Escalations & Follow-ups', href: '/hod/approvals/department-oversight', icon: ClipboardList },
         { label: 'Proxy Approvals', href: '/hod/approvals/proxy', icon: Users, keywords: ['substitute', 'alternate', 'leave', 'proxy'] },
         { label: 'Extra Class Approvals', href: '/hod/approvals/extra-classes', icon: CalendarClock, keywords: ['substitute', 'cancel', 'timetable'] },
         { label: 'Gate Pass Approvals', href: '/hod/approvals/gate-passes', icon: DoorOpen, keywords: ['gate pass', 'outpass', 'leave gate'] },

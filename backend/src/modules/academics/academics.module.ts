@@ -1,3 +1,5 @@
+import { PrincipalOversightService } from './principal-oversight.service';
+import { PrincipalOversightController } from './principal-oversight.controller';
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Subject } from '../../entities/subject.entity';
@@ -108,6 +110,7 @@ import { DeanAuditService } from './dean-audit.service';
   ],
   controllers: [
     AcademicsController,
+    PrincipalOversightController,
     AcademicSessionChangesController,
     ProctorController,
     CertificatesController,
@@ -118,6 +121,7 @@ import { DeanAuditService } from './dean-audit.service';
   ],
   providers: [
     AcademicsService,
+    PrincipalOversightService,
     AcademicsFacultyService,
     ProctorService,
     MentorshipChatService,

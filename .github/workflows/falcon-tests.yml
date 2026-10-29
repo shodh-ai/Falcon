@@ -202,6 +202,18 @@ jobs:
           npm run build --ignore-scripts
           node scripts/test-hr-document-export.cjs
 
+      - name: Principal oversight transactional workflow integration
+        working-directory: backend
+        env:
+          PGHOST: localhost
+          PGUSER: postgres
+          PGPASSWORD: postgres
+        run: node scripts/principal-oversight.integration.js
+
+      - name: Principal workspace and approval interface regressions
+        working-directory: frontend
+        run: npm test -- src/components/principal/__tests__ src/lib/__tests__/principal-routing.test.ts
+
       - name: Install Playwright browsers
         working-directory: tests
         run: npx playwright install --with-deps chromium

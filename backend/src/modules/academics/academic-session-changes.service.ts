@@ -1,3 +1,4 @@
+import { requireDepartmentOffice } from '../department-leadership/office-scope';
 import {
   BadRequestException,
   ForbiddenException,
@@ -108,9 +109,21 @@ export class AcademicSessionChangesService {
     }
   }
 
-  private async actorScope(manager: EntityManager, tenantId: string, actorId: string) {
-    const [actor] = await manager.query<Array<{ dept_id: number | null; role_name: string }>>(
-      `SELECT u.dept_id,r.role_name FROM users u JOIN roles r ON r.role_id=u.role_id
+  private async actorScope(
+    manager: EntityManager,
+    tenantId: string,
+    actorId: string,
+  ) {
+    const [actor] = await manager.query<
+      Array<{ dept_id: number | null; role_name: string }>
+    >(
+      `SELECT u.dept_id,CASE
+         WHEN EXISTS(SELECT 1 FROM department_offices o JOIN department_office_appointments a ON a.office_id=o.office_id
+           JOIN department_leadership cfg ON cfg.tenant_id=o.tenant_id AND cfg.dept_id=o.dept_id
+           WHERE o.tenant_id=u.tenant_id AND o.dept_id=u.dept_id AND a.user_id=u.user_id AND o.kind='HOD'
+             AND a.valid_to IS NULL AND a.valid_from<=now() AND cfg.structure IN ('HOD_ONLY','PRINCIPAL_HOD')) THEN 'HOD'
+         WHEN r.role_name IN ('HOD','Principal') AND EXISTS(SELECT 1 FROM department_leadership cfg WHERE cfg.tenant_id=u.tenant_id AND cfg.dept_id=u.dept_id) THEN 'Faculty'
+         ELSE r.role_name END AS role_name FROM users u JOIN roles r ON r.role_id=u.role_id
        WHERE u.tenant_id=$1 AND u.user_id=$2 AND u.is_active=true`,
       [tenantId, actorId],
     );
@@ -644,19 +657,86 @@ export class AcademicSessionChangesService {
     );
   }
 
-  async decide(hodId: string, tenantId: string, groupId: string,
-    action: 'APPROVE' | 'REJECT') {
-    if (!UUID.test(groupId || '') || !['APPROVE','REJECT'].includes(action)) {
+  async decide(
+    hodId: string,
+    tenantId: string,
+    groupId: string,
+    action: 'APPROVE' | 'REJECT',
+  ) {
+    if (!UUID.test(groupId || '') || !['APPROVE', 'REJECT'].includes(action)) {
       throw new BadRequestException('Invalid change group or action');
     }
-    const result = await this.dataSource.transaction(async (manager) => {
-      const actor = await this.actorScope(manager, tenantId, hodId);
-      if (!['HOD','Dean','SuperAdmin'].includes(actor.role_name)) throw new ForbiddenException('HOD approval required');
-      const rows = await manager.query<Array<Leg & {
-        status: string; requested_by_user_id: string;
-        source_date_text: string; target_date_text: string;
-      }>>(
-        `SELECT m.*,m.source_timetable_id AS timetable_id,
+    const result = await this.dataSource.transaction((manager) =>
+      this.decideInTransaction(manager, hodId, tenantId, groupId, action),
+    );
+    await this.notifyDecision(tenantId, result);
+    return { change_group_id: result.change_group_id, status: result.status };
+  }
+  /** Internal adapter: same validation and canonical update for routine/reserved decisions. */
+  async decideInTransaction(
+    manager: EntityManager,
+    hodId: string,
+    tenantId: string,
+    groupId: string,
+    action: 'APPROVE' | 'REJECT',
+    reservedCaseId?: string,
+  ) {
+    const actor = await this.actorScope(manager, tenantId, hodId);
+    await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+      `reserved-move:${tenantId}:${groupId}`,
+    ]);
+    const [reservation] = await manager.query(
+      `SELECT details FROM department_leadership_events
+        WHERE tenant_id=$1 AND action='PRINCIPAL_CASE' AND details->>'source_id'=$2
+          AND details->>'kind'='TIMETABLE' ORDER BY (details->>'revision')::int DESC,created_at DESC LIMIT 1`,
+      [tenantId, groupId],
+    );
+    if (reservedCaseId) {
+      const office = await requireDepartmentOffice(
+        (sql, args) => manager.query(sql, args),
+        tenantId,
+        hodId,
+        'PRINCIPAL',
+      );
+      if (
+        !reservation ||
+        reservation.details.case_id !== reservedCaseId ||
+        reservation.details.actor_id !== hodId ||
+        reservation.details.decision !== action ||
+        Number(reservation.details.dept_id) !== Number(office.dept_id) ||
+        !['APPROVED', 'APPLICATION_FAILED', 'PENDING_PRINCIPAL'].includes(
+          reservation.details.status,
+        )
+      )
+        throw new ForbiddenException(
+          'A current reserved Principal decision is required',
+        );
+      actor.role_name = 'Principal';
+      actor.dept_id = office.dept_id;
+    } else {
+      if (
+        reservation &&
+        ['PENDING_PRINCIPAL', 'APPROVED', 'APPLICATION_FAILED'].includes(
+          reservation.details.status,
+        )
+      )
+        throw new BadRequestException(
+          'This request is reserved to the Principal; review the escalation',
+        );
+      if (!['HOD', 'Dean', 'SuperAdmin'].includes(actor.role_name))
+        throw new ForbiddenException('HOD approval required');
+    }
+    const rows = await manager.query<
+      Array<
+        Leg & {
+          status: string;
+          requested_by_user_id: string;
+          source_date_text: string;
+          target_date_text: string;
+        }
+      >
+    >(
+      `SELECT m.*,m.source_timetable_id AS timetable_id,
                 m.source_date::text AS source_date_text,
                 m.target_date::text AS target_date_text,
                 u.dept_id AS faculty_dept_id,t.section
@@ -665,74 +745,144 @@ export class AcademicSessionChangesService {
          JOIN academic_timetables t ON t.timetable_id=m.source_timetable_id AND t.tenant_id=m.tenant_id
          WHERE m.tenant_id=$1 AND m.change_group_id=$2::uuid
          ORDER BY m.move_id FOR UPDATE OF m`,
-        [tenantId,groupId],
+      [tenantId, groupId],
+    );
+    if (!rows.length) throw new NotFoundException('Class move not found');
+    if (rows.some((row) => row.status !== 'PENDING_HOD_APPROVAL'))
+      throw new BadRequestException('Change already decided');
+    if (rows.some((row) => row.requested_by_user_id === hodId)) {
+      throw new ForbiddenException(
+        'The proposer cannot approve their own timetable change',
       );
-      if (!rows.length) throw new NotFoundException('Class move not found');
-      if (rows.some((row) => row.status !== 'PENDING_HOD_APPROVAL')) throw new BadRequestException('Change already decided');
-      if (rows.some((row) => row.requested_by_user_id === hodId)) {
-        throw new ForbiddenException('The proposer cannot approve their own timetable change');
-      }
-      if (actor.role_name === 'HOD' && rows.some((row) => Number(row.faculty_dept_id) !== Number(actor.dept_id))) {
-        throw new ForbiddenException('HOD can approve only their department classes');
-      }
-      if (actor.role_name === 'Dean') {
-        await this.assertDeanDepartments(manager, tenantId, hodId, rows.map((row) => row.faculty_dept_id));
-      }
-      if (action === 'APPROVE') {
-        const legs = rows.map((row) => ({
-          ...row, source_date: row.source_date_text, target_date: row.target_date_text,
-        }));
-        const allocations = await manager.query<CohortAllocation[]>(
-          `SELECT course_id,academic_year,program_name,semester FROM academic_course_allocations
+    }
+    if (
+      ['HOD', 'Principal'].includes(actor.role_name) &&
+      rows.some((row) => Number(row.faculty_dept_id) !== Number(actor.dept_id))
+    ) {
+      throw new ForbiddenException(
+        'HOD can approve only their department classes',
+      );
+    }
+    if (actor.role_name === 'Dean') {
+      await this.assertDeanDepartments(
+        manager,
+        tenantId,
+        hodId,
+        rows.map((row) => row.faculty_dept_id),
+      );
+    }
+    if (action === 'APPROVE') {
+      const legs = rows.map((row) => ({
+        ...row,
+        source_date: row.source_date_text,
+        target_date: row.target_date_text,
+      }));
+      const allocations = await manager.query<CohortAllocation[]>(
+        `SELECT course_id,academic_year,program_name,semester FROM academic_course_allocations
            WHERE tenant_id=$1 AND status='ACTIVE' AND course_id=ANY($2::uuid[])
              AND academic_year=ANY($3::text[])`,
-          [tenantId, [...new Set(legs.map((leg) => leg.course_id))],
-            [...new Set(legs.map((leg) => academicYearForDate(leg.source_date)))]],
-        );
-        if (legs.length !== 2 || !sameCohort(legs[0], legs[1], allocations)) {
-          throw new BadRequestException('The classes no longer have the same programme and semester');
-        }
-        const today = campusToday();
-        if (legs.some((leg) => leg.source_date < today || leg.target_date < today)) {
-          throw new BadRequestException('This class change is now past due; create a new request');
-        }
-        await this.lockDates(manager, tenantId, legs.flatMap((row) => [row.source_date,row.target_date]));
-        for (const row of rows) {
-          const attendance = await manager.query(
-            `SELECT 1 FROM course_attendance_logs WHERE tenant_id=$1 AND timetable_id=$2::uuid
-               AND date=$3::date LIMIT 1`,
-            [tenantId,row.timetable_id,row.source_date_text],
-          );
-          if (attendance.length) throw new BadRequestException('Attendance has already been recorded for a source class');
-        }
-        await this.assertNoCollisions(manager, tenantId, legs);
-      }
-      await manager.query(
-        `UPDATE academic_class_moves SET status=$3,decided_by_user_id=$4::uuid,decided_at=NOW()
-         WHERE tenant_id=$1 AND change_group_id=$2::uuid AND status='PENDING_HOD_APPROVAL'`,
-        [tenantId,groupId,action === 'APPROVE' ? 'APPROVED' : 'REJECTED',hodId],
+        [
+          tenantId,
+          [...new Set(legs.map((leg) => leg.course_id))],
+          [...new Set(legs.map((leg) => academicYearForDate(leg.source_date)))],
+        ],
       );
-      return { change_group_id: groupId, status: action === 'APPROVE' ? 'APPROVED' : 'REJECTED',
-        sessions: rows.map((row) => ({
-          course_id: row.course_id, faculty_id: row.original_faculty_id,
-          section: row.section, source_date: row.source_date_text,
-          target_date: row.target_date_text,
-          target_start_time: row.target_start_time,
-        })) };
-    });
-    if (action === 'APPROVE') {
+      if (legs.length !== 2 || !sameCohort(legs[0], legs[1], allocations)) {
+        throw new BadRequestException(
+          'The classes no longer have the same programme and semester',
+        );
+      }
+      const today = campusToday();
+      if (
+        legs.some((leg) => leg.source_date < today || leg.target_date < today)
+      ) {
+        throw new BadRequestException(
+          'This class change is now past due; create a new request',
+        );
+      }
+      await this.lockDates(
+        manager,
+        tenantId,
+        legs.flatMap((row) => [row.source_date, row.target_date]),
+      );
+      for (const row of rows) {
+        const attendance = await manager.query(
+          `SELECT 1 FROM course_attendance_logs WHERE tenant_id=$1 AND timetable_id=$2::uuid
+               AND date=$3::date LIMIT 1`,
+          [tenantId, row.timetable_id, row.source_date_text],
+        );
+        if (attendance.length)
+          throw new BadRequestException(
+            'Attendance has already been recorded for a source class',
+          );
+      }
+      await this.assertNoCollisions(manager, tenantId, legs);
+    }
+    await manager.query(
+      `UPDATE academic_class_moves SET status=$3,decided_by_user_id=$4::uuid,decided_at=NOW()
+         WHERE tenant_id=$1 AND change_group_id=$2::uuid AND status='PENDING_HOD_APPROVAL'`,
+      [
+        tenantId,
+        groupId,
+        action === 'APPROVE' ? 'APPROVED' : 'REJECTED',
+        hodId,
+      ],
+    );
+    return {
+      change_group_id: groupId,
+      status: action === 'APPROVE' ? 'APPROVED' : 'REJECTED',
+      sessions: rows.map((row) => ({
+        course_id: row.course_id,
+        faculty_id: row.original_faculty_id,
+        section: row.section,
+        source_date: row.source_date_text,
+        target_date: row.target_date_text,
+        target_start_time: row.target_start_time,
+      })),
+    };
+  }
+
+  async notifyDecision(
+    tenantId: string,
+    result: {
+      status: string;
+      sessions: Array<{
+        course_id: string;
+        faculty_id: string;
+        section: string | null;
+        source_date: string;
+        target_date: string;
+        target_start_time: string;
+      }>;
+    },
+  ) {
+    if (result.status === 'APPROVED') {
       for (const session of result.sessions) {
         const summary = `Class moved from ${session.source_date} to ${session.target_date} at ${String(session.target_start_time).slice(0, 5)}.`;
-        this.notify.timetableChanged({ tenantId, userId: session.faculty_id,
-          courseName: 'Your class', changeSummary: summary, actionLink: '/faculty/timetable' });
-        const students = await this.dataSource.transaction((manager) =>
-          this.studentIds(manager, tenantId, session.course_id, session.section));
-        for (const studentId of students) this.notify.timetableChanged({
-          tenantId, userId: studentId, courseName: 'Your class',
-          changeSummary: summary, actionLink: '/student/timetable',
+        this.notify.timetableChanged({
+          tenantId,
+          userId: session.faculty_id,
+          courseName: 'Your class',
+          changeSummary: summary,
+          actionLink: '/faculty/timetable',
         });
+        const students = await this.dataSource.transaction((manager) =>
+          this.studentIds(
+            manager,
+            tenantId,
+            session.course_id,
+            session.section,
+          ),
+        );
+        for (const studentId of students)
+          this.notify.timetableChanged({
+            tenantId,
+            userId: studentId,
+            courseName: 'Your class',
+            changeSummary: summary,
+            actionLink: '/student/timetable',
+          });
       }
     }
-    return { change_group_id: result.change_group_id, status: result.status };
   }
 }

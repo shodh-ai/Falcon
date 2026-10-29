@@ -1,3 +1,4 @@
+import { configuredReportingOfficer } from '../department-leadership/reporting-officer';
 import {
   BadRequestException,
   ConflictException,
@@ -639,8 +640,9 @@ export class HrService {
       status: 'PENDING',
     });
 
-    const user = await this.users.findOne({ where: { user_id: staffUserId } });
-    const reportingOfficerId = user?.reporting_officer_id ?? null;
+    const user = await this.users.findOne({ where: { user_id: staffUserId, tenant_id: tenantId } });
+    const configured = await configuredReportingOfficer((sql,args) => this.users.manager.query(sql,args), tenantId, staffUserId);
+    const reportingOfficerId = configured.configured ? configured.officer : user?.reporting_officer_id ?? null;
     const row = this.gatePasses.create({
       tenant_id: tenantId,
       staff_user_id: staffUserId,
