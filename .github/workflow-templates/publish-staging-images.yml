@@ -1,0 +1,264 @@
+# INERT TEMPLATE: GitHub does not execute this directory. Activation requires a
+# reviewed move to .github/workflows on main and explicit owner configuration.
+# Publishes images only; no deployments, migrations or runtime credentials.
+name: Publish staging images
+
+on:
+  workflow_run:
+    workflows: ["Falcon CI"]
+    types: [completed]
+    branches: [staging]
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Full current staging SHA with successful push CI
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: falcon-staging-images-${{ github.event.workflow_run.head_sha || inputs.source_sha }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    if: >-
+      vars.STAGING_IMAGES_ENABLED == 'true' &&
+      github.repository == 'shodh-ai/Falcon' &&
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_branch == 'staging' &&
+        github.event.workflow_run.head_repository.full_name == github.repository))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      source_sha: ${{ steps.source.outputs.source_sha }}
+      ci_run_id: ${{ steps.source.outputs.ci_run_id }}
+      ci_run_attempt: ${{ steps.source.outputs.ci_run_attempt }}
+      image_tag: ${{ steps.source.outputs.image_tag }}
+    steps:
+      # Trusted inline policy only: no source checkout or artifact execution here.
+      - name: Require the current staging revision and latest successful push CI
+        id: source
+        uses: actions/github-script@v7
+        env:
+          STAGING_IMAGES_ENABLED: ${{ vars.STAGING_IMAGES_ENABLED }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        with:
+          script: |
+            // BEGIN SOURCE VALIDATION
+            const assert = (condition, message) => { if (!condition) throw new Error(message); };
+            const { owner, repo } = context.repo;
+            const repository = `${owner}/${repo}`;
+            assert(process.env.STAGING_IMAGES_ENABLED === 'true', 'Staging image publication is disabled.');
+            assert(repository === 'shodh-ai/Falcon' && context.ref === 'refs/heads/main',
+              'Only the trusted shodh-ai/Falcon main workflow may publish.');
+            const automatic = context.eventName === 'workflow_run';
+            assert(automatic || context.eventName === 'workflow_dispatch', 'Unsupported event.');
+            const run = context.payload.workflow_run;
+            const sha = automatic ? run?.head_sha : process.env.SOURCE_SHA;
+            assert(/^[0-9a-f]{40}$/.test(sha || ''), 'A full lowercase source SHA is required.');
+            const { data: workflow } = await github.rest.actions.getWorkflow({ owner, repo, workflow_id: 'falcon-tests.yml' });
+            const matches = candidate => candidate.head_sha === sha && candidate.head_branch === 'staging' &&
+              candidate.event === 'push' && candidate.head_repository?.full_name === repository && candidate.workflow_id === workflow.id;
+            if (automatic) assert(run && matches(run) && run.status === 'completed' && run.conclusion === 'success',
+              'Only successful same-repository staging push CI may trigger publication.');
+            const requireCurrentHead = async () => {
+              const { data: ref } = await github.rest.git.getRef({ owner, repo, ref: 'heads/staging' });
+              assert(ref.object.type === 'commit' && ref.object.sha === sha,
+                'Source SHA must still be the exact staging head. Run CI for the current head.');
+            };
+            await requireCurrentHead();
+            const runs = await github.paginate(github.rest.actions.listWorkflowRuns, {
+              owner, repo, workflow_id: workflow.id, branch: 'staging', head_sha: sha, per_page: 100,
+            });
+            const latest = runs.filter(matches).sort((a, b) => b.id - a.id || b.run_attempt - a.run_attempt)[0];
+            assert(latest?.status === 'completed' && latest.conclusion === 'success',
+              'The latest matching staging push CI run must have succeeded.');
+            if (automatic) assert(latest.id === run.id && latest.run_attempt === run.run_attempt,
+              'This completion event was superseded by another CI run or attempt.');
+            await requireCurrentHead();
+            assert(/^[1-9][0-9]*$/.test(String(context.runId)) && /^[1-9][0-9]*$/.test(process.env.GITHUB_RUN_ATTEMPT || ''),
+              'Invalid publisher run identity.');
+            core.setOutput('source_sha', sha);
+            core.setOutput('ci_run_id', String(latest.id));
+            core.setOutput('ci_run_attempt', String(latest.run_attempt));
+            core.setOutput('image_tag', `sha-${sha}-run-${context.runId}-${process.env.GITHUB_RUN_ATTEMPT}`);
+            // END SOURCE VALIDATION
+
+  publish:
+    needs: validate
+    if: >-
+      vars.STAGING_IMAGES_ENABLED == 'true' &&
+      github.repository == 'shodh-ai/Falcon' &&
+      github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    # PUBLIC build variables only. Never add runtime, hosting or database secrets.
+    environment: staging-build
+    permissions:
+      contents: read
+      actions: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - component: backend
+            context: backend
+            image: ghcr.io/shodh-ai/falcon-staging-backend
+          - component: frontend
+            context: frontend
+            image: ghcr.io/shodh-ai/falcon-staging-frontend
+    steps:
+      # Environment approval can take time. Validate again before source checkout.
+      - name: Recheck staging head and CI after approval
+        uses: actions/github-script@v7
+        env:
+          STAGING_IMAGES_ENABLED: ${{ vars.STAGING_IMAGES_ENABLED }}
+          SOURCE_SHA: ${{ needs.validate.outputs.source_sha }}
+          EXPECTED_CI_RUN_ID: ${{ needs.validate.outputs.ci_run_id }}
+          EXPECTED_CI_RUN_ATTEMPT: ${{ needs.validate.outputs.ci_run_attempt }}
+        with:
+          script: |
+            // BEGIN PUBLICATION REVALIDATION
+            const assert = (condition, message) => { if (!condition) throw new Error(message); };
+            const { owner, repo } = context.repo;
+            const repository = `${owner}/${repo}`;
+            const sha = process.env.SOURCE_SHA;
+            assert(process.env.STAGING_IMAGES_ENABLED === 'true' && repository === 'shodh-ai/Falcon' &&
+              context.ref === 'refs/heads/main', 'Publication requires the enabled trusted main workflow.');
+            assert(/^[0-9a-f]{40}$/.test(sha || ''), 'A validated full source SHA is required.');
+            const requireCurrentHead = async () => {
+              const { data: ref } = await github.rest.git.getRef({ owner, repo, ref: 'heads/staging' });
+              assert(ref.object.type === 'commit' && ref.object.sha === sha, 'Staging changed while awaiting publication.');
+            };
+            await requireCurrentHead();
+            const { data: workflow } = await github.rest.actions.getWorkflow({ owner, repo, workflow_id: 'falcon-tests.yml' });
+            const runs = await github.paginate(github.rest.actions.listWorkflowRuns, {
+              owner, repo, workflow_id: workflow.id, branch: 'staging', head_sha: sha, per_page: 100,
+            });
+            const latest = runs.filter(run => run.head_sha === sha && run.head_branch === 'staging' &&
+              run.event === 'push' && run.head_repository?.full_name === repository && run.workflow_id === workflow.id)
+              .sort((a, b) => b.id - a.id || b.run_attempt - a.run_attempt)[0];
+            assert(latest?.status === 'completed' && latest.conclusion === 'success' &&
+              String(latest.id) === process.env.EXPECTED_CI_RUN_ID &&
+              String(latest.run_attempt) === process.env.EXPECTED_CI_RUN_ATTEMPT,
+              'Validated CI changed or no longer succeeds. Start a new publication request.');
+            await requireCurrentHead();
+            // END PUBLICATION REVALIDATION
+
+      - name: Validate explicit staging public build settings
+        uses: actions/github-script@v7
+        env:
+          STAGING_API_URL: ${{ vars.STAGING_API_URL }}
+          STAGING_SAAS_BASE_DOMAIN: ${{ vars.STAGING_SAAS_BASE_DOMAIN }}
+          STAGING_DEFAULT_TENANT: ${{ vars.STAGING_DEFAULT_TENANT }}
+          STAGING_GOOGLE_CLIENT_ID: ${{ vars.STAGING_GOOGLE_CLIENT_ID }}
+        with:
+          script: |
+            // BEGIN CONFIG VALIDATION
+            const assert = (condition, message) => { if (!condition) throw new Error(message); };
+            const api = process.env.STAGING_API_URL || '';
+            const domain = process.env.STAGING_SAAS_BASE_DOMAIN || '';
+            const tenant = process.env.STAGING_DEFAULT_TENANT || '';
+            const googleClient = process.env.STAGING_GOOGLE_CLIENT_ID || '';
+            assert(api && !/\s/.test(api), 'Set STAGING_API_URL to the isolated HTTPS API URL.');
+            let url;
+            try { url = new URL(api); } catch { throw new Error('STAGING_API_URL must be a valid HTTPS URL.'); }
+            assert(url.protocol === 'https:' && url.origin === api && url.pathname === '/' &&
+              !url.username && !url.password && !url.search && !url.hash,
+              'STAGING_API_URL must be a canonical HTTPS origin without a path, trailing slash, credentials, query, or fragment.');
+            const forbidden = ['apifalcon.jataka.io', 'falcon.jataka.io', 'sgvu.jataka.io'];
+            const isForbidden = host => forbidden.some(value => host === value || host.endsWith(`.${value}`));
+            assert(!isForbidden(url.hostname.toLowerCase().replace(/\.$/, '')), 'The known production origins cannot be staging targets.');
+            const label = '[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?';
+            assert(domain.length <= 253 && new RegExp(`^${label}(?:\\.${label})+$`).test(domain),
+              'Set STAGING_SAAS_BASE_DOMAIN to a dedicated staging hostname without a scheme or path.');
+            assert(new RegExp(`^${label}$`).test(tenant), 'Set STAGING_DEFAULT_TENANT to one staging tenant label.');
+            assert(domain !== 'jataka.io' && !isForbidden(domain) && !isForbidden(`${tenant}.${domain}`),
+              'Staging tenant settings cannot select the production base domain or known production tenants.');
+            assert(!googleClient || /^[A-Za-z0-9._-]+$/.test(googleClient), 'Google client ID must be public or empty.');
+            // END CONFIG VALIDATION
+
+      - name: Check out the validated revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate.outputs.source_sha }}
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate staging image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ matrix.image }}
+          tags: type=raw,value=${{ needs.validate.outputs.image_tag }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/shodh-ai/Falcon
+            org.opencontainers.image.revision=${{ needs.validate.outputs.source_sha }}
+
+      - name: Build and publish ${{ matrix.component }} staging image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.context }}/Dockerfile
+          platforms: linux/amd64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=staging-${{ matrix.component }}
+          cache-to: type=gha,mode=max,scope=staging-${{ matrix.component }}
+          # Preserve existing Coolify single-platform Docker media compatibility.
+          provenance: false
+          sbom: false
+          outputs: type=registry,push=true,oci-mediatypes=false
+          build-args: |
+            NEXT_PUBLIC_API_URL=${{ vars.STAGING_API_URL }}
+            NEXT_PUBLIC_GOOGLE_CLIENT_ID=${{ vars.STAGING_GOOGLE_CLIENT_ID }}
+            NEXT_PUBLIC_SAAS_BASE_DOMAIN=${{ vars.STAGING_SAAS_BASE_DOMAIN }}
+            NEXT_PUBLIC_DEFAULT_TENANT_SUBDOMAIN=${{ vars.STAGING_DEFAULT_TENANT }}
+
+      - name: Record exact image identity
+        uses: actions/github-script@v7
+        env:
+          SOURCE_SHA: ${{ needs.validate.outputs.source_sha }}
+          CI_RUN_ID: ${{ needs.validate.outputs.ci_run_id }}
+          IMAGE: ${{ matrix.image }}
+          COMPONENT: ${{ matrix.component }}
+          IMAGE_TAG: ${{ needs.validate.outputs.image_tag }}
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+        with:
+          script: |
+            const fs = require('node:fs');
+            const { SOURCE_SHA, CI_RUN_ID, IMAGE, COMPONENT, IMAGE_TAG, IMAGE_DIGEST } = process.env;
+            if (!/^sha256:[0-9a-f]{64}$/.test(IMAGE_DIGEST)) throw new Error('Build returned no image digest.');
+            const manifest = { source_sha: SOURCE_SHA, source_branch: 'staging', ci_run_id: CI_RUN_ID,
+              image: `${IMAGE}:${IMAGE_TAG}`, image_by_digest: `${IMAGE}@${IMAGE_DIGEST}` };
+            fs.mkdirSync('staging-images', { recursive: true });
+            fs.writeFileSync(`staging-images/${COMPONENT}.json`, `${JSON.stringify(manifest, null, 2)}\n`);
+            await core.summary.addHeading(`${COMPONENT} staging image published`)
+              .addCodeBlock(JSON.stringify(manifest, null, 2), 'json')
+              .addRaw('\nImages only: no application deployment or database operation was performed.\n').write();
+
+      - name: Upload staging image manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: falcon-staging-${{ matrix.component }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: staging-images/${{ matrix.component }}.json
+          if-no-files-found: error
+          retention-days: 30
