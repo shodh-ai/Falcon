@@ -68,6 +68,7 @@ export class PrincipalOversightService {
       actor.user_id,
       kind,
       dept,
+      m !== this.db,
     );
   }
   private async latest(
@@ -212,7 +213,7 @@ export class PrincipalOversightService {
         'HOD escalates timetable requests; Principal assigns follow-ups',
       );
     // Stable source identity prevents two active decision owners for a timetable request.
-    const id = input.kind === 'TIMETABLE' ? input.source_id! : key;
+    const id = input.kind === 'TIMETABLE' ? input.source_id?.toLowerCase()! : key;
     const caseId =
       input.kind === 'TIMETABLE'
         ? id
@@ -296,7 +297,7 @@ export class PrincipalOversightService {
           case_id: caseId,
           dept_id: Number(office.dept_id),
           kind: input.kind,
-          source_id: input.source_id,
+          source_id: input.kind==='TIMETABLE'?id:undefined,
           title,
           reason,
           due_date: input.due_date,

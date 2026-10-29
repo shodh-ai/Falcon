@@ -15,12 +15,12 @@ export function PrincipalWorkspaceReturn() {
   const hasOffice = resolveUserRoleList(user).some(
     (role) => role.toLowerCase() === "principal",
   );
-  const module = runtimeModuleForPath(manifest, "/principal/dashboard");
+  const launchModule = runtimeModuleForPath(manifest, "/principal/dashboard");
   if (
     !hasOffice ||
     pathname === "/principal" ||
     pathname.startsWith("/principal/") ||
-    module?.available === false
+    launchModule?.available === false
   )
     return null;
 

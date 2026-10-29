@@ -13,7 +13,11 @@ type Overview = {
   workload: Row[];
   timetable: Row[];
   cases: OversightCase[];
-  totals?:{pending_principal:number;failed_applications:number;open_followups:number};
+  totals?: {
+    pending_principal: number;
+    failed_applications: number;
+    open_followups: number;
+  };
   attendance: Row[];
   syllabus?: Row[];
   publishedMarks?: Row[];
@@ -108,39 +112,58 @@ export function PrincipalOversightPage({ view }: { view: PrincipalView }) {
     [error, setError] = useState(""),
     [loading, setLoading] = useState(true),
     [search, setSearch] = useState("");
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError("");
-    try {
-      const result = await api.get<Overview>(
-        "/api/academics/department-oversight/principal",
-      );
-      setData(result);
-      if (view === "department")
-        setDirectory(
-          await api.get<Directory>("/api/academics/principal/overview"),
+  const load = useCallback(
+    async (isActive = () => true) => {
+      setLoading(true);
+      setError("");
+      try {
+        const result = await api.get<Overview>(
+          "/api/academics/department-oversight/principal",
         );
-    } catch (e) {
-      setError(
-        e instanceof Error ? e.message : "Could not load department oversight",
-      );
-      setData(null);
-      setDirectory(null);
-    } finally {
-      setLoading(false);
-    }
-  }, [api, view]);
+        const people =
+          view === "department"
+            ? await api.get<Directory>("/api/academics/principal/overview")
+            : null;
+        if (!isActive()) return;
+        setData(result);
+        setDirectory(people);
+      } catch (e) {
+        if (isActive()) {
+          setError(
+            e instanceof Error
+              ? e.message
+              : "Could not load department oversight",
+          );
+          setData(null);
+          setDirectory(null);
+        }
+      } finally {
+        if (isActive()) setLoading(false);
+      }
+    },
+    [api, view],
+  );
   useEffect(() => {
-    void load();
+    let active = true;
+    queueMicrotask(() => {
+      if (active) void load(() => active);
+    });
+    return () => {
+      active = false;
+    };
   }, [load]);
   const filter = (rows: Row[]) =>
     rows.filter((r) =>
       Object.values(r).join(" ").toLowerCase().includes(search.toLowerCase()),
     );
   const pending =
-    data?.totals?.pending_principal ?? data?.cases.filter((c) => c.status === "PENDING_PRINCIPAL").length ?? 0;
+    data?.totals?.pending_principal ??
+    data?.cases.filter((c) => c.status === "PENDING_PRINCIPAL").length ??
+    0;
   const failed =
-    data?.totals?.failed_applications ?? data?.cases.filter((c) => c.status === "APPLICATION_FAILED").length ?? 0;
+    data?.totals?.failed_applications ??
+    data?.cases.filter((c) => c.status === "APPLICATION_FAILED").length ??
+    0;
   const held =
     data?.workload.reduce(
       (sum, r) => sum + Number(r.pending_sessions ?? 0),
@@ -211,9 +234,12 @@ export function PrincipalOversightPage({ view }: { view: PrincipalView }) {
                     },
                     {
                       label: "Open follow-ups",
-                      value: data.cases.filter(
-                        (c) => c.kind === "FOLLOW_UP" && c.status !== "CLOSED",
-                      ).length,
+                      value:
+                        data.totals?.open_followups ??
+                        data.cases.filter(
+                          (c) =>
+                            c.kind === "FOLLOW_UP" && c.status !== "CLOSED",
+                        ).length,
                       href: "/principal/exceptions",
                       detail: "Actions assigned to HOD",
                     },

@@ -7,6 +7,7 @@ export async function requireDepartmentOffice(
   actorId: string,
   kind: 'PRINCIPAL' | 'HOD',
   selected?: string | number,
+  lock = false,
 ) {
   if (
     selected != null &&
@@ -20,7 +21,7 @@ export async function requireDepartmentOffice(
     JOIN users u ON u.user_id=a.user_id AND u.tenant_id=o.tenant_id AND u.dept_id=o.dept_id
     WHERE o.tenant_id=$1 AND a.user_id=$2 AND o.kind=$3 AND u.is_active=true AND u.deleted_at IS NULL
       AND (c.structure='PRINCIPAL_HOD' OR c.structure=o.kind||'_ONLY')
-      AND ($4::int IS NULL OR o.dept_id=$4) ORDER BY o.dept_id`,
+      AND ($4::int IS NULL OR o.dept_id=$4) ORDER BY o.dept_id ${lock?'FOR SHARE OF o,a,u,c':''}`,
     [tenantId, actorId, kind, selected == null ? null : Number(selected)],
   );
   if (!rows.length)

@@ -271,16 +271,17 @@ async function main() {
       'HOD',
       {
         kind: 'TIMETABLE',
-        source_id: group,
+        source_id: group.toUpperCase(),
         title: 'Reserved timetable exception',
         reason: 'HOD recommends a review of this exceptional class swap',
       },
       randomUUID(),
     );
     await assert.rejects(
-      changes.decide(hod, tenant, group, 'APPROVE'),
+      changes.decide(hod, tenant, group.toUpperCase(), 'APPROVE'),
       /reserved to the Principal/,
     );
+    assert.equal((await changes.listPendingForHod(hod,tenant)).length,0);
     // Validation failure preserves original records, stores approval separately and is retryable.
     await c.query(
       "INSERT INTO staff_leave_requests VALUES($1,$2,'HOD_APPROVED','2030-07-01','2030-07-01')",

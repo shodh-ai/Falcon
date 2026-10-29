@@ -124,7 +124,7 @@ export class AcademicSessionChangesService {
              AND a.valid_to IS NULL AND a.valid_from<=now() AND cfg.structure IN ('HOD_ONLY','PRINCIPAL_HOD')) THEN 'HOD'
          WHEN r.role_name IN ('HOD','Principal') AND EXISTS(SELECT 1 FROM department_leadership cfg WHERE cfg.tenant_id=u.tenant_id AND cfg.dept_id=u.dept_id) THEN 'Faculty'
          ELSE r.role_name END AS role_name FROM users u JOIN roles r ON r.role_id=u.role_id
-       WHERE u.tenant_id=$1 AND u.user_id=$2 AND u.is_active=true`,
+       WHERE u.tenant_id=$1 AND u.user_id=$2 AND u.is_active=true AND u.deleted_at IS NULL`,
       [tenantId, actorId],
     );
     if (!actor) throw new ForbiddenException('Active faculty account required');
@@ -647,6 +647,12 @@ export class AcademicSessionChangesService {
        LEFT JOIN departments d ON d.dept_id=u.dept_id
        LEFT JOIN schools s ON s.school_id=d.school_id
        WHERE m.tenant_id=$1 AND m.status='PENDING_HOD_APPROVAL'
+         AND NOT EXISTS (SELECT 1 FROM (
+           SELECT e.details FROM department_leadership_events e
+           WHERE e.tenant_id=$1 AND e.action='PRINCIPAL_CASE'
+             AND e.details->>'source_id'=m.change_group_id::text AND e.details->>'kind'='TIMETABLE'
+           ORDER BY (e.details->>'revision')::int DESC LIMIT 1
+         ) reserved WHERE reserved.details->>'status' IN ('PENDING_PRINCIPAL','APPROVED','APPLICATION_FAILED'))
        GROUP BY m.change_group_id,m.move_type,m.reason,m.requested_by_user_id
        HAVING $3::boolean OR BOOL_AND(
          ($4::boolean AND s.dean_user_id=$5::uuid)
@@ -681,6 +687,7 @@ export class AcademicSessionChangesService {
     action: 'APPROVE' | 'REJECT',
     reservedCaseId?: string,
   ) {
+    groupId = groupId.toLowerCase();
     const actor = await this.actorScope(manager, tenantId, hodId);
     await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
       `reserved-move:${tenantId}:${groupId}`,
@@ -697,6 +704,8 @@ export class AcademicSessionChangesService {
         tenantId,
         hodId,
         'PRINCIPAL',
+        undefined,
+        true,
       );
       if (
         !reservation ||

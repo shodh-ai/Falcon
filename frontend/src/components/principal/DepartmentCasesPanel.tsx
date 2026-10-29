@@ -53,26 +53,40 @@ export function DepartmentCasesPanel({
       command.current = { signature, key: crypto.randomUUID() };
     return command.current!.key;
   };
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const data = await api.get<{ cases: OversightCase[] }>(base);
-      setCases(data.cases);
-      if (role === "hod")
-        setMoves(
-          await api.get<Move[]>("/api/academics/session-changes/hod/pending"),
-        );
-      setError("");
-    } catch (e) {
-      setError(
-        e instanceof Error ? e.message : "Could not load department cases",
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, [api, base, role]);
+  const load = useCallback(
+    async (isActive = () => true) => {
+      setLoading(true);
+      try {
+        const data = await api.get<{ cases: OversightCase[] }>(base);
+        const pending =
+          role === "hod"
+            ? await api.get<Move[]>(
+                "/api/academics/session-changes/hod/pending",
+              )
+            : [];
+        if (!isActive()) return;
+        setCases(data.cases);
+        setMoves(pending);
+        setError("");
+      } catch (e) {
+        if (isActive())
+          setError(
+            e instanceof Error ? e.message : "Could not load department cases",
+          );
+      } finally {
+        if (isActive()) setLoading(false);
+      }
+    },
+    [api, base, role],
+  );
   useEffect(() => {
-    void load();
+    let active = true;
+    queueMicrotask(() => {
+      if (active) void load(() => active);
+    });
+    return () => {
+      active = false;
+    };
   }, [load]);
   async function create(e: React.FormEvent) {
     e.preventDefault();
