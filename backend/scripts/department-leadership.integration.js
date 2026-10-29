@@ -34,15 +34,22 @@ async function main() {
    CREATE TABLE student_course_enrollments(tenant_id uuid,student_user_id uuid,course_id uuid);
    CREATE TABLE course_attendance_logs(log_id uuid PRIMARY KEY,tenant_id uuid,attendance_data jsonb);
    INSERT INTO roles VALUES(1,'Faculty'),(2,'HOD');INSERT INTO schools VALUES(1,1,NULL,NULL);INSERT INTO departments VALUES(43,1,NULL,NULL);`);
-    await c.query(
-      fs.readFileSync(
+    const migrationSql = fs.readFileSync(
         path.join(
           __dirname,
           '../migrations/20261029180000_department_leadership.sql',
         ),
         'utf8',
-      ),
+      );
+    // DDL must remain inside the runner's transaction, including on failure.
+    await c.query('BEGIN');
+    await c.query(migrationSql);
+    await c.query('ROLLBACK');
+    assert.equal(
+      (await c.query("SELECT to_regclass('department_leadership') AS relation")).rows[0].relation,
+      null,
     );
+    await c.query(migrationSql);
     const tenant = randomUUID(),
       other = randomUUID();
     await c.query(

@@ -28,7 +28,7 @@ story = [Paragraph('Pharmacy Student Login Directory', styles['Title']),
 rows = [[para(x) for x in ['#','Student name','Programme','SID / Login ID','Mapped email','Password']]]
 for i,student in enumerate(students,1):
     rows.append([para(x) for x in [i, student['name'],student['programme'],student['sid'],student['email'],student['password_instruction']]])
-table = LongTable(rows,colWidths=[24,135,85,75,235,200],repeatRows=1,hAlign='LEFT')
+table = LongTable(rows,colWidths=[34,135,85,75,225,200],repeatRows=1,hAlign='LEFT')
 table.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,0),colors.HexColor('#e5edf7')),('VALIGN',(0,0),(-1,-1),'TOP'),('GRID',(0,0),(-1,-1),.3,colors.HexColor('#ccd5e0')),('ROWBACKGROUNDS',(0,1),(-1,-1),[colors.white,colors.HexColor('#f6f8fb')]),('TOPPADDING',(0,0),(-1,-1),7),('BOTTOMPADDING',(0,0),(-1,-1),7)]))
 story.append(table)
 def footer(canvas,doc):

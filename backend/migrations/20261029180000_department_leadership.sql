@@ -1,5 +1,5 @@
 -- Expand only. No department is opted in and no person/email/password is changed.
-BEGIN;
+-- The migration runner owns the schema-and-ledger transaction.
 CREATE TABLE IF NOT EXISTS department_office_session_revisions (
  tenant_id uuid NOT NULL REFERENCES tenants(tenant_id),
  user_id uuid NOT NULL REFERENCES users(user_id),
@@ -50,4 +50,3 @@ CREATE TABLE IF NOT EXISTS student_identity_email_changes (
  changed_at timestamptz NOT NULL DEFAULT now(),
  PRIMARY KEY(tenant_id,user_id)
 );
-COMMIT;
