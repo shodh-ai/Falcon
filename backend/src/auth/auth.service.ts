@@ -143,7 +143,6 @@ export class AuthService {
               u.dept_id,
               u.onboarding_status,
               u.account_status,
-              u.leadership_auth_revision,
               r.role_name,
               d.dept_name
        FROM users u
@@ -173,7 +172,6 @@ export class AuthService {
       dept_id: row.dept_id,
       onboarding_status: row.onboarding_status,
       account_status: row.account_status,
-      leadership_auth_revision: (row as LoginUserRow & {leadership_auth_revision:number}).leadership_auth_revision ?? 0,
       role: row.role_name
         ? ({
             role_id: row.role_id ?? undefined,
@@ -909,6 +907,7 @@ export class AuthService {
   async applyLeadershipClaims(user:User, selected?:OfficeContext){
     if(!this.leadership)return;
     const context=await this.leadership.context(user.tenant_id,user.user_id);
+    user.leadership_auth_revision=context.authRevision ?? 0;
     if(!context.managed && !context.offices.length){
       if(selected)throw new UnauthorizedException('Office appointment changed; sign in again');
       return;

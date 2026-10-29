@@ -1,6 +1,11 @@
 -- Expand only. No department is opted in and no person/email/password is changed.
 BEGIN;
-ALTER TABLE users ADD COLUMN IF NOT EXISTS leadership_auth_revision integer NOT NULL DEFAULT 0;
+CREATE TABLE IF NOT EXISTS department_office_session_revisions (
+ tenant_id uuid NOT NULL REFERENCES tenants(tenant_id),
+ user_id uuid NOT NULL REFERENCES users(user_id),
+ revision integer NOT NULL DEFAULT 0,
+ PRIMARY KEY(tenant_id,user_id)
+);
 CREATE TABLE IF NOT EXISTS department_leadership (
  tenant_id uuid NOT NULL REFERENCES tenants(tenant_id),
  dept_id integer NOT NULL REFERENCES departments(dept_id),

@@ -59,9 +59,6 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     if (!user.is_active) {
       throw new UnauthorizedException('User account is inactive');
     }
-    if((payload.leadership_auth_revision ?? 0)!==(user.leadership_auth_revision ?? 0)){
-      throw new UnauthorizedException('Office assignment changed; sign in again');
-    }
 
     if (user.role?.role_name === 'FacultyReadOnly') {
       // Read the binding on every authenticated request: disabling it takes
@@ -95,6 +92,9 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       )) ?? user;
 
     await this.authService.applyLeadershipClaims(refreshedUser,payload.office_context);
+    if((payload.leadership_auth_revision ?? 0)!==(refreshedUser.leadership_auth_revision ?? 0)){
+      throw new UnauthorizedException('Office assignment changed; sign in again');
+    }
     const roleClaims = this.authService.getRoleClaims(refreshedUser);
 
     const baseUser = {

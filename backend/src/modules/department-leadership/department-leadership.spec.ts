@@ -99,7 +99,7 @@ describe('department leadership isolation', () => {
       service(q).appoint(actor, 43, 'HOD', 'HOD@EXAMPLE.EDU', 'new', 1),
     ).resolves.toEqual({ success: true, revision: 2 });
     const revision = q.mock.calls.find(([sql]) =>
-      sql.includes('leadership_auth_revision=leadership_auth_revision+1'),
+      sql.includes('INSERT INTO department_office_session_revisions'),
     );
     expect(revision?.[1]).toEqual(['tenant', ['old', 'new']]);
     expect(q.mock.calls.some(([sql]) => sql.includes('password_hash'))).toBe(

@@ -138,10 +138,10 @@ async function main() {
     assert.equal(
       (
         await c.query(
-          'SELECT leadership_auth_revision FROM users WHERE user_id=$1',
+          'SELECT revision FROM department_office_session_revisions WHERE user_id=$1',
           [hod],
         )
-      ).rows[0].leadership_auth_revision,
+      ).rows[0].revision,
       2,
     );
     await assert.rejects(

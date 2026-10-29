@@ -58,7 +58,7 @@ export class User extends BaseTenantEntity {
   @Column({ type: 'varchar', length: 255, nullable: true, select: false })
   password_hash: string | null;
 
-  @Column({ type: 'int', default: 0 })
+  /** Transient; persisted in department_office_session_revisions, not users. */
   leadership_auth_revision: number;
 
   /** Transient, server-resolved office claims. Never persisted as personal roles. */

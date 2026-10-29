@@ -94,6 +94,11 @@ async function mapEmails(c, apply = false) {
             prior.rows[0].student_login_id !== row.student_login_id)
         )
           throw Error('An earlier email mapping conflicts; review required');
+        if(prior.rows.length){
+          if(row.official_email!==row.email)throw Error('A mapped student email was changed after publication; review required');
+          // Replay must not overwrite later mailbox/contact administration.
+          continue;
+        }
         await c.query(
           `INSERT INTO student_identity_email_changes(tenant_id,user_id,student_login_id,old_email,new_email)
      VALUES($1,$2,$3,$4,$5) ON CONFLICT(tenant_id,user_id) DO NOTHING`,

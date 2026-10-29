@@ -25,6 +25,24 @@ export class DepartmentLeadershipService {
     private readonly campus: CampusScopeService,
   ) {}
 
+  private async transaction<T>(
+    work: (m: EntityManager) => Promise<T>,
+  ): Promise<T> {
+    try {
+      return await this.db.transaction('SERIALIZABLE', work);
+    } catch (error) {
+      if (
+        ['40001', '40P01', '23505'].includes(
+          (error as { code?: string }).code ?? '',
+        )
+      )
+        throw new ConflictException(
+          'Leadership changed concurrently or the office alias is already reserved; refresh and retry',
+        );
+      throw error;
+    }
+  }
+
   private async scope(actor: ScopedAuthUser, deptId: number) {
     if (!actor.tenant_id || !actor.user_id) throw new ForbiddenException();
     if (!Number.isInteger(deptId) || deptId < 1)
@@ -65,7 +83,7 @@ export class DepartmentLeadershipService {
     revision: number,
   ) {
     await this.scope(actor, deptId);
-    return this.db.transaction('SERIALIZABLE', async (m) => {
+    return this.transaction(async (m) => {
       await m.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
         `${actor.tenant_id}:${deptId}:leadership`,
       ]);
@@ -82,11 +100,11 @@ export class DepartmentLeadershipService {
           `SELECT user_id FROM users u WHERE user_id=$1 AND tenant_id=$2 AND is_active=true AND deleted_at IS NULL
           AND u.dept_id IS DISTINCT FROM $3
           AND NOT EXISTS(SELECT 1 FROM student_profiles sp WHERE sp.tenant_id=u.tenant_id AND sp.user_id=u.user_id)`,
-          [input.higher_officer_id, actor.tenant_id,deptId],
+          [input.higher_officer_id, actor.tenant_id, deptId],
         );
         if (rows.length !== 1)
           throw new BadRequestException(
-          'Higher reporting officer must be active staff outside this department in the same tenant',
+            'Higher reporting officer must be active staff outside this department in the same tenant',
           );
       }
       const holders = await m.query(
@@ -108,7 +126,7 @@ export class DepartmentLeadershipService {
           input.higher_officer_id ?? null,
         ],
       );
-      await this.projectReporting(m, actor.tenant_id!, deptId);
+      await this.projectReporting(m, actor.tenant_id!, deptId, actor.user_id);
       await this.event(m, actor, deptId, 'CONFIGURE', {
         before: old ?? null,
         after: input,
@@ -126,7 +144,7 @@ export class DepartmentLeadershipService {
     revision: number,
   ) {
     await this.scope(actor, deptId);
-    return this.db.transaction('SERIALIZABLE', async (m) => {
+    return this.transaction(async (m) => {
       const [config] = await m.query(
         'SELECT * FROM department_leadership WHERE tenant_id=$1 AND dept_id=$2 FOR UPDATE',
         [actor.tenant_id, deptId],
@@ -150,7 +168,8 @@ export class DepartmentLeadershipService {
         );
       if (userId) {
         const holder = await m.query(
-          `SELECT u.user_id FROM users u WHERE u.user_id=$1 AND u.tenant_id=$2 AND u.dept_id=$3
+          `SELECT u.user_id FROM users u JOIN roles r ON r.role_id=u.role_id WHERE u.user_id=$1 AND u.tenant_id=$2 AND u.dept_id=$3
+          AND r.role_name IN ('Faculty','HOD','Dean','Principal')
           AND u.is_active=true AND u.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM student_profiles sp WHERE sp.user_id=u.user_id AND sp.tenant_id=u.tenant_id)`,
           [userId, actor.tenant_id, deptId],
         );
@@ -189,7 +208,8 @@ export class DepartmentLeadershipService {
       ];
       if (affected.length)
         await m.query(
-          'UPDATE users SET leadership_auth_revision=leadership_auth_revision+1 WHERE tenant_id=$1 AND user_id=ANY($2::uuid[])',
+          `INSERT INTO department_office_session_revisions(tenant_id,user_id,revision)
+           SELECT $1,unnest($2::uuid[]),1 ON CONFLICT(tenant_id,user_id) DO UPDATE SET revision=department_office_session_revisions.revision+1`,
           [actor.tenant_id, affected],
         );
       await m.query(
@@ -201,7 +221,7 @@ export class DepartmentLeadershipService {
           'UPDATE departments SET hod_user_id=$1 WHERE dept_id=$2',
           [userId, deptId],
         );
-      await this.projectReporting(m, actor.tenant_id!, deptId);
+      await this.projectReporting(m, actor.tenant_id!, deptId, actor.user_id);
       await this.event(m, actor, deptId, 'APPOINT', {
         office_id: office.office_id,
         kind,
@@ -218,6 +238,7 @@ export class DepartmentLeadershipService {
     m: EntityManager,
     tenantId: string,
     deptId: number,
+    actorId?: string,
   ) {
     const [config] = await m.query(
       'SELECT * FROM department_leadership WHERE tenant_id=$1 AND dept_id=$2',
@@ -236,19 +257,39 @@ export class DepartmentLeadershipService {
         SELECT user_id,reporting_officer_id,ARRAY[user_id] AS path FROM users WHERE tenant_id=$1 AND user_id=$2
         UNION ALL SELECT u.user_id,u.reporting_officer_id,c.path||u.user_id FROM users u JOIN chain c ON u.user_id=c.reporting_officer_id
         WHERE u.tenant_id=$1 AND NOT u.user_id=ANY(c.path)) SELECT 1 FROM chain c JOIN users person ON person.user_id=c.user_id AND person.tenant_id=$1 WHERE c.user_id=$3 OR person.dept_id=$4`,
-        [tenantId, config.higher_officer_id, headId,deptId],
+        [tenantId, config.higher_officer_id, headId, deptId],
       );
       if (cycle.length)
         throw new BadRequestException(
           'Reporting hierarchy would contain a cycle',
         );
     }
+    const before = await m.query(
+      `SELECT u.user_id,u.reporting_officer_id FROM users u
+      WHERE u.tenant_id=$1 AND u.dept_id=$2 AND u.is_active=true AND u.deleted_at IS NULL
+      AND NOT EXISTS(SELECT 1 FROM student_profiles sp WHERE sp.tenant_id=u.tenant_id AND sp.user_id=u.user_id)
+      ORDER BY u.user_id`,
+      [tenantId, deptId],
+    );
     await m.query(
       `UPDATE users u SET reporting_officer_id=CASE WHEN user_id=$3 THEN $4::uuid ELSE $3::uuid END
       WHERE tenant_id=$1 AND dept_id=$2 AND is_active=true AND deleted_at IS NULL
       AND NOT EXISTS(SELECT 1 FROM student_profiles sp WHERE sp.tenant_id=u.tenant_id AND sp.user_id=u.user_id)`,
       [tenantId, deptId, headId, config.higher_officer_id ?? null],
     );
+    if (actorId)
+      await this.event(
+        m,
+        { tenant_id: tenantId, user_id: actorId },
+        deptId,
+        'REPORTING_PROJECTION',
+        {
+          before,
+          head_user_id: headId,
+          higher_officer_id: config.higher_officer_id ?? null,
+          pending_personal_requests: 'unchanged',
+        },
+      );
   }
 
   private event(
@@ -284,11 +325,13 @@ export class DepartmentLeadershipService {
     managed: boolean;
     offices: OfficeContext[];
     explicitDean: boolean;
+    authRevision:number;
   }> {
     const managed = await this.db.query(
       `SELECT 1 FROM users u JOIN department_leadership c ON c.tenant_id=u.tenant_id AND c.dept_id=u.dept_id WHERE u.tenant_id=$1 AND u.user_id=$2`,
       [tenantId, userId],
     );
+    const [session]=await this.db.query('SELECT revision FROM department_office_session_revisions WHERE tenant_id=$1 AND user_id=$2',[tenantId,userId]);
     const offices = await this.db.query(
       `SELECT o.office_id,o.dept_id,o.kind,o.login_alias,a.appointment_id FROM department_offices o
       JOIN department_leadership c ON c.tenant_id=o.tenant_id AND c.dept_id=o.dept_id
@@ -309,6 +352,7 @@ export class DepartmentLeadershipService {
       managed: !!managed.length,
       offices,
       explicitDean: !!explicitDean.length,
+      authRevision:session?.revision ?? 0,
     };
   }
 }

@@ -90,7 +90,7 @@ describe('office claims', () => {
       .mockResolvedValue({ is_active: true, leadership_auth_revision: 2 });
     const strategy = new JwtStrategy(
       { get: () => 'test-secret-with-at-least-32-characters' } as any,
-      { findById } as any,
+      { findById, syncMultiHatWorkspaceRoles:async()=>{},loadUserWithSyncedWorkspaceRoles:async()=>({is_active:true,leadership_auth_revision:2}), applyLeadershipClaims:async()=>{} } as any,
       {} as any,
     );
     await expect(
