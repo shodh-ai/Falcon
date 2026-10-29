@@ -82,7 +82,31 @@ describe('Session-linked Exam Cell timetable', () => {
     expect(mocks.success).toHaveBeenCalledWith('Exam slot saved');
     expect(mocks.success).not.toHaveBeenCalledWith(expect.stringMatching(/notified|delivered/i));
     expect(mocks.api.get).toHaveBeenCalledWith('/api/exam-cell/schedules?session_id=session-a');
-    expect(screen.getByText('1 scheduled exams · Authorized exam session')).toBeVisible();
+    expect(screen.getByText('1 timetable entries · Authorized exam session')).toBeVisible();
+  });
+
+  it('lets only ExamCell release all prepared session slots and then locks preparation', async () => {
+    let status = 'SCHEDULED';
+    mocks.api.get.mockImplementation(async (path: string) => {
+      if (path === '/api/exam-cell/sessions') return [session];
+      if (path === '/api/exam-cell/subjects') return [subject];
+      if (path.startsWith('/api/exam-cell/schedules?')) return [{ ...schedule, status }];
+      throw new Error('Unexpected test request: ' + path);
+    });
+    mocks.api.post.mockImplementation(async (path: string) => {
+      if (path !== `/api/exam-cell/sessions/${session.session_id}/timetable/release`) throw new Error('Unexpected timetable mutation: ' + path);
+      status = 'RELEASED';
+      return [{ ...schedule, status }];
+    });
+    render(<TimetablePage />);
+    await selectSession();
+    await screen.findByText('Operating Systems · END_TERM');
+    fireEvent.click(screen.getByRole('button', { name: 'Release timetable to students' }));
+    expect(await screen.findByText('This timetable is officially released. Students can see its active exam slots, and new slots are locked for this session.')).toBeVisible();
+    expect(mocks.api.post).toHaveBeenCalledWith(`/api/exam-cell/sessions/${session.session_id}/timetable/release`, {});
+    expect(mocks.success).toHaveBeenCalledWith('Timetable released to students');
+    expect(screen.getByRole('button', { name: 'Add to schedule' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Release timetable to students' })).not.toBeInTheDocument();
   });
 
   it('sends optional maximum marks and batch label only as explicitly entered metadata', async () => {
@@ -252,7 +276,7 @@ describe('Session-linked Exam Cell timetable', () => {
     await screen.findByText('No exams scheduled for this session.');
     await act(async () => { complete([schedule]); });
     expect(screen.queryByText('Operating Systems · END_TERM')).not.toBeInTheDocument();
-    expect(screen.getByText('0 scheduled exams · Second exam session')).toBeVisible();
+    expect(screen.getByText('0 timetable entries · Second exam session')).toBeVisible();
   });
 
   it('clears the prior session form when selecting a different actual session', async () => {

@@ -167,6 +167,20 @@ export class ExamCellController {
     );
   }
 
+  @Post('sessions/:sessionId/timetable/release')
+  releaseSessionTimetable(
+    @Req() req: { user: AuthUser },
+    @Param('sessionId', ParseUUIDPipe) sessionId: string,
+  ) {
+    this.requireAction(req, 'release_timetable');
+    return this.examCell.releaseSessionTimetable(
+      this.tenant(req),
+      sessionId,
+      req.user.user_id,
+      examCellRoleFromUser(req.user),
+    );
+  }
+
   @Get('admit-cards/audit')
   auditAdmitCards(
     @Req() req: { user: AuthUser },

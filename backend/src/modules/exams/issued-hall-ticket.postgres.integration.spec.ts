@@ -9,6 +9,8 @@ import { ObjectStorageService } from '../../storage/object-storage.service';
 import { ExamCellAuditService } from '../exam-cell/exam-cell-audit.service';
 import { ExamCellService } from '../exam-cell/exam-cell.service';
 import { ExamCellEnterpriseService } from '../exam-cell/exam-cell-enterprise.service';
+import { HallTicketDecisionService } from '../exam-cell/hall-ticket-decision.service';
+import { HallTicketIssuanceInfrastructure } from '../exam-cell/hall-ticket-issuance.infrastructure';
 import {
   IssuedHallTicketService,
   issuedHallTicketKey,
@@ -29,6 +31,11 @@ const scopeMigration = resolve(
   __dirname,
   '../../..',
   'migrations/20261023143000_hall_ticket_session_scope.sql',
+);
+const queueMigration = resolve(
+  __dirname,
+  '../../..',
+  'migrations/20261023160000_hall_ticket_registration_queue.sql',
 );
 
 function removeTestStorage(root: string) {
@@ -124,6 +131,9 @@ integration('isolated PostgreSQL issued hall-ticket retrieval', () => {
     );
     await primary.transaction((manager) =>
       manager.query(readFileSync(scopeMigration, 'utf8')),
+    );
+    await primary.transaction((manager) =>
+      manager.query(readFileSync(queueMigration, 'utf8')),
     );
     root = mkdtempSync(join(tmpdir(), 'falcon-hall-ticket-it-'));
     oldUploadPath = process.env.UPLOAD_PATH;
@@ -271,6 +281,386 @@ integration('isolated PostgreSQL issued hall-ticket retrieval', () => {
       [tenant],
     );
 
+  // Infrastructure fixtures deliberately have PENDING registration/approvals.
+  // These tests never authorize or produce an officially downloadable ticket.
+  async function pendingInfrastructureFixture() {
+    const f = await fixture();
+    await primary.query(
+      'DELETE FROM exam_admit_card_entries WHERE entry_id=$1 AND tenant_id=$2',
+      [f.entry, f.tenant],
+    );
+    await primary.query(
+      "UPDATE exam_semester_registrations SET status='PENDING',reviewed_at=NULL,reviewed_by=NULL WHERE registration_id=$1",
+      [f.registration],
+    );
+    await primary.query(
+      "UPDATE hall_ticket_approvals SET stage='ELIGIBILITY',eligibility_status='PENDING',finance_status='PENDING',exam_office_status='PENDING',coe_status='PENDING',approved_at=NULL,approved_by=NULL WHERE approval_id=$1",
+      [f.approval],
+    );
+    return f;
+  }
+
+  async function pendingCoeDecision() {
+    const f = await pendingInfrastructureFixture();
+    await primary.query(
+      "UPDATE exam_semester_registrations SET status='APPROVED', reviewed_by=$2, reviewed_at=NOW() WHERE registration_id=$1",
+      [f.registration, f.actor],
+    );
+    // Existing-stage fixture, not evidence that earlier approvals were executed.
+    await primary.query(
+      "UPDATE hall_ticket_approvals SET stage='COE',eligibility_status='APPROVED',finance_status='APPROVED',exam_office_status='APPROVED' WHERE approval_id=$1",
+      [f.approval],
+    );
+    return f;
+  }
+  const decisions = (db = primary, audit = new ExamCellAuditService(db)) =>
+    new HallTicketDecisionService(db, audit);
+  it('commits scoped COE rejection with its required audit and preserves the historical PDF', async () => {
+    const f = await pendingCoeDecision();
+    await expect(
+      decisions().decide(f.tenant, f.actor, 'ExamCell', [f.approval], {
+        action: 'REJECT',
+        reason: 'Official evidence incomplete',
+      }),
+    ).resolves.toEqual({ updated: 1, action: 'REJECT' });
+    const [row] = await primary.query<
+      Array<{ stage: string; coe_status: string }>
+    >(
+      'SELECT stage,coe_status FROM hall_ticket_approvals WHERE approval_id=$1',
+      [f.approval],
+    );
+    expect(row).toEqual({ stage: 'REJECTED', coe_status: 'REJECTED' });
+    expect(
+      await primary.query(
+        'SELECT audit_id FROM exam_audit_logs WHERE tenant_id=$1 AND action=$2',
+        [f.tenant, 'HALL_TICKET_STAGE_REJECTED'],
+      ),
+    ).toHaveLength(1);
+    expect(readFileSync(join(root, f.key))).toEqual(bytes);
+  });
+  it('rolls back rejection if required PostgreSQL audit fails', async () => {
+    const f = await pendingCoeDecision();
+    await expect(
+      decisions(primary, new FailingRetrievalAudit(primary)).decide(
+        f.tenant,
+        f.actor,
+        'ExamCell',
+        [f.approval],
+        { action: 'REJECT', reason: 'Official evidence incomplete' },
+      ),
+    ).rejects.toBeDefined();
+    expect(
+      await primary.query(
+        'SELECT stage,coe_status FROM hall_ticket_approvals WHERE approval_id=$1',
+        [f.approval],
+      ),
+    ).toEqual([{ stage: 'COE', coe_status: 'PENDING' }]);
+    expect(
+      await primary.query(
+        'SELECT audit_id FROM exam_audit_logs WHERE tenant_id=$1',
+        [f.tenant],
+      ),
+    ).toHaveLength(0);
+  });
+  it('serializes concurrent rejection and records only one decision', async () => {
+    const f = await pendingCoeDecision();
+    const results = await Promise.allSettled(
+      [primary, competing].map((db) =>
+        decisions(db).decide(f.tenant, f.actor, 'ExamCell', [f.approval], {
+          action: 'REJECT',
+          reason: 'Official evidence incomplete',
+        }),
+      ),
+    );
+    expect(
+      results.filter((result) => result.status === 'fulfilled'),
+    ).toHaveLength(1);
+    expect(
+      results.filter((result) => result.status === 'rejected'),
+    ).toHaveLength(1);
+    expect(
+      await primary.query(
+        'SELECT audit_id FROM exam_audit_logs WHERE tenant_id=$1',
+        [f.tenant],
+      ),
+    ).toHaveLength(1);
+  });
+  it('denies wrong tenant and role without changing a pending decision', async () => {
+    const f = await pendingCoeDecision();
+    await expect(
+      decisions().decide(randomUUID(), f.actor, 'ExamCell', [f.approval], {
+        action: 'REJECT',
+        reason: 'Official evidence incomplete',
+      }),
+    ).rejects.toMatchObject({ status: 404 });
+    await expect(
+      decisions().decide(f.tenant, f.actor, 'ExamOperator', [f.approval], {
+        action: 'REJECT',
+        reason: 'Official evidence incomplete',
+      }),
+    ).rejects.toMatchObject({ status: 403 });
+    expect(
+      await primary.query(
+        'SELECT stage FROM hall_ticket_approvals WHERE approval_id=$1',
+        [f.approval],
+      ),
+    ).toEqual([{ stage: 'COE' }]);
+  });
+  it('keeps actual positive COE approval blocked without prerequisite evidence', async () => {
+    const f = await pendingCoeDecision();
+    await expect(
+      decisions().decide(
+        f.tenant,
+        f.actor,
+        'ExamCell',
+        [f.approval],
+        { action: 'APPROVE' },
+        f.session,
+      ),
+    ).rejects.toMatchObject({ status: 503 });
+    expect(
+      await primary.query(
+        'SELECT stage FROM hall_ticket_approvals WHERE approval_id=$1',
+        [f.approval],
+      ),
+    ).toEqual([{ stage: 'COE' }]);
+    expect(
+      await primary.query(
+        'SELECT entry_id FROM exam_admit_card_entries WHERE tenant_id=$1',
+        [f.tenant],
+      ),
+    ).toHaveLength(0);
+  });
+
+  const infrastructure = (db = primary, audit = new ExamCellAuditService(db)) =>
+    new HallTicketIssuanceInfrastructure(db, audit);
+  const insertIncomplete = (
+    manager: EntityManager,
+    f: Awaited<ReturnType<typeof fixture>>,
+  ) =>
+    manager.query(
+      'INSERT INTO exam_admit_card_entries(entry_id,run_id,student_user_id,eligible) VALUES($1,$2,$3,false)',
+      [f.entry, f.run, f.student],
+    );
+
+  it('commits an incomplete infrastructure record with its audit, without authorizing a ticket', async () => {
+    const f = await pendingInfrastructureFixture();
+    expect(
+      (
+        await infrastructure().transaction(f, (manager) =>
+          insertIncomplete(manager, f),
+        )
+      ).kind,
+    ).toBe('transaction_committed');
+    expect(await service().list(f.student, f.tenant)).toEqual([]);
+    expect(
+      await primary.query(
+        "SELECT 1 FROM exam_audit_logs WHERE tenant_id=$1 AND action='HALL_TICKET_ISSUANCE_TRANSACTION'",
+        [f.tenant],
+      ),
+    ).toHaveLength(1);
+  });
+
+  it('retries an existing record without a write, upload or repeated audit', async () => {
+    const f = await fixture();
+    let writes = 0;
+    for (let retry = 0; retry < 2; retry++) {
+      expect(
+        await infrastructure().transaction(f, () => {
+          writes++;
+          return Promise.resolve();
+        }),
+      ).toEqual({ kind: 'existing_record', entry_id: f.entry });
+    }
+    expect(writes).toBe(0);
+    expect(await download(f)).toEqual(bytes);
+    expect(
+      await primary.query(
+        "SELECT 1 FROM exam_audit_logs WHERE tenant_id=$1 AND action='HALL_TICKET_ISSUANCE_TRANSACTION'",
+        [f.tenant],
+      ),
+    ).toHaveLength(0);
+  });
+
+  it('rolls back persistence on required audit failure and retains only a private recovery object', async () => {
+    const f = await pendingInfrastructureFixture();
+    const key = issuedHallTicketKey({
+      tenant_id: f.tenant,
+      student_user_id: f.student,
+      session_id: f.session,
+      entry_id: randomUUID(),
+    });
+    await storage.uploadNew(f.tenant, key, bytes, 'application/pdf');
+    await expect(
+      infrastructure(primary, new FailingRetrievalAudit(primary)).transaction(
+        f,
+        (manager) => insertIncomplete(manager, f),
+      ),
+    ).rejects.toMatchObject({ code: '22012' });
+    expect(
+      await primary.query(
+        'SELECT 1 FROM exam_admit_card_entries WHERE entry_id=$1',
+        [f.entry],
+      ),
+    ).toHaveLength(0);
+    expect(
+      await primary.query(
+        "SELECT 1 FROM exam_audit_logs WHERE tenant_id=$1 AND action='HALL_TICKET_ISSUANCE_TRANSACTION'",
+        [f.tenant],
+      ),
+    ).toHaveLength(0);
+    expect(readFileSync(join(root, key))).toEqual(bytes);
+    expect(await service().list(f.student, f.tenant)).toEqual([]);
+    // Recovery is a fresh transaction, never deletion of an uncertain upload.
+    await infrastructure().transaction(f, (manager) =>
+      insertIncomplete(manager, f),
+    );
+  });
+
+  it('preserves an existing PDF when an immutable upload collides', async () => {
+    const f = await fixture();
+    await expect(
+      storage.uploadNew(
+        f.tenant,
+        f.key,
+        Buffer.from('replacement'),
+        'application/pdf',
+      ),
+    ).rejects.toMatchObject({ code: 'EEXIST' });
+    expect(await download(f)).toEqual(bytes);
+  });
+
+  it('rolls back database writes if storage upload fails inside the transaction', async () => {
+    const f = await pendingInfrastructureFixture();
+    await expect(
+      infrastructure().transaction(f, async (manager) => {
+        await insertIncomplete(manager, f);
+        await storage.uploadNew(f.tenant, f.key, bytes, 'application/pdf');
+      }),
+    ).rejects.toMatchObject({ code: 'EEXIST' });
+    expect(
+      await primary.query(
+        'SELECT 1 FROM exam_admit_card_entries WHERE entry_id=$1',
+        [f.entry],
+      ),
+    ).toHaveLength(0);
+    expect(readFileSync(join(root, f.key))).toEqual(bytes);
+  });
+
+  it('serializes two infrastructure transactions using a real session row lock', async () => {
+    const f = await pendingInfrastructureFixture();
+    const runner = observer.createQueryRunner();
+    await runner.connect();
+    await runner.startTransaction();
+    await runner.query(
+      'SELECT session_id FROM exam_sessions WHERE session_id=$1 FOR UPDATE',
+      [f.session],
+    );
+    let active = 0;
+    let maximum = 0;
+    const work = async (manager: EntityManager) => {
+      active++;
+      maximum = Math.max(maximum, active);
+      await manager.query('SELECT pg_sleep(0.1)');
+      active--;
+    };
+    const attempts = Promise.all([
+      infrastructure().transaction(f, work),
+      infrastructure(competing).transaction(f, work),
+    ]);
+    try {
+      await waitForLock();
+      await runner.commitTransaction();
+      await attempts;
+    } finally {
+      if (runner.isTransactionActive) await runner.rollbackTransaction();
+      await runner.release();
+    }
+    expect(maximum).toBe(1);
+    expect(await service().list(f.student, f.tenant)).toEqual([]);
+  });
+
+  it('rejects wrong tenant, student, session, registration, window, approval or actor before persistence', async () => {
+    const f = await pendingInfrastructureFixture();
+    let writes = 0;
+    for (const scope of [
+      { ...f, tenant: randomUUID() },
+      { ...f, student: randomUUID() },
+      { ...f, session: randomUUID() },
+      { ...f, registration: randomUUID() },
+      { ...f, window: randomUUID() },
+      { ...f, approval: randomUUID() },
+      { ...f, actor: randomUUID() },
+    ])
+      await expect(
+        infrastructure().transaction(scope, () => {
+          writes++;
+          return Promise.resolve();
+        }),
+      ).rejects.toMatchObject({ status: 404 });
+    expect(writes).toBe(0);
+  });
+
+  it('rolls back on a real deferred COMMIT failure without deleting the uploaded recovery object', async () => {
+    const f = await pendingInfrastructureFixture();
+    const key = issuedHallTicketKey({
+      tenant_id: f.tenant,
+      student_user_id: f.student,
+      session_id: f.session,
+      entry_id: randomUUID(),
+    });
+    await storage.uploadNew(f.tenant, key, bytes, 'application/pdf');
+    await expect(
+      infrastructure().transaction(f, async (manager) => {
+        await manager.query(
+          `CREATE FUNCTION pg_temp.reject_hall_test_commit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'isolated deferred failure'; END $$`,
+        );
+        await manager.query(
+          `CREATE CONSTRAINT TRIGGER isolated_hall_commit_failure AFTER INSERT ON exam_admit_card_entries DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION pg_temp.reject_hall_test_commit()`,
+        );
+        await insertIncomplete(manager, f);
+      }),
+    ).rejects.toMatchObject({ code: 'P0001' });
+    expect(
+      await primary.query(
+        'SELECT 1 FROM exam_admit_card_entries WHERE entry_id=$1',
+        [f.entry],
+      ),
+    ).toHaveLength(0);
+    expect(
+      await primary.query(
+        "SELECT 1 FROM exam_audit_logs WHERE tenant_id=$1 AND action='HALL_TICKET_ISSUANCE_TRANSACTION'",
+        [f.tenant],
+      ),
+    ).toHaveLength(0);
+    expect(readFileSync(join(root, key))).toEqual(bytes);
+    await infrastructure().transaction(f, (manager) =>
+      insertIncomplete(manager, f),
+    );
+  });
+
+  it('allows only one concurrent create-only upload and preserves the winning bytes', async () => {
+    const f = await pendingInfrastructureFixture();
+    const key = issuedHallTicketKey({
+      tenant_id: f.tenant,
+      student_user_id: f.student,
+      session_id: f.session,
+      entry_id: randomUUID(),
+    });
+    const outcomes = await Promise.allSettled([
+      storage.uploadNew(f.tenant, key, bytes, 'application/pdf'),
+      storage.uploadNew(f.tenant, key, Buffer.from('other'), 'application/pdf'),
+    ]);
+    expect(
+      outcomes.filter((outcome) => outcome.status === 'fulfilled'),
+    ).toHaveLength(1);
+    expect(
+      outcomes.filter((outcome) => outcome.status === 'rejected'),
+    ).toHaveLength(1);
+    expect(readFileSync(join(root, key))).toEqual(bytes);
+    expect(await service().list(f.student, f.tenant)).toEqual([]);
+  });
+
   async function waitForLock() {
     const until = Date.now() + 8000;
     while (Date.now() < until) {
@@ -284,10 +674,70 @@ integration('isolated PostgreSQL issued hall-ticket retrieval', () => {
     throw new Error('No real PostgreSQL lock waiter observed');
   }
 
+  it('enforces one linked approval per registration and safely reruns the queue migration', async () => {
+    const f = await fixture();
+    await primary.transaction((manager) =>
+      manager.query(readFileSync(queueMigration, 'utf8')),
+    );
+    await expect(
+      primary.query(
+        `INSERT INTO hall_ticket_approvals(tenant_id,student_user_id,semester,batch_label,registration_id,session_id)
+         VALUES($1,$2,4,NULL,$3,$4)`,
+        [f.tenant, f.student, f.registration, f.session],
+      ),
+    ).rejects.toMatchObject({
+      code: '23505',
+      constraint: 'uq_hall_approval_registration',
+    });
+    expect(await download(f)).toEqual(bytes);
+  });
+
+  it('refuses duplicate legacy registration links without changing existing approvals', async () => {
+    const f = await fixture();
+    await expect(
+      primary.transaction(async (manager) => {
+        await manager.query(
+          'CREATE TEMP TABLE hall_ticket_approvals (LIKE public.hall_ticket_approvals INCLUDING DEFAULTS) ON COMMIT DROP',
+        );
+        await manager.query(
+          `INSERT INTO pg_temp.hall_ticket_approvals
+        SELECT * FROM public.hall_ticket_approvals WHERE approval_id=$1
+        UNION ALL SELECT * FROM public.hall_ticket_approvals WHERE approval_id=$1`,
+          [f.approval],
+        );
+        await manager.query(readFileSync(queueMigration, 'utf8'));
+      }),
+    ).rejects.toMatchObject({
+      code: '23505',
+      message:
+        'Duplicate linked hall-ticket approvals require manual review before registration uniqueness',
+    });
+    expect(await download(f)).toEqual(bytes);
+  });
+
   it('reads the exact stored bytes and commits a required retrieval audit', async () => {
     const f = await fixture();
     expect(await download(f)).toEqual(bytes);
     expect(await audits(f.tenant)).toHaveLength(1);
+  });
+
+  it('rejects changed course scope after clearance without returning a stored file', async () => {
+    const f = await fixture();
+    const changedCourse = randomUUID();
+    await expect(
+      service().download(f.student, f.tenant, f.entry, async (scope) => {
+        expect(scope.semester).toBe(4);
+        expect(scope.courseIds).not.toContain(changedCourse);
+        // A separate real PostgreSQL connection commits between the initial
+        // clearance and locked authorization recheck. No service query is mocked.
+        await competing.query(
+          `UPDATE exam_admit_card_entries SET issuance_snapshot=jsonb_set(
+            issuance_snapshot, '{exams,0,course_id}', to_jsonb($2::text)) WHERE entry_id=$1`,
+          [f.entry, changedCourse],
+        );
+      }),
+    ).rejects.toMatchObject({ status: 409 });
+    expect(await audits(f.tenant)).toHaveLength(0);
   });
 
   it('does not starve upstream clearance when the shared PostgreSQL pool has one connection', async () => {

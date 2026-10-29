@@ -1575,7 +1575,6 @@ export const examCellPortal: PortalConfig = {
         { label: 'Exam Registration', href: '/exam-cell/form-fillup', icon: FileCheck2, keywords: ['registration', 'eligibility', 'form fill-up desk'] },
         { label: 'Eligibility Dashboard', href: '/exam-cell/eligibility', icon: ClipboardCheck, keywords: ['attendance', 'fee', 'debarred'] },
         { label: 'Attendance Exemptions', href: '/exam-cell/attendance-exemptions', icon: ClipboardCheck, keywords: ['exemption', 'low attendance'] },
-        { label: 'Hall Ticket Approvals', href: '/exam-cell/hall-ticket-approvals', icon: FileCheck2, keywords: ['coe approval', 'workflow'] },
         { label: 'Hall Tickets', href: '/exam-cell/admit-cards', icon: Ticket, keywords: ['hall ticket', 'admit', 'admit card engine', 'admit cards'] },
       ],
     },

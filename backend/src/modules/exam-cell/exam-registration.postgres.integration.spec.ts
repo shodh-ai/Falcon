@@ -354,7 +354,7 @@ integration('isolated PostgreSQL registration and clearance', () => {
     };
   }
 
-  it('persists an explicitly session-linked timetable and required audit before local notifications', async () => {
+  it('keeps prepared timetable private and emits local notifications only after audited release commits', async () => {
     const f = await fixture();
     const creator = timetable();
     const visibleCounts: number[] = [];
@@ -401,8 +401,21 @@ integration('isolated PostgreSQL registration and clearance', () => {
     ).toEqual([
       { actor_user_id: f.actor, resource_id: stored.exam_schedule_id },
     ]);
+    expect(visibleCounts).toEqual([]);
+    expect(creator.notifications).toHaveLength(0);
+    await creator.service.releaseSession(
+      f.tenant,
+      f.actor,
+      'ExamCell',
+      f.session,
+    );
     expect(visibleCounts).toEqual([1, 1]);
     expect(creator.notifications).toHaveLength(2);
+    const [released] = await primary.query<Array<{ status: string }>>(
+      'SELECT status FROM exam_schedules WHERE tenant_id=$1 AND session_id=$2',
+      [f.tenant, f.session],
+    );
+    expect(released.status).toBe('RELEASED');
     expect(creator.notifications).toEqual(
       expect.arrayContaining(
         f.students.map((student): unknown =>
@@ -413,6 +426,66 @@ integration('isolated PostgreSQL registration and clearance', () => {
         ),
       ),
     );
+  });
+
+  it('serializes simultaneous release attempts on PostgreSQL and records one release audit', async () => {
+    const f = await fixture();
+    await timetable().service.create(
+      f.tenant,
+      f.actor,
+      'ExamCell',
+      timetableInput(f),
+    );
+    const first = timetable(primary);
+    const second = timetable(competing);
+    const results = await Promise.all([
+      first.service.releaseSession(f.tenant, f.actor, 'ExamCell', f.session),
+      second.service.releaseSession(f.tenant, f.actor, 'ExamCell', f.session),
+    ]);
+    expect(results.map((rows) => rows[0].status)).toEqual([
+      'RELEASED',
+      'RELEASED',
+    ]);
+    const audits = await primary.query(
+      "SELECT audit_id FROM exam_audit_logs WHERE tenant_id=$1 AND resource_id=$2 AND action='EXAM_TIMETABLE_RELEASED'",
+      [f.tenant, f.session],
+    );
+    expect(audits).toHaveLength(1);
+    expect(first.notifications).toHaveLength(2);
+    expect(second.notifications).toHaveLength(0);
+  });
+
+  it('rolls back the release status and audit together when required audit persistence fails', async () => {
+    const f = await fixture();
+    await timetable().service.create(
+      f.tenant,
+      f.actor,
+      'ExamCell',
+      timetableInput(f),
+    );
+    const beforeAudits = await primary.query(
+      'SELECT audit_id FROM exam_audit_logs WHERE tenant_id=$1 ORDER BY audit_id',
+      [f.tenant],
+    );
+    const failing = timetable(
+      primary,
+      new FailingRegistrationAudit(primary),
+    );
+    await expect(
+      failing.service.releaseSession(f.tenant, f.actor, 'ExamCell', f.session),
+    ).rejects.toMatchObject({ code: '22012' });
+    const [schedule] = await primary.query<Array<{ status: string }>>(
+      'SELECT status FROM exam_schedules WHERE tenant_id=$1 AND session_id=$2',
+      [f.tenant, f.session],
+    );
+    expect(schedule.status).toBe('SCHEDULED');
+    expect(
+      await primary.query(
+        'SELECT audit_id FROM exam_audit_logs WHERE tenant_id=$1 ORDER BY audit_id',
+        [f.tenant],
+      ),
+    ).toEqual(beforeAudits);
+    expect(failing.notifications).toHaveLength(0);
   });
 
   it('rejects foreign tenant/session and subject relationships without timetable writes', async () => {
@@ -492,7 +565,7 @@ integration('isolated PostgreSQL registration and clearance', () => {
         [f.tenant],
       ),
     ).toHaveLength(1);
-    expect(creator.notifications).toHaveLength(2);
+    expect(creator.notifications).toHaveLength(0);
   });
 
   it('rejects another slot for the same session subject across room, time and exam type without ignoring historical status', async () => {
@@ -535,7 +608,7 @@ integration('isolated PostgreSQL registration and clearance', () => {
         exam_type: 'END_TERM',
       },
     ]);
-    expect(creator.notifications).toHaveLength(2);
+    expect(creator.notifications).toHaveLength(0);
     expect(
       await primary.query(
         "SELECT 1 FROM exam_audit_logs WHERE tenant_id=$1 AND action='EXAM_TIMETABLE_CREATED'",
@@ -581,7 +654,7 @@ integration('isolated PostgreSQL registration and clearance', () => {
         [f.tenant],
       ),
     ).toEqual([{ venue }]);
-    expect(creator.notifications).toHaveLength(2);
+    expect(creator.notifications).toHaveLength(0);
   });
 
   it('rolls back timetable persistence and audit on a required PostgreSQL audit failure without notifications', async () => {
@@ -675,7 +748,7 @@ integration('isolated PostgreSQL registration and clearance', () => {
           ),
         ).toHaveLength(1);
         expect(first.notifications.length + second.notifications.length).toBe(
-          2,
+          0,
         );
       } finally {
         if (barrier.isTransactionActive) await barrier.rollbackTransaction();
@@ -707,7 +780,7 @@ integration('isolated PostgreSQL registration and clearance', () => {
     ).toHaveLength(1);
   });
 
-  it('diagnoses exact session timetable, own seating and missing final approval using real source services', async () => {
+  it('releases an audited timetable and diagnoses exact session timetable, own seating and missing final approval using real PostgreSQL sources', async () => {
     const f = await fixture();
     await approveRegistrations(f);
     await preparation().prepare(f.tenant, f.session, f.actor, 'ExamCell');
@@ -717,6 +790,29 @@ integration('isolated PostgreSQL registration and clearance', () => {
       VALUES($1,$2,$3,'END_TERM',CURRENT_DATE+1,'09:00','12:00','Fixture Hall','SCHEDULED') RETURNING exam_schedule_id`,
       [f.tenant, f.session, f.subject],
     );
+    await timetable().service.releaseSession(
+      f.tenant,
+      f.actor,
+      'ExamCell',
+      f.session,
+    );
+    const [releasedSlot] = await primary.query<
+      Array<{ status: string; session_id: string }>
+    >(
+      'SELECT status,session_id FROM exam_schedules WHERE tenant_id=$1 AND exam_schedule_id=$2',
+      [f.tenant, slot.exam_schedule_id],
+    );
+    expect(releasedSlot).toEqual({ status: 'RELEASED', session_id: f.session });
+    const [releaseAudit] = await primary.query<
+      Array<{ actor_user_id: string; action: string; new_value: unknown }>
+    >(
+      "SELECT actor_user_id,action,new_value FROM exam_audit_logs WHERE tenant_id=$1 AND action='EXAM_TIMETABLE_RELEASED' AND resource_id=$2",
+      [f.tenant, f.session],
+    );
+    expect(releaseAudit.actor_user_id).toBe(f.actor);
+    expect(releaseAudit.new_value).toEqual([
+      { exam_schedule_id: slot.exam_schedule_id, status: 'RELEASED' },
+    ]);
     // Another student's seat must never satisfy the selected registration.
     await primary.query(
       "INSERT INTO exam_seating_allocations(tenant_id,exam_schedule_id,student_user_id,room,seat_number) VALUES($1,$2,$3,'Fixture Hall','A1')",
@@ -922,7 +1018,7 @@ integration('isolated PostgreSQL registration and clearance', () => {
       can_approve: false,
       can_issue: false,
     });
-    for (const approval of result.data) {
+    for (const approval of result.data as Array<Record<string, unknown>>) {
       expect(approval).toMatchObject({
         tenant_id: f.tenant,
         session_id: f.session,

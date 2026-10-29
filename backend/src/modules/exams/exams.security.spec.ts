@@ -15,7 +15,9 @@ describe('student exam data isolation', () => {
 
   it('requires tenant and enrolled courses for schedule reads', async () => {
     const builder = {
-      where: jest.fn().mockReturnThis(),
+      where: jest
+        .fn<unknown, [string, Record<string, unknown>]>()
+        .mockReturnThis(),
       andWhere: jest
         .fn<unknown, [string, Record<string, unknown>]>()
         .mockReturnThis(),
@@ -35,18 +37,26 @@ describe('student exam data isolation', () => {
       unused,
     );
     await service.listUpcomingSchedulesForStudent('student-a', 'tenant-a');
-    expect(builder.andWhere.mock.calls[0]).toEqual([
+    const [scheduleFilter, scheduleParams] = builder.where.mock.calls[0];
+    expect(scheduleFilter).toContain('s.deleted_at IS NULL');
+    expect(scheduleFilter).toContain('s.status = :released');
+    expect(scheduleParams.released).toBe('RELEASED');
+    const [releaseEvidence] = builder.andWhere.mock.calls[0];
+    expect(releaseEvidence).toContain('s.session_id IS NOT NULL');
+    expect(releaseEvidence).toContain("timetable_release.action = 'EXAM_TIMETABLE_RELEASED'");
+    expect(releaseEvidence).toContain("timetable_release.new_value @> jsonb_build_array");
+    expect(builder.andWhere.mock.calls[1]).toEqual([
       's.tenant_id = :tenantId',
       { tenantId: 'tenant-a' },
     ]);
-    expect(builder.andWhere.mock.calls[1][0]).toContain(
+    expect(builder.andWhere.mock.calls[2][0]).toContain(
       'e.student_user_id = :studentUserId',
     );
-    expect(builder.andWhere.mock.calls[1][0]).toContain(
+    expect(builder.andWhere.mock.calls[2][0]).toContain(
       "e.status = 'ENROLLED'",
     );
-    expect(builder.andWhere.mock.calls[1][0]).toContain('e.deleted_at IS NULL');
-    expect(builder.andWhere.mock.calls[1][1]).toEqual({
+    expect(builder.andWhere.mock.calls[2][0]).toContain('e.deleted_at IS NULL');
+    expect(builder.andWhere.mock.calls[2][1]).toEqual({
       studentUserId: 'student-a',
     });
     expect(builder.andWhere.mock.calls[1][0]).not.toContain('e.semester =');
@@ -79,11 +89,11 @@ describe('student exam data isolation', () => {
     await expect(
       service.listUpcomingSchedulesForStudent('student-a', 'tenant-a', 3),
     ).resolves.toEqual([row]);
-    expect(builder.andWhere.mock.calls[0]).toEqual([
+    expect(builder.andWhere.mock.calls[1]).toEqual([
       's.tenant_id = :tenantId',
       { tenantId: 'tenant-a' },
     ]);
-    const [enrollmentSql, params] = builder.andWhere.mock.calls[1];
+    const [enrollmentSql, params] = builder.andWhere.mock.calls[2];
     expect(enrollmentSql).toContain('EXISTS (');
     expect(enrollmentSql).toContain('e.tenant_id = :tenantId');
     expect(enrollmentSql).toContain('e.student_user_id = :studentUserId');
@@ -252,6 +262,93 @@ describe('student exam data isolation', () => {
       expect(eligibility.reasons).toHaveLength(1);
     },
   );
+
+  it('does not let new generic dues alone block an issued-ticket download', async () => {
+    const finance = {
+      getPendingDues: jest
+        .fn()
+        .mockResolvedValue([
+          { demand_id: 'new-demand', fee_head: 'HOSTEL_DAMAGE' },
+        ]),
+    };
+    const attendance = {
+      evaluate: jest.fn().mockResolvedValue({
+        eligible: true,
+        attendance_percent: 90,
+        effective_threshold: 75,
+      }),
+    };
+    const unused = {} as never;
+    const service = new ExamsService(
+      unused,
+      unused,
+      unused,
+      unused,
+      finance as never,
+      unused,
+      attendance as never,
+    );
+
+    await expect(
+      service.checkEligibility('student-a', 'tenant-a', {
+        semester: 4,
+        courseIds: ['course-a'],
+      }),
+    ).resolves.toMatchObject({ eligible: true, reasons: [] });
+    expect(attendance.evaluate).toHaveBeenCalledWith(
+      'tenant-a',
+      'student-a',
+      expect.objectContaining({
+        strict: true,
+        context: 'ADMIT_CARD',
+        semester: 4,
+        courseIds: ['course-a'],
+      }),
+    );
+    expect(finance.getPendingDues).not.toHaveBeenCalled();
+  });
+
+  it('keeps generic Finance demands unverified instead of labeling them examination-blocking', async () => {
+    const finance = {
+      getPendingDues: jest.fn().mockResolvedValue([
+        {
+          demand_id: 'demand-a',
+          fee_head: 'HOSTEL_DAMAGE',
+          status: 'PENDING',
+        },
+      ]),
+    };
+    const attendance = {
+      evaluate: jest.fn().mockResolvedValue({
+        eligible: true,
+        attendance_percent: 90,
+        effective_threshold: 75,
+      }),
+    };
+    const unused = {} as never;
+    const service = new ExamsService(
+      unused,
+      unused,
+      unused,
+      unused,
+      finance as never,
+      unused,
+      attendance as never,
+    );
+
+    const result = await service.checkEligibility('student-a', 'tenant-a');
+
+    expect(finance.getPendingDues).toHaveBeenCalledWith(
+      'student-a',
+      'tenant-a',
+    );
+    expect(result).toMatchObject({
+      eligible: false,
+      finance_status: 'UNVERIFIED',
+      reasons: [{ code: 'FINANCE_UNVERIFIED' }],
+    });
+    expect(JSON.stringify(result)).not.toContain('HOSTEL_DAMAGE');
+  });
 
   it('propagates hall-ticket database failures instead of generating a misleading PDF', async () => {
     const issued = {

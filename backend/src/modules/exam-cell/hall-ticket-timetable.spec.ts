@@ -59,7 +59,23 @@ describe('session-linked Hall Ticket timetable creation (mocked database)', () =
       sessionFound: true,
       actorFound: true,
       issued: false,
+      released: false,
+      releaseAudit: true,
       venueKey: 'hall a' as unknown,
+      releaseSlots: [
+        {
+          exam_schedule_id: randomUUID(),
+          tenant_id: tenant,
+          session_id: session.session_id,
+          subject_id: 7,
+          exam_type: 'END_TERM',
+          exam_date: '2026-11-05',
+          start_time: '09:00:00',
+          end_time: '12:00:00',
+          venue: 'Hall A',
+          status: 'SCHEDULED',
+        },
+      ],
       committed: false,
       rolledBack: false,
     };
@@ -72,8 +88,22 @@ describe('session-linked Hall Ticket timetable creation (mocked database)', () =
         return state.actorFound ? [{ user_id: actor }] : [];
       if (sql.includes('FROM exam_admit_card_entries'))
         return state.issued ? [{ entry_id: randomUUID() }] : [];
-      if (sql.includes('FROM exam_schedules'))
-        return sql.includes('AND subject_id=$3') ? subjectSlots : conflicts;
+      if (sql.includes('FROM exam_audit_logs'))
+        return state.releaseAudit ? [{ audit_id: randomUUID() }] : [];
+      if (sql.includes('FROM exam_schedules')) {
+        if (sql.includes("status='RELEASED'"))
+          return state.released ? [{ exam_schedule_id: randomUUID() }] : [];
+        if (sql.includes('AND subject_id=$3')) return subjectSlots;
+        if (sql.includes('start_time<$5::time')) return conflicts;
+        return state.releaseSlots;
+      }
+      if (sql.includes("UPDATE exam_schedules SET status='RELEASED'")) {
+        state.releaseSlots = state.releaseSlots.map((slot) => ({
+          ...slot,
+          status: 'RELEASED',
+        }));
+        return [state.releaseSlots, state.releaseSlots.length];
+      }
       if (sql.includes('INSERT INTO exam_schedules')) {
         const row = {
           exam_schedule_id: randomUUID(),
@@ -95,6 +125,7 @@ describe('session-linked Hall Ticket timetable creation (mocked database)', () =
       transaction: jest.fn(
         async (run: (value: typeof manager) => Promise<unknown>) => {
           const before = persisted.length;
+          const beforeSlots = state.releaseSlots.map((slot) => ({ ...slot }));
           try {
             const result = await run(manager);
             state.committed = true;
@@ -102,6 +133,7 @@ describe('session-linked Hall Ticket timetable creation (mocked database)', () =
           } catch (error) {
             state.rolledBack = true;
             persisted.splice(before);
+            state.releaseSlots = beforeSlots;
             throw error;
           }
         },
@@ -120,6 +152,8 @@ describe('session-linked Hall Ticket timetable creation (mocked database)', () =
     );
     const create = (dto = input, role: string | undefined = 'ExamCell') =>
       service.create(tenant, actor, role, dto);
+    const release = (role: string | undefined = 'ExamCell') =>
+      service.releaseSession(tenant, actor, role, session.session_id);
     return {
       tenant,
       actor,
@@ -139,6 +173,7 @@ describe('session-linked Hall Ticket timetable creation (mocked database)', () =
       events,
       service,
       create,
+      release,
     };
   }
 
@@ -492,18 +527,13 @@ describe('session-linked Hall Ticket timetable creation (mocked database)', () =
     expect(f.audit.log).not.toHaveBeenCalled();
   });
 
-  it('sends notifications only after commit and only to students with the selected official subject', async () => {
+  it('sends student timetable notifications only after official release commits', async () => {
     const f = fixture();
-    f.roster.push({
-      ...f.roster[0],
-      student_user_id: randomUUID(),
-      enrollments: [{ ...f.roster[0].enrollments[0], subject_id: 8 }],
-    });
     f.events.emitAsync.mockImplementation(() => {
       expect(f.state.committed).toBe(true);
       return Promise.resolve([]);
     });
-    await f.create();
+    await f.release();
     expect(f.events.emitAsync).toHaveBeenCalledTimes(1);
     expect(f.events.emitAsync).toHaveBeenCalledWith(
       NotificationEvents.ACADEMICS_TIMETABLE_CHANGED,
@@ -515,7 +545,7 @@ describe('session-linked Hall Ticket timetable creation (mocked database)', () =
     );
   });
 
-  it('propagates required audit failure and never emits a success notification', async () => {
+  it('does not notify students when timetable creation audit fails', async () => {
     const f = fixture();
     f.audit.log.mockRejectedValue(new Error('Required audit failed'));
     await expect(f.create()).rejects.toThrow('Required audit failed');
@@ -525,13 +555,96 @@ describe('session-linked Hall Ticket timetable creation (mocked database)', () =
     expect(f.events.emitAsync).not.toHaveBeenCalled();
   });
 
-  it('does not pretend a post-commit notification failure rolled back the timetable', async () => {
+  it('does not pretend a post-commit release notification failure rolled back the timetable', async () => {
     const f = fixture();
     f.events.emitAsync.mockRejectedValue(
       new Error('Notification service unavailable'),
     );
-    await expect(f.create()).resolves.toHaveLength(1);
+    await expect(f.release()).resolves.toHaveLength(1);
     expect(f.state.committed).toBe(true);
-    expect(f.persisted).toHaveLength(1);
+    expect(f.state.releaseSlots[0].status).toBe('RELEASED');
+  });
+
+  it('releases a complete session timetable only for ExamCell and audits in the transaction', async () => {
+    const f = fixture();
+    const result = await f.release();
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ status: 'RELEASED', subject_id: 7 });
+    expect(f.audit.log).toHaveBeenCalledWith(
+      f.tenant,
+      f.actor,
+      expect.objectContaining({
+        action: 'EXAM_TIMETABLE_RELEASED',
+        resource_type: 'exam_session',
+        resource_id: f.session.session_id,
+      }),
+      f.manager,
+    );
+    expect(f.state.committed).toBe(true);
+  });
+
+  it.each(['DeputyCOE', 'ExamAdmin', 'ExamOperator', 'SuperAdmin'])(
+    'does not let %s release the official timetable',
+    async (role) => {
+      const f = fixture();
+      await expect(f.release(role)).rejects.toMatchObject({ status: 403 });
+      expect(f.query).not.toHaveBeenCalled();
+      expect(f.audit.log).not.toHaveBeenCalled();
+    },
+  );
+
+  it('blocks release when an officially allocated subject has no slot', async () => {
+    const f = fixture();
+    f.roster[0].enrollments.push({
+      ...f.roster[0].enrollments[0],
+      subject_id: 8,
+    });
+    await expect(f.release()).rejects.toMatchObject({ status: 409 });
+    expect(f.audit.log).not.toHaveBeenCalled();
+    expect(f.state.committed).toBe(false);
+  });
+
+  it('blocks release when a room has a conflicting allocation', async () => {
+    const f = fixture();
+    f.conflicts.push({
+      exam_schedule_id: randomUUID(),
+      session_id: randomUUID(),
+      exam_type: 'END_TERM',
+      subject_id: 8,
+      start_time: '10:00:00',
+      end_time: '13:00:00',
+    });
+    await expect(f.release()).rejects.toMatchObject({ status: 409 });
+    expect(f.audit.log).not.toHaveBeenCalled();
+    expect(f.state.committed).toBe(false);
+  });
+
+  it('rejects a cancelled or unknown schedule state instead of publishing it', async () => {
+    const f = fixture();
+    f.state.releaseSlots[0].status = 'CANCELLED';
+    await expect(f.release()).rejects.toMatchObject({ status: 409 });
+    expect(f.audit.log).not.toHaveBeenCalled();
+    expect(f.state.committed).toBe(false);
+  });
+
+  it('rolls back the release status when the required audit insert fails', async () => {
+    const f = fixture();
+    f.audit.log.mockRejectedValue(new Error('Required audit failed'));
+    await expect(f.release()).rejects.toThrow('Required audit failed');
+    expect(f.state.releaseSlots[0].status).toBe('SCHEDULED');
+    expect(f.state.rolledBack).toBe(true);
+    expect(f.state.committed).toBe(false);
+  });
+
+  it('returns an already released timetable without duplicating its audit event', async () => {
+    const f = fixture();
+    f.state.releaseSlots = f.state.releaseSlots.map((slot) => ({
+      ...slot,
+      status: 'RELEASED',
+    }));
+    await expect(f.release()).resolves.toMatchObject([
+      expect.objectContaining({ status: 'RELEASED' }),
+    ]);
+    expect(f.audit.log).not.toHaveBeenCalled();
   });
 });

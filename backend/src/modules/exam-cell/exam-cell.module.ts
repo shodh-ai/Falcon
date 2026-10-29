@@ -19,6 +19,7 @@ import { ExamCellDevService } from './exam-cell-dev.service';
 import { OfficialTranscriptService } from './official-transcript.service';
 import { OfficialTranscriptPdfService } from './official-transcript-pdf.service';
 import { StudentEnrollmentSyncService } from '../academics/student-enrollment-sync.service';
+import { HallTicketDecisionService } from './hall-ticket-decision.service';
 import { HallTicketPreparationService } from './hall-ticket-preparation.service';
 import { HallTicketReadinessService } from './hall-ticket-readiness.service';
 import { HallTicketTimetableService } from './hall-ticket-timetable.service';
@@ -42,6 +43,7 @@ import { QuestionPaperWorkflowService } from './question-paper-workflow.service'
     // Reuse the existing source service without an AcademicsModule import cycle.
     StudentEnrollmentSyncService,
     HallTicketPreparationService,
+    HallTicketDecisionService,
     HallTicketReadinessService,
     HallTicketTimetableService,
     ExamDayScriptsService,

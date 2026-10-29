@@ -166,24 +166,14 @@ export default function StudentExamsPage() {
 
   const ineligibleMessage = useMemo(() => {
     if (!eligibility || eligibility.eligible) return null;
-    const duesReason = eligibility.reasons.find((r) => r.code === 'PENDING_FEE_DUES');
+    const financeReason = eligibility.reasons.find((r) => r.code === 'FINANCE_UNVERIFIED');
     const attendanceReason = eligibility.reasons.find((r) => r.code === 'ATTENDANCE_SHORTFALL');
 
     const lines: string[] = [];
     if (attendanceReason) {
       lines.push(`Attendance is ${eligibility.attendance_percent}% (minimum ${eligibility.min_required ?? 75}% required).`);
     }
-    if (duesReason && Array.isArray(duesReason.details)) {
-      const dues = duesReason.details.filter((detail): detail is { fee_head: string; outstanding: number | string } =>
-        detail != null && typeof detail === 'object' && typeof detail.fee_head === 'string' && Number.isFinite(Number(detail.outstanding)),
-      );
-      if (dues.length > 0) {
-        const parts = dues.map((d) => `${d.fee_head} of ₹${Math.round(Number(d.outstanding))}`).join(' and ');
-        lines.push(`Please clear your ${parts} to unlock.`);
-      } else {
-        lines.push('Please clear pending fee dues to unlock.');
-      }
-    }
+    if (financeReason) lines.push(financeReason.message);
     return lines.join(' ');
   }, [eligibility]);
 
@@ -503,10 +493,12 @@ export default function StudentExamsPage() {
               </div>
               <div className="flex items-center justify-between rounded-xl border bg-background/60 px-4 py-3">
                 <span>Fee clearance</span>
-                {eligibility && eligibility.reasons.some((r) => r.code === 'PENDING_FEE_DUES') ? (
-                  <Badge variant="destructive">Pending</Badge>
-                ) : eligibility ? (
-                  <Badge variant="success">Clear</Badge>
+                {eligibility?.finance_status === 'UNVERIFIED' ? (
+                  <Badge variant="destructive">Not verified</Badge>
+                ) : eligibility?.finance_status === 'NO_OUTSTANDING_DEMANDS' ? (
+                  <Badge variant="outline">No balance recorded</Badge>
+                ) : eligibility?.finance_status === 'NOT_CHECKED' ? (
+                  <Badge variant="outline">Not checked</Badge>
                 ) : (
                   <Badge variant="outline">Unavailable</Badge>
                 )}

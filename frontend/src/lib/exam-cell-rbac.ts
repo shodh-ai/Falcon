@@ -12,6 +12,7 @@ export type ExamCellAction =
   | 'view_dashboard'
   | 'manage_sessions'
   | 'manage_schedules'
+  | 'release_timetable'
   | 'generate_admit_cards'
   | 'manage_seating'
   | 'publish_results'
@@ -20,7 +21,7 @@ export type ExamCellAction =
 
 const ROLE_ACTIONS: Record<string, ExamCellAction[]> = {
   superadmin: ['view_dashboard', 'manage_sessions', 'manage_schedules', 'generate_admit_cards', 'manage_seating', 'publish_results', 'approve_ufm', 'manage_qp'],
-  examcell: ['view_dashboard', 'manage_sessions', 'manage_schedules', 'generate_admit_cards', 'manage_seating', 'publish_results', 'approve_ufm', 'manage_qp'],
+  examcell: ['view_dashboard', 'manage_sessions', 'manage_schedules', 'release_timetable', 'generate_admit_cards', 'manage_seating', 'publish_results', 'approve_ufm', 'manage_qp'],
   deputycoe: ['view_dashboard', 'manage_sessions', 'manage_schedules', 'generate_admit_cards', 'manage_seating', 'publish_results', 'approve_ufm'],
   examadmin: ['view_dashboard', 'manage_sessions', 'manage_schedules', 'generate_admit_cards', 'manage_seating'],
   examoperator: ['view_dashboard', 'generate_admit_cards', 'manage_seating'],

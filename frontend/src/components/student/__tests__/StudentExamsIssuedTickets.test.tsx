@@ -33,7 +33,7 @@ beforeEach(() => {
   mocks.schedule.mockResolvedValue([]);
   mocks.myApplications.mockResolvedValue([]);
   mocks.studentResults.mockResolvedValue({ exam_reports: [] });
-  mocks.eligibility.mockResolvedValue({ eligible: true, attendance_percent: 90, min_required: 75, reasons: [] });
+  mocks.eligibility.mockResolvedValue({ eligible: true, attendance_percent: 90, min_required: 75, finance_status: 'NO_OUTSTANDING_DEMANDS', reasons: [] });
   mocks.issuedAdmitCards.mockResolvedValue([]);
 });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
@@ -105,9 +105,22 @@ describe('student issued hall-ticket screen', () => {
 
   it('retains the existing clearance gate even when an issued record exists', async () => {
     mocks.issuedAdmitCards.mockResolvedValue([ticket]);
-    mocks.eligibility.mockResolvedValue({ eligible: false, attendance_percent: 90, reasons: [{ code: 'PENDING_FEE_DUES', message: 'Outstanding fees' }] });
+    mocks.eligibility.mockResolvedValue({ eligible: false, attendance_percent: 90, finance_status: 'UNVERIFIED', reasons: [{ code: 'FINANCE_UNVERIFIED', message: 'Finance records need review' }] });
     render(<StudentExamsPage />);
     expect(await openAdmit()).toBeDisabled();
+  });
+
+  it('shows unclassified Finance demands as not verified, not as an approved fee blocker', async () => {
+    mocks.eligibility.mockResolvedValue({
+      eligible: false,
+      attendance_percent: 90,
+      finance_status: 'UNVERIFIED',
+      reasons: [{ code: 'FINANCE_UNVERIFIED', message: 'Finance records need review; no official examination-blocking fee classification is configured.' }],
+    });
+    render(<StudentExamsPage />);
+    fireEvent.click(await screen.findByRole('button', { name: /Admit Card/ }));
+    expect(await screen.findByText('Not verified')).toBeVisible();
+    expect(screen.getByText(/no official examination-blocking fee classification/i)).toBeVisible();
   });
 
   it('does not keep a previous authenticated session ticket selectable after identity changes', async () => {

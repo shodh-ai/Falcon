@@ -1,8 +1,8 @@
 import type { ComponentProps } from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import ApprovalsPage from '@/app/(portals)/exam-cell/hall-ticket-approvals/page';
-import AdmitCardsPage from '@/app/(portals)/exam-cell/admit-cards/page';
+import ApprovalsPage from '@/components/exam-cell/HallTicketApprovals';
+import AdmitCardsPage from '@/components/exam-cell/HallTicketReadiness';
 
 const mocks = vi.hoisted(() => ({
   api: { get: vi.fn(), post: vi.fn() },
@@ -231,7 +231,7 @@ describe('Hall Ticket readiness uses actual session and registration records', (
     expect(mocks.api.get).toHaveBeenCalledTimes(1);
     expect(screen.getByRole('button', { name: 'Issue Hall Tickets — unavailable' })).toBeDisabled();
     expect(screen.queryByText('Synthetic Student')).not.toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Hall Ticket Approval Workflow →' })).toHaveAttribute('href', '/exam-cell/hall-ticket-approvals');
+    expect(screen.getByRole('button', { name: 'Open approval queue' })).toBeEnabled();
     expect(mocks.api.post).not.toHaveBeenCalled();
   });
 
@@ -451,5 +451,46 @@ describe('Hall Ticket readiness uses actual session and registration records', (
     await screen.findByText('Page 2 of 2');
     expect(screen.getByRole('button', { name: 'Next', exact: true })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Previous', exact: true })).toBeEnabled();
+  });
+});
+
+describe('Approval queue navigation', () => {
+  it('requests later pages and resets pagination when searching', async () => {
+    mocks.api.get.mockImplementation(async (path: string) => {
+      if (path === '/api/exam-cell/sessions') return [session];
+      const query = new URLSearchParams(path.split('?')[1]);
+      return { data: [{ ...approval, student_name: query.get('page') === '2' ? 'Second page student' : 'First page student' }], total: 51, workflow };
+    });
+    render(<ApprovalsPage />);
+    await screen.findByText('First page student');
+    fireEvent.click(screen.getByRole('button', { name: 'Next', exact: true }));
+    await screen.findByText('Second page student');
+    expect(mocks.api.get).toHaveBeenCalledWith(expect.stringContaining('page=2&limit=50'));
+    fireEvent.change(screen.getByLabelText('Find a student'), { target: { value: 'TEST-001' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Search', exact: true }));
+    await screen.findByText('First page student');
+    expect(mocks.api.get).toHaveBeenCalledWith(expect.stringContaining('page=1&limit=50&search=TEST-001'));
+    expect(screen.getByRole('button', { name: 'Previous', exact: true })).toBeDisabled();
+    expect(mocks.api.post).not.toHaveBeenCalled();
+  });
+});
+
+describe('Approval rejection reason', () => {
+  it('requires a reason for authorized rejection while positive approvals remain blocked', async () => {
+    // Rejection is independent of the positive-approval safety interlock.
+    mocks.api.get.mockImplementation(async (path: string) => path === '/api/exam-cell/sessions' ? [session] : ({
+      data: [{ ...approval, session_id: session.session_id, registration_id: 'registration-id', can_reject: true }],
+      total: 1, workflow,
+    }));
+    mocks.api.post.mockResolvedValue({});
+    render(<ApprovalsPage sessionId={session.session_id} />);
+    await screen.findByText('Synthetic Student');
+    fireEvent.click(screen.getByRole('button', { name: 'Reject', exact: true }));
+    expect(screen.getByRole('button', { name: 'Confirm rejection' })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('Rejection reason'), { target: { value: '  Required documents missing  ' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm rejection' }));
+    await waitFor(() => expect(mocks.api.post).toHaveBeenCalledWith('/api/exam-cell/hall-ticket-approvals/fixture/advance', {
+      action: 'REJECT', reason: 'Required documents missing',
+    }));
   });
 });

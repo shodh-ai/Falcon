@@ -5,6 +5,7 @@ export type ExamCellAction =
   | 'view_dashboard'
   | 'manage_sessions'
   | 'manage_schedules'
+  | 'release_timetable'
   | 'generate_admit_cards'
   | 'manage_seating'
   | 'publish_results'
@@ -26,6 +27,7 @@ const ROLE_ACTIONS: Record<string, ExamCellAction[]> = {
     'view_dashboard',
     'manage_sessions',
     'manage_schedules',
+    'release_timetable',
     'generate_admit_cards',
     'manage_seating',
     'publish_results',

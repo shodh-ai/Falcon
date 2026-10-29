@@ -6,11 +6,11 @@ import {
 } from '@/lib/navigation';
 import { filterPortalConfigForLaunchModules } from '@/lib/launch-modules';
 
-// Preserve the 38 destinations remaining after the two requested sidebar removals.
+// Preserve the 37 destinations remaining after the two requested sidebar removals.
 const remainingPaths = [
   'dashboard', 'live-dashboard', 'calendar', 'my-tasks', 'search', 'student-timeline',
   'sessions', 'deadlines', 'audit-log', 'schedule', 'form-fillup', 'eligibility',
-  'hall-ticket-approvals', 'exam-centres', 'admit-cards', 'attendance-exemptions',
+  'exam-centres', 'admit-cards', 'attendance-exemptions',
   'seating', 'seating-plans', 'resource-allocation', 'invigilation',
   'print-hub', 'question-papers', 'exam-day', 'answer-sheets', 'documents', 'results',
   'grade-cards', 'approvals/grade-change', 'approvals/dofa-inbox', 'course-grades',

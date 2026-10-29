@@ -364,4 +364,97 @@ describe('issued hall-ticket retrieval (mocked database/storage)', () => {
     ).resolves.toEqual(f.bytes);
     expect(pdf.generate).not.toHaveBeenCalled();
   });
+  it('passes verified document course and semester scope to clearance', async () => {
+    const f = fixture();
+    await f.download();
+    expect(f.check).toHaveBeenCalledWith({
+      semester: 4,
+      courseIds: [
+        (f.row.issuance_snapshot.exams as Array<{ course_id: string }>)[0]
+          .course_id,
+      ],
+    });
+  });
+
+  it.each([
+    {
+      eligible: false,
+      attendance_percent: 90,
+      effective_threshold: 75,
+      reason: null,
+    },
+    { eligible: undefined, attendance_percent: 90, effective_threshold: 75 },
+    { eligible: true, attendance_percent: NaN, effective_threshold: 75 },
+  ])(
+    'rejects denied or malformed attendance before reading storage: %p',
+    async (attendance) => {
+      const f = fixture();
+      const evaluator = { evaluate: jest.fn().mockResolvedValue(attendance) };
+      const service = new ExamsService(
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        { getPendingDues: jest.fn().mockResolvedValue([]) } as never,
+        { generate: jest.fn() } as never,
+        evaluator as never,
+        f.service,
+      );
+      await expect(
+        service.generateAdmitCardOrThrow(
+          f.row.student_user_id,
+          f.row.tenant_id,
+          f.row.entry_id,
+        ),
+      ).rejects.toThrow();
+      expect(evaluator.evaluate).toHaveBeenCalledWith(
+        f.row.tenant_id,
+        f.row.student_user_id,
+        expect.objectContaining({
+          strict: true,
+          semester: 4,
+          context: 'ADMIT_CARD',
+        }),
+      );
+      expect(f.storage.getDownloadStream).not.toHaveBeenCalled();
+    },
+  );
+
+  it('does not let new generic dues alone block an issued-ticket download', async () => {
+    const f = fixture();
+    const finance = {
+      getPendingDues: jest
+        .fn()
+        .mockResolvedValue([
+          { fee_head: 'HOSTEL_DAMAGE', total_amount: 100, paid_amount: 0 },
+        ]),
+    };
+    const pdf = { generate: jest.fn() };
+    const service = new ExamsService(
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      finance as never,
+      pdf as never,
+      {
+        evaluate: jest.fn().mockResolvedValue({
+          eligible: true,
+          attendance_percent: 90,
+          effective_threshold: 75,
+        }),
+      } as never,
+      f.service,
+    );
+    await expect(
+      service.generateAdmitCardOrThrow(
+        f.row.student_user_id,
+        f.row.tenant_id,
+        f.row.entry_id,
+      ),
+    ).resolves.toEqual(f.bytes);
+    expect(finance.getPendingDues).not.toHaveBeenCalled();
+    expect(f.storage.getDownloadStream).toHaveBeenCalledWith(f.row.pdf_path);
+    expect(pdf.generate).not.toHaveBeenCalled();
+  });
 });

@@ -19,13 +19,16 @@ export const HALL_TICKET_APPROVAL_STAGES = [
 export type HallTicketApprovalStage =
   (typeof HALL_TICKET_APPROVAL_STAGES)[number];
 
-/** Confirmed stage assignments only. Null is a closed policy gate, not a role. */
+/** Explicitly approved stage assignments; no implicit administrator override. */
 export const HALL_TICKET_STAGE_ROLES: Readonly<
-  Record<HallTicketApprovalStage, 'Accountant' | 'ExamCell' | null>
+  Record<
+    HallTicketApprovalStage,
+    'ExamAdmin' | 'Accountant' | 'DeputyCOE' | 'ExamCell'
+  >
 > = {
-  ELIGIBILITY: null,
+  ELIGIBILITY: 'ExamAdmin',
   FINANCE: 'Accountant',
-  EXAM_OFFICE: null,
+  EXAM_OFFICE: 'DeputyCOE',
   COE: 'ExamCell',
 };
 
@@ -41,13 +44,6 @@ export function assertHallTicketStageRole(
   if (!HALL_TICKET_APPROVAL_STAGES.includes(stage))
     throw new BadRequestException('A current approval stage is required');
   const requiredRole = HALL_TICKET_STAGE_ROLES[stage];
-  if (requiredRole === null)
-    throw new ServiceUnavailableException({
-      statusCode: 503,
-      code: 'HALL_TICKET_STAGE_POLICY_UNCONFIRMED',
-      message: `The authorized role for ${stage} approval is not confirmed`,
-      stage,
-    });
   // No CampusAdmin/SuperAdmin alias or generation permission is stage authority.
   if (role !== normalizeExamCellRole(requiredRole))
     throw new ForbiddenException(
@@ -56,25 +52,22 @@ export function assertHallTicketStageRole(
 }
 
 /**
- * Explicit safety interlock, not a configurable permission or approval policy.
- * Confirmed by the requester: Finance=Accountant, final COE=ExamCell;
- * ExamOperator never approves. One ticket/student/session; issue only OPEN or
- * ACTIVE sessions; required internal marks must be finalized. Revoked approval
- * or rejected registration blocks download. These are not permission grants.
- * Eligibility/Exam Office role mappings, conditional clearance applicability
- * and post-issuance dues policy remain unresolved. The writer is incomplete.
- * Do not remove this guard merely to enable the legacy batch-label writers:
- * replace those writers with the verified session-linked workflow first.
+ * Approved role mappings do not establish missing authoritative clearance data.
+ * Keep legacy writes blocked until the session-linked writer, finalized internal
+ * assessment source, examination-specific clearance sources and authorized
+ * post-issuance hold workflow are implemented and verified.
  */
 export function hallTicketWorkflowAvailability() {
   return {
     status: 'BLOCKED' as const,
+    // Retained for existing API clients; the message identifies technical blockers.
     code: 'HALL_TICKET_POLICY_UNCONFIRMED',
+    approval_roles_confirmed: true,
     can_sync: false,
     can_approve: false,
     can_issue: false,
     message:
-      'Hall-ticket approval and issuance are unavailable until Eligibility/Exam Office roles, conditional clearance rules and post-issuance dues policy are verified and the session-linked workflow is implemented. Existing records remain read-only; clearance alone is not approval or issuance.',
+      'Hall-ticket approver roles are confirmed. Approval and issuance remain blocked until authoritative finalized assessment, examination-specific clearances, authorized holds and the session-linked issuance workflow are implemented and verified. Clearance alone is not approval or issuance.',
   };
 }
 

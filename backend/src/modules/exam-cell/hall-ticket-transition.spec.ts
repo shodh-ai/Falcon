@@ -145,9 +145,9 @@ describe('hall-ticket server-controlled transition planning', () => {
 describe('hall-ticket confirmed role assignments stay fail-closed', () => {
   it('records only confirmed assignments and never enables the global writer', () => {
     expect(HALL_TICKET_STAGE_ROLES).toEqual({
-      ELIGIBILITY: null,
+      ELIGIBILITY: 'ExamAdmin',
       FINANCE: 'Accountant',
-      EXAM_OFFICE: null,
+      EXAM_OFFICE: 'DeputyCOE',
       COE: 'ExamCell',
     });
     expect(hallTicketWorkflowAvailability()).toMatchObject({
@@ -157,6 +157,8 @@ describe('hall-ticket confirmed role assignments stay fail-closed', () => {
   });
 
   it.each([
+    ['ELIGIBILITY', 'ExamAdmin'],
+    ['EXAM_OFFICE', 'DeputyCOE'],
     ['FINANCE', 'Accountant'],
     ['FINANCE', ' accountant '],
     ['COE', 'ExamCell'],
@@ -186,8 +188,8 @@ describe('hall-ticket confirmed role assignments stay fail-closed', () => {
     },
   );
 
-  it.each(['ELIGIBILITY', 'EXAM_OFFICE'] as const)(
-    'keeps unconfirmed %s authority blocked for every existing officer role',
+  it.each(['ELIGIBILITY', 'FINANCE', 'EXAM_OFFICE', 'COE'] as const)(
+    'rejects every other role at the %s stage',
     (stage) => {
       for (const role of [
         'ExamCell',
@@ -195,14 +197,15 @@ describe('hall-ticket confirmed role assignments stay fail-closed', () => {
         'ExamAdmin',
         'DeputyCOE',
         'SuperAdmin',
+        'CampusAdmin',
+        'ExamOperator',
+        'Student',
       ]) {
+        if (role === HALL_TICKET_STAGE_ROLES[stage]) continue;
         expect(() => assertHallTicketStageRole(tenant, stage, role)).toThrow(
-          'not confirmed',
+          /cannot approve/,
         );
       }
-      expect(() =>
-        assertHallTicketStageRole(tenant, stage, 'ExamOperator'),
-      ).toThrow('cannot approve hall tickets');
     },
   );
 

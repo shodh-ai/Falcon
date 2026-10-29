@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
+import { DataSource, EntityManager } from 'typeorm';
 
 export type EnterpriseAuditContext = {
   tenantId: string;
@@ -19,7 +19,7 @@ export type EnterpriseAuditContext = {
 export class EnterpriseAuditService {
   constructor(@InjectDataSource() private readonly db: DataSource) {}
 
-  async log(ctx: EnterpriseAuditContext) {
+  async log(ctx: EnterpriseAuditContext, manager?: EntityManager) {
     const meta = {
       tenant_id: ctx.tenantId,
       role: ctx.role ?? null,
@@ -30,7 +30,11 @@ export class EnterpriseAuditService {
       timestamp: new Date().toISOString(),
     };
 
-    await this.db.query(
+    const query = manager
+      ? manager.query.bind(manager)
+      : this.db.query.bind(this.db);
+
+    await query(
       `INSERT INTO system_audit_logs (table_name, record_id, action, old_value, new_value, changed_by_user_id)
        VALUES ($1, $2, 'UPDATE', $3, $4, $5)`,
       [
@@ -42,8 +46,7 @@ export class EnterpriseAuditService {
       ],
     );
 
-    await this.db
-      .query(
+    await query(
         `INSERT INTO audit_log (user_id, action, entity_type, entity_id, details, created_at)
        VALUES ($1, $2, $3, $4, $5::jsonb, NOW())`,
         [
@@ -57,8 +60,7 @@ export class EnterpriseAuditService {
             new_value: ctx.newValue ?? null,
           }),
         ],
-      )
-      .catch(() => undefined);
+      ).catch(() => undefined);
   }
 
   async listForTenant(

@@ -20,7 +20,8 @@ export interface ExamEligibilityResult {
   attendance_percent: number;
   min_required?: number;
   exempted?: boolean;
-  reasons: Array<{ code: 'ATTENDANCE_SHORTFALL' | 'PENDING_FEE_DUES'; message: string; details?: unknown }>;
+  finance_status?: 'NO_OUTSTANDING_DEMANDS' | 'UNVERIFIED' | 'NOT_CHECKED';
+  reasons: Array<{ code: 'ATTENDANCE_SHORTFALL' | 'FINANCE_UNVERIFIED'; message: string; details?: unknown }>;
 }
 
 export interface IssuedAdmitCard {

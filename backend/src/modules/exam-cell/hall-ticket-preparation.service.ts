@@ -65,7 +65,7 @@ export class HallTicketPreparationService {
         canExamCellAction(role, 'manage_sessions') &&
         ['OPEN', 'ACTIVE'].includes(session.status),
       message:
-        'The approval queue can be prepared from approved registrations for this session. Preparation does not approve eligibility or issue a ticket. Eligibility/Exam Office authority and remaining issuance policies still require confirmation.',
+        'The approval queue can be prepared from approved registrations for this session. Preparation does not approve eligibility or issue a ticket. Approver roles are confirmed; positive approvals and issuance await authoritative prerequisite integrations. Authorized stage officers may reject linked pending records with a reason.',
     };
   }
 

@@ -13,14 +13,26 @@ import { useAuthedApi } from '@/lib/api';
 
 type AuditResult = {
   final_status: string;
-  credits_earned: number;
+  credits_earned: number | null;
+  credits_required?: number | null;
   cgpa_earned: number | null;
-  pending_backlogs: number;
+  cgpa_required?: number | null;
+  pending_backlogs: number | null;
   finance_clearance: boolean;
   examination_clearance: boolean;
   library_clearance?: boolean;
   hostel_clearance?: boolean;
+  clearance_statuses?: Partial<Record<'credits' | 'cgpa' | 'backlogs' | 'finance' | 'examination' | 'library' | 'hostel', string>>;
+  requirements_policy_status?: 'UNCONFIRMED' | 'CONFIRMED';
 };
+
+type CheckStatus = 'CLEARED' | 'NOT_CLEARED' | 'UNAVAILABLE';
+
+function checkLabel(status?: string) {
+  if (status === 'CLEARED') return 'Cleared';
+  if (status === 'NOT_CLEARED') return 'Not cleared';
+  return 'Not verified';
+}
 
 export default function ExamCellDegreeAuditPage() {
   const api = useAuthedApi();
@@ -46,13 +58,45 @@ export default function ExamCellDegreeAuditPage() {
   }
 
   const checks = result ? [
-    { label: 'Credits earned', ok: result.credits_earned >= 160, detail: `${result.credits_earned} / 160` },
-    { label: 'CGPA requirement', ok: (result.cgpa_earned ?? 0) >= 5.0, detail: result.cgpa_earned?.toFixed(2) ?? 'N/A' },
-    { label: 'No pending backlogs', ok: result.pending_backlogs === 0, detail: `${result.pending_backlogs} pending` },
-    { label: 'Finance clearance', ok: result.finance_clearance, detail: result.finance_clearance ? 'Clear' : 'Pending dues' },
-    { label: 'Examination clearance', ok: result.examination_clearance, detail: result.examination_clearance ? 'Clear' : 'Backlogs open' },
-    { label: 'Library clearance', ok: result.library_clearance !== false, detail: 'Verified' },
-    { label: 'Hostel clearance', ok: result.hostel_clearance !== false, detail: 'Verified' },
+    {
+      label: 'Credits earned',
+      status: result.requirements_policy_status === 'CONFIRMED'
+        ? (result.clearance_statuses?.credits as CheckStatus | undefined) ?? 'UNAVAILABLE'
+        : 'UNAVAILABLE',
+      detail: `${result.credits_earned ?? '—'} / ${result.credits_required ?? '—'} configured; policy unconfirmed`,
+    },
+    {
+      label: 'CGPA requirement',
+      status: result.requirements_policy_status === 'CONFIRMED'
+        ? (result.clearance_statuses?.cgpa as CheckStatus | undefined) ?? 'UNAVAILABLE'
+        : 'UNAVAILABLE',
+      detail: `${result.cgpa_earned?.toFixed(2) ?? '—'} / ${result.cgpa_required ?? '—'} configured; policy unconfirmed`,
+    },
+    {
+      label: 'No pending backlogs',
+      status: (result.clearance_statuses?.backlogs as CheckStatus | undefined) ?? 'UNAVAILABLE',
+      detail: result.pending_backlogs == null ? 'Not verified' : `${result.pending_backlogs} pending`,
+    },
+    {
+      label: 'Finance clearance',
+      status: (result.clearance_statuses?.finance as CheckStatus | undefined) ?? 'UNAVAILABLE',
+      detail: checkLabel(result.clearance_statuses?.finance),
+    },
+    {
+      label: 'Examination clearance',
+      status: (result.clearance_statuses?.backlogs as CheckStatus | undefined) ?? 'UNAVAILABLE',
+      detail: checkLabel(result.clearance_statuses?.backlogs),
+    },
+    {
+      label: 'Library clearance',
+      status: (result.clearance_statuses?.library as CheckStatus | undefined) ?? 'UNAVAILABLE',
+      detail: checkLabel(result.clearance_statuses?.library),
+    },
+    {
+      label: 'Hostel clearance',
+      status: (result.clearance_statuses?.hostel as CheckStatus | undefined) ?? 'UNAVAILABLE',
+      detail: checkLabel(result.clearance_statuses?.hostel),
+    },
   ] : [];
 
   return (
@@ -87,7 +131,7 @@ export default function ExamCellDegreeAuditPage() {
           <CardHeader>
             <CardTitle className="flex items-center justify-between text-base">
               Eligibility result
-              <Badge variant={result.final_status === 'ELIGIBLE' ? 'default' : 'destructive'}>{result.final_status.replace(/_/g, ' ')}</Badge>
+              <Badge variant={result.final_status === 'ELIGIBLE' ? 'default' : result.final_status === 'NOT_ELIGIBLE' ? 'destructive' : 'outline'}>{result.final_status.replace(/_/g, ' ')}</Badge>
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
@@ -96,7 +140,7 @@ export default function ExamCellDegreeAuditPage() {
                 <span>{c.label}</span>
                 <div className="flex items-center gap-2">
                   <span className="text-muted-foreground">{c.detail}</span>
-                  <Badge variant={c.ok ? 'default' : 'destructive'}>{c.ok ? 'Pass' : 'Fail'}</Badge>
+                  <Badge variant={c.status === 'CLEARED' ? 'default' : c.status === 'NOT_CLEARED' ? 'destructive' : 'outline'}>{checkLabel(c.status)}</Badge>
                 </div>
               </div>
             ))}

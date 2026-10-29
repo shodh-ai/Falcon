@@ -56,6 +56,7 @@ export default function ExamCellSchedulePage() {
   const role = user?.primaryRole ?? user?.role;
   const canRead = canExamCellAction(role, 'view_dashboard');
   const canManage = canExamCellAction(role, 'manage_schedules');
+  const canRelease = canExamCellAction(role, 'release_timetable');
   const scope = [user?.user_id ?? '', user?.tenant_id ?? '', role ?? ''].join(':');
   const hasContext = Boolean(user?.user_id && user?.tenant_id);
   const [catalogue, setCatalogue] = useState<{ api: typeof api; scope: string; sessions: Session[]; subjects: Subject[]; error?: string } | null>(null);
@@ -63,6 +64,7 @@ export default function ExamCellSchedulePage() {
   const [snapshot, setSnapshot] = useState<{ api: typeof api; key: string; data?: Schedule[]; error?: string } | null>(null);
   const [formState, setFormState] = useState({ key: '', value: emptyForm });
   const [mutation, setMutation] = useState<{ key: string; pending?: boolean; error?: string } | null>(null);
+  const [releaseMutation, setReleaseMutation] = useState<{ key: string; pending?: boolean; error?: string } | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const catalogueEpoch = useRef(0);
   const scheduleEpoch = useRef(0);
@@ -78,8 +80,10 @@ export default function ExamCellSchedulePage() {
   const catalogueLoading = canRead && hasContext && !currentCatalogue;
   const loading = Boolean(session && (!current || refreshing));
   const subjects = (currentCatalogue?.subjects ?? []).filter((item) => !session?.semester || item.semester === null || item.semester === session.semester);
-  const canEdit = canManage && Boolean(session && ['DRAFT', 'OPEN', 'ACTIVE'].includes(session.status));
   const schedules = current?.data ?? [];
+  const currentReleaseMutation = releaseMutation?.key === key ? releaseMutation : null;
+  const actionPending = Boolean(currentMutation?.pending || currentReleaseMutation?.pending);
+  const canEdit = canManage && Boolean(session && ['DRAFT', 'OPEN', 'ACTIVE'].includes(session.status)) && !schedules.some((item) => item.status === 'RELEASED') && !actionPending;
 
   const loadCatalogue = useCallback(() => {
     if (!canRead || !hasContext) return Promise.resolve();
@@ -157,6 +161,29 @@ export default function ExamCellSchedulePage() {
     }
   }
 
+  async function releaseTimetable() {
+    if (!canRelease || !session || schedules.length === 0 || pendingMutation.current === key || schedules.some((item) => item.status !== 'SCHEDULED')) return;
+    const epoch = ++mutationEpoch.current;
+    pendingMutation.current = key;
+    setReleaseMutation({ key, pending: true });
+    try {
+      const result = await api.post<unknown>(`/api/exam-cell/sessions/${session.session_id}/timetable/release`, {});
+      if (mutationEpoch.current !== epoch) return;
+      const released = scheduleRows(result, session.session_id);
+      if (released.length !== schedules.length || released.some((item) => item.status !== 'RELEASED')) {
+        throw new Error('Released timetable response could not be verified. Refresh the session before retrying.');
+      }
+      toast.success('Timetable released to students');
+      setReleaseMutation({ key });
+      setRefreshing(true);
+      await loadSchedules();
+    } catch (error: unknown) {
+      if (mutationEpoch.current === epoch) setReleaseMutation({ key, error: error instanceof Error ? error.message : 'Timetable could not be released' });
+    } finally {
+      if (mutationEpoch.current === epoch) pendingMutation.current = null;
+    }
+  }
+
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-4 md:p-6">
       <Card className="border-sgvu-navy/10 bg-white shadow-sm"><CardContent className="p-5 md:p-6"><p className="text-sm font-semibold text-sgvu-gold">Falcon Exam OS</p><h1 className="text-2xl font-bold text-sgvu-navy">Exam Timetable</h1><p className="mt-1 text-sm text-muted-foreground">Session-linked examination slots for Hall Ticket readiness, seating and invigilation.</p></CardContent></Card>
@@ -168,7 +195,7 @@ export default function ExamCellSchedulePage() {
             <Select id="timetable-session" className="h-10 w-full rounded-md border px-3 text-sm" value={session?.session_id ?? ''} disabled={catalogueLoading || Boolean(currentCatalogue?.error) || Boolean(currentMutation?.pending)} onChange={(event) => {
               scheduleEpoch.current++; mutationEpoch.current++; pendingMutation.current = null;
               const nextKey = [scope, event.target.value].join(':');
-              setSelection({ scope, id: event.target.value }); setFormState({ key: nextKey, value: emptyForm }); setMutation(null); setRefreshing(false);
+              setSelection({ scope, id: event.target.value }); setFormState({ key: nextKey, value: emptyForm }); setMutation(null); setReleaseMutation(null); setRefreshing(false);
             }}>
               <option value="">{catalogueLoading ? 'Loading sessions…' : 'Select examination session'}</option>
               {(currentCatalogue?.sessions ?? []).map((item) => <option key={item.session_id} value={item.session_id}>{item.session_name}{item.semester ? ' · Semester ' + item.semester : ''} · {item.status}</option>)}
@@ -176,7 +203,7 @@ export default function ExamCellSchedulePage() {
             {currentCatalogue?.error ? <div role="alert" className="space-y-2 text-sm text-red-700"><p>{currentCatalogue.error}</p><Button variant="outline" onClick={() => void loadCatalogue()}>Retry loading session data</Button></div> : !catalogueLoading && currentCatalogue?.sessions.length === 0 ? <p className="text-sm text-muted-foreground">No examination sessions are available. Configure an authorized session before scheduling.</p> : null}
           </CardContent></Card>
           {canManage ? <Card><CardHeader><CardTitle className="text-base">Add exam slot</CardTitle></CardHeader><CardContent className="space-y-3">
-            {!session ? <p className="text-sm text-muted-foreground">Select a real examination session before adding a slot.</p> : !canEdit ? <p className="text-sm text-muted-foreground">The selected session is closed or archived. New timetable slots are blocked.</p> : null}
+            {!session ? <p className="text-sm text-muted-foreground">Select a real examination session before adding a slot.</p> : schedules.some((item) => item.status === 'RELEASED') ? <p className="text-sm text-muted-foreground">This timetable is officially released. New slots are blocked until an authorized timetable amendment workflow exists.</p> : !canEdit ? <p className="text-sm text-muted-foreground">The selected session is closed or archived. New timetable slots are blocked.</p> : null}
             <fieldset disabled={!canEdit || Boolean(currentMutation?.pending)} className="grid gap-4 sm:grid-cols-2">
               <div className="flex min-h-[4.5rem] flex-col gap-1.5"><label htmlFor="timetable-type" className="text-sm font-bold text-sgvu-navy">Exam type</label><Select id="timetable-type" className="h-10 w-full rounded-md border px-3 text-sm" value={form.exam_type} disabled={!canEdit || Boolean(currentMutation?.pending)} onChange={(event) => update('exam_type', event.target.value)}><option value="">Select exam type</option><option value="MID_TERM">Mid Term</option><option value="END_TERM">End Term</option><option value="PRACTICAL">Practical</option></Select></div>
               <div className="flex min-h-[4.5rem] flex-col gap-1.5"><label htmlFor="timetable-subject" className="text-sm font-bold text-sgvu-navy">Subject</label><Select id="timetable-subject" className="h-10 w-full rounded-md border px-3 text-sm" value={form.subject_id} disabled={!canEdit || Boolean(currentMutation?.pending)} onChange={(event) => update('subject_id', event.target.value)}><option value="">Select subject</option>{subjects.map((item) => <option key={item.subject_id} value={String(item.subject_id)}>{item.subject_code} — {item.subject_name}{item.semester ? ' (Sem ' + item.semester + ')' : ''}</option>)}</Select></div>
@@ -191,7 +218,10 @@ export default function ExamCellSchedulePage() {
             {session && !currentCatalogue?.error && subjects.length === 0 ? <p className="text-sm text-muted-foreground">No catalogue subjects are available for this semester. The academic source must be reviewed.</p> : null}
             {currentMutation?.error ? <p role="alert" className="text-sm text-red-700">{currentMutation.error}</p> : null}
           </CardContent></Card> : null}
-          <Card><CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2"><CardTitle className="text-base">{session && current?.data && !loading ? current.data.length + ' scheduled exams · ' + session.session_name : 'Session timetable'}</CardTitle>{session ? <Button variant="outline" size="sm" disabled={loading || Boolean(currentMutation?.pending)} onClick={() => { setRefreshing(true); void loadSchedules(); }}>Refresh timetable</Button> : null}</CardHeader><CardContent className="space-y-2">
+          <Card><CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2"><CardTitle className="text-base">{session && current?.data && !loading ? current.data.length + ' timetable entries · ' + session.session_name : 'Session timetable'}</CardTitle><div className="flex flex-wrap items-center gap-2">{canRelease && session && schedules.length > 0 && schedules.every((item) => item.status === 'SCHEDULED') ? <Button size="sm" disabled={loading || actionPending} onClick={() => void releaseTimetable()}>{currentReleaseMutation?.pending ? 'Releasing…' : 'Release timetable to students'}</Button> : null}{session ? <Button variant="outline" size="sm" disabled={loading || actionPending} onClick={() => { setRefreshing(true); void loadSchedules(); }}>Refresh timetable</Button> : null}</div></CardHeader><CardContent className="space-y-2">
+            {session && schedules.some((item) => item.status === 'RELEASED') ? <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">This timetable is officially released. Students can see its active exam slots, and new slots are locked for this session.</p> : null}
+            {currentReleaseMutation?.error ? <p role="alert" className="text-sm text-red-700">{currentReleaseMutation.error}</p> : null}
+            {session && schedules.some((item) => item.status === 'SCHEDULED') ? <p className="text-xs text-muted-foreground">Prepared slots are not visible to students. Only ExamCell can release the complete validated session timetable.</p> : null}
             {!session ? <p className="py-8 text-center text-sm text-muted-foreground">Select a session to view its timetable. Unlinked historical schedules are not automatically assigned.</p> : loading ? <div role="status" className="flex items-center gap-2 py-8 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Loading session timetable…</div> : current?.error ? <p role="alert" className="py-8 text-sm text-red-700">{current.error}. Use Refresh timetable to retry.</p> : schedules.length === 0 ? <p className="py-8 text-center text-sm text-muted-foreground">No exams scheduled for this session.</p> : schedules.map((item) => <div key={item.exam_schedule_id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border bg-white px-4 py-3 text-sm"><div><p className="font-semibold text-sgvu-navy">{item.subject_name ?? item.subject_code ?? 'Subject'} · {item.exam_type}</p><p className="text-muted-foreground">{item.exam_date.slice(0, 10)} · {item.start_time.slice(0, 5)}–{item.end_time.slice(0, 5)} · {item.venue}</p><p className="text-xs text-muted-foreground">{session.session_name}</p></div><Badge>{item.status}</Badge></div>)}
           </CardContent></Card>
         </>

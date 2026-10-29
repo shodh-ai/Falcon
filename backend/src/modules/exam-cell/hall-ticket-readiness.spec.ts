@@ -57,7 +57,8 @@ describe('Hall Ticket exact registration diagnostics (mocked sources)', () => {
             start_time: '09:00',
             end_time: '12:00',
             venue: 'Hall A',
-            status: 'SCHEDULED',
+            status: 'RELEASED',
+            release_audited: true,
           },
         ];
       if (sql.includes('FROM exam_seating_allocations')) return seats;
@@ -175,6 +176,41 @@ describe('Hall Ticket exact registration diagnostics (mocked sources)', () => {
       (await f.service.inspect(tenant, session, registrationId, 'ExamCell'))
         .block_reasons,
     ).toContain('Strict attendance clearance is not verified');
+  });
+  it('blocks ticket readiness for a prepared but unreleased timetable', async () => {
+    const f = fixture();
+    f.query.mockImplementation((sql: string): unknown[] => {
+      if (sql.includes('FROM exam_sessions'))
+        return [{ session_id: session, semester: 4, program_label: 'BTECH CSE', academic_year: '2026-2027', status: 'OPEN' }];
+      if (sql.includes('FROM exam_semester_registrations')) return [f.registration];
+      if (sql.includes('FROM exam_form_windows')) return [{ session_id: session, semester: 4, program_label: 'BTECH CSE' }];
+      if (sql.includes('FROM hall_ticket_approvals')) return [f.approval];
+      if (sql.includes('FROM exam_schedules')) return [{ exam_schedule_id: schedule, subject_id: 7, exam_date: '2026-11-05', start_time: '09:00', end_time: '12:00', venue: 'Hall A', status: 'SCHEDULED', release_audited: false }];
+      if (sql.includes('FROM exam_seating_allocations')) return f.seats;
+      throw new Error('Unexpected query');
+    });
+    const result = await f.service.inspect(tenant, session, registrationId, 'ExamCell');
+    expect(result.ready_to_issue).toBe(false);
+    expect(result.block_reasons).toContain(
+      'The timetable slot for TEST-01 is incomplete or not officially released',
+    );
+  });
+  it('does not trust RELEASED status when the matching release audit is missing', async () => {
+    const f = fixture();
+    f.query.mockImplementation((sql: string): unknown[] => {
+      if (sql.includes('FROM exam_sessions'))
+        return [{ session_id: session, semester: 4, program_label: 'BTECH CSE', academic_year: '2026-2027', status: 'OPEN' }];
+      if (sql.includes('FROM exam_semester_registrations')) return [f.registration];
+      if (sql.includes('FROM exam_form_windows')) return [{ session_id: session, semester: 4, program_label: 'BTECH CSE' }];
+      if (sql.includes('FROM hall_ticket_approvals')) return [f.approval];
+      if (sql.includes('FROM exam_schedules')) return [{ exam_schedule_id: schedule, subject_id: 7, exam_date: '2026-11-05', start_time: '09:00', end_time: '12:00', venue: 'Hall A', status: 'RELEASED', release_audited: false }];
+      if (sql.includes('FROM exam_seating_allocations')) return f.seats;
+      throw new Error('Unexpected query');
+    });
+    const result = await f.service.inspect(tenant, session, registrationId, 'ExamCell');
+    expect(result.block_reasons).toContain(
+      'The timetable slot for TEST-01 is incomplete or not officially released',
+    );
   });
   it('rejects malformed Finance and propagates unavailable Finance', async () => {
     const f = fixture();

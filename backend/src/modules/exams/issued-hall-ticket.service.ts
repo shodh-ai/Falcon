@@ -13,6 +13,11 @@ import { DataSource, EntityManager } from 'typeorm';
 import { ObjectStorageService } from '../../storage/object-storage.service';
 import { ExamCellAuditService } from '../exam-cell/exam-cell-audit.service';
 
+export type IssuedHallTicketClearanceScope = {
+  semester: number;
+  courseIds: string[];
+};
+
 type IssuedRow = {
   entry_id: string;
   tenant_id: string;
@@ -108,7 +113,9 @@ export class IssuedHallTicketService {
     );
   }
 
-  private snapshot(row: IssuedRow): { document_bytes: number } {
+  private snapshot(
+    row: IssuedRow,
+  ): { document_bytes: number } & IssuedHallTicketClearanceScope {
     const value = row.issuance_snapshot;
     if (!value || typeof value !== 'object' || Array.isArray(value))
       throw new NotFoundException('Verified issued ticket unavailable');
@@ -146,6 +153,7 @@ export class IssuedHallTicketService {
     )
       throw new NotFoundException('Verified issued ticket unavailable');
     const schedules = new Set<string>();
+    const courses = new Set<string>();
     for (const item of snapshot.exams as unknown[]) {
       if (!item || typeof item !== 'object')
         throw new NotFoundException('Verified issued ticket unavailable');
@@ -165,8 +173,13 @@ export class IssuedHallTicketService {
       )
         throw new NotFoundException('Verified issued ticket unavailable');
       schedules.add(exam.exam_schedule_id);
+      courses.add(exam.course_id);
     }
-    return { document_bytes: snapshot.document_bytes };
+    return {
+      document_bytes: snapshot.document_bytes,
+      semester: row.semester,
+      courseIds: [...courses],
+    };
   }
 
   async list(studentId: string, tenantId: string) {
@@ -190,7 +203,9 @@ export class IssuedHallTicketService {
     studentId: string,
     tenantId: string,
     entryId: string | undefined,
-    existingClearanceCheck: () => Promise<void>,
+    existingClearanceCheck: (
+      scope: IssuedHallTicketClearanceScope,
+    ) => Promise<void>,
   ): Promise<Buffer> {
     this.scope(studentId, tenantId, entryId);
     const candidates = await this.rows(
@@ -206,12 +221,15 @@ export class IssuedHallTicketService {
         'Select a specific officially issued hall ticket',
       );
     const candidate = candidates[0];
-    this.snapshot(candidate);
+    const clearanceScope = this.snapshot(candidate);
     // Upstream services own their connections. Do not hold a transaction
     // connection while waiting for another connection from the same pool.
     // This prerequisite never replaces the locked authorization recheck below.
     // It does not serialize future fee changes (a separate policy decision).
-    await existingClearanceCheck();
+    await existingClearanceCheck({
+      semester: clearanceScope.semester,
+      courseIds: clearanceScope.courseIds,
+    });
     return this.db.transaction(async (manager) => {
       // Match registration review lock order; hold authorization through storage
       // retrieval and required audit. Re-read after any competing writer commits.
@@ -260,6 +278,14 @@ export class IssuedHallTicketService {
           'Officially issued hall ticket unavailable',
         );
       const snapshot = this.snapshot(row);
+      if (
+        snapshot.semester !== clearanceScope.semester ||
+        JSON.stringify([...snapshot.courseIds].sort()) !==
+          JSON.stringify([...clearanceScope.courseIds].sort())
+      )
+        throw new ConflictException(
+          'Issued ticket scope changed; retry the download',
+        );
       let pdf: Buffer;
       try {
         const stream = await this.storage.getDownloadStream(row.pdf_path);

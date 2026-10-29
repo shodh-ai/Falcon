@@ -11,7 +11,14 @@ import { plainToInstance } from 'class-transformer';
 import { isUUID, validateSync } from 'class-validator';
 import { AttendanceEligibilityService } from '../attendance-policy/attendance-eligibility.service';
 import { FinanceService } from '../finance/finance.service';
+import { requireTenantId } from '../../common/utils/require-tenant-id';
 import { ExamCellAuditService } from './exam-cell-audit.service';
+import { HallTicketDecisionService } from './hall-ticket-decision.service';
+import {
+  HALL_TICKET_STAGE_ROLES,
+  HallTicketApprovalStage,
+} from './hall-ticket-policy';
+import { normalizeExamCellRole } from './exam-cell-rbac.util';
 import { HallTicketPreparationService } from './hall-ticket-preparation.service';
 import { HallTicketReadinessService } from './hall-ticket-readiness.service';
 import { ExamDayScriptsService } from './exam-day-scripts.service';
@@ -53,6 +60,8 @@ export class ExamCellEnterpriseService {
     private readonly hallTicketReadiness?: HallTicketReadinessService,
     @Optional()
     private readonly examDayScripts?: ExamDayScriptsService,
+    @Optional()
+    private readonly hallTicketDecisions?: HallTicketDecisionService,
   ) {}
 
   private async queryOrEmpty<T extends Record<string, unknown>>(
@@ -430,7 +439,20 @@ export class ExamCellEnterpriseService {
     );
     return {
       workflow,
-      data: rows,
+      data: rows.map((row) => ({
+        ...row,
+        can_reject: Boolean(
+          this.hallTicketDecisions &&
+          filters.session_id &&
+          row.session_id === filters.session_id &&
+          row.registration_id &&
+          HALL_TICKET_STAGE_ROLES[row.stage as HallTicketApprovalStage] &&
+          normalizeExamCellRole(actorRole) ===
+            normalizeExamCellRole(
+              HALL_TICKET_STAGE_ROLES[row.stage as HallTicketApprovalStage],
+            ),
+        ),
+      })),
       total: Number(countRows[0]?.c ?? 0),
       limit,
       offset,
@@ -451,8 +473,14 @@ export class ExamCellEnterpriseService {
           'Valid approval and authenticated actor IDs are required',
         );
       validateHallTicketApprovalCommand(dto);
-      // The pure sequential planner is tested separately; it is deliberately
-      // not activated while essential stage policies remain unconfirmed.
+      if (this.hallTicketDecisions)
+        return this.hallTicketDecisions.decide(
+          tenantId,
+          actorUserId,
+          actorRole,
+          [approvalId],
+          dto,
+        );
       return assertHallTicketApprovalPolicy(tenantId, actorRole);
     });
   }
@@ -478,6 +506,15 @@ export class ExamCellEnterpriseService {
       if (errors.length)
         throw new BadRequestException(
           'An explicit session and unique approval IDs are required; target stages are controlled by the server',
+        );
+      if (this.hallTicketDecisions)
+        return this.hallTicketDecisions.decide(
+          tenantId,
+          actorUserId,
+          actorRole,
+          dto.approval_ids,
+          { action: 'APPROVE' },
+          dto.session_id,
         );
       return assertHallTicketApprovalPolicy(tenantId, actorRole);
     });
@@ -855,100 +892,197 @@ export class ExamCellEnterpriseService {
     studentUserId: string,
     actorUserId: string,
   ) {
-    const [credits] = await this.db.query(
-      `SELECT COALESCE(SUM(c.credits), 0)::int AS earned
-       FROM student_course_enrollments e
-       JOIN academic_courses c ON c.course_id = e.course_id
-       WHERE e.student_user_id = $1 AND e.tenant_id = $2 AND e.status = 'COMPLETED'`,
-      [studentUserId, tenantId],
+    const tid = requireTenantId(tenantId);
+    if (!isUUID(studentUserId)) {
+      throw new BadRequestException('A valid student ID is required');
+    }
+
+    return this.db.transaction(async (manager) => {
+    const [student] = await manager.query<Array<{ user_id: string }>>(
+      'SELECT user_id FROM users WHERE user_id = $1 AND tenant_id = $2 FOR UPDATE',
+      [studentUserId, tid],
     );
+    if (!student) throw new NotFoundException('Student not found');
 
-    const [grade] = await this.db
-      .query(
-        `SELECT cgpa FROM student_grade_cards
-       WHERE student_user_id = $1 AND tenant_id = $2
-       ORDER BY semester DESC LIMIT 1`,
-        [studentUserId, tenantId],
-      )
-      .catch(() => [{ cgpa: null }]);
+    type Check = 'CLEARED' | 'NOT_CLEARED' | 'UNAVAILABLE';
+    const checks: Record<string, Check> = {
+      credits: 'UNAVAILABLE',
+      cgpa: 'UNAVAILABLE',
+      backlogs: 'UNAVAILABLE',
+      finance: 'UNAVAILABLE',
+      library: 'UNAVAILABLE',
+      // No tenant-scoped authoritative hostel-demand source is defined in the
+      // current schema. Do not query the legacy, unverified table name.
+      hostel: 'UNAVAILABLE',
+    };
 
-    const [backlogs] = await this.db.query(
-      `SELECT COUNT(*)::int AS c FROM exam_applications
-       WHERE student_user_id = $1 AND application_type = 'BACKLOG' AND status = 'PENDING'`,
-      [studentUserId],
-    );
+    let creditsEarned: number | null = null;
+    let cgpaEarned: number | null = null;
+    let pendingBacklogs: number | null = null;
+    let pendingDues: Awaited<ReturnType<FinanceService['getPendingDues']>> | null = null;
+    let activeLibraryLoans: number | null = null;
 
-    const pendingDues = await this.finance.getPendingDues(studentUserId);
-    const cgpaEarned = grade?.cgpa != null ? Number(grade.cgpa) : null;
-    const creditsEarned = credits?.earned ?? 0;
-    const pendingBacklogs = backlogs?.c ?? 0;
+    try {
+      const [credits] = await manager.query<Array<{ earned: unknown }>>(
+        `SELECT COALESCE(SUM(c.credits), 0)::int AS earned
+         FROM (
+           SELECT DISTINCT e.course_id
+           FROM student_course_enrollments e
+           WHERE e.student_user_id = $1 AND e.tenant_id = $2 AND e.status = 'COMPLETED'
+         ) completed
+         JOIN academic_courses c ON c.course_id = completed.course_id AND c.tenant_id = $2`,
+        [studentUserId, tid],
+      );
+      const value = Number(credits?.earned);
+      if (Number.isFinite(value) && value >= 0) creditsEarned = value;
+    } catch {
+      // Unknown source state remains unavailable and cannot pass.
+    }
+    // Earned credits are informational until an approved programme/regulation
+    // rule and transfer-credit equivalency source are available. In particular,
+    // the schema does not identify transferred credit mappings.
 
-    const financeClear = pendingDues.length === 0;
-    const examClear = pendingBacklogs === 0;
-    const creditsOk = creditsEarned >= 160;
-    const cgpaOk = cgpaEarned != null && cgpaEarned >= 5.0;
-
-    const [libraryDues] = await this.db
-      .query(
-        `SELECT COUNT(*)::int AS c FROM library_circulation
-       WHERE student_user_id = $1 AND status IN ('ISSUED','OVERDUE')`,
-        [studentUserId],
-      )
-      .catch(() => [{ c: 0 }]);
-
-    const [hostelDues] = await this.db
-      .query(
-        `SELECT COUNT(*)::int AS c FROM hostel_fee_demands
-       WHERE student_user_id = $1 AND status NOT IN ('PAID','WAIVED')`,
-        [studentUserId],
-      )
-      .catch(() => [{ c: 0 }]);
-
-    const libraryClear = (libraryDues?.c ?? 0) === 0;
-    const hostelClear = (hostelDues?.c ?? 0) === 0;
-
-    const finalStatus =
-      creditsOk &&
-      cgpaOk &&
-      financeClear &&
-      examClear &&
-      libraryClear &&
-      hostelClear
-        ? 'ELIGIBLE'
-        : 'NOT_ELIGIBLE';
-
-    const [row] = await this.queryOrEmpty<Record<string, unknown>>(
-      `INSERT INTO degree_eligibility_audits
-         (tenant_id, student_user_id, credits_earned, cgpa_earned, pending_backlogs,
-          library_clearance, finance_clearance, hostel_clearance, examination_clearance,
-          final_status, checked_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-       RETURNING *`,
-      [
-        tenantId,
-        studentUserId,
-        creditsEarned,
-        cgpaEarned,
-        pendingBacklogs,
-        libraryClear,
-        financeClear,
-        hostelClear,
-        examClear,
-        finalStatus,
-        actorUserId,
-      ],
-    );
-
-    return (
-      row ?? {
-        final_status: finalStatus,
-        credits_earned: creditsEarned,
-        cgpa_earned: cgpaEarned,
-        pending_backlogs: pendingBacklogs,
-        finance_clearance: financeClear,
-        examination_clearance: examClear,
+    try {
+      const [grade] = await manager.query<Array<{ cgpa: unknown }>>(
+        `SELECT cgpa FROM grade_cards
+         WHERE student_user_id = $1 AND tenant_id = $2
+           AND status = 'PUBLISHED' AND published_at IS NOT NULL
+         ORDER BY semester DESC, published_at DESC LIMIT 1`,
+        [studentUserId, tid],
+      );
+      if (grade?.cgpa !== null && grade?.cgpa !== undefined) {
+        const value = Number(grade.cgpa);
+        if (Number.isFinite(value) && value >= 0) cgpaEarned = value;
       }
-    );
+    } catch {
+      // Missing grade data/schema is not evidence of a passing CGPA.
+    }
+    // CGPA is informational until the applicable, approved programme policy
+    // is available. Draft/provisional grade cards are excluded above.
+
+    try {
+      // Backlog history is tenant-scoped and records repeat attempts. Count
+      // distinct unresolved course/subject keys, not attempts. An unlinked
+      // backlog row cannot be safely matched and therefore remains unavailable.
+      const backlogs = await manager.query<Array<{
+        course_id: string | null;
+        subject_id: string | null;
+        course_in_tenant: boolean;
+      }>>(
+        `SELECT b.course_id::text AS course_id, b.subject_id::text AS subject_id,
+                (b.course_id IS NULL OR c.course_id IS NOT NULL) AS course_in_tenant
+         FROM student_backlog_history b
+         LEFT JOIN academic_courses c
+           ON c.course_id = b.course_id AND c.tenant_id = b.tenant_id
+         WHERE b.student_user_id = $1 AND b.tenant_id = $2
+           AND b.status IN ('ACTIVE', 'FAILED_AGAIN')`,
+        [studentUserId, tid],
+      );
+      if (backlogs.every((row) => (row.course_id || row.subject_id) && row.course_in_tenant)) {
+        pendingBacklogs = new Set(
+          backlogs.map((row) => row.course_id ?? `subject:${row.subject_id}`),
+        ).size;
+      }
+    } catch {
+      // An unavailable backlog source cannot be treated as an empty backlog.
+    }
+    if (pendingBacklogs !== null) {
+      checks.backlogs = pendingBacklogs === 0 ? 'CLEARED' : 'NOT_CLEARED';
+    }
+
+    try {
+      pendingDues = await this.finance.getPendingDues(studentUserId, tid);
+      if (!Array.isArray(pendingDues)) pendingDues = null;
+    } catch {
+      // Preserve an explicit unavailable state for Finance failures.
+      pendingDues = null;
+    }
+    // finance_fee_demands exposes fee_head but no authoritative degree-blocking
+    // classification. Do not treat unrelated pending demands as degree blockers
+    // or an empty broad list as official clearance.
+    void pendingDues;
+
+    try {
+      // lib_circulation is tenant keyed in the migration and library service.
+      const [library] = await manager.query<Array<{ c: unknown }>>(
+        `SELECT COUNT(*)::int AS c
+         FROM lib_circulation l
+         JOIN users u ON u.user_id = l.user_id AND u.tenant_id = l.tenant_id
+         WHERE l.tenant_id = $2 AND l.user_id = $1 AND l.returned_at IS NULL`,
+        [studentUserId, tid],
+      );
+      const value = Number(library?.c);
+      if (Number.isInteger(value) && value >= 0) activeLibraryLoans = value;
+    } catch {
+      // An unavailable library source cannot be treated as clear.
+    }
+    if (activeLibraryLoans !== null) {
+      checks.library = activeLibraryLoans === 0 ? 'CLEARED' : 'NOT_CLEARED';
+    }
+
+    const knownBlocker = Object.values(checks).includes('NOT_CLEARED');
+    const allVerified = Object.values(checks).every((status) => status === 'CLEARED');
+    // The schema contains defaults of 160 credits / 5.0 CGPA, but the
+    // university has not confirmed these as official degree policy.
+    const requirementsPolicyStatus = 'UNCONFIRMED';
+    const finalStatus = knownBlocker
+      ? 'NOT_ELIGIBLE'
+      : requirementsPolicyStatus === 'UNCONFIRMED'
+        ? 'PENDING'
+        : allVerified
+          ? 'ELIGIBLE'
+          : 'PENDING';
+
+    let row: Record<string, unknown> | undefined;
+    try {
+      [row] = await manager.query<Record<string, unknown>[]>(
+        `INSERT INTO degree_eligibility_audits
+           (tenant_id, student_user_id, credits_earned, cgpa_earned, pending_backlogs,
+            library_clearance, finance_clearance, hostel_clearance, examination_clearance,
+            final_status, checked_at, checked_by, clearance_statuses, requirements_policy_status)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,clock_timestamp(),$11,$12::jsonb,$13)
+         RETURNING *`,
+        [
+          tid,
+          studentUserId,
+          creditsEarned,
+          cgpaEarned,
+          pendingBacklogs,
+          checks.library === 'CLEARED',
+          checks.finance === 'CLEARED',
+          checks.hostel === 'CLEARED',
+          checks.backlogs === 'CLEARED',
+          finalStatus,
+          actorUserId,
+          JSON.stringify(checks),
+          requirementsPolicyStatus,
+        ],
+      );
+    } catch {
+      throw new ServiceUnavailableException(
+        'The degree eligibility audit could not be saved; no audit result was produced.',
+      );
+    }
+    if (!row) {
+      throw new ServiceUnavailableException(
+        'The degree eligibility audit could not be saved; no audit result was produced.',
+      );
+    }
+
+    return {
+      ...row,
+      credits_earned: creditsEarned,
+      cgpa_earned: cgpaEarned,
+      pending_backlogs: pendingBacklogs,
+      finance_clearance: checks.finance === 'CLEARED',
+      examination_clearance: checks.backlogs === 'CLEARED',
+      library_clearance: checks.library === 'CLEARED',
+      hostel_clearance: checks.hostel === 'CLEARED',
+      clearance_statuses: checks,
+      requirements_policy_status: requirementsPolicyStatus,
+      final_status: finalStatus,
+    };
+    });
   }
 
   /* ── 19. Student Examination Timeline ── */

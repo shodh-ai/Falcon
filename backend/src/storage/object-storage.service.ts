@@ -11,6 +11,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { existsSync, mkdirSync, writeFileSync, createReadStream } from 'fs';
 import { resolve } from 'path';
 import { Readable } from 'stream';
+import { isUUID } from 'class-validator';
 
 export interface StoredObject {
   key: string;
@@ -127,6 +128,56 @@ export class ObjectStorageService implements OnModuleInit {
       new GetObjectCommand({ Bucket: this.bucket, Key: key }),
     );
     return response.Body as Readable;
+  }
+
+  /**
+   * Create-only storage primitive. Never use upload() as an immutable retry.
+   * An I/O error or lost S3 acknowledgement may leave an object behind. Keep it
+   * for reconciliation; never delete or overwrite it on an uncertain outcome.
+   */
+  async uploadNew(
+    tenantId: string,
+    key: string,
+    body: Buffer,
+    contentType: string,
+  ): Promise<StoredObject> {
+    if (
+      !isUUID(tenantId) ||
+      !key.startsWith(`${tenantId}/`) ||
+      key.includes('\\') ||
+      key.split('/').some((part) => !part || part === '.' || part === '..')
+    )
+      throw new Error('Invalid tenant-scoped immutable object key');
+    if (!this.enabled) {
+      const root = resolve(process.env.UPLOAD_PATH || './uploads');
+      const path = resolve(root, key);
+      mkdirSync(resolve(path, '..'), { recursive: true });
+      // A collision must never truncate an existing issued document.
+      writeFileSync(path, body, { flag: 'wx' });
+      return {
+        key,
+        bucket: 'disk',
+        url: `/uploads/${key}`,
+        size: body.length,
+        contentType,
+      };
+    }
+    await this.client.send(
+      new PutObjectCommand({
+        Bucket: this.bucket,
+        Key: key,
+        Body: body,
+        ContentType: contentType,
+        IfNoneMatch: '*',
+      }),
+    );
+    return {
+      key,
+      bucket: this.bucket,
+      url: `s3://${this.bucket}/${key}`,
+      size: body.length,
+      contentType,
+    };
   }
 
   async getPresignedDownloadUrl(

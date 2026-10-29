@@ -8,6 +8,7 @@ import {
 import { BaseSoftDeleteEntity } from './base-soft-delete.entity';
 
 export type ExamType = 'MID_TERM' | 'END_TERM' | 'PRACTICAL';
+export type ExamScheduleStatus = 'SCHEDULED' | 'RELEASED' | 'CANCELLED';
 
 @Entity('exam_schedules')
 @Index(['exam_date'])
@@ -23,6 +24,11 @@ export class ExamSchedule extends BaseSoftDeleteEntity {
 
   @Column({ type: 'uuid', nullable: true })
   session_id: string | null;
+
+  // Existing exam_schedules.status column. RELEASED is set only by the
+  // authorized session timetable release workflow.
+  @Column({ type: 'varchar', length: 50, default: 'SCHEDULED' })
+  status: ExamScheduleStatus;
 
   @Column({ length: 20 })
   exam_type: ExamType;

@@ -45,6 +45,7 @@ describe('session-linked Hall Ticket timetable HTTP security', () => {
     ...body,
   };
   const create = jest.fn();
+  const releaseSessionTimetable = jest.fn();
   const query = jest.fn<Promise<unknown[]>, [string, unknown[]?]>();
   let app: INestApplication<App>;
 
@@ -75,7 +76,7 @@ describe('session-linked Hall Ticket timetable HTTP security', () => {
       {} as never,
       {} as never,
       {} as never,
-      { create } as never,
+      { create, releaseSession: releaseSessionTimetable } as never,
     );
     const module = await Test.createTestingModule({
       controllers: [ExamCellController],
@@ -113,6 +114,9 @@ describe('session-linked Hall Ticket timetable HTTP security', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     create.mockResolvedValue([stored]);
+    releaseSessionTimetable.mockResolvedValue([
+      { ...stored, status: 'RELEASED' },
+    ]);
     query.mockImplementation((sql) => {
       if (sql.includes('FROM exam_sessions'))
         return Promise.resolve([{ session_id: session }]);
@@ -143,6 +147,43 @@ describe('session-linked Hall Ticket timetable HTTP security', () => {
       .send(body)
       .expect(201);
     expect(create).toHaveBeenCalledWith(tenant, actor, 'DeputyCOE', body);
+  });
+
+  it('allows only the confirmed ExamCell role to release a session timetable', async () => {
+    const response = await request(app.getHttpServer())
+      .post(`/api/exam-cell/sessions/${session}/timetable/release`)
+      .set('x-fixture-role', 'ExamCell')
+      .send({})
+      .expect(201);
+    expect(response.body).toEqual([{ ...stored, status: 'RELEASED' }]);
+    expect(releaseSessionTimetable).toHaveBeenCalledWith(
+      tenant,
+      actor,
+      'ExamCell',
+      session,
+    );
+  });
+
+  it.each(['DeputyCOE', 'ExamAdmin', 'ExamOperator', 'SuperAdmin'])(
+    'does not allow %s to release a timetable',
+    async (role) => {
+      await request(app.getHttpServer())
+        .post(`/api/exam-cell/sessions/${session}/timetable/release`)
+        .set('x-fixture-role', role)
+        .send({})
+        .expect(403);
+      expect(releaseSessionTimetable).not.toHaveBeenCalled();
+    },
+  );
+
+  it('does not use a secondary ExamCell role when DeputyCOE is the active role', async () => {
+    await request(app.getHttpServer())
+      .post(`/api/exam-cell/sessions/${session}/timetable/release`)
+      .set('x-fixture-role', 'ExamCell')
+      .set('x-fixture-primary-role', 'DeputyCOE')
+      .send({})
+      .expect(403);
+    expect(releaseSessionTimetable).not.toHaveBeenCalled();
   });
 
   it('does not elevate an active operator using a secondary administrator role', async () => {

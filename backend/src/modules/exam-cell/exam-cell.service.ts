@@ -414,6 +414,24 @@ export class ExamCellService {
     );
   }
 
+  releaseSessionTimetable(
+    tenantId: string,
+    sessionId: string,
+    actorUserId: string,
+    actorRole?: string,
+  ) {
+    if (!this.hallTicketTimetable)
+      throw new ServiceUnavailableException(
+        'Session-linked timetable service is unavailable',
+      );
+    return this.hallTicketTimetable.releaseSession(
+      tenantId,
+      actorUserId,
+      actorRole,
+      sessionId,
+    );
+  }
+
   /** Compatibility endpoint: no legacy batch-label or local-file issuance. */
   generateAdmitCards(
     tenantId: string,

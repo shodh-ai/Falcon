@@ -11,4 +11,12 @@ describe('exam-cell-rbac branch coverage', () => {
     expect(hasExamCellPortalAccess(null)).toBe(false);
     expect(canExamCellAction(undefined, 'view_dashboard')).toBe(false);
   });
+
+  it('restricts official timetable release to the confirmed ExamCell approver', () => {
+    expect(canExamCellAction('ExamCell', 'release_timetable')).toBe(true);
+    expect(canExamCellAction('DeputyCOE', 'release_timetable')).toBe(false);
+    expect(canExamCellAction('ExamAdmin', 'release_timetable')).toBe(false);
+    expect(canExamCellAction('ExamOperator', 'release_timetable')).toBe(false);
+    expect(canExamCellAction('SuperAdmin', 'release_timetable')).toBe(false);
+  });
 });

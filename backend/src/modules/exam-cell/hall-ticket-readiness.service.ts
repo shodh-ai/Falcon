@@ -250,9 +250,19 @@ export class HallTicketReadinessService {
             end_time: string;
             venue: string;
             status: string;
+            release_audited: boolean;
           }>
         >(
-          `SELECT exam_schedule_id, subject_id, exam_date, start_time, end_time, venue, status FROM exam_schedules
+          `SELECT exam_schedule_id, subject_id, exam_date, start_time, end_time, venue, status,
+                  EXISTS (SELECT 1 FROM exam_audit_logs timetable_release
+                    WHERE timetable_release.tenant_id=exam_schedules.tenant_id
+                      AND timetable_release.resource_type='exam_session'
+                      AND timetable_release.resource_id=exam_schedules.session_id::text
+                      AND timetable_release.action='EXAM_TIMETABLE_RELEASED'
+                      AND timetable_release.new_value @> jsonb_build_array(
+                        jsonb_build_object('exam_schedule_id', exam_schedules.exam_schedule_id, 'status', 'RELEASED')
+                      )) AS release_audited
+           FROM exam_schedules
            WHERE tenant_id=$1 AND session_id=$2 AND subject_id=ANY($3::int[]) AND deleted_at IS NULL ORDER BY exam_schedule_id FOR SHARE`,
           [tenant, sessionId, student.enrollments.map((e) => e.subject_id)],
         );
@@ -279,7 +289,8 @@ export class HallTicketReadinessService {
           }
           const schedule = matches[0];
           if (
-            schedule.status !== 'SCHEDULED' ||
+            schedule.status !== 'RELEASED' ||
+            schedule.release_audited !== true ||
             !schedule.exam_date ||
             !schedule.start_time ||
             !schedule.end_time ||
@@ -287,7 +298,7 @@ export class HallTicketReadinessService {
             !schedule.venue?.trim()
           )
             reasons.push(
-              `The timetable slot for ${enrollment.course_code} is incomplete or not scheduled`,
+              `The timetable slot for ${enrollment.course_code} is incomplete or not officially released`,
             );
           const ownSeat = seats.filter(
             (s) => s.exam_schedule_id === schedule.exam_schedule_id,
@@ -326,10 +337,9 @@ export class HallTicketReadinessService {
       ready_to_issue: false,
       diagnostic_only: true,
       unresolved_requirements: [
-        'Eligibility and Exam Office approver roles are not confirmed',
         'The required internal assessment components and their finalized state are not mapped to this examination session',
-        'Mandatory document, active UFM restriction and post-issuance dues policies require authoritative definitions',
-        'Timetable approval/release rules and the durable issuance writer are not yet implemented',
+        'Mandatory examination-document and active examination-restriction sources, examination-blocking Finance classification and authorized post-issuance holds are not integrated',
+        'The durable Hall Ticket issuance writer and required clearance sources are not yet implemented',
       ],
     };
   }

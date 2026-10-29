@@ -24,8 +24,9 @@ export interface ExamEligibilityResult {
   attendance_percent: number;
   min_required: number;
   exempted: boolean;
+  finance_status: 'NO_OUTSTANDING_DEMANDS' | 'UNVERIFIED' | 'NOT_CHECKED';
   reasons: Array<{
-    code: 'ATTENDANCE_SHORTFALL' | 'PENDING_FEE_DUES';
+    code: 'ATTENDANCE_SHORTFALL' | 'FINANCE_UNVERIFIED';
     message: string;
     details?: unknown;
   }>;
@@ -59,7 +60,26 @@ export class ExamsService {
     const today = new Date().toISOString().slice(0, 10);
     return this.schedules
       .createQueryBuilder('s')
-      .where('s.exam_date >= :today', { today })
+      .where(
+        's.exam_date >= :today AND s.deleted_at IS NULL AND s.status = :released',
+        { today, released: 'RELEASED' },
+      )
+      .andWhere(
+        `s.session_id IS NOT NULL AND EXISTS (
+          SELECT 1 FROM exam_sessions released_session
+          WHERE released_session.session_id = s.session_id
+            AND released_session.tenant_id = s.tenant_id
+        ) AND EXISTS (
+          SELECT 1 FROM exam_audit_logs timetable_release
+          WHERE timetable_release.tenant_id = s.tenant_id
+            AND timetable_release.resource_type = 'exam_session'
+            AND timetable_release.resource_id = s.session_id::text
+            AND timetable_release.action = 'EXAM_TIMETABLE_RELEASED'
+            AND timetable_release.new_value @> jsonb_build_array(
+              jsonb_build_object('exam_schedule_id', s.exam_schedule_id, 'status', 'RELEASED')
+            )
+        )`,
+      )
       .andWhere('s.tenant_id = :tenantId', {
         tenantId: requireTenantId(tenantId),
       })
@@ -79,7 +99,15 @@ export class ExamsService {
   }
 
   async listMyApplications(studentUserId: string, tenantId: string) {
-    return this.db.query(
+    return this.db.query<
+      Array<
+        ExamApplication & {
+          subject_name: string | null;
+          subject_code: string | null;
+          faculty_name: string | null;
+        }
+      >
+    >(
       `SELECT a.*,
               sub.subject_name,
               sub.subject_code,
@@ -137,18 +165,10 @@ export class ExamsService {
     return this.applications.save(application);
   }
 
-  /**
-   * Smoke-seed fee heads (e.g. SMOKE-FEE-2026-001) must not block hall tickets
-   * during local demos. Production stays strict unless the head is clearly smoke.
-   */
-  private isNonBlockingSmokeFee(feeHead: string): boolean {
-    return /^SMOKE([\s_-]|$)/i.test(String(feeHead ?? '').trim());
-  }
-
-  /** Local/demo: unlock admit card when smoke dues / seed attendance would otherwise lock it. */
+  /** Legacy local preview data only; never used to authorize clearance/download. */
   private isAdmitCardDemoBypassEnabled(): boolean {
-    if (process.env.STRICT_ADMIT_CARD_ELIGIBILITY === 'true') return false;
     return (
+      process.env.STRICT_ADMIT_CARD_ELIGIBILITY !== 'true' &&
       process.env.ADMIT_CARD_DEMO_BYPASS === 'true' &&
       process.env.NODE_ENV !== 'production'
     );
@@ -157,23 +177,52 @@ export class ExamsService {
   async checkEligibility(
     studentUserId: string,
     tenantId: string,
+    issuedScope?: { semester: number; courseIds: string[] },
   ): Promise<ExamEligibilityResult> {
     const tid = requireTenantId(tenantId);
 
     const [attendance, pendingDues] = await Promise.all([
       this.attendanceEligibility.evaluate(tid, studentUserId, {
-        context: 'EXAM_DESK',
+        context: issuedScope ? 'ADMIT_CARD' : 'EXAM_DESK',
+        ...(issuedScope
+          ? {
+              strict: true,
+              semester: issuedScope.semester,
+              courseIds: issuedScope.courseIds,
+            }
+          : {}),
       }),
-      this.finance.getPendingDues(studentUserId, tid),
+      // Finance returns every unpaid demand and has no authoritative
+      // exam-blocking classification. New dues alone must not invalidate an
+      // already-issued ticket; an authorized examination hold is a separate
+      // workflow and is not inferred from a generic balance.
+      issuedScope
+        ? Promise.resolve([])
+        : this.finance.getPendingDues(studentUserId, tid),
     ]);
 
-    const blockingDues = pendingDues.filter(
-      (d) => !this.isNonBlockingSmokeFee(String(d.fee_head ?? '')),
-    );
+    if (
+      !Array.isArray(pendingDues) ||
+      !attendance ||
+      typeof attendance.eligible !== 'boolean' ||
+      !Number.isFinite(attendance.attendance_percent) ||
+      attendance.attendance_percent < 0 ||
+      attendance.attendance_percent > 100 ||
+      !Number.isFinite(attendance.effective_threshold) ||
+      attendance.effective_threshold < 0 ||
+      attendance.effective_threshold > 100
+    )
+      throw new ServiceUnavailableException(
+        'Authoritative examination clearance is unavailable',
+      );
+    // Finance fee_head is free-form and the current schema has no official
+    // exam-blocking designation. Do not label generic balances as a policy
+    // violation; keep eligibility pending until Finance classifies them.
+    const financeUnverified = !issuedScope && pendingDues.length > 0;
 
     const reasons: ExamEligibilityResult['reasons'] = [];
 
-    if (!attendance.eligible && attendance.reason) {
+    if (!attendance.eligible) {
       reasons.push({
         code: 'ATTENDANCE_SHORTFALL',
         message: 'Blocked: Attendance Shortfall',
@@ -184,34 +233,25 @@ export class ExamsService {
       });
     }
 
-    if (blockingDues.length > 0) {
+    if (financeUnverified) {
       reasons.push({
-        code: 'PENDING_FEE_DUES',
-        message: 'Blocked: Pending Fee Dues',
-        details: blockingDues.map((d) => ({
-          demand_id: d.demand_id,
-          fee_head: d.fee_head,
-          due_date: d.due_date,
-          outstanding: Number(d.total_amount) - Number(d.paid_amount),
-          status: d.status,
-        })),
+        code: 'FINANCE_UNVERIFIED',
+        message:
+          'Finance records need review; no official examination-blocking fee classification is configured.',
       });
     }
 
-    const demoBypass =
-      this.isAdmitCardDemoBypassEnabled() && reasons.length > 0;
-
     return {
-      eligible: reasons.length === 0 || demoBypass,
-      attendance_percent: demoBypass
-        ? Math.max(
-            attendance.attendance_percent,
-            attendance.effective_threshold,
-          )
-        : attendance.attendance_percent,
+      eligible: reasons.length === 0,
+      attendance_percent: attendance.attendance_percent,
       min_required: attendance.effective_threshold,
       exempted: attendance.threshold_source === 'EXEMPTION',
-      reasons: demoBypass ? [] : reasons,
+      finance_status: issuedScope
+        ? 'NOT_CHECKED'
+        : financeUnverified
+          ? 'UNVERIFIED'
+          : 'NO_OUTSTANDING_DEMANDS',
+      reasons,
     };
   }
 
@@ -245,7 +285,18 @@ export class ExamsService {
     tenantId: string,
   ): Promise<AdmitCardExamRow[]> {
     const today = new Date().toISOString().slice(0, 10);
-    const rows = await this.db.query(
+    const rows = await this.db.query<
+      Array<{
+        exam_date: string;
+        start_time: string;
+        end_time: string;
+        exam_type: string;
+        venue: string;
+        seat_no?: string | null;
+        subject_code: string;
+        subject_name: string;
+      }>
+    >(
       `SELECT es.exam_date::text AS exam_date,
                 es.start_time::text AS start_time,
                 es.end_time::text AS end_time,
@@ -258,6 +309,7 @@ export class ExamsService {
          LEFT JOIN academic_subjects sub ON sub.subject_id = es.subject_id
          JOIN academic_courses c ON (c.course_code = sub.subject_code OR c.course_name ILIKE sub.subject_name) AND c.tenant_id = $2
          WHERE es.exam_date >= $1::date AND es.tenant_id = $2
+           AND es.deleted_at IS NULL AND es.status = 'RELEASED'
            AND EXISTS (SELECT 1 FROM student_course_enrollments e
              WHERE e.course_id = c.course_id AND e.student_user_id = $3 AND e.tenant_id = $2 AND e.status = 'ENROLLED' AND e.deleted_at IS NULL)
          ORDER BY es.exam_date ASC, es.start_time ASC`,
@@ -377,7 +429,7 @@ export class ExamsService {
   }
 
   private async loadAdmitCardStudent(studentUserId: string, tenantId: string) {
-    const rows = await this.db.query(
+    const rows = await this.db.query<unknown[]>(
       `SELECT u.user_id, u.name, u.official_email AS email,
                 sp.enrollment_number, sp.enrollment_no, sp.admission_number,
                 sp.batch, sp.section_code, sp.current_semester, sp.profile_photo_url,
@@ -472,10 +524,11 @@ export class ExamsService {
       studentUserId,
       requireTenantId(tenantId),
       entryId,
-      async () => {
+      async (issuedScope) => {
         const eligibility = await this.checkEligibility(
           studentUserId,
           tenantId,
+          issuedScope,
         );
         if (!eligibility.eligible)
           throw new ForbiddenException(
