@@ -132,14 +132,20 @@ describe('configured direct reporting', () => {
       officer: null,
     });
   });
-  test('Principal directly replaces HOD reporting, without a second HOD stage', async () => {
+  test('routine reporting delegates to HOD without a duplicate Principal stage', async () => {
     expect(
       await configuredReportingOfficer(
-        async () => [{ structure: 'PRINCIPAL_HOD', head_user_id: 'principal' }],
+        async () => [
+          {
+            structure: 'PRINCIPAL_HOD',
+            head_user_id: 'hod',
+            principal_user_id: 'principal',
+          },
+        ],
         't',
         'faculty',
       ),
-    ).toEqual({ configured: true, officer: 'principal' });
+    ).toEqual({ configured: true, officer: 'hod' });
   });
   test('head routes to explicit higher reporting officer', async () => {
     expect(
@@ -164,7 +170,8 @@ describe('configured direct reporting', () => {
           async () => [
             {
               structure: 'PRINCIPAL_HOD',
-              head_user_id: 'principal',
+              head_user_id: 'hod',
+              principal_user_id: 'principal',
               higher_officer_id: higher,
             },
           ],
@@ -174,7 +181,7 @@ describe('configured direct reporting', () => {
       ).rejects.toBeInstanceOf(BadRequestException);
     },
   );
-  test('vacant Principal does not fall through to HOD or HR', async () => {
+  test('vacant routine HOD does not fall through to Principal or HR', async () => {
     await expect(
       configuredReportingOfficer(
         async () => [{ structure: 'PRINCIPAL_HOD', head_user_id: null }],
