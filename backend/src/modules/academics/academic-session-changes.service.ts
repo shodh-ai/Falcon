@@ -837,6 +837,16 @@ export class AcademicSessionChangesService {
         hodId,
       ],
     );
+    if (reservation?.details.status === 'RETURNED') {
+      const sourceOffice=actor.role_name==='HOD'?await requireDepartmentOffice((sql,args)=>manager.query(sql,args),tenantId,hodId,'HOD',reservation.details.dept_id,true):null;
+      await manager.query(`INSERT INTO department_leadership_events(tenant_id,dept_id,actor_user_id,action,details)
+        VALUES($1,$2,$3,'PRINCIPAL_CASE',$4::jsonb)`,[tenantId,reservation.details.dept_id,hodId,JSON.stringify({
+          ...reservation.details,revision:reservation.details.revision+1,actor_id:hodId,office_id:sourceOffice?.office_id??null,
+          source_decision_role:actor.role_name,status:action==='APPROVE'?'APPLIED':'REJECTED',decision:action,
+          updated_at:new Date().toISOString(),note:'Source request decided through its routine authority after Principal return.',
+          application_error:undefined,idempotency_key:`routine_${groupId}`,fingerprint:'canonical_source_transition'
+        })]);
+    }
     return {
       change_group_id: groupId,
       status: action === 'APPROVE' ? 'APPROVED' : 'REJECTED',

@@ -380,7 +380,7 @@ async function main() {
     state=await svc.act(p,'PRINCIPAL',group,1,{action:'APPROVE',note:'Approval remains subject to source validation'},randomUUID());assert.equal(state.status,'APPLICATION_FAILED');
     state=await svc.act(p,'PRINCIPAL',group,state.revision,{action:'RETURN',note:'Please resolve this request through HOD review'},randomUUID());assert.equal(state.status,'RETURNED');
     assert.equal((await changes.listPendingForHod(hod,tenant)).length,1);
-    await changes.decide(hod,tenant,group,'REJECT');await c.query('DELETE FROM staff_leave_requests');
+    await changes.decide(hod,tenant,group,'REJECT');assert.equal((await svc.detail(p,'PRINCIPAL',group)).state.status,'REJECTED');await c.query('DELETE FROM staff_leave_requests');
     // Returned requests use one case history; concurrent recommendations cannot create a second owner.
     await c.query('DELETE FROM academic_class_moves');
     group = await source();
@@ -471,6 +471,13 @@ async function main() {
     await c.query('UPDATE academic_course_allocations SET faculty_user_id=$1',[teacher]);
     const projection=await svc.overview(p);assert.equal(projection.office.dept_id,43);
     assert.ok(Array.isArray(projection.workload));assert.ok(Array.isArray(projection.syllabus));assert.ok(Array.isArray(projection.iqac));
+    await c.query('DELETE FROM academic_class_moves');group=await source();
+    state=await svc.create(h,'HOD',{kind:'TIMETABLE',source_id:group,title:'Concurrent hand-back checks',reason:'HOD recommendation for a returned request'},randomUUID());
+    state=await svc.act(p,'PRINCIPAL',group,1,{action:'RETURN',note:'Return this request for departmental resolution'},randomUUID());
+    const race=await Promise.allSettled([svc.act(h,'HOD',group,state.revision,{action:'RESUBMIT',note:'Department evidence supplied for Principal review'},randomUUID()),changes.decide(hod,tenant,group,'REJECT')]);
+    assert.equal(race.filter(r=>r.status==='fulfilled').length,1);
+    const liveCase=(await svc.detail(p,'PRINCIPAL',group)).state,liveSource=(await query('SELECT status FROM academic_class_moves WHERE change_group_id=$1',[group]))[0];
+    assert.ok(liveCase.status==='PENDING_PRINCIPAL'&&liveSource.status==='PENDING_HOD_APPROVAL'||liveCase.status==='REJECTED'&&liveSource.status==='REJECTED');
     // Transfer revokes reads/decisions immediately, including idempotent replay.
     await c.query(
       'UPDATE department_office_appointments SET valid_to=now() WHERE user_id=$1',

@@ -122,6 +122,8 @@ export class PrincipalOversightService {
       .update(JSON.stringify(command))
       .digest('hex');
     return this.db.transaction(async (m) => {
+      // Share lock order with the source domain before taking the case lock.
+      await m.query('SELECT pg_advisory_xact_lock(hashtext($1))',[`reserved-move:${tenant}:${id}`]);
       await m.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
         `principal-case:${tenant}:${id}`,
       ]);
