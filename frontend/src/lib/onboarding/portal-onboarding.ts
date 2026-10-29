@@ -1,7 +1,7 @@
 export type OnboardingPortalKind = 'student' | 'staff';
 
 export type PortalOnboardingConfig = {
-  portalPrefix: '/student' | '/faculty' | '/hod' | '/dean';
+  portalPrefix: '/student' | '/faculty' | '/hod' | '/dean' | '/principal';
   apiPrefix: '/api/student/onboarding' | '/api/staff/onboarding';
   portalLabel: string;
   dashboardPath: string;
@@ -39,6 +39,7 @@ export const HOD_ONBOARDING_CONFIG: PortalOnboardingConfig = {
   dashboardPath: '/hod/dashboard',
   kind: 'staff',
 };
+export const PRINCIPAL_ONBOARDING_CONFIG:PortalOnboardingConfig={portalPrefix:'/principal',apiPrefix:'/api/staff/onboarding',portalLabel:'Principal',dashboardPath:'/principal/dashboard',kind:'staff'};
 
 export const STAFF_DOC_LABELS: Record<string, string> = {
   PHOTO: 'Passport Size Photo',
@@ -110,13 +111,14 @@ export function normalizeOnboardingStatus(
 
 export function isStaffOnboardingRole(role: string | undefined | null): boolean {
   const r = (role ?? '').trim().toLowerCase();
-  return r === 'faculty' || r === 'hod' || r === 'dean';
+  return r === 'faculty' || r === 'hod' || r === 'dean' || r === 'principal';
 }
 
 export function getStaffOnboardingConfig(role: string | undefined | null): PortalOnboardingConfig {
   const r = (role ?? '').trim().toLowerCase();
   if (r === 'dean') return DEAN_ONBOARDING_CONFIG;
   if (r === 'hod') return HOD_ONBOARDING_CONFIG;
+  if (r === 'principal') return PRINCIPAL_ONBOARDING_CONFIG;
   return FACULTY_ONBOARDING_CONFIG;
 }
 

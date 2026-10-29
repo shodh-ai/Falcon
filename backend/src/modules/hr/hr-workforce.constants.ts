@@ -8,6 +8,7 @@ export const EXAM_CELL_SELF_SERVICE_ROLES = [
 
 /** Existing HR employee self-service roles, including Examination Cell employees. */
 export const HR_EMPLOYEE_SELF_SERVICE_ROLES = [
+  'Principal',
   'Faculty',
   'HOD',
   'Dean',
@@ -19,6 +20,7 @@ export const HR_EMPLOYEE_SELF_SERVICE_ROLES = [
 
 /** Staff roles that may submit leave / OD / attendance self-service requests. */
 export const WORKFORCE_SELF_SERVICE_ROLES = [
+  'Principal',
   'Faculty',
   'HOD',
   'Dean',

@@ -18,7 +18,7 @@ export type StudentOnboardingDocType =
 export type StaffOnboardingDocType =
   (typeof STAFF_ONBOARDING_DOC_TYPES)[number];
 
-const STAFF_ROLES = new Set(['faculty', 'hod', 'dean']);
+const STAFF_ROLES = new Set(['faculty', 'hod', 'dean', 'principal']);
 const FIRST_LOGIN_WIZARD_ROLES = new Set([
   'student',
   'applicant',

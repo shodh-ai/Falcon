@@ -30,6 +30,8 @@ import { normalizeOnboardingStatusForWizard } from '../modules/student-onboardin
 import { isStudentEnrollmentEmail } from './utils/student-enrollment-email.util';
 import { hasDirectReports } from '../modules/hr/utils/reporting-officer.util';
 import { wrapFalconEmailHtml } from '../common/email/falcon-email.template';
+import { DepartmentLeadershipService } from '../modules/department-leadership/department-leadership.service';
+import type { OfficeContext } from '../modules/department-leadership/leadership.types';
 
 import {
   PASSWORD_RESET_DELIVERY,
@@ -91,6 +93,7 @@ export class AuthService {
     @Optional()
     @Inject(PASSWORD_RESET_DELIVERY)
     private readonly resetDelivery?: PasswordResetDelivery,
+    @Optional() private readonly leadership?: DepartmentLeadershipService,
   ) {}
 
   getProviderId(): string {
@@ -239,6 +242,13 @@ export class AuthService {
     // Multiple active profiles sharing an identifier are an integrity error;
     // fail closed rather than authenticating an arbitrary account.
     let credential = credentials.length === 1 ? credentials[0] : undefined;
+    const office = isEmailIdentifier && this.leadership
+      ? await this.leadership.resolveAlias(tenant.tenant_id,loginIdentifier) : undefined;
+    // A reserved/unassigned office must not fall through to a different tenant.
+    if(office){
+      if(credentials.length || !office.user_id)throw new UnauthorizedException('Invalid email or password');
+      credential=office;
+    }
 
     // The shared Falcon hostname defaults to SGVU. If that default tenant has
     // no such account, resolve an email only when it belongs to exactly one
@@ -310,6 +320,8 @@ export class AuthService {
       tenant.tenant_id,
     );
     const tokenUserForClaims = syncedUser ?? tokenUser;
+    if(office)tokenUserForClaims.office_context={office_id:office.office_id,appointment_id:office.appointment_id,dept_id:office.dept_id,kind:office.kind,login_alias:office.login_alias};
+    await this.applyLeadershipClaims(tokenUserForClaims,tokenUserForClaims.office_context);
     const roleClaims = this.getRoleClaims(tokenUserForClaims);
     // Issue token before optional enrichment so Redis/HR schema faults cannot block login.
     const token = this.signToken(
@@ -359,6 +371,7 @@ export class AuthService {
         role: roleClaims.primaryRole,
         roles: roleClaims.roles,
         primaryRole: roleClaims.primaryRole,
+        office_context: tokenUserForClaims.office_context,
         read_only_academic_view: tokenUserForClaims.role?.role_name === 'FacultyReadOnly',
         role_id: tokenUser.role_id,
         department: tokenUser.department?.dept_name,
@@ -862,6 +875,7 @@ export class AuthService {
        SELECT $1, rd.role_id, false
        FROM roles rd
        WHERE rd.role_name = 'Dean'
+         AND NOT EXISTS (SELECT 1 FROM users u JOIN department_leadership c ON c.tenant_id=u.tenant_id AND c.dept_id=u.dept_id WHERE u.user_id=$1)
          AND EXISTS (
            SELECT 1
            FROM user_roles ur
@@ -885,7 +899,31 @@ export class AuthService {
     tenantId: string,
   ): Promise<User | null> {
     await this.syncMultiHatWorkspaceRoles(userId);
-    return this.loadUserForLogin(userId, tenantId);
+    const user=await this.loadUserForLogin(userId, tenantId);
+    if(user)await this.applyLeadershipClaims(user);
+    return user;
+  }
+
+  async applyLeadershipClaims(user:User, selected?:OfficeContext){
+    if(!this.leadership)return;
+    const context=await this.leadership.context(user.tenant_id,user.user_id);
+    user.leadership_auth_revision=context.authRevision ?? 0;
+    if(!context.managed && !context.offices.length){
+      if(selected)throw new UnauthorizedException('Office appointment changed; sign in again');
+      return;
+    }
+    // Remove only managed HOD authority. Existing explicit Dean roles are retained.
+    delete user.leadership_roles;
+    const base=this.getRoleClaims(user);
+    const roles=base.roles.filter(r=>r!=='Principal' && !(context.managed && r==='HOD') &&
+      !(context.managed && user.role?.role_name==='HOD' && r==='Dean' && !context.explicitDean));
+    if(context.offices.some(o=>o.kind==='HOD'))roles.push('HOD');
+    if(context.offices.some(o=>o.kind==='PRINCIPAL'))roles.push('Principal');
+    const office=selected ? context.offices.find(o=>o.appointment_id===selected.appointment_id && o.office_id===selected.office_id) : context.offices.find(o=>o.kind==='PRINCIPAL') ?? context.offices[0];
+    if(selected && !office)throw new UnauthorizedException('Office appointment changed; sign in again');
+    user.office_context=office;
+    const primary=office ? (office.kind==='PRINCIPAL'?'Principal':'HOD') : roles.includes('Principal')?'Principal':roles.includes('HOD')?'HOD':roles.includes(base.primaryRole ?? '')?base.primaryRole:roles[0];
+    user.leadership_roles={roles:[...new Set(roles)],primaryRole:primary};
   }
 
   /** Resolve guardian mobile for Parent-role users (password login → parent portal APIs). */
@@ -903,6 +941,7 @@ export class AuthService {
   }
 
   getRoleClaims(user: User): { roles: string[]; primaryRole?: string } {
+    if(user.leadership_roles)return user.leadership_roles;
     // The dedicated DB role cannot gain ordinary Faculty access on older
     // releases. JWT validation independently requires an enabled binding.
     if (user.role?.role_name === 'FacultyReadOnly') {

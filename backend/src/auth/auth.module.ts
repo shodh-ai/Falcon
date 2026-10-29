@@ -16,6 +16,7 @@ import { KeycloakAuthProvider } from './providers/keycloak-auth.provider';
 import { AuthTenantCookieMiddleware } from './middleware/auth-tenant-cookie.middleware';
 import { resolveJwtSecret } from '../common/config/jwt-secret';
 import { HrModule } from '../modules/hr/hr.module';
+import { DepartmentLeadershipModule } from '../modules/department-leadership/department-leadership.module';
 
 const authProviderFactory = {
   provide: AUTH_PROVIDER,
@@ -28,6 +29,7 @@ const authProviderFactory = {
 
 @Module({
   imports: [
+    DepartmentLeadershipModule,
     HrModule,
     TypeOrmModule.forFeature([User, Role, UserRole]),
     PassportModule,

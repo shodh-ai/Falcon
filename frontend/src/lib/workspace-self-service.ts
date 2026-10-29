@@ -1,8 +1,9 @@
 import { getAccountSettingsHrefForPortal, getDashboardPathForRole } from '@/lib/auth-routing';
 
-export type WorkspacePrefix = 'faculty' | 'hod' | 'dean' | 'hr';
+export type WorkspacePrefix = 'faculty' | 'hod' | 'dean' | 'hr' | 'principal';
 
 export function workspacePrefixFromPath(pathname: string): WorkspacePrefix | null {
+  if (pathname.startsWith('/principal')) return 'principal';
   if (pathname.startsWith('/dean')) return 'dean';
   if (pathname.startsWith('/hod')) return 'hod';
   if (pathname.startsWith('/faculty')) return 'faculty';

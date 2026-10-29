@@ -26,6 +26,7 @@ export function getDashboardPathForRole(role: string | undefined | null): string
   if (r === 'hod') {
     return '/hod/dashboard';
   }
+  if (r === 'principal') return '/principal/dashboard';
 
   if (r === 'student' || r === 'applicant') {
     return getStudentLandingPath(r);
@@ -172,6 +173,7 @@ export function getDashboardPathForRole(role: string | undefined | null): string
 
 export function getWorkspaceLabelForRole(role: string): string {
   const r = role.trim().toLowerCase();
+  if (r === 'principal') return 'Principal Workspace';
   if (r === 'student' || r === 'applicant') return 'Student Workspace';
   if (r === 'faculty') return 'Faculty Workspace';
   if (r === 'hod') return 'HOD Workspace';
@@ -207,6 +209,7 @@ export function getWorkspaceLabelForRole(role: string): string {
 /** Compact label for header controls where space is limited */
 export function getWorkspaceShortLabelForRole(role: string): string {
   const r = role.trim().toLowerCase();
+  if (r === 'principal') return 'Principal';
   if (r === 'student' || r === 'applicant') return 'Student';
   if (r === 'faculty') return 'Faculty';
   if (r === 'hod') return 'HOD';
@@ -374,6 +377,7 @@ function canAccessHrPath(
 }
 
 const portalRoles: Record<string, string[]> = {
+  '/principal': ['principal'],
   '/student': ['student', 'applicant'],
   '/faculty': ['faculty'],
   '/dean': ['dean'],
@@ -1071,7 +1075,7 @@ export function getPostLoginPath(user: {
 
   // Department heads (including Deans mapped as hod_user_id) use the HOD Command Center.
   const landingRole =
-    user.is_department_hod || hasHodRole ? 'HOD' : primaryRole;
+    primaryRole?.trim().toLowerCase()==='principal' ? 'Principal' : user.is_department_hod || hasHodRole ? 'HOD' : primaryRole;
 
   const config = getOnboardingConfigForRole(landingRole);
   if (config) {

@@ -2,5 +2,5 @@
 export function isStudentEnrollmentEmail(
   email: string | null | undefined,
 ): boolean {
-  return /^[^@]*\.\d{5,}@/i.test((email ?? '').trim());
+  return /^(?:[^@]*\.\d{5,}|\d+\.student)@/i.test((email ?? '').trim());
 }

@@ -1107,6 +1107,7 @@ export class HrService {
       const hodUserId = await fetchDepartmentHodUserId(
         (sql, params) => this.users.manager.query(sql, params),
         user.dept_id,
+        tenantId,
       );
 
       user.reporting_officer_id = resolveDefaultReportingOfficerId({

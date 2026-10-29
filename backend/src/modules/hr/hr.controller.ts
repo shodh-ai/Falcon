@@ -155,7 +155,7 @@ export class HrController {
   }
 
   @Post('staff-attendance/:userId/check-in')
-  @Roles('HR', 'HRAdmin', 'SuperAdmin', 'Faculty', 'HOD')
+  @Roles('HR', 'HRAdmin', 'SuperAdmin', 'Faculty', 'HOD', 'Principal')
   checkIn(
     @Param('userId') userId: string,
     @Body('work_date') workDate: string,
@@ -165,7 +165,7 @@ export class HrController {
 
   @Post('attendance/web-punch')
   @SkipEntityScope()
-  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
+  @Roles('Faculty', 'HOD', 'Principal', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
   webPunch(
     @Req() req: { user: AuthUser },
     @Body('action') action?: 'IN' | 'OUT',
@@ -175,14 +175,14 @@ export class HrController {
 
   @Get('attendance/my-summary')
   @SkipEntityScope()
-  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
+  @Roles('Faculty', 'HOD', 'Principal', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
   myAttendanceSummary(@Req() req: { user: AuthUser }) {
     return this.hr.getAttendanceSummary(req.user.user_id);
   }
 
   @Get('attendance/my-calendar')
   @SkipEntityScope()
-  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
+  @Roles('Faculty', 'HOD', 'Principal', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
   myAttendanceCalendar(
     @Req() req: { user: AuthUser },
     @Query('month') month: string,
@@ -195,7 +195,7 @@ export class HrController {
 
   @Post('leaves/apply')
   @SkipEntityScope()
-  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
+  @Roles('Faculty', 'HOD', 'Principal', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
   applyLeave(
     @Req() req: { user: AuthUser },
     @Body()
@@ -215,7 +215,7 @@ export class HrController {
 
   @Get('leaves/my-requests')
   @SkipEntityScope()
-  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
+  @Roles('Faculty', 'HOD', 'Principal', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
   myStaffLeaves(@Req() req: { user: AuthUser }) {
     return this.hr.listMyStaffLeaves(
       req.user.user_id,
@@ -314,7 +314,7 @@ export class HrController {
 
   @Post('gate-passes')
   @SkipEntityScope()
-  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
+  @Roles('Faculty', 'HOD', 'Principal', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
   createGatePass(
     @Req() req: { user: AuthUser },
     @Body() dto: { out_time: string; expected_in_time: string; reason: string },
@@ -328,7 +328,7 @@ export class HrController {
 
   @Get('gate-passes/my')
   @SkipEntityScope()
-  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
+  @Roles('Faculty', 'HOD', 'Principal', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
   myGatePasses(@Req() req: { user: AuthUser }) {
     return this.hr.listMyGatePasses(
       req.user.user_id,
@@ -337,7 +337,7 @@ export class HrController {
   }
 
   @Get('gate-passes/pending-approvals')
-  @Roles('HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin', 'Faculty')
+  @Roles('HOD', 'Principal', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin', 'Faculty')
   pendingGatePasses(@Req() req: { user: AuthUser }) {
     return this.hr.listPendingGatePassApprovals(
       req.user.user_id,
@@ -378,7 +378,7 @@ export class HrController {
   }
 
   @Patch('gate-passes/:passId/action')
-  @Roles('HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin', 'Faculty')
+  @Roles('HOD', 'Principal', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin', 'Faculty')
   actOnGatePass(
     @Param('passId') passId: string,
     @Req() req: { user: AuthUser },
@@ -680,7 +680,7 @@ export class HrController {
   }
 
   @Get('inbox/pending')
-  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
+  @Roles('Faculty', 'HOD', 'Principal', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
   pendingInbox(@Req() req: { user: AuthUser }) {
     return this.workforce.listPendingInbox(
       req.user.user_id,
@@ -822,7 +822,7 @@ export class HrController {
   }
 
   @Get('directory')
-  @Roles('HR', 'HRAdmin', 'SuperAdmin', 'Faculty', 'HOD', 'Dean', 'President')
+  @Roles('HR', 'HRAdmin', 'SuperAdmin', 'Faculty', 'HOD', 'Principal', 'Dean', 'President')
   @HrPermission('directory', 'read')
   async directory(
     @Req() req: { user: AuthUser },
@@ -1218,7 +1218,7 @@ export class HrController {
 
   @Get('holidays')
   @SkipEntityScope()
-  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
+  @Roles('Faculty', 'HOD', 'Principal', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
   holidays() {
     return this.workforce.listHolidaysGrouped();
   }
@@ -1375,7 +1375,7 @@ export class HrController {
   }
 
   @Get('recruitment/pipeline')
-  @Roles('HR', 'HRAdmin', 'SuperAdmin', 'Faculty', 'HOD', 'Dean')
+  @Roles('HR', 'HRAdmin', 'SuperAdmin', 'Faculty', 'HOD', 'Principal', 'Dean')
   @HrPermission('recruitment', 'read')
   async recruitmentPipeline(
     @Req() req: { user: AuthUser },
@@ -1387,7 +1387,7 @@ export class HrController {
   }
 
   @Patch('recruitment/applicants/:applicantId/stage')
-  @Roles('HR', 'HRAdmin', 'SuperAdmin', 'Faculty', 'HOD', 'Dean')
+  @Roles('HR', 'HRAdmin', 'SuperAdmin', 'Faculty', 'HOD', 'Principal', 'Dean')
   @HrPermission('recruitment', 'write')
   async moveApplicant(
     @Param('applicantId') applicantId: string,
@@ -1579,7 +1579,7 @@ export class HrController {
   }
 
   @Get('ess/onboarding/progress')
-  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
+  @Roles('Faculty', 'HOD', 'Principal', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
   async essOnboardingProgress(
     @Req() req: { user: AuthUser },
     @Query('entity_id') entityId?: string,
@@ -1590,7 +1590,7 @@ export class HrController {
   }
 
   @Patch('ess/onboarding/steps/:stepKey')
-  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
+  @Roles('Faculty', 'HOD', 'Principal', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
   completeOnboardingStep(
     @Param('stepKey') stepKey: string,
     @Body('pipeline_id') pipelineId: string,
@@ -1599,7 +1599,7 @@ export class HrController {
   }
 
   @Post('ess/resignation')
-  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
+  @Roles('Faculty', 'HOD', 'Principal', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
   async submitResignation(
     @Req() req: { user: AuthUser },
     @Query('entity_id') entityId: string | undefined,
@@ -1652,7 +1652,7 @@ export class HrController {
 
   @Get('ess/team/scope-counts')
   @SkipEntityScope()
-  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
+  @Roles('Faculty', 'HOD', 'Principal', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
   teamScopeCounts(@Req() req: { user: AuthUser }) {
     return this.team.getScopeCounts(
       req.user.user_id,
@@ -1662,7 +1662,7 @@ export class HrController {
 
   @Get('ess/team/dashboard')
   @SkipEntityScope()
-  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
+  @Roles('Faculty', 'HOD', 'Principal', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
   teamDashboard(
     @Req() req: { user: AuthUser },
     @Query('scope') scope?: string,
@@ -1678,7 +1678,7 @@ export class HrController {
 
   @Get('ess/team/attendance')
   @SkipEntityScope()
-  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
+  @Roles('Faculty', 'HOD', 'Principal', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
   teamAttendance(
     @Req() req: { user: AuthUser },
     @Query('scope') scope?: string,
@@ -1694,7 +1694,7 @@ export class HrController {
 
   @Get('ess/team/attendance/today')
   @SkipEntityScope()
-  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
+  @Roles('Faculty', 'HOD', 'Principal', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
   teamAttendanceToday(
     @Req() req: { user: AuthUser },
     @Query('scope') scope?: string,
@@ -1708,7 +1708,7 @@ export class HrController {
 
   @Get('ess/resignations/pending-hod')
   @SkipEntityScope()
-  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
+  @Roles('Faculty', 'HOD', 'Principal', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
   pendingHodResignations(
     @Req() req: { user: AuthUser },
     @Query('scope') scope?: string,
@@ -1722,7 +1722,7 @@ export class HrController {
 
   @Get('ess/team/attendance/export')
   @SkipEntityScope()
-  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
+  @Roles('Faculty', 'HOD', 'Principal', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
   async teamAttendanceExport(
     @Req() req: { user: AuthUser },
     @Res({ passthrough: true }) res: Response,
@@ -1746,7 +1746,7 @@ export class HrController {
 
   @Get('ess/team/member/:userId/summary')
   @SkipEntityScope()
-  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
+  @Roles('Faculty', 'HOD', 'Principal', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
   teamMemberSummary(
     @Param('userId') userId: string,
     @Req() req: { user: AuthUser },
@@ -1820,7 +1820,7 @@ export class HrController {
 
   @Get('team/pending-counts')
   @SkipEntityScope()
-  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
+  @Roles('Faculty', 'HOD', 'Principal', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
   teamPendingCounts(
     @Req() req: { user: AuthUser },
     @Query('scope') scope?: string,
@@ -1835,7 +1835,7 @@ export class HrController {
 
   @Get('ess/team/requests')
   @SkipEntityScope()
-  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
+  @Roles('Faculty', 'HOD', 'Principal', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
   teamRequests(
     @Req() req: { user: AuthUser },
     @Query('scope') scope?: string,
@@ -1852,7 +1852,7 @@ export class HrController {
 
   @Patch('ess/team/requests/bulk')
   @SkipEntityScope()
-  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
+  @Roles('Faculty', 'HOD', 'Principal', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
   teamBulkRequests(
     @Req() req: { user: AuthUser },
     @Body()
@@ -1876,7 +1876,7 @@ export class HrController {
 
   @Post('ess/team/attention')
   @SkipEntityScope()
-  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
+  @Roles('Faculty', 'HOD', 'Principal', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
   teamAttention(
     @Req() req: { user: AuthUser },
     @Body()
@@ -2230,7 +2230,7 @@ export class HrController {
   }
 
   @Get('ess/policies')
-  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
+  @Roles('Faculty', 'HOD', 'Principal', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
   async essPolicies(
     @Req() req: { user: AuthUser },
     @Query('entity_id') entityId?: string,
@@ -2241,7 +2241,7 @@ export class HrController {
   }
 
   @Post('ess/policies/:policyId/acknowledge')
-  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
+  @Roles('Faculty', 'HOD', 'Principal', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
   acknowledgePolicy(
     @Param('policyId') policyId: string,
     @Req() req: { user: AuthUser },
@@ -2254,7 +2254,7 @@ export class HrController {
   }
 
   @Post('ess/policies/:policyId/vote')
-  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
+  @Roles('Faculty', 'HOD', 'Principal', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
   submitPolicyVote(
     @Param('policyId') policyId: string,
     @Body('vote') vote: 'YES' | 'NO',
@@ -2439,7 +2439,7 @@ export class HrController {
   }
 
   @Post('workforce/biometric/simulate')
-  @Roles('HR', 'HRAdmin', 'SuperAdmin', 'Faculty', 'HOD')
+  @Roles('HR', 'HRAdmin', 'SuperAdmin', 'Faculty', 'HOD', 'Principal')
   simulateBiometric(
     @Req() req: { user: AuthUser },
     @Body()
