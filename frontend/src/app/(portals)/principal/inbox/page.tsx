@@ -1,5 +1,5 @@
 import { DepartmentCasesPanel } from "@/components/principal/DepartmentCasesPanel";
-import { TeamInboxPage } from "@/components/self-service/TeamInboxPage";
+import { PrincipalReportingRequests } from "@/components/principal/PrincipalReportingRequests";
 import { PrincipalGatePasses } from "@/components/principal/PrincipalGatePasses";
 export default function PrincipalInbox() {
   return (
@@ -14,7 +14,7 @@ export default function PrincipalInbox() {
           Existing requests retain their recorded approvers. New routine
           department requests are routed to HOD.
         </p>
-        <TeamInboxPage />
+        <PrincipalReportingRequests />
         <PrincipalGatePasses />
       </section>
     </main>

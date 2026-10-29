@@ -113,7 +113,7 @@ export function PrincipalOversightPage({ view }: { view: PrincipalView }) {
     [loading, setLoading] = useState(true),
     [search, setSearch] = useState("");
   const load = useCallback(
-    async (isActive = () => true) => {
+    async (isActive: () => boolean = () => true) => {
       setLoading(true);
       setError("");
       try {

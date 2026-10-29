@@ -835,6 +835,11 @@ export class HrTeamService {
     }
     if (!ids.length) throw new BadRequestException('No requests selected');
     const tabKey = (tab?.toUpperCase() ?? 'LEAVE') as TeamRequestTab;
+    if (roles.some(role => role.toLowerCase() === 'principal') &&
+        !roles.some(role => ['hr','hradmin','superadmin','hod','dean'].includes(role.toLowerCase())) &&
+        ['DOCUMENT','APPRAISAL','ATTENDANCE_OVERRIDE'].includes(tabKey)) {
+      throw new ForbiddenException('Principal oversight does not grant specialist document, appraisal or attendance approval authority');
+    }
 
     if (tabKey === 'DOCUMENT') {
       const status = action === 'APPROVE' ? 'VERIFIED' : 'REJECTED';

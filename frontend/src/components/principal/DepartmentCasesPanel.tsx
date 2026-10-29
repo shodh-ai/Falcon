@@ -54,7 +54,7 @@ export function DepartmentCasesPanel({
     return command.current!.key;
   };
   const load = useCallback(
-    async (isActive = () => true) => {
+    async (isActive: () => boolean = () => true) => {
       setLoading(true);
       try {
         const data = await api.get<{ cases: OversightCase[] }>(base);

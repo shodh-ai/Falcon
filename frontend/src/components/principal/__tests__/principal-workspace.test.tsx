@@ -7,6 +7,7 @@ import {
   cleanup,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { PrincipalReportingRequests } from "../PrincipalReportingRequests";
 import { DepartmentCasesPanel } from "../DepartmentCasesPanel";
 import { PrincipalOversightPage, duration } from "../PrincipalOversightPage";
 import { PrincipalWorkspaceReturn } from "@/components/layout/PrincipalWorkspaceReturn";
@@ -180,5 +181,33 @@ describe("reserved approval interface", () => {
     expect(screen.getByLabelText("Decision / response (required)")).toHaveValue(
       "Decision with adequate evidence",
     );
+  });
+});
+
+describe("Principal reporting queue", () => {
+  it("uses assigned direct reporting requests and offers no specialist or cross-workspace shortcuts", async () => {
+    mocks.get.mockResolvedValue({ items: [] });
+    render(<PrincipalReportingRequests />);
+    await screen.findByText("No assigned pending requests of this type.");
+    expect(mocks.get).toHaveBeenCalledWith(
+      "/api/hr/ess/team/requests?scope=direct&tab=LEAVE",
+    );
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("option", { name: "Appraisals" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("option", { name: "Documents" }),
+    ).not.toBeInTheDocument();
+  });
+  it("surfaces request failures without presenting demo requests", async () => {
+    mocks.get.mockRejectedValue(new Error("Reporting scope unavailable"));
+    render(<PrincipalReportingRequests />);
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Reporting scope unavailable",
+    );
+    expect(
+      screen.queryByText("No assigned pending requests of this type."),
+    ).not.toBeInTheDocument();
   });
 });
