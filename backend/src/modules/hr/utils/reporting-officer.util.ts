@@ -1,4 +1,4 @@
-const FACULTY_LIKE_ROLES = new Set(['faculty', 'hod', 'dean']);
+const FACULTY_LIKE_ROLES = new Set(['faculty', 'hod', 'dean', 'principal']);
 
 /** Resolve reporting officer: explicit override wins, else default to department HOD for faculty-like roles. */
 export function resolveDefaultReportingOfficerId(params: {
@@ -34,8 +34,18 @@ export async function fetchDepartmentHodUserId(
     params?: unknown[],
   ) => Promise<Array<{ hod_user_id: string | null }>>,
   deptId: number | null | undefined,
+  tenantId?: string,
 ): Promise<string | null> {
   if (!deptId) return null;
+  if(tenantId){
+    const rows=await query(`SELECT CASE WHEN c.dept_id IS NULL THEN d.hod_user_id ELSE a.user_id END AS hod_user_id
+      FROM departments d LEFT JOIN department_leadership c ON c.dept_id=d.dept_id AND c.tenant_id=$2
+      LEFT JOIN department_offices o ON o.tenant_id=c.tenant_id AND o.dept_id=c.dept_id
+        AND o.kind=CASE WHEN c.structure='HOD_ONLY' THEN 'HOD' ELSE 'PRINCIPAL' END
+      LEFT JOIN department_office_appointments a ON a.office_id=o.office_id AND a.valid_to IS NULL AND a.valid_from<=now()
+      WHERE d.dept_id=$1 LIMIT 1`,[deptId,tenantId]);
+    return rows[0]?.hod_user_id??null;
+  }
   const rows = await query(
     `SELECT hod_user_id FROM departments WHERE dept_id = $1 LIMIT 1`,
     [deptId],
@@ -45,6 +55,7 @@ export async function fetchDepartmentHodUserId(
 
 const MANAGER_PORTAL_ROLES = new Set([
   'hod',
+  'principal',
   'dean',
   'hr',
   'hradmin',

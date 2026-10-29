@@ -27,6 +27,7 @@ interface User {
   has_direct_reports?: boolean;
   is_department_hod?: boolean;
   read_only_academic_view?: boolean;
+  office_context?: {office_id:string;appointment_id:string;dept_id:number;kind:'PRINCIPAL'|'HOD';login_alias:string};
 }
 
 interface AuthContextType {

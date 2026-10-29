@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -143,6 +144,10 @@ export class SuperAdminService {
     if (!entityId) {
       throw new BadRequestException('entity_id is required');
     }
+    if(dto.entity_type==='DEPARTMENT' && dto.assignment_type==='HOD'){
+      const managed=await this.dataSource.query('SELECT 1 FROM department_leadership WHERE tenant_id=$1 AND dept_id=$2',[tenantId,Number(entityId)]);
+      if(managed.length)throw new ConflictException('Use Department leadership & officeholders to change this managed HOD office');
+    }
 
     const user = await this.dataSource.query<{ user_id: string }[]>(
       `SELECT user_id FROM users WHERE user_id = $1 AND tenant_id = $2 AND is_active = true`,
@@ -282,6 +287,10 @@ export class SuperAdminService {
     const row = rows[0];
     if (!row) {
       throw new NotFoundException('Assignment not found');
+    }
+    if(row.assignment_type==='HOD' && row.entity_type==='DEPARTMENT'){
+      const managed=await this.dataSource.query('SELECT 1 FROM department_leadership WHERE tenant_id=$1 AND dept_id=$2',[tenantId,Number(row.entity_id)]);
+      if(managed.length)throw new ConflictException('End the managed office appointment in Department leadership & officeholders');
     }
 
     if (row.assignment_type === 'DEAN' && row.entity_type === 'SCHOOL') {

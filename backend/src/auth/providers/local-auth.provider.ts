@@ -23,6 +23,8 @@ export class LocalAuthProvider implements IAuthProvider {
       name: user.name,
       tenantId,
       tenantSchema,
+      leadership_auth_revision: user.leadership_auth_revision ?? 0,
+      office_context: user.office_context,
     };
     return this.jwtService.sign(payload);
   }
@@ -34,6 +36,7 @@ export class LocalAuthProvider implements IAuthProvider {
   }
 
   private getRoleClaims(user: User): { roles: string[]; primaryRole?: string } {
+    if(user.leadership_roles)return user.leadership_roles;
     const mappedRoles = (user.userRoles ?? [])
       .filter((row) => row.role?.role_name)
       .sort((a, b) => Number(b.is_primary) - Number(a.is_primary))

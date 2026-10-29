@@ -63,6 +63,7 @@ function isProtectedPortalPath(pathname: string): boolean {
     pathname.startsWith('/student') ||
     pathname.startsWith('/faculty') ||
     pathname.startsWith('/hod') ||
+    pathname.startsWith('/principal') ||
     pathname.startsWith('/dean') ||
     pathname.startsWith('/hr') ||
     pathname.startsWith('/finance') ||

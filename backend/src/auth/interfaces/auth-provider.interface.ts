@@ -15,6 +15,8 @@ export interface AuthTokenPayload {
   impersonator_user_id?: string;
   read_only_impersonation?: boolean;
   impersonation_session_id?: string;
+  leadership_auth_revision?: number;
+  office_context?: import('../../modules/department-leadership/leadership.types').OfficeContext;
 }
 
 export interface AuthenticatedUser {
