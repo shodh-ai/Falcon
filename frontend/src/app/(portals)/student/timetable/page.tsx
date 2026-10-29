@@ -32,6 +32,7 @@ type TimetableSlot = {
   room: string | null;
   faculty_name: string | null;
   substitute_faculty_name?: string | null;
+  is_extra_class?: boolean;
   section: string | null;
   day_of_week: number;
   start_time: string;
@@ -161,6 +162,7 @@ function SlotButton({
         <p className="text-sm font-semibold leading-snug">{subject}</p>
         <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs">
           <span className="font-medium text-muted-foreground">{slot.course_code}</span>
+          {slot.is_extra_class && <Badge variant="outline">Approved extra class</Badge>}
           {batch && <Badge variant="secondary">{batch}</Badge>}
           {slot.is_virtual && <Badge variant="outline">Online</Badge>}
         </div>
@@ -350,6 +352,7 @@ export default function TimetablePage() {
                   <p className="text-xs uppercase tracking-wide text-muted-foreground">Course code</p>
                   <p className="font-semibold text-sgvu-navy">{selectedSlot.course_code}</p>
                 </div>
+                {selectedSlot.is_extra_class && <Badge variant="outline">Approved extra class</Badge>}
                 {selectedSlot.section?.toUpperCase().startsWith('BATCH-') && (
                   <div>
                     <p className="text-xs uppercase tracking-wide text-muted-foreground">Practical group</p>

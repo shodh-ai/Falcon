@@ -17,6 +17,7 @@ import {
   getAttendanceSemesters,
   getCurrentAttendanceSemester,
   getSemesterAttendance,
+  getSubjectAttendance,
   type StudentAttendanceData as AttendanceData,
   type StudentAttendanceSubject as SubjectAttendance,
 } from '@/lib/student-attendance';
@@ -43,11 +44,7 @@ function SemesterAttendanceRecords({ rows, semester, loadError }: {
         <>
           <div role="list" aria-label={semester == null ? "Course attendance cards" : `Semester ${semester} attendance cards`} className="space-y-3 md:hidden">
             {rows.map((row) => {
-              const pct = Number(row.attendance_percent);
-              const total =
-                row.total_classes > 0
-                  ? row.total_classes
-                  : row.present_count + row.absent_count;
+              const { percent: pct, total } = getSubjectAttendance(row);
               return (
                 <div
                   role="listitem"
@@ -62,7 +59,9 @@ function SemesterAttendanceRecords({ rows, semester, loadError }: {
                       <p className="mt-1 text-sm font-semibold text-sgvu-navy">{row.course_name}</p>
                       <p className="mt-0.5 text-xs text-muted-foreground">Semester {row.semester}</p>
                     </div>
-                    <Badge variant={pct >= 75 ? 'success' : 'destructive'}>{pct.toFixed(1)}%</Badge>
+                    <Badge variant={pct == null ? 'secondary' : pct >= 75 ? 'success' : 'destructive'}>
+                      {pct == null ? 'Not recorded' : `${pct.toFixed(1)}%`}
+                    </Badge>
                   </div>
                   <div className="mt-3 grid grid-cols-3 gap-2 text-center text-xs">
                     <div className="rounded-lg bg-slate-50 px-2 py-2">
@@ -96,11 +95,7 @@ function SemesterAttendanceRecords({ rows, semester, loadError }: {
               </thead>
               <tbody>
                 {rows.map((row) => {
-                  const pct = Number(row.attendance_percent);
-                  const total =
-                    row.total_classes > 0
-                      ? row.total_classes
-                      : row.present_count + row.absent_count;
+                  const { percent: pct, total } = getSubjectAttendance(row);
                   return (
                     <tr key={`${row.course_code}-${row.semester}`} className="border-b last:border-0">
                       <td className="px-4 py-3 font-semibold text-sgvu-navy">{row.course_code}</td>
@@ -118,8 +113,8 @@ function SemesterAttendanceRecords({ rows, semester, loadError }: {
                       </td>
                       <td className="px-4 py-3 text-right">{total}</td>
                       <td className="px-4 py-3 text-right">
-                        <Badge variant={pct >= 75 ? 'success' : 'destructive'}>
-                          {pct.toFixed(1)}%
+                        <Badge variant={pct == null ? 'secondary' : pct >= 75 ? 'success' : 'destructive'}>
+                          {pct == null ? 'Not recorded' : `${pct.toFixed(1)}%`}
                         </Badge>
                       </td>
                     </tr>

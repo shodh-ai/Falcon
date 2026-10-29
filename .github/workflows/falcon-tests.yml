@@ -164,6 +164,21 @@ jobs:
           ALLOW_SCHEMA_BOOTSTRAP_SYNC: 'true'
         run: npm run db:migrate:test
 
+      - name: Student timetable and attendance identity regressions
+        working-directory: backend
+        env:
+          FALCON_RUN_STUDENT_ATTENDANCE_SQL_TESTS: '1'
+        run: |
+          npm test -- --runInBand --runTestsByPath \
+            src/modules/academics/student-dated-timetable.spec.ts \
+            src/modules/academics/student-timetable-visibility.spec.ts \
+            src/modules/academics/academics.service.spec.ts \
+            src/modules/student-portal/student-portal.service.spec.ts \
+            src/modules/student-portal/student-portal.security.spec.ts \
+            src/modules/academics/student-results.security.spec.ts \
+            src/modules/academics/student-enrollment-sync.service.spec.ts
+          node --test scripts/student-attendance-session-identity.spec.cjs
+
       - name: HR QA workflow, scoped queues, reports and document storage regressions
         working-directory: backend
         env:

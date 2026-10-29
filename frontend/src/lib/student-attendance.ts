@@ -16,6 +16,15 @@ export type StudentAttendanceData = {
   progression: { semester: number; status: string; courses_count: number }[];
 };
 
+export function getSubjectAttendance(row: StudentAttendanceSubject) {
+  const count = Number(row.total_classes);
+  const total = Number.isFinite(count) && count > 0 ? count : 0;
+  return {
+    total,
+    percent: total > 0 ? (Number(row.present_count ?? 0) / total) * 100 : null,
+  };
+}
+
 export function getAttendanceSemesters(data: StudentAttendanceData | null): number[] {
   return [...new Set([
     ...(data?.subject_wise ?? []).map((row) => Number(row.semester)),

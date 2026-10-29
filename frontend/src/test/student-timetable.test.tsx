@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import TimetablePage from '@/app/(portals)/student/timetable/page';
 
@@ -11,6 +11,29 @@ vi.mock('@/components/student/StudentPageShell', () => ({
 }));
 
 describe('published student timetable', () => {
+  it('labels an approved dated extra and opens its own attendance record alongside the regular class', async () => {
+    const base = {
+      course_id: 'course-from-environment', course_code: 'TEST101', course_name: 'Enrolled subject',
+      faculty_name: 'Allocated faculty', room: 'Room B', day_of_week: 2,
+      is_virtual: false, live_join_url: null, session_date: '2026-10-27', section: 'A',
+    };
+    api.get.mockResolvedValue({
+      week_start: '2026-10-26', week_dates: [{ day_of_week: 2, label: 'Tue', date: '2026-10-27' }],
+      slots: [
+        { ...base, timetable_id: 'regular-from-environment', start_time: '11:00', end_time: '12:00', attendance_status: 'ABSENT' },
+        { ...base, timetable_id: 'extra:adjustment-from-environment', start_time: '14:30', end_time: '15:30', section: null, is_extra_class: true, attendance_status: 'PRESENT' },
+      ], pending_practical_batches: [], conflict_count: 0,
+    });
+    render(<TimetablePage />);
+    const extra = await screen.findByRole('button', { name: /2:30 PM 3:30 PM Enrolled subject/ });
+    expect(within(extra).getByText('Approved extra class')).toBeInTheDocument();
+    fireEvent.click(extra);
+    const dialog = screen.getByRole('dialog', { name: 'Enrolled subject' });
+    expect(within(dialog).getByText('Approved extra class')).toBeInTheDocument();
+    expect(within(dialog).getByText('Present')).toBeInTheDocument();
+    expect(within(dialog).getByText('Tuesday, 27 October 2026')).toBeInTheDocument();
+    expect(within(dialog).queryByText('Absent')).not.toBeInTheDocument();
+  });
   it('shows a readable day schedule with only the confirmed practical', async () => {
     const base = {
       course_id: 'course', course_code: 'CODE', room: 'LT-24',

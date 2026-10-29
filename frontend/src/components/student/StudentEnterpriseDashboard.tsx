@@ -142,6 +142,7 @@ type ScheduleItem = {
   start: string;
   end: string;
   status: 'upcoming' | 'ongoing' | 'done';
+  isExtraClass?: boolean;
 };
 
 type AssignmentItem = {
@@ -522,6 +523,7 @@ function StudentDashboardWorkspace({ disabledModules }: { disabledModules: Busin
             start,
             end,
             status: getTimetableSlotStatus(start, end, now),
+            isExtraClass: row.is_extra_class === true,
           };
         });
         setSchedule(mapped);
@@ -1098,6 +1100,7 @@ function StudentDashboardWorkspace({ disabledModules }: { disabledModules: Busin
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
                           <p className="truncate text-sm font-semibold text-sgvu-navy">{slot.subject}</p>
+                          {slot.isExtraClass && <Badge variant="outline">Approved extra class</Badge>}
                           <p className="mt-0.5 text-xs text-muted-foreground">
                             {slot.faculty} · <MapPin className="mr-0.5 inline h-3 w-3" />
                             {slot.room}
