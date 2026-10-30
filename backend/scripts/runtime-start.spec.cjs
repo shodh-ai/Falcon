@@ -173,8 +173,17 @@ const limitedPolicy={
   department_leadership_events:{insert:true,updateColumns:[]},
   student_identity_email_changes:{insert:false,updateColumns:[]},
 };
-test('leadership boundary lists only six exact immutable object policies',()=>{
-  assert.deepEqual(LIMITED_BUSINESS_TABLES,limitedPolicy);
+const compatibilityAdditions={
+  hr_department_request_routes:{insert:true,updateColumns:['approver_ids','current_index','leadership_revision','updated_at']},
+  department_leadership_changes:{insert:true,updateColumns:[]},
+  hr_staff_request_appeals:{insert:true,updateColumns:['rejecting_user_id','reviewer_user_id','status','reconsideration_count','revision','updated_at']},
+  hr_staff_request_appeal_events:{insert:true,updateColumns:[]},
+};
+test('compatibility boundary recognizes exact old and new limited relations',()=>{
+  assert.deepEqual(LIMITED_BUSINESS_TABLES,{...limitedPolicy,
+    department_leadership:{insert:true,updateColumns:[
+      'structure','higher_officer_id','revision','dean_enabled','dean_user_id']},
+    ...compatibilityAdditions});
   assert.ok(Object.isFrozen(LIMITED_BUSINESS_TABLES));
   for(const table of Object.values(LIMITED_BUSINESS_TABLES)){
     assert.ok(Object.isFrozen(table));
@@ -184,14 +193,17 @@ test('leadership boundary lists only six exact immutable object policies',()=>{
   assert.equal(Object.hasOwn(LIMITED_BUSINESS_TABLES,'schema_migrations'),false);
 });
 test('leadership metadata query checks effective column permissions without a schema mutation',()=>{
-  for(const name of Object.keys(limitedPolicy)) assert.ok(ROLE_QUERY.includes(name));
+  for(const name of Object.keys(LIMITED_BUSINESS_TABLES)) assert.ok(ROLE_QUERY.includes(name));
+  assert.match(ROLE_QUERY,/to_regclass\('public\.hr_department_request_routes'\)/);
+  assert.match(ROLE_QUERY,/dean_enabled/);
+  assert.match(ROLE_QUERY,/dean_user_id/);
   assert.match(ROLE_QUERY,/has_column_privilege/);
   assert.match(ROLE_QUERY,/has_any_column_privilege/);
   assert.match(ROLE_QUERY,/pg_attribute/);
   assert.doesNotMatch(ROLE_QUERY,/\b(?:GRANT|REVOKE|ALTER|CREATE|DROP|TRUNCATE)\s+(?:ON|TABLE|SCHEMA|ROLE|ALL)\b/);
 });
 
-test('runtime launcher and both reviewed SQL policies share exactly the same limited matrix',()=>{
+test('pre-migration SQL policies retain the exact old limited matrix',()=>{
   const directory=path.join(__dirname,'../../ops/deployment-safety');
   const expected=Object.fromEntries(Object.entries(limitedPolicy).map(([name,entry])=>
     [name,{insert:entry.insert,update_columns:entry.updateColumns}]));
