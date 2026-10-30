@@ -459,9 +459,12 @@ export default function FacultyTimetablePage() {
   return (
     <FacultyPageShell>
       <FacultyPageHeader
-        title="Timetable"
-        description="Your classes, substitute offers, and approved changes."
-        actions={<Button asChild variant="outline" size="sm"><Link href={`${teachingPrefix}/workload`}>View my workload</Link></Button>}
+        title={teachingPrefix === '/hod/my-teaching' ? 'My Teaching Timetable' : 'Timetable'}
+        description="Your own teaching sessions, substitute offers, and approved changes."
+        actions={<>
+          {teachingPrefix === '/hod/my-teaching' && <Button asChild variant="outline" size="sm"><Link href="/hod/department-timetable">Department timetable</Link></Button>}
+          <Button asChild variant="outline" size="sm"><Link href={`${teachingPrefix}/workload`}>View my workload</Link></Button>
+        </>}
       />
 
       <FacultyPanel

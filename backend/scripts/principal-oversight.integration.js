@@ -28,6 +28,7 @@ async function main() {
  CREATE TABLE departments(dept_id int PRIMARY KEY,school_id int,hod_user_id uuid,deleted_at timestamptz);
  CREATE TABLE schools(school_id int PRIMARY KEY,dean_user_id uuid);
  CREATE TABLE users(user_id uuid PRIMARY KEY,tenant_id uuid,dept_id int,name text,official_email text,role_id int,is_active boolean DEFAULT true,deleted_at timestamptz);
+ CREATE TABLE iam_programs(program_name text, program_code text, dept_id int, deleted_at timestamptz);
  CREATE TABLE academic_courses(course_id uuid PRIMARY KEY,tenant_id uuid,course_code text,course_name text);
  CREATE TABLE academic_timetables(timetable_id uuid PRIMARY KEY,tenant_id uuid,course_id uuid,faculty_user_id uuid,day_of_week int,start_time time,end_time time,room text,section text,deleted_at timestamptz,valid_from date,valid_to date);
  CREATE TABLE academic_course_allocations(tenant_id uuid,course_id uuid,academic_year text,program_name text,semester text,status text);

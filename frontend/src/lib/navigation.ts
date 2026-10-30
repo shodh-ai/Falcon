@@ -902,7 +902,7 @@ export const hodPortal: PortalConfig = {
     {
       title: 'My Teaching',
       items: [
-        { label: 'My Timetable', href: '/hod/my-teaching/timetable', icon: CalendarClock, keywords: ['my classes', 'schedule'] },
+        { label: 'My Teaching Timetable', href: '/hod/my-teaching/timetable', icon: CalendarClock, keywords: ['my classes', 'schedule'] },
         { label: 'My Courses', href: '/hod/my-teaching/courses', icon: BookOpen, keywords: ['my subjects', 'teaching'] },
         { label: 'Mark Attendance', href: '/hod/my-teaching/attendance', icon: ClipboardCheck, keywords: ['my class attendance'] },
         { label: 'My Workload', href: '/hod/my-teaching/workload', icon: BarChart3, keywords: ['weekly hours', 'cancelled', 'extra classes'] },
@@ -979,7 +979,7 @@ export const hodPortal: PortalConfig = {
     {
       title: 'My Teaching',
       items: [
-        { label: 'My Timetable', href: '/hod/my-teaching/timetable', icon: CalendarClock },
+        { label: 'My Teaching Timetable', href: '/hod/my-teaching/timetable', icon: CalendarClock },
         { label: 'My Courses', href: '/hod/my-teaching/courses', icon: BookOpen },
         { label: 'Mark Attendance', href: '/hod/my-teaching/attendance', icon: ClipboardCheck },
         { label: 'My Workload', href: '/hod/my-teaching/workload', icon: BarChart3 },
