@@ -113,8 +113,10 @@ test containers were removed. The 22 Node launcher/deployment tests and local
 locally, which was exercised separately by the 19-test server run.
 
 That evidence established the prior six-table grant/metadata-query behavior against
-synthetic PG18 data. The four new relations and Dean columns require a new PG18
-fixture pass before production migration or deployment.
+synthetic PG18 data. The expanded ten-table fixture passed in the PR #193 CI
+storage and database deployment-boundaries job on 30 October 2026, using a
+disposable PostgreSQL 18 container and synthetic data. This establishes the
+isolated grant-policy gate only.
 It does not establish final-image startup, password-authenticated production login,
 business workflow acceptance, the complete leadership migration shape, or the
 compatibility-image rolling deployment/restart/rollback sequence. Those remain
