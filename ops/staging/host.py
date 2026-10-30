@@ -88,8 +88,14 @@ class Host:
         if time.monotonic()-getattr(self,'usage_checked_at',-120)>60:
             usage=self.run(['du','-s','-B1','--',str(ROOT)],timeout=15).decode().split()[0]
             if not usage.isdigit():raise RuntimeError('STAGING_WORKING_SET_MEASUREMENT')
+            references=set(self.state['data_images'].values())
+            if self.state.get('current'):references.update(self.state['current']['images'].values())
+            references.update(getattr(self,'reviewed_pulled_images',set()))
+            sizes=self.run(['docker','image','inspect','--format','{{.Size}}',*sorted(references)]).decode().split()
+            if len(sizes)!=len(references) or any(not s.isdigit() for s in sizes):
+                raise RuntimeError('STAGING_IMAGE_SIZE_MEASUREMENT')
             # Include retained generations; low space never authorizes cleanup.
-            self.working_bytes=max(int(usage),self.state.get('working_bytes',0))
+            self.working_bytes=int(usage)+max(sum(map(int,sizes)),self.state.get('working_bytes',0))
             self.usage_checked_at=time.monotonic()
         self.stack.capacity(memory,disk.f_bavail*disk.f_frsize,
                             initial=self.initial and not self.state.get('current') and not self.initial_gate_passed,candidate_mib=candidate_mib,
@@ -130,6 +136,9 @@ class Host:
                actual['Config']['Cmd']!=expected_cmd or actual['Config']['User']!=expected_user:
                 raise RuntimeError('STAGING_IMAGE_PROVENANCE')
             images[component]=image
+            if not hasattr(self,'reviewed_pulled_images'):self.reviewed_pulled_images=set()
+            self.reviewed_pulled_images.add(image)
+            self.usage_checked_at=-120
             self.guard(candidate_mib=1280)
         return images
 
