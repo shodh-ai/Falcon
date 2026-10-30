@@ -9,14 +9,15 @@ const mocks = vi.hoisted(() => ({
   downloadWithAuth: vi.fn(),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
+  pathname: null as string | null,
+  apiPost: vi.fn(),
 }));
 
-vi.mock('@/lib/api', () => ({
-  useAuthedApi: () => ({
-    get: mocks.apiGet,
-    post: vi.fn(),
-  }),
-}));
+vi.mock('next/navigation', () => ({ usePathname: () => mocks.pathname }));
+vi.mock('@/lib/api', () => {
+  const api = { get: mocks.apiGet, post: mocks.apiPost };
+  return { useAuthedApi: () => api };
+});
 
 vi.mock('@/context/AuthContext', () => ({
   useAuth: () => ({ token: 'faculty-test-token' }),
@@ -38,8 +39,15 @@ vi.mock('@/lib/notifications/falcon-toast', () => ({
 describe('FacultyAssignmentsTab create modal', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.pathname = null;
     mocks.apiGet.mockResolvedValue([]);
     mocks.postMultipart.mockResolvedValue({ notified_count: 0 });
+  });
+
+  it('loads only personal assignments within HOD My Teaching', async () => {
+    mocks.pathname = '/hod/my-teaching/courses/course-1';
+    render(<FacultyAssignmentsTab courseId="course-1" />);
+    await waitFor(() => expect(mocks.apiGet).toHaveBeenCalledWith('/api/academics/faculty/assignments?courseId=course-1&scope=mine'));
   });
 
   it('keeps the modal bounded and scrollable so publish and cancel remain reachable', async () => {
