@@ -7,6 +7,14 @@ on:
         description: 'Tested commit SHA to publish'
         required: true
         type: string
+      candidate_tag:
+        description: 'Update the mutable main-candidate tag (choose no for a compatibility or rollback image)'
+        required: true
+        type: choice
+        options:
+          - 'yes'
+          - 'no'
+        default: 'yes'
   workflow_run:
     workflows: ["Falcon CI"]
     types: [completed]
@@ -62,7 +70,7 @@ jobs:
           images: ${{ matrix.image }}
           tags: |
             type=raw,value=sha-${{ inputs.release_sha || github.event.workflow_run.head_sha }}
-            type=raw,value=main-candidate
+            type=raw,value=main-candidate,enable=${{ inputs.candidate_tag != 'no' }}
           labels: |
             org.opencontainers.image.source=https://github.com/shodh-ai/Falcon
             org.opencontainers.image.revision=${{ inputs.release_sha || github.event.workflow_run.head_sha }}
