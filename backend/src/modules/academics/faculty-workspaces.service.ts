@@ -107,7 +107,9 @@ export class FacultyWorkspacesService {
              c.course_id,
              c.course_code,
              c.course_name,
-             c.credits
+             c.credits,
+             assigned.user_id AS faculty_user_id,
+             assigned.name AS faculty_name
            FROM academic_course_allocations a
            INNER JOIN academic_courses c
              ON c.course_id = a.course_id AND c.tenant_id = a.tenant_id
@@ -144,7 +146,9 @@ export class FacultyWorkspacesService {
              c.course_id,
              c.course_code,
              c.course_name,
-             c.credits
+             c.credits,
+             NULL::uuid AS faculty_user_id,
+             NULL::varchar AS faculty_name
            FROM academic_courses c
            WHERE c.tenant_id = $1
              AND EXISTS (
@@ -175,7 +179,9 @@ export class FacultyWorkspacesService {
          c.course_id,
          c.course_code,
          c.course_name,
-         c.credits
+         c.credits,
+         a.faculty_user_id,
+         u.name AS faculty_name
        ${ALLOCATION_WITH_DEPT_FROM}
        WHERE a.tenant_id = $1
          AND a.faculty_user_id = $2
@@ -197,7 +203,9 @@ export class FacultyWorkspacesService {
          c.course_id,
          c.course_code,
          c.course_name,
-         c.credits
+         c.credits,
+         t.faculty_user_id,
+         NULL::varchar AS faculty_name
        FROM academic_courses c
        INNER JOIN academic_timetables t ON t.course_id = c.course_id AND t.tenant_id = c.tenant_id
        WHERE c.tenant_id = $1

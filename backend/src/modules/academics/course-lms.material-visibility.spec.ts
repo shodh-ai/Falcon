@@ -41,6 +41,7 @@ describe('Course LMS section-scoped material publish', () => {
       {} as any,
       {} as any,
       {} as any,
+      {} as any,
     );
     jest.spyOn(target as any, 'resolveHodDepartmentIds').mockResolvedValue([]);
     return { target, materials, allocations, dataSource, manager };

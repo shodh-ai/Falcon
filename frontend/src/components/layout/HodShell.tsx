@@ -1,8 +1,9 @@
 "use client";
-import { useEffect, useState, type ReactNode } from "react";
+import { Suspense, useEffect, useState, type ReactNode } from "react";
 import { AppShell } from "@/components/layout/AppShell";
 import { hodPortal } from "@/lib/navigation";
 import { useAuthedApi } from "@/lib/api";
+import { TeachingDepartmentProvider } from "@/components/faculty/TeachingDepartmentContext";
 export function HodShell({ children }: { children: ReactNode }) {
   const api = useAuthedApi();
   const [enabled, setEnabled] = useState(false);
@@ -36,5 +37,5 @@ export function HodShell({ children }: { children: ReactNode }) {
           (i) => i.href !== "/hod/approvals/department-oversight",
         ),
       };
-  return <AppShell config={config}>{children}</AppShell>;
+  return <Suspense fallback={null}><TeachingDepartmentProvider><AppShell config={config}>{children}</AppShell></TeachingDepartmentProvider></Suspense>;
 }

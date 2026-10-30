@@ -388,11 +388,13 @@ export class AcademicsController {
   listFacultyAssignments(
     @Req() req: { user: AuthUser },
     @Query('courseId') courseId?: string,
+    @Query('scope') scope?: string,
   ) {
     return this.assignments.listFacultyAssignments(
       req.user.user_id,
       this.resolveTenantId(req.user),
       courseId,
+      scope === 'mine',
     );
   }
 
@@ -824,6 +826,36 @@ export class AcademicsController {
       this.resolveTenantId(req.user),
       req.user.user_id,
       courseId,
+    );
+  }
+
+  @Get('hod/courses/:courseId/oversight')
+  @Roles('HOD')
+  hodCourseOversight(
+    @Req() req: { user: AuthUser },
+    @Param('courseId') courseId: string,
+  ) {
+    return this.courseLms.getHodCourseWorkspace(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      courseId,
+    );
+  }
+
+  @Post('hod/courses/:courseId/faculty/:facultyUserId/notification')
+  @Roles('HOD')
+  hodNotifyCourseFaculty(
+    @Req() req: { user: AuthUser },
+    @Param('courseId') courseId: string,
+    @Param('facultyUserId') facultyUserId: string,
+    @Body() body: { message?: string },
+  ) {
+    return this.courseLms.notifyHodCourseFaculty(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      courseId,
+      facultyUserId,
+      body.message ?? '',
     );
   }
 
@@ -2125,13 +2157,15 @@ export class AcademicsController {
   async facultyWorkspaceCourses(
     @Req() req: { user: AuthUser },
     @Query('deptId') deptIdRaw?: string,
+    @Query('scope') scope?: 'mine' | 'department',
   ) {
-    const deptId = await this.resolveFacultyDeptId(req, deptIdRaw);
+    const hodScope = this.isHod(req.user) && scope !== 'mine';
+    const deptId = hodScope ? null : await this.resolveFacultyDeptId(req, deptIdRaw);
     return this.facultyWorkspaces.listFacultyCourses(
       req.user.user_id,
       this.resolveTenantId(req.user),
       deptId,
-      this.isHod(req.user),
+      hodScope,
     );
   }
 

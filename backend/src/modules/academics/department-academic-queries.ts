@@ -174,7 +174,17 @@ export async function listDepartmentTimetable(
        INNER JOIN users u ON u.user_id = t.faculty_user_id AND u.tenant_id=t.tenant_id
        LEFT JOIN departments d ON d.dept_id = u.dept_id
        WHERE t.tenant_id = $1
-         AND u.dept_id = ANY($2::int[])
+         AND (
+           u.dept_id = ANY($2::int[])
+           OR EXISTS (
+             SELECT 1 FROM student_course_enrollments e
+             JOIN users student ON student.user_id = e.student_user_id
+               AND student.tenant_id = e.tenant_id
+             WHERE e.tenant_id = t.tenant_id AND e.course_id = t.course_id
+               AND e.status = 'ENROLLED'
+               AND student.dept_id = ANY($2::int[])
+           )
+         )
          AND EXISTS (
            SELECT 1
            FROM academic_course_allocations current_allocation

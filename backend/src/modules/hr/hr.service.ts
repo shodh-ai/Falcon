@@ -17,7 +17,10 @@ import {
 } from '../../entities/leave-request.entity';
 import { LeaveBalance } from '../../entities/leave-balance.entity';
 import { StaffAttendance } from '../../entities/staff-attendance.entity';
-import { StaffLeaveRequest } from '../../entities/staff-leave-request.entity';
+import {
+  StaffLeaveRequest,
+  StaffRequestType,
+} from '../../entities/staff-leave-request.entity';
 import { StaffPayslip } from '../../entities/staff-payslip.entity';
 import { StaffPayslipDownloadRequest } from '../../entities/staff-payslip-download-request.entity';
 import { StaffGatePass } from '../../entities/staff-gate-pass.entity';
@@ -1316,6 +1319,8 @@ export class HrService {
     tenantId: string,
     entityId: number,
     status?: StaffLeaveRequest['status'],
+    requestTypes?: StaffRequestType[],
+    currentApproverUserId?: string,
   ) {
     const qb = this.staffLeaveRequests
       .createQueryBuilder('leave')
@@ -1330,6 +1335,14 @@ export class HrService {
       )
       .orderBy('leave.applied_at', 'DESC');
     if (status) qb.andWhere('leave.status = :status', { status });
+    if (requestTypes?.length) {
+      qb.andWhere('leave.request_type IN (:...requestTypes)', { requestTypes });
+    }
+    if (currentApproverUserId) {
+      qb.andWhere('leave.current_approver_user_id = :currentApproverUserId', {
+        currentApproverUserId,
+      });
+    }
     return qb.getMany();
   }
 

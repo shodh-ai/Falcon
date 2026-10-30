@@ -1,6 +1,7 @@
 'use client';
 
 import { FormEvent, useEffect, useState } from 'react';
+import { usePathname } from 'next/navigation';
 import { ChevronRight, Edit3, Plus, Trash2, X } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import {
@@ -23,6 +24,8 @@ type Props = {
 
 export function FacultyAssignmentsTab({ courseId }: Props) {
   const api = useAuthedApi();
+  const pathname = usePathname();
+  const ownTeaching = pathname?.startsWith('/hod/my-teaching/') ?? false;
   const { token, user } = useAuth();
   const [assignments, setAssignments] = useState<FacultyAssignment[]>([]);
   const [createOpen, setCreateOpen] = useState(false);
@@ -53,7 +56,7 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
     setLoadError(null);
     try {
       const rows = await api.get<FacultyAssignment[]>(
-        `/api/academics/faculty/assignments?courseId=${encodeURIComponent(courseId)}`,
+        `/api/academics/faculty/assignments?courseId=${encodeURIComponent(courseId)}${ownTeaching ? '&scope=mine' : ''}`,
       );
       if (!Array.isArray(rows)) throw new Error('Assignments API returned an invalid response');
       setAssignments(rows);
@@ -65,7 +68,7 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
 
   useEffect(() => {
     void loadAssignments();
-  }, [api, courseId]);
+  }, [api, courseId, ownTeaching]);
 
   async function openRoster(assignmentId: string, title: string, maxMarks: number) {
     setSelectedId(assignmentId);
