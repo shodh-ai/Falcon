@@ -175,8 +175,15 @@ export async function listDepartmentTimetable(
        INNER JOIN users u ON u.user_id = t.faculty_user_id AND u.tenant_id=t.tenant_id
        LEFT JOIN departments d ON d.dept_id = u.dept_id
        WHERE t.tenant_id = $1
-         AND (${allocationDepartmentScope('a', 'u', '$2::int[]')}
-           OR ${enrolledDepartmentScope('t.course_id', 't.tenant_id', '$2::int[]')})
+         AND (EXISTS (
+           SELECT 1 FROM academic_course_allocations scoped_allocation
+           WHERE scoped_allocation.tenant_id = t.tenant_id
+             AND scoped_allocation.course_id = t.course_id
+             AND scoped_allocation.faculty_user_id = t.faculty_user_id
+             AND scoped_allocation.academic_year = $3
+             AND scoped_allocation.status = 'ACTIVE'
+             AND ${allocationDepartmentScope('scoped_allocation', 'u', '$2::int[]')}
+         ) OR ${enrolledDepartmentScope('t.course_id', 't.tenant_id', '$2::int[]')})
          AND EXISTS (
            SELECT 1
            FROM academic_course_allocations current_allocation

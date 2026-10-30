@@ -40,22 +40,24 @@ async function main() {
     await course('VISITING',visiting,'BPHARM');
     await course('UNRELATED',teacher,'BTECH'); // teacher's home dept must not expose this
     await course('LEGACY',teacher,null);
+    await course('SHARED',teacher,'BPHARM');
+    await c.query(`INSERT INTO academic_course_allocations(tenant_id,course_id,faculty_user_id,program_name,semester,academic_year,status,updated_at) VALUES($1,$2,$3,'BTECH','I','2026-2027','ACTIVE',now())`,[tenant,ids.SHARED,teacher]);
     await course('ENROLLED',visiting,'BTECH');
     await course('FORMER',visiting,'BTECH');
     await course('FOREIGN',visiting,'BTECH');
     await course('OTHER-TENANT',teacher,'BPHARM',otherTenant);
     await c.query(`INSERT INTO student_course_enrollments VALUES($1,$2,$3,'ENROLLED'),($1,$4,$3,'COMPLETED'),($1,$5,$6,'ENROLLED')`,[tenant,ids.ENROLLED,student,ids.FORMER,ids.FOREIGN,foreignStudent]);
-    for(const code of ['OWN','DEPT','UNRELATED']) await c.query(`INSERT INTO academic_timetables(tenant_id,course_id,faculty_user_id,day_of_week,start_time,end_time) VALUES($1,$2,$3,1,'09:00','10:00')`,[tenant,ids[code],code==='OWN'?hod:teacher]);
+    for(const code of ['OWN','DEPT','UNRELATED','SHARED']) await c.query(`INSERT INTO academic_timetables(tenant_id,course_id,faculty_user_id,day_of_week,start_time,end_time) VALUES($1,$2,$3,1,'09:00','10:00')`,[tenant,ids[code],code==='OWN'?hod:teacher]);
     const ds={query:async(sql,args)=>(await c.query(sql,args)).rows};
     const service=new FacultyWorkspacesService(ds,{},new FacultyTeachingDepartmentsService(ds),{});
     const rows=await service.listFacultyCourses(hod,tenant,null,true);
-    assert.deepEqual([...new Set(rows.map(r=>r.course_code))].sort(),['DEPT','ENROLLED','LEGACY','OWN','VISITING']);
+    assert.deepEqual([...new Set(rows.map(r=>r.course_code))].sort(),['DEPT','ENROLLED','LEGACY','OWN','SHARED','VISITING']);
     assert.deepEqual((await service.getWeeklyTimetable(hod,tenant)).map(r=>r.course_code),['OWN']);
     const departmentSchedule = await service.getFacultyScheduleData(hod,tenant);
-    assert.deepEqual([...new Set(departmentSchedule.allocations.map(r=>r.course_code))].sort(),['DEPT','ENROLLED','LEGACY','OWN','VISITING']);
-    assert.deepEqual(departmentSchedule.timetables.map(r=>r.course_code).sort(),['DEPT','OWN']);
+    assert.deepEqual([...new Set(departmentSchedule.allocations.map(r=>r.course_code))].sort(),['DEPT','ENROLLED','LEGACY','OWN','SHARED','VISITING']);
+    assert.deepEqual(departmentSchedule.timetables.map(r=>r.course_code).sort(),['DEPT','OWN','SHARED']);
     const departmentTimetable = await listDepartmentTimetable(ds.query,tenant,[43],'2026-2027');
-    assert.deepEqual(departmentTimetable.map(r=>r.course_code).sort(),['DEPT','OWN']);
+    assert.deepEqual(departmentTimetable.map(r=>r.course_code).sort(),['DEPT','OWN','SHARED']);
     const lms=Object.create(CourseLmsService.prototype);
     lms.dataSource=ds;
     lms.getCourseOrFail=async()=>{}; // membership is tested against the real SQL gate below
