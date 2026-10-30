@@ -14,7 +14,8 @@ describe('HrWorkflowRoutingService', () => {
     fallbackHr: string | null,
   ) {
     const dataSource = {
-      query: jest.fn().mockResolvedValue(queryResult),
+      query: jest.fn(async (sql: string) =>
+        sql.includes('FROM users requester') ? [] : queryResult),
     } as unknown as DataSource;
     const workflowBuilder = {
       resolveFallbackManager: jest.fn().mockResolvedValue(fallbackManager),
@@ -79,6 +80,36 @@ describe('HrWorkflowRoutingService', () => {
         tenantId, 1, 'LEAVE', requesterId, 2, null, 'hr-approver',
       ),
     ).resolves.toMatchObject({ is_final: true });
+  });
+
+  it('routes configured HOD then Principal without a mandatory HR step', async () => {
+    const dataSource = {
+      query: jest.fn(async (sql: string) => {
+        if (sql.includes('FROM users requester')) return [{
+          dept_id: 7, revision: 2, structure: 'PRINCIPAL_HOD',
+          hod_user_id: 'hod', principal_user_id: 'principal',
+          dean_enabled: false, dean_user_id: null, higher_officer_id: 'higher',
+        }];
+        if (sql.includes('FROM hr_department_request_routes')) return [{
+          approver_ids: ['hod', 'principal'], current_index: 0,
+        }];
+        return [];
+      }),
+    } as unknown as DataSource;
+    const builder = { resolveFallbackHrApprover: jest.fn() } as unknown as HrWorkflowBuilderService;
+    const service = new HrWorkflowRoutingService(dataSource, builder);
+    expect(await service.initializeRequest(tenantId, 1, 'LEAVE', requesterId))
+      .toMatchObject({ approver_user_id: 'hod', approver_type: 'DEPARTMENT_OFFICE' });
+    expect(await service.advanceAfterApproval(
+      tenantId, 1, 'LEAVE', requesterId, 1, null, 'hod', 'leave-1',
+    )).toMatchObject({ approver_user_id: 'principal', is_final: false });
+    (dataSource.query as jest.Mock).mockResolvedValueOnce([{
+      approver_ids: ['hod', 'principal'], current_index: 1,
+    }]);
+    expect(await service.advanceAfterApproval(
+      tenantId, 1, 'LEAVE', requesterId, 2, null, 'principal', 'leave-1',
+    )).toMatchObject({ approver_user_id: null, is_final: true });
+    expect(builder.resolveFallbackHrApprover).not.toHaveBeenCalled();
   });
 
   it('advances a request against its pinned workflow even after active configuration changes', async () => {
@@ -150,6 +181,8 @@ describe('HrWorkflowRoutingService', () => {
     const saveGate = new Promise<void>((resolve) => { releaseSave = resolve; });
     const manager = {
       query: jest.fn().mockImplementation(async (sql: string) => {
+        if (sql.includes('SELECT dept_id FROM users')) return [{ dept_id: null }];
+        if (sql.includes('FROM users requester')) return [];
         events.push('locked');
         expect(sql).toContain('FOR SHARE');
         return [{ workflow_id: 'workflow-1' }];
@@ -210,7 +243,9 @@ describe('HrWorkflowRoutingService', () => {
         const isRequest = ++transactionNumber === 1;
         const manager = {
           query: jest.fn(async (sql: string) => {
-            if (sql.includes('FOR SHARE')) {
+            if (sql.includes('SELECT dept_id FROM users')) return [{ dept_id: null }];
+            if (sql.includes('FROM users requester')) return [];
+            if (sql.includes('hr_approval_workflows') && sql.includes('FOR SHARE')) {
               events.push('request-lock');
               return [{ workflow_id: 'workflow-1' }];
             }

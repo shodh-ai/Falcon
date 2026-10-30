@@ -333,18 +333,20 @@ export class SuperAdminService {
     return { revoked: true };
   }
 
-  async listAssignableUsers(tenantId: string, q?: string) {
+  async listAssignableUsers(tenantId: string, q?: string, deptId?: number) {
     const term = q?.trim();
     return this.dataSource.query<
-      { user_id: string; name: string; email: string; role_name: string }[]
+      { user_id: string; name: string; email: string; role_name: string; dept_id: number | null }[]
     >(
-      `SELECT u.user_id, u.name, u.official_email AS email, r.role_name
+      `SELECT u.user_id, u.name, u.official_email AS email, r.role_name,u.dept_id
        FROM users u
        INNER JOIN roles r ON r.role_id = u.role_id
        WHERE u.tenant_id = $1
          AND u.is_active = true
          AND u.deleted_at IS NULL
-         AND r.role_name IN ('Dean', 'HOD', 'Faculty', 'SuperAdmin')
+         AND ($3::int IS NULL OR u.dept_id=$3)
+         AND NOT EXISTS(SELECT 1 FROM student_profiles sp
+           WHERE sp.tenant_id=u.tenant_id AND sp.user_id=u.user_id)
          AND (
            $2::text IS NULL OR $2 = ''
            OR u.name ILIKE '%' || $2 || '%'
@@ -352,7 +354,7 @@ export class SuperAdminService {
          )
        ORDER BY u.name ASC
        LIMIT 50`,
-      [tenantId, term ?? ''],
+      [tenantId, term ?? '', deptId ?? null],
     );
   }
 

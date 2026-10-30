@@ -1,4 +1,5 @@
 export const STRUCTURES = [
+  'NONE',
   'HOD_ONLY',
   'PRINCIPAL_ONLY',
   'PRINCIPAL_HOD',
@@ -18,6 +19,7 @@ export function officeEnabled(
 ) {
   return structure === 'PRINCIPAL_HOD' || structure === `${kind}_ONLY`;
 }
-export function reportingKind(structure: DepartmentStructure): OfficeKind {
+export function reportingKind(structure: DepartmentStructure): OfficeKind | null {
+  if (structure === 'NONE') return null;
   return structure === 'HOD_ONLY' ? 'HOD' : 'PRINCIPAL';
 }

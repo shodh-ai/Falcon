@@ -95,7 +95,11 @@ export default function HrInboxPage() {
         await api.patch(`/api/hr/admin/requests/${leaveId}/override`, { action, comment: overrideReasons[leaveId]?.trim() });
         toast.success(action === 'APPROVE' ? 'Approval stage completed; any remaining sign-off stays pending' : 'Request rejected');
       } else {
-        await api.patch(`/api/hr/workforce/team/${leaveId}/action`, { action });
+        const current = inbox?.items.find((item) => item.leave_id === leaveId);
+        await api.patch(`/api/hr/workforce/team/${leaveId}/action`, { action }, {
+          'If-Match': String(current?.current_step_order ?? ''),
+          'Idempotency-Key': crypto.randomUUID(),
+        });
         toast.success(action === 'APPROVE' ? 'Approved' : 'Rejected');
       }
       const [pending, overridePending] = await fetchQueues();

@@ -22,6 +22,7 @@ type Tab = 'LEAVE' | 'ON_DUTY' | 'REGULARIZATION' | 'COMP_OFF_CREDIT';
 
 type TeamRow = {
   leave_id: string;
+  current_step_order?: number;
   request_type: string;
   leave_type: string;
   start_date: string;
@@ -111,7 +112,11 @@ export default function FacultyTeamRequestsPage() {
         setRows((prev) => prev.filter((r) => r.leave_id !== leaveId));
         return;
       }
-      await api.patch(`/api/hr/workforce/team/${leaveId}/action`, { action, comment });
+      const current = rows.find((row) => row.leave_id === leaveId);
+      await api.patch(`/api/hr/workforce/team/${leaveId}/action`, { action, comment }, {
+        'If-Match': String(current?.current_step_order ?? ''),
+        'Idempotency-Key': crypto.randomUUID(),
+      });
       toast.success(action === 'APPROVE' ? 'Approved' : 'Rejected');
       await load(tab);
     } catch (e) {

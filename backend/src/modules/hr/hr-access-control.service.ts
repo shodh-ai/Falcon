@@ -654,7 +654,8 @@ export class HrAccessControlService {
     if (
       !approverType ||
       approverType === 'REPORTING_MANAGER' ||
-      approverType === 'DEPT_HEAD'
+      approverType === 'DEPT_HEAD' ||
+      approverType === 'DEPARTMENT_OFFICE'
     ) {
       return;
     }

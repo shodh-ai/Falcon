@@ -2401,6 +2401,36 @@ export class HrController {
     );
   }
 
+  @Get('workforce/appeals')
+  @SkipEntityScope()
+  @Roles(...WORKFORCE_SELF_SERVICE_ROLES, ...EXAM_CELL_SELF_SERVICE_ROLES)
+  workforceAppeals(@Req() req: { user: AuthUser }) {
+    return this.workforce.listAppeals(req.user.user_id, this.resolveTenantId(req.user));
+  }
+
+  @Post('workforce/requests/:leaveId/appeal')
+  @SkipEntityScope()
+  @Roles(...WORKFORCE_SELF_SERVICE_ROLES, ...EXAM_CELL_SELF_SERVICE_ROLES)
+  workforceAppeal(@Req() req: { user: AuthUser }, @Param('leaveId') leaveId: string,
+    @Body('reason') reason: string, @Headers('idempotency-key') key: string) {
+    return this.workforce.appealRejectedRequest(req.user.user_id,
+      this.resolveTenantId(req.user), leaveId, reason, key);
+  }
+
+  @Post('workforce/appeals/:appealId/decision')
+  @SkipEntityScope()
+  @Roles(...WORKFORCE_SELF_SERVICE_ROLES)
+  workforceAppealDecision(@Req() req: { user: AuthUser },
+    @Param('appealId') appealId: string,
+    @Body() body: { action: 'REJECT' | 'RECONSIDER'; reason: string },
+    @Headers('idempotency-key') key: string,
+    @Headers('if-match') match?: string) {
+    const expectedRevision = match && /^"?\d+"?$/.test(match)
+      ? Number(match.replace(/"/g, '')) : undefined;
+    return this.workforce.reviewAppeal(req.user.user_id,
+      this.resolveTenantId(req.user), appealId, body.action, body.reason, key, expectedRevision);
+  }
+
   @Get('workforce/team/pending')
   @Roles(...WORKFORCE_SELF_SERVICE_ROLES)
   workforceTeamPending(
@@ -2421,14 +2451,18 @@ export class HrController {
     @Param('leaveId') leaveId: string,
     @Req() req: { user: AuthUser },
     @Body() dto: { action: 'APPROVE' | 'REJECT'; comment?: string },
+    @Headers('if-match') match?: string,
+    @Headers('idempotency-key') key?: string,
   ) {
+    const expectedStepOrder = match && /^"?\d+"?$/.test(match)
+      ? Number(match.replace(/"/g, '')) : undefined;
     return this.workforce.actOnTeamRequest(
       req.user.user_id,
       this.resolveTenantId(req.user),
       leaveId,
       dto.action,
       dto.comment,
-      { roles: this.resolveRoles(req.user) },
+      { roles: this.resolveRoles(req.user), expectedStepOrder, idempotencyKey: key },
     );
   }
 
