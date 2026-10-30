@@ -435,6 +435,49 @@ INSERT INTO public.department_leadership_events(tenant_id,dept_id,actor_user_id,
                 "DELETE FROM public.business_records WHERE value='synthetic rollback'; ROLLBACK;")
             self.assertEqual(self.psql('TABLE public.business_records;').stdout, before)
 
+    def test_compatibility_guard_accepts_old_then_expanded_leadership_schema(self):
+        with self.leadership_tables():
+            role = self.new_role()
+            self.apply(role)
+            self.assert_startup_accepts(role)
+            try:
+                self.psql("""
+ALTER TABLE public.department_leadership
+  ADD COLUMN dean_enabled boolean, ADD COLUMN dean_user_id uuid;
+CREATE TABLE public.hr_department_request_routes (
+  leave_id uuid, approver_ids uuid[], current_index integer,
+  leadership_revision integer, updated_at timestamptz);
+CREATE TABLE public.department_leadership_changes (change_id uuid);
+CREATE TABLE public.hr_staff_request_appeals (
+  appeal_id uuid, rejecting_user_id uuid, reviewer_user_id uuid,
+  status text, reconsideration_count integer, revision integer,
+  updated_at timestamptz);
+CREATE TABLE public.hr_staff_request_appeal_events (event_id uuid);
+""")
+                # The post-migration grant operation is separate from schema
+                # creation. Before grants, the compatible process fails closed.
+                self.assertTrue(self.startup_metadata(role)['missing_business_access'])
+                self.psql(f"""
+GRANT UPDATE(dean_enabled,dean_user_id)
+  ON public.department_leadership TO {role};
+GRANT SELECT,INSERT ON public.hr_department_request_routes,
+  public.department_leadership_changes,
+  public.hr_staff_request_appeals,
+  public.hr_staff_request_appeal_events TO {role};
+GRANT UPDATE(approver_ids,current_index,leadership_revision,updated_at)
+  ON public.hr_department_request_routes TO {role};
+GRANT UPDATE(rejecting_user_id,reviewer_user_id,status,reconsideration_count,revision,updated_at)
+  ON public.hr_staff_request_appeals TO {role};
+""")
+                self.assert_startup_accepts(role)
+                self.psql(f"REVOKE UPDATE(dean_user_id) ON public.department_leadership FROM {role};")
+                self.assertTrue(self.startup_metadata(role)['missing_business_access'])
+            finally:
+                self.psql("DROP TABLE IF EXISTS public.hr_staff_request_appeal_events,"
+                          "public.hr_staff_request_appeals,"
+                          "public.department_leadership_changes,"
+                          "public.hr_department_request_routes;")
+
     def test_leadership_public_extra_authority_is_refused_atomically_and_guard_denies(self):
         with self.leadership_tables():
             role = self.new_role()
