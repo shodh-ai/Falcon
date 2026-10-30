@@ -141,6 +141,17 @@ export class DepartmentLeadershipService {
       const oldPrincipalId = oldHolders.find((holder) => holder.kind === 'PRINCIPAL')?.user_id;
       if (Number(old?.revision ?? 0) !== revision)
         throw new ConflictException('Leadership configuration changed; refresh');
+      // Older academic and administrative paths still read the global
+      // departments.hod_user_id. Until those paths use tenant-scoped offices,
+      // changing that field is safe only when this department belongs to one
+      // active tenant. Never let one tenant's switch rewrite another's HOD.
+      const [sharedDepartment] = await m.query(
+        `SELECT 1 FROM users u WHERE u.dept_id=$1 AND u.tenant_id<>$2
+          AND u.is_active=true AND u.deleted_at IS NULL LIMIT 1`,
+        [deptId, actor.tenant_id],
+      );
+      if (sharedDepartment)
+        throw new ConflictException('This department is shared by another tenant; its legacy HOD scope must be migrated before leadership can change');
       const selected = Object.values(normalized).filter((id): id is string => !!id);
       if (new Set(selected).size !== selected.length)
         throw new BadRequestException('One person cannot hold two levels in the same reporting chain');
