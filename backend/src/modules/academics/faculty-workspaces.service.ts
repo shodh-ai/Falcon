@@ -144,16 +144,8 @@ export class FacultyWorkspacesService {
              NULL::varchar AS faculty_name
            FROM academic_courses c
            WHERE c.tenant_id = $1
-             AND EXISTS (
-               SELECT 1
-               FROM student_course_enrollments e
-               JOIN users student ON student.user_id = e.student_user_id AND student.tenant_id = e.tenant_id
-               WHERE e.tenant_id = c.tenant_id
-                 AND e.course_id = c.course_id
-                 AND e.status = 'ENROLLED' AND student.deleted_at IS NULL
-                 AND student.dept_id = ANY($2::int[])
-                 AND ($3::int IS NULL OR student.dept_id = $3)
-             )
+             AND ${enrolledDepartmentScope('c.course_id', 'c.tenant_id', '$2::int[]')}
+             AND ($3::int IS NULL OR ${enrolledDepartmentScope('c.course_id', 'c.tenant_id', 'ARRAY[$3::int]')})
          )
          SELECT * FROM scoped_courses
          ORDER BY academic_year DESC, program_name NULLS LAST,
