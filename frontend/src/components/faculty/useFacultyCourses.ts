@@ -45,7 +45,7 @@ export function useFacultyCourses() {
       try {
         setLoading(true);
         const data = await api.get<FacultyCourse[]>(
-          withTeachingDeptId(pathname.startsWith('/hod/my-teaching/')
+          withTeachingDeptId(pathname?.startsWith('/hod/my-teaching/')
             ? '/api/academics/faculty/workspaces/courses?scope=mine'
             : '/api/academics/faculty/workspaces/courses', activeDeptId),
         );

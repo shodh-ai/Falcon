@@ -110,7 +110,7 @@ function todayIso() {
 
 function MarkAttendanceContent() {
   const api = useAuthedApi();
-  const teachingPrefix = usePathname().startsWith('/hod/my-teaching/') ? '/hod/my-teaching' : '/faculty';
+  const teachingPrefix = usePathname()?.startsWith('/hod/my-teaching/') ? '/hod/my-teaching' : '/faculty';
   const { activeDeptId, loading: deptLoading } = useTeachingDepartment();
   const params = useSearchParams();
   const initialCourseId = params.get('courseId');

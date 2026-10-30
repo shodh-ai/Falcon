@@ -76,7 +76,7 @@ function statusBadgeClass(row: { status?: string; dofa_awaiting_role?: string | 
 export default function GradeChangePage() {
   const api = useAuthedApi();
   const pathname = usePathname();
-  const isHod = pathname.startsWith('/hod/') && !pathname.startsWith('/hod/my-teaching/');
+  const isHod = pathname?.startsWith('/hod/') && !pathname?.startsWith('/hod/my-teaching/');
   const { courses } = useFacultyCourses();
   const courseOptions = uniqueFacultyCoursesByCourseId(courses);
   const [departmentStudents, setDepartmentStudents] = useState<DepartmentStudent[]>([]);

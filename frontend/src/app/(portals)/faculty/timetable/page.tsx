@@ -157,7 +157,7 @@ function formatTermStart(value: string | null) {
 }
 
 export default function FacultyTimetablePage() {
-  const teachingPrefix = usePathname().startsWith('/hod/my-teaching/') ? '/hod/my-teaching' : '/faculty';
+  const teachingPrefix = usePathname()?.startsWith('/hod/my-teaching/') ? '/hod/my-teaching' : '/faculty';
   const api = useAuthedApi();
   const { user } = useAuth();
   const isObserver = Boolean(user?.read_only_academic_view);
