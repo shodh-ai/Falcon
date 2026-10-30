@@ -273,7 +273,7 @@ export class HrWorkforceService {
     dto: ApplyWorkforceRequestDto,
     options?: { actorRoles?: string[] },
   ) {
-    const staff = await this.users.findOne({ where: { user_id: staffUserId } });
+    const staff = await this.users.findOne({ where: { user_id: staffUserId, tenant_id: tenantId } });
     if (!staff) throw new NotFoundException('Employee not found');
 
     const requestType = dto.request_type;
@@ -485,7 +485,7 @@ export class HrWorkforceService {
                 ORDER BY stage.position
               ) END AS effective_chain
        FROM staff_leave_requests r
-       JOIN users u ON u.user_id = r.staff_user_id
+       JOIN users u ON u.user_id = r.staff_user_id AND u.tenant_id = r.tenant_id
        LEFT JOIN departments d ON d.dept_id = u.dept_id
        LEFT JOIN hr_department_request_routes route ON route.leave_id=r.leave_id AND route.tenant_id=r.tenant_id
        LEFT JOIN hr_approval_workflow_steps hr_step

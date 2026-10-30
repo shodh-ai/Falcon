@@ -1160,10 +1160,14 @@ export class HrController {
     @Req() req: { user: AuthUser },
     @Query('status') status?: StaffLeaveStatus,
     @Query('entity_id') entityId?: string,
+    @Query('request_type') requestType?: StaffRequestType,
   ) {
+    if (requestType && !['LEAVE', 'ON_DUTY', 'REGULARIZATION', 'COMP_OFF'].includes(requestType)) {
+      throw new BadRequestException('Invalid workforce request type');
+    }
     const tenantId = this.resolveTenantId(req.user);
     const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
-    return this.hr.listAllStaffLeaves(tenantId, entity, status);
+    return this.hr.listAllStaffLeaves(tenantId, entity, status, requestType ? [requestType] : undefined);
   }
 
   @Get('leaves/review')

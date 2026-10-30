@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { HrPageHeader } from '@/components/hr/HrPageHeader';
 import { HrAttendanceCalendar } from '@/components/hr/HrAttendanceCalendar';
+import { HrLeaveReviewQueue } from '@/components/hr/HrLeaveReviewQueue';
 import { Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useHrApi } from '@/lib/api/use-hr-api';
@@ -78,6 +79,7 @@ export default function HrAttendancePage() {
         month={month}
         title={`Master matrix — ${month}`}
       />
+      <HrLeaveReviewQueue requestType="REGULARIZATION" />
     </>
   );
 }
