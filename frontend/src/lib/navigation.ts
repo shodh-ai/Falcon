@@ -253,7 +253,7 @@ export function withRoleAwareDofaInboxNav(
   config: PortalConfig,
   inboxHref: string | null,
 ): PortalConfig {
-  if (!inboxHref || portalHasDofaInboxLink(config)) return config;
+  if (!inboxHref || portalHasDofaInboxLink(config) || config.navGroups.some(group => group.items.some(item => item.href === inboxHref))) return config;
 
   const inboxItem: NavItem = {
     label: 'DOFA Inbox (Universal)',
@@ -670,6 +670,7 @@ export const facultyPortal: PortalConfig = {
       title: 'Academics & Teaching',
       items: [
         { label: 'Timetable & Classes', href: '/faculty/timetable', icon: CalendarClock, keywords: ['schedule', 'slots', 'substitute', 'cancel', 'ltp', 'extra class'] },
+        { label: 'My Workload', href: '/faculty/workload', icon: BookOpen, keywords: ['weekly workload', 'teaching hours', 'extra class', 'cancelled class'] },
         { label: 'Mark Attendance', href: '/faculty/attendance', icon: ClipboardCheck, keywords: ['attendance', 'present', 'absent'] },
         { label: 'My Courses', href: '/faculty/courses', icon: BookOpen, keywords: ['lesson plan', 'handout', 'course page', 'workspace'] },
         { label: 'Assignments', href: '/faculty/assignments', icon: ClipboardList, keywords: ['da', 'digital assignment', 'submission', 'deadline', 'grade'] },
@@ -740,6 +741,7 @@ export const facultyPortal: PortalConfig = {
       title: 'Academics & Teaching',
       items: [
         { label: 'Timetable & Classes', href: '/faculty/timetable', icon: CalendarClock, keywords: ['schedule', 'slots', 'substitute', 'cancel', 'ltp', 'extra'] },
+        { label: 'My Workload', href: '/faculty/workload', icon: BookOpen, keywords: ['weekly workload', 'teaching hours', 'extra class', 'cancelled class'] },
         { label: 'Mark Attendance', href: '/faculty/attendance', icon: ClipboardCheck, keywords: ['attendance', 'present', 'absent'] },
         { label: 'My Courses', href: '/faculty/courses', icon: BookOpen, keywords: ['lesson plan', 'handout', 'course page', 'workspace'] },
         { label: 'Assignments', href: '/faculty/assignments', icon: ClipboardList, keywords: ['da', 'digital assignment', 'submission', 'deadline', 'grade'] },
@@ -885,14 +887,26 @@ export const hrPortal: PortalConfig = {
 
 export const hodPortal: PortalConfig = {
   personaLabel: 'HOD Workspace',
-  personaTitle: 'Department Command Center',
+  personaTitle: 'Department Workspace',
   homeHref: '/hod/dashboard',
+  hideWorkspaceSwitcher: true,
   navGroups: [
     {
       title: 'Overview',
       items: [
         { label: 'Dashboard', href: '/hod/dashboard', icon: LayoutDashboard, keywords: ['command center', 'metrics', 'attendance'] },
+        { label: 'Approval Inbox', href: '/hod/inbox?scope=dept', icon: Inbox, keywords: ['staff requests', 'leave', 'on duty', 'regularization'] },
         { label: 'Department Timetable', href: '/hod/department-timetable', icon: CalendarClock, keywords: ['schedule', 'rooms', 'master'] },
+      ],
+    },
+    {
+      title: 'My Teaching',
+      items: [
+        { label: 'My Timetable', href: '/hod/my-teaching/timetable', icon: CalendarClock, keywords: ['my classes', 'schedule'] },
+        { label: 'My Courses', href: '/hod/my-teaching/courses', icon: BookOpen, keywords: ['my subjects', 'teaching'] },
+        { label: 'Mark Attendance', href: '/hod/my-teaching/attendance', icon: ClipboardCheck, keywords: ['my class attendance'] },
+        { label: 'My Workload', href: '/hod/my-teaching/workload', icon: BarChart3, keywords: ['weekly hours', 'cancelled', 'extra classes'] },
+        { label: 'Grade Change Request', href: '/hod/my-teaching/grade-change', icon: PenLine, keywords: ['my grades', 'request'] },
       ],
     },
     {
@@ -901,6 +915,7 @@ export const hodPortal: PortalConfig = {
         { label: 'Team Directory (Zimyo)', href: '/hod/reporting-directory?tab=dashboard&scope=dept', icon: Users, keywords: ['zimyo', 'reporting', 'directory', 'attendance', 'leave', 'gate pass', 'hrms', 'dashboard', 'reports', 'probation', 'pending approvals', 'inbox', 'team requests'] },
         { label: 'Resignations & Offboarding', href: '/hod/approvals/resignations', icon: DoorOpen, keywords: ['resignation', 'exit', 'separation', 'fnf', 'offboarding'] },
         { label: 'Profile Corrections', href: '/hod/approvals/profile-corrections', icon: ClipboardCheck, keywords: ['student profile', 'edit', 'correction'] },
+        { label: 'Principal Escalations & Follow-ups', href: '/hod/approvals/department-oversight', icon: ClipboardList },
         { label: 'Proxy Approvals', href: '/hod/approvals/proxy', icon: Users, keywords: ['substitute', 'alternate', 'leave', 'proxy'] },
         { label: 'Extra Class Approvals', href: '/hod/approvals/extra-classes', icon: CalendarClock, keywords: ['substitute', 'cancel', 'timetable'] },
         { label: 'Gate Pass Approvals', href: '/hod/approvals/gate-passes', icon: DoorOpen, keywords: ['gate pass', 'outpass', 'leave gate'] },
@@ -942,7 +957,6 @@ export const hodPortal: PortalConfig = {
         { label: 'End-Semester Marks Approval', href: '/hod/academics/end-term-results', icon: ClipboardCheck, keywords: ['exam', 'hod', 'end term', 'marks approval'] },
         { label: 'Result Analytics', href: '/hod/academics/result-analytics', icon: BarChart3, keywords: ['pass', 'fail', 'exam', 'grades'] },
         { label: 'Compiled Results', href: '/hod/dashboard?tab=results', icon: FileSpreadsheet, keywords: ['marks', 'grades', 'export', 'semester'] },
-        { label: 'Grade Change Request', href: '/hod/academics/grade-change', icon: PenLine, keywords: ['grade change', 'request', 'sis'] },
         { label: 'Grade Change DOFA', href: '/hod/approvals/grade-change', icon: PenLine, keywords: ['sis', 'grade change', 'dofa', 'coe', 'approve'] },
         { label: 'DOFA Inbox (Universal)', href: '/hod/approvals/dofa-inbox', icon: Inbox, keywords: ['nervous system', 'grade change', 'approvals'] },
       ],
@@ -962,6 +976,16 @@ export const hodPortal: PortalConfig = {
     myHrOperationsNavGroup('hod'),
   ],
   commandItems: flattenNavToCommandItems([
+    {
+      title: 'My Teaching',
+      items: [
+        { label: 'My Timetable', href: '/hod/my-teaching/timetable', icon: CalendarClock },
+        { label: 'My Courses', href: '/hod/my-teaching/courses', icon: BookOpen },
+        { label: 'Mark Attendance', href: '/hod/my-teaching/attendance', icon: ClipboardCheck },
+        { label: 'My Workload', href: '/hod/my-teaching/workload', icon: BarChart3 },
+        { label: 'Grade Change Request', href: '/hod/my-teaching/grade-change', icon: PenLine },
+      ],
+    },
     {
       title: 'Overview',
       items: [
@@ -1009,7 +1033,6 @@ export const hodPortal: PortalConfig = {
         { label: 'End-Semester Marks Approval', href: '/hod/academics/end-term-results', icon: ClipboardCheck, keywords: ['exam', 'end term', 'hod marks'] },
         { label: 'Result Analytics', href: '/hod/academics/result-analytics', icon: BarChart3, keywords: ['pass fail'] },
         { label: 'Compiled Results', href: '/hod/dashboard?tab=results', icon: FileSpreadsheet, keywords: ['compiled results'] },
-        { label: 'Grade Change Request', href: '/hod/academics/grade-change', icon: PenLine, keywords: ['grade change', 'request'] },
         { label: 'Grade Change DOFA', href: '/hod/approvals/grade-change', icon: PenLine, keywords: ['grade change', 'dofa'] },
         { label: 'DOFA Inbox (Universal)', href: '/hod/approvals/dofa-inbox', icon: Inbox, keywords: ['dofa inbox'] },
       ],
@@ -1374,7 +1397,7 @@ export const financePortal: PortalConfig = {
         { label: 'AP Desk', href: '/finance/ap-desk', icon: Banknote, keywords: ['3-way', 'pay', 'neft'], roles: ['APManager', 'APClerk', 'CFO', 'Accountant', 'FinanceController', 'SuperAdmin', 'CampusAdmin'] },
         { label: 'DOFA Inbox (Universal)', href: '/finance/approvals/dofa-inbox', icon: Inbox, keywords: ['nervous system', 'cross domain'], roles: ['COO', 'CFO', 'SuperAdmin', 'CampusAdmin'] },
         { label: 'Digital DOFA', href: '/finance/dofa', icon: Scale, keywords: ['delegation', 'financial authority', 'limits'], roles: ['COO', 'CFO', 'Accountant', 'FinanceController', 'ProcurementHead', 'Chairman', 'SuperAdmin', 'CampusAdmin', 'HOD', 'Dean'] },
-        { label: 'Policy Vault (Dual-Key)', href: '/finance/dofa-policy-vault', icon: Shield, keywords: ['constitution', 'workflow engine', 'cfo unlock', 'audit'], roles: FINANCE_DESK_ROLES },
+        { label: 'Policy Vault (Dual-Key)', href: '/finance/dofa-policy-vault', icon: Shield, keywords: ['constitution', 'workflow engine', 'cfo unlock', 'audit'], roles: ['CampusAdmin', 'SuperAdmin', 'CIO', 'CFO', 'Chairman', 'President', 'InternalAuditor'] },
         { label: 'Procurement Intelligence', href: '/finance/procurement-intelligence', icon: TrendingUp, keywords: ['fraud', 'invoice split', 'l2'], roles: ['COO', 'CFO', 'InternalAuditor', 'ProcurementHead', 'Chairman', 'SuperAdmin', 'CampusAdmin'] },
         { label: 'Project Funding Requests', href: '/finance/funding-requests', icon: Receipt, keywords: ['project', 'funding', 'hod', 'faculty'], roles: [...FINANCE_DESK_ROLES, 'HOD', 'Faculty'] },
         { label: 'Salary Processing', href: '/finance/salary-processing', icon: Landmark, keywords: ['neft', 'rtgs', 'payroll'], roles: FINANCE_DESK_ROLES },
@@ -1561,101 +1584,66 @@ export const examCellPortal: PortalConfig = {
   homeHref: '/exam-cell/dashboard',
   navGroups: [
     {
-      title: 'Dashboard',
-      homeHref: '/exam-cell/dashboard',
-      icon: LayoutDashboard,
+      title: 'Overview',
       items: [
-        { label: 'Command Center', href: '/exam-cell/dashboard', icon: LayoutDashboard, keywords: ['coe', 'analytics', 'dashboard'] },
+        { label: 'Command Center', href: '/exam-cell/dashboard', icon: LayoutDashboard, keywords: ['coe', 'analytics'] },
         { label: 'Live Exam Dashboard', href: '/exam-cell/live-dashboard', icon: LineChart, keywords: ['realtime', 'exam day'] },
+        { label: 'Examination Calendar', href: '/exam-cell/calendar', icon: Calendar, keywords: ['month', 'week', 'holidays'] },
         { label: 'My Tasks', href: '/exam-cell/my-tasks', icon: ListTodo, keywords: ['inbox', 'pending'] },
         { label: 'Global Search', href: '/exam-cell/search', icon: Search, keywords: ['find', 'student', 'prn', 'qr'] },
         { label: 'Student Timeline', href: '/exam-cell/student-timeline', icon: History, keywords: ['journey', 'registration'] },
-      ],
-    },
-    {
-      title: 'Exam Planning',
-      homeHref: '/exam-cell/schedule',
-      icon: CalendarDays,
-      items: [
-        { label: 'Examination Calendar', href: '/exam-cell/calendar', icon: Calendar, keywords: ['month', 'week', 'holidays'] },
         { label: 'Exam Sessions', href: '/exam-cell/sessions', icon: CalendarRange, keywords: ['academic year', 'semester cycle'] },
-        { label: 'Master Exam Schedule', href: '/exam-cell/schedule', icon: CalendarDays, keywords: ['mid term', 'end term', 'timetable'] },
         { label: 'Deadlines', href: '/exam-cell/deadlines', icon: Timer, keywords: ['countdown', 'reminder'] },
+        { label: 'Audit Log', href: '/exam-cell/audit-log', icon: Shield, keywords: ['compliance', 'trail'] },
+      ],
+    },
+    {
+      title: 'Pre-Exam Operations',
+      items: [
+        { label: 'Master Exam Schedule', href: '/exam-cell/schedule', icon: CalendarDays, keywords: ['mid term', 'end term', 'timetable'] },
         { label: 'Form Fill-up Desk', href: '/exam-cell/form-fillup', icon: FileCheck2, keywords: ['registration', 'eligibility'] },
-      ],
-    },
-    {
-      title: 'Students & Eligibility',
-      homeHref: '/exam-cell/eligibility',
-      icon: Users,
-      items: [
         { label: 'Eligibility Dashboard', href: '/exam-cell/eligibility', icon: ClipboardCheck, keywords: ['attendance', 'fee', 'debarred'] },
-        { label: 'Attendance Exemptions', href: '/exam-cell/attendance-exemptions', icon: ClipboardCheck, keywords: ['exemption', 'low attendance'] },
-        { label: 'Backlog & Supplementary', href: '/exam-cell/backlog-exams', icon: ArrowUpCircle, keywords: ['back paper', 'supplementary'] },
-        { label: 'Product Viva Panel', href: '/exam-cell/product-viva', icon: Users, keywords: ['product viva', 'urop', 'industry', 'shodh'] },
-      ],
-    },
-    {
-      title: 'Admit Cards',
-      homeHref: '/exam-cell/admit-cards',
-      icon: Ticket,
-      items: [
         { label: 'Hall Ticket Approvals', href: '/exam-cell/hall-ticket-approvals', icon: FileCheck2, keywords: ['coe approval', 'workflow'] },
+        { label: 'Exam Centres & Rooms', href: '/exam-cell/exam-centres', icon: DoorOpen, keywords: ['building', 'hall', 'capacity'] },
         { label: 'Admit Card Engine', href: '/exam-cell/admit-cards', icon: Ticket, keywords: ['hall ticket', 'admit'] },
+        { label: 'Attendance Exemptions', href: '/exam-cell/attendance-exemptions', icon: ClipboardCheck, keywords: ['exemption', 'low attendance'] },
+        { label: 'Product Viva Panel', href: '/exam-cell/product-viva', icon: Users, keywords: ['product viva', 'urop', 'industry', 'shodh'] },
         { label: 'Seating Planner', href: '/exam-cell/seating', icon: ClipboardList, keywords: ['seating', 'rooms', 'ai'] },
         { label: 'Published Seating Plans', href: '/exam-cell/seating-plans', icon: ClipboardList, keywords: ['published seating'] },
         { label: 'Resource Allocation', href: '/exam-cell/resource-allocation', icon: LayoutGrid, keywords: ['coordinator', 'room'] },
-        { label: 'Print & Export Hub', href: '/exam-cell/print-hub', icon: Printer, keywords: ['pdf', 'export', 'csv'] },
-      ],
-    },
-    {
-      title: 'Exam Operations',
-      homeHref: '/exam-cell/exam-day',
-      icon: ClipboardList,
-      items: [
         { label: 'Invigilation Roster', href: '/exam-cell/invigilation', icon: Eye, keywords: ['faculty', 'duty', 'auto assign'] },
+        { label: 'Print & Export Hub', href: '/exam-cell/print-hub', icon: Printer, keywords: ['pdf', 'export', 'csv'] },
         { label: 'Question Paper Control', href: '/exam-cell/question-papers', icon: FolderLock, keywords: ['qp', 'moderation'] },
         { label: 'Exam Day Operations', href: '/exam-cell/exam-day', icon: Timer, keywords: ['attendance', 'qr verify'] },
         { label: 'Answer Sheet Tracking', href: '/exam-cell/answer-sheets', icon: FileText, keywords: ['qr', 'barcode', 'evaluator'] },
+        { label: 'Document Repository', href: '/exam-cell/documents', icon: Archive, keywords: ['notices', 'circulars', 'verification'] },
       ],
     },
     {
-      title: 'Marks & Results',
-      homeHref: '/exam-cell/results',
-      icon: TrendingUp,
+      title: 'Post-Exam Operations',
       items: [
         { label: 'Result Control Centre', href: '/exam-cell/results', icon: TrendingUp, keywords: ['publish', 'bell curve', 'declare', 'marks entry'] },
-        { label: 'Course Grades', href: '/exam-cell/course-grades', icon: GraduationCap, keywords: ['grades', 'aggregate'] },
         { label: 'Grade Cards & Merit', href: '/exam-cell/grade-cards', icon: Medal, keywords: ['marksheet', 'grade cards', 'cgpa', 'sgpa', 'top students', 'merit'] },
         { label: 'Grade Change DOFA', href: '/exam-cell/approvals/grade-change', icon: PenLine, keywords: ['dofa', 'grade change', 'coe approval', 'apply'] },
-        { label: 'Re-evaluations', href: '/exam-cell/re-evaluations', icon: FileText, keywords: ['recheck', 'backlog'] },
-      ],
-    },
-    {
-      title: 'Reports & Compliance',
-      homeHref: '/exam-cell/reports',
-      icon: BarChart3,
-      items: [
         { label: 'DOFA Inbox (Universal)', href: '/exam-cell/approvals/dofa-inbox', icon: Inbox, keywords: ['nervous system', 'approvals'] },
+        { label: 'Course Grades', href: '/exam-cell/course-grades', icon: GraduationCap, keywords: ['grades', 'aggregate'] },
+        { label: 'Backlog & Supplementary', href: '/exam-cell/backlog-exams', icon: ArrowUpCircle, keywords: ['back paper', 'supplementary'] },
+        { label: 'Re-evaluations', href: '/exam-cell/re-evaluations', icon: FileText, keywords: ['recheck', 'backlog'] },
         { label: 'UFM Malpractice Desk', href: '/exam-cell/ufm-cases', icon: Shield, keywords: ['cheating', 'unfair means'] },
         { label: 'Degree & Transcripts', href: '/exam-cell/transcripts', icon: Award, keywords: ['digilocker', 'abc id'] },
         { label: 'Portfolio Transcripts', href: '/exam-cell/portfolio-transcripts', icon: Briefcase, keywords: ['github', 'patents', 'hardware', 'portfolio degree'] },
         { label: 'Degree Eligibility Audit', href: '/exam-cell/degree-audit', icon: FileCheck2, keywords: ['credits', 'cgpa', 'clearance'] },
         { label: 'Examination Reports', href: '/exam-cell/reports', icon: BarChart3, keywords: ['pass percentage', 'rankers'] },
         { label: 'Advanced Analytics', href: '/exam-cell/analytics', icon: PieChart, keywords: ['management', 'charts', 'export'] },
-        { label: 'Audit Log', href: '/exam-cell/audit-log', icon: Shield, keywords: ['compliance', 'trail'] },
-        { label: 'Document Repository', href: '/exam-cell/documents', icon: Archive, keywords: ['notices', 'circulars', 'verification'] },
         { label: 'Exam Notifications', href: '/exam-cell/notifications', icon: Bell, keywords: ['sms', 'email', 'alert'] },
       ],
     },
     {
-      title: 'Master Data & Settings',
-      homeHref: '/exam-cell/exam-centres',
-      icon: Settings,
+      title: 'My HR & Operations',
       items: [
-        { label: 'Settings', href: '/exam-cell/settings', icon: Settings, keywords: ['configuration', 'preferences'] },
-        { label: 'Account Profile', href: '/exam-cell/profile', icon: UserCog, keywords: ['account', 'profile', 'security'] },
-        { label: 'Exam Centres & Rooms', href: '/exam-cell/exam-centres', icon: DoorOpen, keywords: ['building', 'hall', 'capacity', 'master data'] },
+        { label: 'Attendance & Leave', href: '/exam-cell/me/workforce', icon: CalendarDays, keywords: ['hr', 'employee', 'attendance', 'leave', 'on duty'] },
+        { label: 'Salary & Tax', href: '/exam-cell/me/payslips', icon: Banknote, keywords: ['hr', 'salary', 'payslip', 'tax', 'salary certificate'] },
+        { label: 'My Documents', href: '/exam-cell/me/documents', icon: FileText, keywords: ['hr', 'employee', 'documents', 'vault'] },
       ],
     },
   ],
@@ -1668,6 +1656,9 @@ export const examCellPortal: PortalConfig = {
     { label: 'Grade Cards & Merit', href: '/exam-cell/grade-cards', icon: Medal },
     { label: 'Grade Change DOFA', href: '/exam-cell/approvals/grade-change', icon: PenLine },
     { label: 'UFM Desk', href: '/exam-cell/ufm-cases', icon: Shield },
+    { label: 'Attendance & Leave', href: '/exam-cell/me/workforce', icon: CalendarDays, keywords: ['hr', 'employee'] },
+    { label: 'Salary & Tax', href: '/exam-cell/me/payslips', icon: Banknote, keywords: ['hr', 'payslip'] },
+    { label: 'My Documents', href: '/exam-cell/me/documents', icon: FileText, keywords: ['hr', 'vault'] },
   ],
 };
 

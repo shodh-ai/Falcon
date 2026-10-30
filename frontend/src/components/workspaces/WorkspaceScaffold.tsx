@@ -133,6 +133,7 @@ export function WorkspaceScaffold({ config }: { config: WorkspacePageConfig }) {
   const [studentId, setStudentId] = useState('');
   const [filterValues, setFilterValues] = useState<Record<string, string>>({});
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
+  const [page, setPage] = useState(1);
   const [detailsModalOpen, setDetailsModalOpen] = useState(false);
   const [selectedRowId, setSelectedRowId] = useState('');
 
@@ -212,6 +213,11 @@ export function WorkspaceScaffold({ config }: { config: WorkspacePageConfig }) {
   }, [config.dataKey, config.filters, data, query, filterValues, sortConfig]);
 
   const summary = config.summary?.(data) ?? [];
+  const pageSize = 25;
+  const pageCount = Math.max(1, Math.ceil(rows.length / pageSize));
+  const currentPage = Math.min(page, pageCount);
+  const visibleRows = rows.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  useEffect(() => { setPage(1); }, [query, filterValues, sortConfig, config.endpoint]);
   const chart = config.chart?.(data) ?? [];
   const maxChartValue = Math.max(...chart.map((item) => Math.abs(item.value)), 1);
 
@@ -360,7 +366,7 @@ export function WorkspaceScaffold({ config }: { config: WorkspacePageConfig }) {
           <CardHeader className="gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <CardTitle>Data Table</CardTitle>
-              <CardDescription>{rows.length} records</CardDescription>
+              <CardDescription>{rows.length} records · Showing {rows.length ? (currentPage - 1) * pageSize + 1 : 0}–{Math.min(currentPage * pageSize, rows.length)}</CardDescription>
             </div>
             <div className="flex w-full flex-col gap-3 sm:max-w-md sm:flex-row sm:items-center sm:justify-end">
               {config.filters?.map((filter) => {
@@ -420,11 +426,11 @@ export function WorkspaceScaffold({ config }: { config: WorkspacePageConfig }) {
                 </tr>
               </thead>
               <tbody>
-                {rows.slice(0, 25).map((row, index) => {
+                {visibleRows.map((row, index) => {
                   const isClickable = config.rowAction === 'student-details';
                   return (
                   <tr 
-                    key={index} 
+                    key={`${currentPage}-${index}`}
                     className={`border-b last:border-0 ${isClickable ? 'cursor-pointer hover:bg-slate-50 transition-colors' : ''}`}
                     tabIndex={isClickable ? 0 : undefined}
                     role={isClickable ? 'button' : undefined}
@@ -455,6 +461,11 @@ export function WorkspaceScaffold({ config }: { config: WorkspacePageConfig }) {
               </tbody>
             </table>
             {rows.length === 0 && <p className="py-8 text-center text-sm text-muted-foreground">No records found.</p>}
+            {pageCount > 1 && <nav aria-label={`${config.title} pages`} className="mt-4 flex flex-wrap items-center justify-end gap-3 border-t pt-4 text-sm">
+              <Button type="button" variant="outline" size="sm" onClick={() => setPage((value) => Math.max(1, value - 1))} disabled={currentPage === 1}>Previous</Button>
+              <span aria-live="polite" className="tabular-nums text-slate-600">Page {currentPage} of {pageCount}</span>
+              <Button type="button" variant="outline" size="sm" onClick={() => setPage((value) => Math.min(pageCount, value + 1))} disabled={currentPage === pageCount}>Next</Button>
+            </nav>}
             {config.title.includes('Transactions') && (
               <Button variant="outline" className="mt-4">
                 <Download className="h-4 w-4" />

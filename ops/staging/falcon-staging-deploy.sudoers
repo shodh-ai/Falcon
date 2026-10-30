@@ -1,0 +1,2 @@
+# No shell, Docker, arbitrary arguments, production deploy, SQL, reset or restore.
+falcon-staging-deploy ALL=(root) NOPASSWD: /usr/local/sbin/falcon-staging-request ""

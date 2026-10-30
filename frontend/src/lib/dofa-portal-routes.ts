@@ -90,6 +90,8 @@ export function getP2pDofaApprovalsPath(role: string | undefined | null): string
 
 export function getUniversalDofaInboxPath(role: string | undefined | null): string {
   switch (norm(role)) {
+    case 'principal':
+      return '/principal/inbox';
     case 'hod':
       return '/hod/approvals/dofa-inbox';
     case 'dean':
@@ -141,6 +143,8 @@ export function resolveDofaInboxPathForUser(
   const hasApproverRole = normalized.some((r) =>
     DOFA_INBOX_APPROVER_ROLES.includes(r as (typeof DOFA_INBOX_APPROVER_ROLES)[number]),
   );
+  // Principal uses the department-scoped decision queue, not specialist role-wide DoFA.
+  if ((pathname === '/principal' || pathname?.startsWith('/principal/')) && normalized.includes('principal')) return '/principal/inbox';
   if (!hasApproverRole) return null;
 
   if (pathname) {

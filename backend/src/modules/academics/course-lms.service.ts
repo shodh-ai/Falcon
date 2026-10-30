@@ -28,6 +28,7 @@ import { User } from '../../entities/user.entity';
 import { ObjectStorageService } from '../../storage/object-storage.service';
 import { AssignmentsService } from './assignments.service';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
+import { FalconNotificationsService } from '../../core/notifications/falcon-notifications.service';
 import { materialDownloadMetadata } from './material-download';
 import { normalizeYouTubeMaterialUrl } from './youtube-material';
 
@@ -55,6 +56,7 @@ export class CourseLmsService {
     private readonly assignments: AssignmentsService,
     private readonly objectStorage: ObjectStorageService,
     private readonly notificationEmitter: NotificationEmitterService,
+    private readonly falconNotifications: FalconNotificationsService,
   ) {}
 
   async getFacultyWorkspace(
@@ -63,6 +65,16 @@ export class CourseLmsService {
     courseId: string,
   ) {
     await this.assertFacultyTeaches(courseId, facultyUserId, tenantId);
+    return this.loadCourseWorkspace(tenantId, courseId);
+  }
+
+  /** HOD oversight is read-only; every editing method still checks direct teaching. */
+  async getHodCourseWorkspace(hodUserId: string, tenantId: string, courseId: string) {
+    await this.assertHodCourseScope(courseId, hodUserId, tenantId);
+    return this.loadCourseWorkspace(tenantId, courseId);
+  }
+
+  private async loadCourseWorkspace(tenantId: string, courseId: string) {
     const course = await this.getCourseOrFail(courseId, tenantId);
     const moduleRows = await this.modules.find({
       where: { tenant_id: tenantId, course_id: courseId },
@@ -95,7 +107,6 @@ export class CourseLmsService {
   ) {
     await this.assertFacultyTeaches(courseId, facultyUserId, tenantId);
     const course = await this.getCourseOrFail(courseId, tenantId);
-    const hodDepartmentIds = await this.resolveHodDepartmentIds(facultyUserId);
     const rows = await this.dataSource.query<
       Array<{
         allocation_id: string;
@@ -111,17 +122,9 @@ export class CourseLmsService {
        WHERE a.tenant_id = $1
          AND a.course_id = $3
          AND a.status = 'ACTIVE'
-           AND (
-             a.faculty_user_id = $2
-             OR EXISTS (
-             SELECT 1
-             FROM users assigned
-             WHERE assigned.user_id = a.faculty_user_id
-               AND assigned.dept_id = ANY($4::int[])
-           )
-         )
+           AND a.faculty_user_id = $2
        ORDER BY a.program_name NULLS LAST, a.semester NULLS LAST`,
-      [tenantId, facultyUserId, courseId, hodDepartmentIds],
+      [tenantId, facultyUserId, courseId],
     );
 
     return {
@@ -648,17 +651,8 @@ export class CourseLmsService {
     });
     if (!material) throw new NotFoundException('Material not found');
 
-    const ownsMaterial = material.faculty_user_id === facultyUserId;
-    if (!ownsMaterial) {
-      try {
-        await this.assertFacultyTeaches(
-          material.course_id,
-          facultyUserId,
-          tenantId,
-        );
-      } catch {
-        throw new ForbiddenException('You cannot delete this material');
-      }
+    if (material.faculty_user_id !== facultyUserId) {
+      throw new ForbiddenException('Only the uploading faculty may delete this material');
     }
 
     // Keep original bytes, metadata and visibility links for authorized recovery.
@@ -795,10 +789,12 @@ export class CourseLmsService {
     );
     if (allocation.length) return;
 
-    // HODs may manage courses offered by their own department even when they
-    // are not the assigned lecturer. Faculty users remain restricted to the
-    // direct timetable/allocation checks above.
-    const hodDepartmentIds = await this.resolveHodDepartmentIds(facultyUserId);
+    throw new NotFoundException('Course not found in your teaching timetable');
+  }
+
+  private async assertHodCourseScope(courseId: string, hodUserId: string, tenantId: string) {
+    await this.getCourseOrFail(courseId, tenantId);
+    const hodDepartmentIds = await this.resolveHodDepartmentIds(hodUserId, tenantId);
     if (hodDepartmentIds.length) {
       const scoped = await this.dataSource.query(
         `SELECT 1
@@ -831,17 +827,54 @@ export class CourseLmsService {
       if (scoped.length) return;
     }
 
-    throw new NotFoundException('Course not found in your teaching timetable');
+    throw new NotFoundException('Course not found in your department');
   }
 
-  private async resolveHodDepartmentIds(hodUserId: string): Promise<number[]> {
+  async notifyHodCourseFaculty(
+    hodUserId: string,
+    tenantId: string,
+    courseId: string,
+    facultyUserId: string,
+    message: string,
+  ) {
+    await this.assertHodCourseScope(courseId, hodUserId, tenantId);
+    const body = message?.trim();
+    if (!body || body.length > 1000) {
+      throw new BadRequestException('Message must be between 1 and 1000 characters');
+    }
+    const rows = await this.dataSource.query<Array<{ name: string }>>(
+      `SELECT u.name FROM academic_course_allocations a
+       JOIN users u ON u.user_id = a.faculty_user_id AND u.tenant_id = a.tenant_id
+       WHERE a.tenant_id = $1 AND a.course_id = $2 AND a.faculty_user_id = $3
+         AND a.status = 'ACTIVE' AND u.is_active = true AND u.deleted_at IS NULL
+       LIMIT 1`,
+      [tenantId, courseId, facultyUserId],
+    );
+    if (!rows.length) throw new NotFoundException('Active course faculty not found');
+    const course = await this.getCourseOrFail(courseId, tenantId);
+    await this.falconNotifications.create({
+      tenantId,
+      userId: facultyUserId,
+      category: 'ACADEMICS',
+      title: `HOD note · ${course.course_code}`,
+      message: body,
+      actionLink: `/faculty/courses/${encodeURIComponent(courseId)}`,
+      intent: 'action_required',
+      metadata: { course_id: courseId, hod_user_id: hodUserId },
+    });
+    return { sent: true, recipient: rows[0].name };
+  }
+
+  private async resolveHodDepartmentIds(hodUserId: string, tenantId: string): Promise<number[]> {
     const rows = await this.dataSource.query<Array<{ dept_id: number }>>(
-      `SELECT dept_id FROM departments WHERE hod_user_id = $1 AND deleted_at IS NULL
+      `SELECT d.dept_id FROM departments d
+       JOIN users hod ON hod.user_id = d.hod_user_id AND hod.tenant_id = $2
+       WHERE d.hod_user_id = $1 AND d.deleted_at IS NULL
        UNION
        SELECT u.dept_id FROM users u
        JOIN roles r ON r.role_id = u.role_id
-       WHERE u.user_id = $1 AND u.dept_id IS NOT NULL AND lower(r.role_name) = 'hod'`,
-      [hodUserId],
+       WHERE u.user_id = $1 AND u.tenant_id = $2 AND u.dept_id IS NOT NULL AND lower(r.role_name) = 'hod'`,
+      [hodUserId, tenantId],
     );
     return [...new Set(rows.map((row) => Number(row.dept_id)).filter(Boolean))];
   }
@@ -858,10 +891,8 @@ export class CourseLmsService {
       },
     });
     if (!mod) throw new NotFoundException('Module not found');
-    // Preserve direct faculty ownership while allowing an HOD to manage
-    // modules created by lecturers in the HOD's department.
     if (mod.faculty_user_id !== facultyUserId) {
-      await this.assertFacultyTeaches(mod.course_id, facultyUserId, tenantId);
+      throw new ForbiddenException('Only the owning faculty may change this unit');
     }
     return mod;
   }
@@ -977,22 +1008,17 @@ export class CourseLmsService {
       return [];
     }
 
-    const hodDepartmentIds = await this.resolveHodDepartmentIds(facultyUserId);
     const validIds = await this.dataSource.query<
       Array<{ allocation_id: string }>
     >(
       `SELECT a.allocation_id
        FROM academic_course_allocations a
-       LEFT JOIN users assigned ON assigned.user_id = a.faculty_user_id
        WHERE a.tenant_id = $1
          AND a.course_id = $2
          AND a.allocation_id = ANY($3::uuid[])
          AND a.status = 'ACTIVE'
-         AND (
-           a.faculty_user_id = $4
-           OR assigned.dept_id = ANY($5::int[])
-         )`,
-      [tenantId, courseId, allocationIds, facultyUserId, hodDepartmentIds],
+         AND a.faculty_user_id = $4`,
+      [tenantId, courseId, allocationIds, facultyUserId],
     );
     const valid = validIds.map((row) => row.allocation_id);
     if (valid.length !== new Set(allocationIds).size) {

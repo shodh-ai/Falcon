@@ -1,0 +1,5 @@
+#!/bin/sh
+# Install root-owned, mode 0755. Authorized key must force this exact command.
+set -eu
+[ "${SSH_ORIGINAL_COMMAND:-}" = deploy ] || exit 64
+exec /usr/bin/sudo -n /usr/local/sbin/falcon-staging-request

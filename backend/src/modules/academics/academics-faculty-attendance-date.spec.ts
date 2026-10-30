@@ -6,6 +6,7 @@ import { AcademicsFacultyService } from './academics-faculty.service';
 function createService(options?: {
   timetableRows?: Record<string, unknown>[];
   slotRows?: Record<string, unknown>[];
+  cancellations?: Array<{ course_id: string; start_time: string; session_date?: string }>;
 }) {
   const dataSource = {
     query: jest.fn().mockImplementation((sql: string) => {
@@ -14,6 +15,8 @@ function createService(options?: {
       if (sql.includes('SELECT count(*)::int AS student_count'))
         return Promise.resolve([{ student_count: 2 }]);
       if (sql.includes('SELECT b.batch_id')) return Promise.resolve([]);
+      if (sql.includes('FROM class_adjustments') && sql.includes("adjustment_type='CANCEL'"))
+        return Promise.resolve(options?.cancellations ?? []);
       return Promise.resolve(options?.timetableRows ?? []);
     }),
   };
@@ -50,7 +53,7 @@ describe('Faculty attendance date and practical batch safety', () => {
     await expect(service.saveCourseAttendanceLog('f','t',{course_id:'c',attendance_data:[{student_id:'s',status:'PRESENT'}]})).rejects.toBeInstanceOf(BadRequestException);
     expect(dataSource.query).toHaveBeenCalledTimes(1);
   });
-  it('uses one bounded week query without fetching any student roster', async () => {
+  it('uses bounded week and cancellation queries without fetching any student roster', async () => {
     const { service, dataSource } = createService({ timetableRows: [
       {date:'2026-10-12',timetable_id:'slot-1',has_saved_attendance:true},
       {date:'2026-10-12',timetable_id:'slot-2',has_saved_attendance:false},
@@ -58,13 +61,29 @@ describe('Faculty attendance date and practical batch safety', () => {
     ] });
     const roster = jest.spyOn(service,'getCourseStudents');
     const week=await service.getFacultyAttendanceWeek('faculty-1','tenant-1',43,'2026-10-12');
-    expect(dataSource.query).toHaveBeenCalledTimes(1);
+    expect(dataSource.query).toHaveBeenCalledTimes(2);
     expect(week).toHaveLength(7);
     expect(week[0].sessions.map(s=>s.has_saved_attendance)).toEqual([true,false]);
     expect(week[1].sessions[0].awaiting_confirmation).toBe(true);
     expect(week[6].date).toBe('2026-10-18');
     expect(roster).not.toHaveBeenCalled();
     expect(dataSource.query).toHaveBeenCalledWith(expect.stringContaining('generate_series(0, 6)'),['tenant-1','faculty-1',43,'2026-10-12']);
+  });
+  it('labels a cancelled weekly session without counting it as attendance due', async () => {
+    const { service } = createService({ timetableRows: [
+      { date: '2026-10-12', timetable_id: 'slot-1', course_id: 'course-1', start_time: '11:00' },
+    ], cancellations: [{ course_id: 'course-1', start_time: '11:00', session_date: '2026-10-12' }] });
+    const week = await service.getFacultyAttendanceWeek('faculty-1', 'tenant-1', null, '2026-10-12');
+    expect(week[0].sessions[0].cancelled).toBe(true);
+  });
+  it('keeps an approved extra class and its saved status visible in the attendance week', async () => {
+    const adjustment = '33333333-3333-4333-8333-333333333333';
+    const { service, dataSource } = createService({ timetableRows: [
+      { date: '2026-10-28', timetable_id: `extra:${adjustment}`, course_id: 'course-1', has_saved_attendance: true },
+    ] });
+    const week = await service.getFacultyAttendanceWeek('faculty-1', 'tenant-1', null, '2026-10-28');
+    expect(week[0].sessions[0]).toMatchObject({ timetable_id: `extra:${adjustment}`, has_saved_attendance: true });
+    expect(dataSource.query.mock.calls[0][0]).toContain('cal.class_adjustment_id=a.adjustment_id');
   });
   it('rejects invalid week input before querying', async () => {
     const {service,dataSource}=createService();
@@ -134,6 +153,19 @@ describe('Faculty attendance date and practical batch safety', () => {
       'cal.faculty_user_id = t.faculty_user_id', 'cal.timetable_id = t.timetable_id', 'cal.date = $5::date']) {
       expect(sql).toContain(condition);
     }
+  });
+
+  it('labels only the approved cancellation at its exact course and start time', async () => {
+    const { service } = createService({
+      timetableRows: [
+        { timetable_id: 'slot-1', course_id: 'course-1', start_time: '11:00:00' },
+        { timetable_id: 'slot-2', course_id: 'course-1', start_time: '12:00:00' },
+      ],
+      cancellations: [{ course_id: 'course-1', start_time: '11:00' }],
+    });
+    jest.spyOn(service, 'getCourseStudents').mockResolvedValue([]);
+    const rows = await service.getFacultyAcademicTimetableToday('faculty-1', 'tenant-1', null, '2026-10-13');
+    expect(rows.map(row => row.cancelled)).toEqual([true, false]);
   });
 
   it('does not count the whole course as the roster of an unmapped practical batch', async () => {

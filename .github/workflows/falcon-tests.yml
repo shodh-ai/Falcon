@@ -2,9 +2,9 @@ name: Falcon CI
 
 on:
   push:
-    branches: [main, develop, testing]
+    branches: [main, develop, testing, staging]
   pull_request:
-    branches: [main, develop, testing]
+    branches: [main, develop, testing, staging]
 
 jobs:
   deployment-boundaries:
@@ -22,6 +22,8 @@ jobs:
           node --test backend/scripts/storage-boundary.spec.cjs backend/scripts/resource-boundary.spec.cjs backend/scripts/runtime-start.spec.cjs backend/scripts/deploy-migrate.spec.cjs
           node --test ops/deployment-safety/tests/recovery_upload_probe.spec.cjs
           python3 -B -m unittest discover -s ops/deployment-safety/tests -v
+          node --test backend/scripts/staging-boundary.spec.cjs ops/staging/tests/frontend-runtime.spec.cjs
+          python3 -B -m unittest discover -s ops/staging/tests -v
       - name: Prepare official disposable PostgreSQL 18 fixture image
         run: |
           docker pull postgres:18-alpine
@@ -84,6 +86,11 @@ jobs:
             src/common/email/falcon-email-sender.spec.ts \
             src/common/email/falcon-email-consumers.spec.ts \
             src/auth/password-reset-sender.spec.ts \
+            src/common/config/staging-request-policy.spec.ts \
+            src/common/config/staging-environment.spec.ts \
+            src/auth/strategies/staging-jwt-boundary.spec.ts \
+            src/common/config/staging-invites.spec.ts \
+            src/common/config/staging-mocks.spec.ts \
             src/auth/password-reset.security.spec.ts
 
       - name: Validate notification staging preparation offline
@@ -164,6 +171,21 @@ jobs:
           ALLOW_SCHEMA_BOOTSTRAP_SYNC: 'true'
         run: npm run db:migrate:test
 
+      - name: Student timetable and attendance identity regressions
+        working-directory: backend
+        env:
+          FALCON_RUN_STUDENT_ATTENDANCE_SQL_TESTS: '1'
+        run: |
+          npm test -- --runInBand --runTestsByPath \
+            src/modules/academics/student-dated-timetable.spec.ts \
+            src/modules/academics/student-timetable-visibility.spec.ts \
+            src/modules/academics/academics.service.spec.ts \
+            src/modules/student-portal/student-portal.service.spec.ts \
+            src/modules/student-portal/student-portal.security.spec.ts \
+            src/modules/academics/student-results.security.spec.ts \
+            src/modules/academics/student-enrollment-sync.service.spec.ts
+          node --test scripts/student-attendance-session-identity.spec.cjs
+
       - name: HR QA workflow, scoped queues, reports and document storage regressions
         working-directory: backend
         env:
@@ -186,6 +208,18 @@ jobs:
         run: |
           npm run build --ignore-scripts
           node scripts/test-hr-document-export.cjs
+
+      - name: Principal oversight transactional workflow integration
+        working-directory: backend
+        env:
+          PGHOST: localhost
+          PGUSER: postgres
+          PGPASSWORD: postgres
+        run: node scripts/principal-oversight.integration.js
+
+      - name: Principal workspace and approval interface regressions
+        working-directory: frontend
+        run: npm test -- src/components/principal/__tests__ src/lib/__tests__/principal-routing.test.ts
 
       - name: Install Playwright browsers
         working-directory: tests
@@ -245,3 +279,20 @@ jobs:
           name: playwright-report
           path: tests/playwright-report
           if-no-files-found: ignore
+
+  staging-images:
+    name: Publish tested staging images
+    needs: [deployment-boundaries, notification-security, ci]
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/staging') ||
+      (github.event_name == 'pull_request' && github.base_ref == 'staging' &&
+       github.event.pull_request.head.repo.full_name == github.repository)
+    permissions:
+      contents: read
+      actions: read
+      packages: write
+      id-token: write
+    uses: ./.github/workflows/publish-staging-images.yml
+    with:
+      release_sha: ${{ github.sha }}
+      deploy: ${{ github.event_name == 'push' && github.ref == 'refs/heads/staging' }}

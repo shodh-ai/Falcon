@@ -1,3 +1,5 @@
+import { PrincipalOversightService } from './principal-oversight.service';
+import { PrincipalOversightController } from './principal-oversight.controller';
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Subject } from '../../entities/subject.entity';
@@ -44,6 +46,8 @@ import { FacultyProfileService } from './faculty-profile.service';
 import { FacultyProfileController } from './faculty-profile.controller';
 import { CourseLmsService } from './course-lms.service';
 import { AcademicProxyService } from './academic-proxy.service';
+import { AcademicSessionChangesService } from './academic-session-changes.service';
+import { AcademicSessionChangesController } from './academic-session-changes.controller';
 import { MarksheetPdfService } from './pdf/marksheet-pdf.service';
 import { MarksHistoryService } from './marks-history.service';
 import { StorageModule } from '../../storage/storage.module';
@@ -106,6 +110,8 @@ import { DeanAuditService } from './dean-audit.service';
   ],
   controllers: [
     AcademicsController,
+    PrincipalOversightController,
+    AcademicSessionChangesController,
     ProctorController,
     CertificatesController,
     EarlyWarningController,
@@ -115,6 +121,7 @@ import { DeanAuditService } from './dean-audit.service';
   ],
   providers: [
     AcademicsService,
+    PrincipalOversightService,
     AcademicsFacultyService,
     ProctorService,
     MentorshipChatService,
@@ -125,6 +132,7 @@ import { DeanAuditService } from './dean-audit.service';
     FacultyProfileService,
     CourseLmsService,
     AcademicProxyService,
+    AcademicSessionChangesService,
     MarksheetPdfService,
     MarksHistoryService,
     EarlyWarningService,

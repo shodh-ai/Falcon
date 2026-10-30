@@ -630,7 +630,7 @@ export class HrTeamService {
               u.name AS employee_name, u.official_email AS employee_email,
               p.employee_id
        FROM staff_leave_requests r
-       JOIN users u ON u.user_id = r.staff_user_id
+       JOIN users u ON u.user_id = r.staff_user_id AND u.tenant_id = r.tenant_id
        LEFT JOIN hr_employee_profiles p ON p.user_id = u.user_id AND p.tenant_id = r.tenant_id
        LEFT JOIN hr_approval_workflow_steps hr_step
          ON hr_step.workflow_id = r.workflow_id AND hr_step.step_order = r.current_step_order
@@ -835,6 +835,11 @@ export class HrTeamService {
     }
     if (!ids.length) throw new BadRequestException('No requests selected');
     const tabKey = (tab?.toUpperCase() ?? 'LEAVE') as TeamRequestTab;
+    if (roles.some(role => role.toLowerCase() === 'principal') &&
+        !roles.some(role => ['hr','hradmin','superadmin','hod','dean'].includes(role.toLowerCase())) &&
+        ['DOCUMENT','APPRAISAL','ATTENDANCE_OVERRIDE'].includes(tabKey)) {
+      throw new ForbiddenException('Principal oversight does not grant specialist document, appraisal or attendance approval authority');
+    }
 
     if (tabKey === 'DOCUMENT') {
       const status = action === 'APPROVE' ? 'VERIFIED' : 'REJECTED';
@@ -1041,7 +1046,7 @@ export class HrTeamService {
        FROM staff_leave_requests r
        JOIN users u ON u.user_id = r.staff_user_id AND u.tenant_id = r.tenant_id
        LEFT JOIN hr_employee_profiles p ON p.user_id = u.user_id AND p.tenant_id = r.tenant_id
-       LEFT JOIN users approver ON approver.user_id = r.current_approver_user_id
+       LEFT JOIN users approver ON approver.user_id = r.current_approver_user_id AND approver.tenant_id = r.tenant_id
        LEFT JOIN hr_approval_workflow_steps hr_step
          ON hr_step.workflow_id = r.workflow_id AND hr_step.step_order = r.current_step_order
        WHERE r.tenant_id = $1 AND r.status IN ('PENDING', 'HOD_APPROVED')

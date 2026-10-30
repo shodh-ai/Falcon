@@ -1,3 +1,4 @@
+import { publishStagingOutbox } from '../../common/config/staging-mocks';
 /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access -- query rows are untyped */
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -16,6 +17,7 @@ export class ProcurementOutboxPublisher {
 
   @Interval(30_000)
   async publish() {
+    if (await publishStagingOutbox(this.db, 'proc_outbox_events')) return;
     const endpoint = this.config.get<string>('PROCUREMENT_EVENT_WEBHOOK_URL');
     const privateKey = this.config.get<string>(
       'PROCUREMENT_EVENT_SIGNING_PRIVATE_KEY',

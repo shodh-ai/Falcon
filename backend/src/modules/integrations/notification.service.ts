@@ -1,3 +1,5 @@
+import { isVerifiedStaging } from '../../common/config/staging-environment';
+import { captureStagingIntegration } from '../../common/config/staging-mocks';
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
@@ -19,6 +21,10 @@ export class NotificationService {
   }
 
   async queueWhatsApp(to: string, message: string) {
+    if (isVerifiedStaging()) {
+      captureStagingIntegration('whatsapp', { to, message });
+      return { queued: true, mock: true };
+    }
     await this.db.query(
       `INSERT INTO integration_jobs (tenant_id, integration_type, entity_type, payload)
        VALUES ('a0000000-0000-4000-8000-000000000001', 'WHATSAPP', 'alert', $1::jsonb)`,

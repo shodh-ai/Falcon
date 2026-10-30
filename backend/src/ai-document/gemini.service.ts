@@ -1,3 +1,4 @@
+import { isVerifiedStaging } from '../common/config/staging-environment';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GoogleGenerativeAI } from '@google/generative-ai';
@@ -90,6 +91,12 @@ export class GeminiService {
     absolutePdfPath: string;
     taskName: string;
   }): Promise<AiAuditResult> {
+    if (isVerifiedStaging())
+      return {
+        status: AiSubmissionStatus.VALIDATED,
+        extracted_data: { staging_mock: true },
+        remarks: 'STAGING MOCK — no document analysis performed',
+      };
     const apiKey = this.config.get<string>('GEMINI_API_KEY');
     if (!apiKey) {
       throw new Error('GEMINI_API_KEY is not configured');

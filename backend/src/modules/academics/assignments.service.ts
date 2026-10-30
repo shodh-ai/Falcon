@@ -9,7 +9,7 @@ import {
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createReadStream, existsSync, mkdirSync, writeFileSync } from 'fs';
-import { basename, extname, resolve } from 'path';
+import { extname, resolve } from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { In, Repository } from 'typeorm';
 import { NotificationDispatchService } from '../../core/notifications/notification-dispatch.service';
@@ -22,7 +22,8 @@ import { FalconNotification } from '../../entities/falcon-notification.entity';
 import { StudentCourseEnrollment } from '../../entities/student-course-enrollment.entity';
 import { User } from '../../entities/user.entity';
 import { ObjectStorageService } from '../../storage/object-storage.service';
-import { assertPdfUpload } from './lms-upload.config';
+import { assertAssignmentUpload } from './lms-upload.config';
+import { materialDownloadMetadata } from './material-download';
 
 export type AssignmentSubmissionStatus =
   | 'SUBMITTED'
@@ -56,8 +57,9 @@ export class AssignmentsService {
     facultyUserId: string,
     tenantId: string,
     courseId?: string,
+    ownOnly = false,
   ) {
-    const hodDepartmentIds = await this.resolveHodDepartmentIds(facultyUserId);
+    const hodDepartmentIds = ownOnly ? [] : await this.resolveHodDepartmentIds(facultyUserId);
     if (hodDepartmentIds.length) {
       const scoped = await this.timetable.query(
         `SELECT DISTINCT a.assignment_id
@@ -174,6 +176,7 @@ export class AssignmentsService {
       throw new BadRequestException('Publish date must be before the deadline');
     }
 
+    if (file) assertAssignmentUpload(file);
     const stored = file
       ? await this.persistAssignmentFile(
           tenantId,
@@ -257,6 +260,7 @@ export class AssignmentsService {
     }
 
     if (file) {
+      assertAssignmentUpload(file);
       const stored = await this.persistAssignmentFile(
         tenantId,
         'assignment-references',
@@ -644,9 +648,14 @@ export class AssignmentsService {
           max_marks: assignment.max_marks,
           description: assignment.description,
           has_reference_file: !!assignment.reference_file_path,
+          reference_file_extension: assignment.reference_file_path
+            ? extname(assignment.reference_file_key || assignment.reference_file_path).toLowerCase()
+            : null,
           course_id: assignment.course_id,
         },
-        submission: submission ?? null,
+        submission: submission
+          ? { ...submission, file_extension: extname(submission.file_key || submission.file_path).toLowerCase() }
+          : null,
         status: this.deriveStudentStatus(assignment, submission),
         can_resubmit: this.canStudentSubmit(assignment, submission),
       };
@@ -681,7 +690,7 @@ export class AssignmentsService {
       );
     }
 
-    assertPdfUpload(file);
+    assertAssignmentUpload(file);
 
     const enrollment = await this.enrollments.findOne({
       where: {
@@ -802,14 +811,18 @@ export class AssignmentsService {
   }
 
   async streamSubmissionFile(submission: AssignmentSubmission) {
+    const metadata = materialDownloadMetadata({
+      title: submission.submission_id,
+      file_key: submission.file_key,
+      file_path: submission.file_path,
+    });
     if (submission.file_key && this.objectStorage.isEnabled()) {
       const stream = await this.objectStorage.getDownloadStream(
         submission.file_key,
       );
       return {
         stream,
-        filename: `${submission.submission_id}.pdf`,
-        mimeType: 'application/pdf',
+        ...metadata,
       };
     }
     const uploadRoot = resolve(process.env.UPLOAD_PATH || './uploads');
@@ -823,8 +836,7 @@ export class AssignmentsService {
       throw new NotFoundException('File not found on server');
     return {
       stream: createReadStream(resolved),
-      filename: basename(resolved),
-      mimeType: 'application/pdf',
+      ...metadata,
     };
   }
 
@@ -862,14 +874,18 @@ export class AssignmentsService {
   }
 
   async streamAssignmentFile(assignment: AcademicAssignment) {
+    const metadata = materialDownloadMetadata({
+      title: `${assignment.title}_ref`,
+      file_key: assignment.reference_file_key,
+      file_path: assignment.reference_file_path!,
+    });
     if (assignment.reference_file_key && this.objectStorage.isEnabled()) {
       const stream = await this.objectStorage.getDownloadStream(
         assignment.reference_file_key,
       );
       return {
         stream,
-        filename: `${assignment.title.replace(/\s+/g, '_')}_ref.pdf`,
-        mimeType: 'application/pdf',
+        ...metadata,
       };
     }
     const uploadRoot = resolve(process.env.UPLOAD_PATH || './uploads');
@@ -883,8 +899,7 @@ export class AssignmentsService {
       throw new NotFoundException('File not found on server');
     return {
       stream: createReadStream(resolved),
-      filename: basename(resolved),
-      mimeType: 'application/pdf',
+      ...metadata,
     };
   }
 
@@ -911,12 +926,7 @@ export class AssignmentsService {
     }
   }
 
-  /**
-   * Faculty can manage only assignments they created. HODs may additionally
-   * manage assignments created by lecturers whose course is in the HOD's own
-   * department scope. The check is tenant and course scoped to prevent using
-   * an assignment id to cross department boundaries.
-   */
+  /** Editing an assignment belongs to its author, including when the viewer is an HOD. */
   private async assertFacultyMayManageAssignment(
     facultyUserId: string,
     tenantId: string,
@@ -925,16 +935,7 @@ export class AssignmentsService {
     if (assignment.tenant_id !== tenantId) {
       throw new NotFoundException('Assignment not found');
     }
-    if (assignment.faculty_user_id === facultyUserId) return;
-
-    try {
-      await this.assertFacultyTeachesCourse(
-        assignment.course_id,
-        facultyUserId,
-        tenantId,
-      );
-    } catch {
-      // Do not leak whether an assignment exists outside the caller's scope.
+    if (assignment.faculty_user_id !== facultyUserId) {
       throw new NotFoundException('Assignment not found');
     }
   }
@@ -1305,36 +1306,6 @@ export class AssignmentsService {
       [tenantId, courseId, facultyUserId],
     );
     if (marks.length) return;
-
-    const hodDepartmentIds = await this.resolveHodDepartmentIds(facultyUserId);
-    if (hodDepartmentIds.length) {
-      const scoped = await this.timetable.query(
-        `SELECT 1
-         WHERE EXISTS (
-           SELECT 1 FROM academic_course_allocations ca
-           JOIN users assigned ON assigned.user_id = ca.faculty_user_id
-           WHERE ca.tenant_id = $1 AND ca.course_id = $2
-             AND ca.status = 'ACTIVE'
-             AND assigned.dept_id = ANY($3::int[])
-         )
-         OR EXISTS (
-           SELECT 1 FROM academic_timetables t
-           JOIN users assigned ON assigned.user_id = t.faculty_user_id
-           WHERE t.tenant_id = $1 AND t.course_id = $2
-             AND t.deleted_at IS NULL
-             AND assigned.dept_id = ANY($3::int[])
-         )
-         OR EXISTS (
-           SELECT 1 FROM student_course_enrollments e
-           JOIN users student ON student.user_id = e.student_user_id
-           WHERE e.tenant_id = $1 AND e.course_id = $2
-             AND e.status IN ('ENROLLED', 'COMPLETED', 'FAILED')
-             AND student.dept_id = ANY($3::int[])
-         )`,
-        [tenantId, courseId, hodDepartmentIds],
-      );
-      if (scoped.length) return;
-    }
 
     throw new NotFoundException('Course not found in your teaching timetable');
   }

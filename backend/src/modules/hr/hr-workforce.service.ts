@@ -273,7 +273,7 @@ export class HrWorkforceService {
     dto: ApplyWorkforceRequestDto,
     options?: { actorRoles?: string[] },
   ) {
-    const staff = await this.users.findOne({ where: { user_id: staffUserId } });
+    const staff = await this.users.findOne({ where: { user_id: staffUserId, tenant_id: tenantId } });
     if (!staff) throw new NotFoundException('Employee not found');
 
     const requestType = dto.request_type;
@@ -405,10 +405,21 @@ export class HrWorkforceService {
   }
 
   listMyRequests(staffUserId: string, tenantId: string) {
-    return this.requests.find({
-      where: { staff_user_id: staffUserId, tenant_id: tenantId },
-      order: { applied_at: 'DESC' },
-    });
+    return this.dataSource.query(
+      `SELECT r.*,approver.name AS current_approver_name,
+        CASE WHEN route.leave_id IS NULL THEN NULL ELSE ARRAY(
+          SELECT officer.name FROM unnest(route.approver_ids) WITH ORDINALITY AS stage(user_id,position)
+          JOIN users officer ON officer.user_id=stage.user_id AND officer.tenant_id=r.tenant_id
+          ORDER BY stage.position
+        ) END AS effective_chain
+       FROM staff_leave_requests r
+       LEFT JOIN hr_department_request_routes route
+         ON route.leave_id=r.leave_id AND route.tenant_id=r.tenant_id
+       LEFT JOIN users approver ON approver.user_id=r.current_approver_user_id
+         AND approver.tenant_id=r.tenant_id
+       WHERE r.tenant_id=$1 AND r.staff_user_id=$2
+       ORDER BY r.applied_at DESC`, [tenantId, staffUserId],
+    );
   }
 
   async listTeamPending(
@@ -461,15 +472,22 @@ export class HrWorkforceService {
         employee_name: string;
         employee_email: string | null;
         employee_dept: string | null;
+        effective_chain: string[] | null;
       }>
     >(
       `SELECT r.leave_id, r.request_type, r.leave_type, r.start_date, r.end_date,
               r.start_time, r.end_time, r.regularization_date, r.missed_punch_type, r.reason, r.status, r.applied_at,
               r.staff_user_id, r.current_step_order,
-              u.name AS employee_name, u.official_email AS employee_email, d.dept_name AS employee_dept
+              u.name AS employee_name, u.official_email AS employee_email, d.dept_name AS employee_dept,
+              CASE WHEN route.leave_id IS NULL THEN NULL ELSE ARRAY(
+                SELECT officer.name FROM unnest(route.approver_ids) WITH ORDINALITY AS stage(user_id,position)
+                JOIN users officer ON officer.user_id=stage.user_id AND officer.tenant_id=r.tenant_id
+                ORDER BY stage.position
+              ) END AS effective_chain
        FROM staff_leave_requests r
-       JOIN users u ON u.user_id = r.staff_user_id
+       JOIN users u ON u.user_id = r.staff_user_id AND u.tenant_id = r.tenant_id
        LEFT JOIN departments d ON d.dept_id = u.dept_id
+       LEFT JOIN hr_department_request_routes route ON route.leave_id=r.leave_id AND route.tenant_id=r.tenant_id
        LEFT JOIN hr_approval_workflow_steps hr_step
          ON hr_step.workflow_id = r.workflow_id AND hr_step.step_order = r.current_step_order
        WHERE r.tenant_id = $1
@@ -497,6 +515,7 @@ export class HrWorkforceService {
       status: r.status,
       applied_at: r.applied_at,
       current_step_order: r.current_step_order,
+      effective_chain: r.effective_chain,
       employee: {
         user_id: r.staff_user_id,
         name: r.employee_name ?? 'Employee',
@@ -896,7 +915,8 @@ export class HrWorkforceService {
     leaveId: string,
     action: 'APPROVE' | 'REJECT',
     comment?: string,
-    options?: { adminOverride?: boolean; roles?: string[] },
+    options?: { adminOverride?: boolean; roles?: string[];
+      idempotencyKey?: string; expectedStepOrder?: number },
   ) {
     const row = await this.requests.findOne({
       where: { leave_id: leaveId, tenant_id: tenantId },
@@ -909,7 +929,26 @@ export class HrWorkforceService {
     if (action !== 'APPROVE' && action !== 'REJECT') {
       throw new BadRequestException('action must be APPROVE or REJECT');
     }
-
+    const [configuredRoute] = (await this.dataSource.query<Array<{ leave_id: string }>>(
+      `SELECT leave_id FROM hr_department_request_routes WHERE tenant_id=$1 AND leave_id=$2`,
+      [tenantId, leaveId],
+    )) ?? [];
+    if (configuredRoute?.leave_id === leaveId && !options?.adminOverride) {
+      const key = options?.idempotencyKey;
+      if (!key || key.length > 128 || !Number.isInteger(options.expectedStepOrder))
+        throw new BadRequestException('If-Match step revision and Idempotency-Key are required');
+      const [prior] = await this.dataSource.query<Array<{
+        leave_id: string; actor_user_id: string; action: string;
+      }>>(`SELECT leave_id,actor_user_id,action FROM hr_staff_request_decisions
+        WHERE tenant_id=$1 AND idempotency_key=$2`, [tenantId, key]);
+      if (prior) {
+        if (prior.leave_id === leaveId && prior.actor_user_id === reportingOfficerId
+            && prior.action === action) return row;
+        throw new ConflictException('Idempotency key was used for a different decision');
+      }
+      if (row.current_step_order !== options.expectedStepOrder)
+        throw new ConflictException('Request approval step changed; refresh');
+    }
     const staff =
       row.staff ??
       (await this.users.findOne({ where: { user_id: row.staff_user_id } }));
@@ -1026,7 +1065,7 @@ export class HrWorkforceService {
       row.approver_remarks = comment?.trim() ?? row.approver_remarks;
       const saved = await this.dataSource.transaction((manager) => this.commitDecision(
         row, expectedDecisionState, reportingOfficerId, action,
-        adminOverride, manager, overrideAuditParams,
+        adminOverride, manager, overrideAuditParams, options?.idempotencyKey, comment,
       ));
       void this.notifyEmployeeDecision(staff, saved, false, comment);
       return saved;
@@ -1047,6 +1086,7 @@ export class HrWorkforceService {
       row.current_step_order,
       row.workflow_id,
       reportingOfficerId,
+      row.leave_id,
     );
 
     if (next.is_final) {
@@ -1059,7 +1099,7 @@ export class HrWorkforceService {
         );
         const claimed = await this.commitDecision(
           row, expectedDecisionState, reportingOfficerId, action,
-          adminOverride, manager, overrideAuditParams,
+          adminOverride, manager, overrideAuditParams, options?.idempotencyKey, comment,
         );
         await this.applyApprovalSideEffects(claimed, manager);
         return claimed;
@@ -1076,7 +1116,7 @@ export class HrWorkforceService {
     row.approver_remarks = comment?.trim() ?? row.approver_remarks;
     const saved = await this.dataSource.transaction((manager) => this.commitDecision(
       row, expectedDecisionState, reportingOfficerId, action,
-      adminOverride, manager, overrideAuditParams,
+      adminOverride, manager, overrideAuditParams, options?.idempotencyKey, comment,
     ));
 
     if (next.approver_user_id) {
@@ -1089,6 +1129,243 @@ export class HrWorkforceService {
     }
 
     return saved;
+  }
+
+  async listAppeals(actorId: string, tenantId: string) {
+    return this.dataSource.query(
+      `SELECT a.appeal_id,a.leave_id,a.reason,a.status,a.reconsideration_count,a.revision,
+        a.reviewer_user_id,a.rejecting_user_id,a.requester_user_id,a.created_at,
+        requester.name AS requester_name
+       FROM hr_staff_request_appeals a
+       JOIN users requester ON requester.user_id=a.requester_user_id AND requester.tenant_id=a.tenant_id
+       WHERE a.tenant_id=$1 AND $2::uuid IN (a.requester_user_id,a.reviewer_user_id,a.rejecting_user_id)
+       ORDER BY a.created_at DESC`, [tenantId, actorId],
+    );
+  }
+
+  private async resolveAppealReviewer(
+    manager: EntityManager,
+    tenantId: string,
+    leaveId: string,
+    rejectingUserId: string,
+    rejectingLevel?: string | null,
+  ): Promise<string | null> {
+    const [configured] = await manager.query<Array<{
+      dept_id: number; hod_user_id: string | null; principal_user_id: string | null;
+      dean_user_id: string | null; higher_officer_id: string | null;
+    }>>(`SELECT c.dept_id,c.dean_user_id,c.higher_officer_id,
+      (SELECT a.user_id FROM department_offices o JOIN department_office_appointments a
+        ON a.office_id=o.office_id AND a.valid_to IS NULL
+        WHERE o.tenant_id=c.tenant_id AND o.dept_id=c.dept_id AND o.kind='HOD'
+        LIMIT 1) AS hod_user_id,
+      (SELECT a.user_id FROM department_offices o JOIN department_office_appointments a
+        ON a.office_id=o.office_id AND a.valid_to IS NULL
+        WHERE o.tenant_id=c.tenant_id AND o.dept_id=c.dept_id AND o.kind='PRINCIPAL'
+        LIMIT 1) AS principal_user_id
+      FROM hr_department_request_routes route JOIN department_leadership c
+        ON c.tenant_id=route.tenant_id AND c.dept_id=route.dept_id
+      WHERE route.tenant_id=$1 AND route.leave_id=$2 FOR SHARE OF c`, [tenantId, leaveId]);
+    if (configured) {
+      const hod = configured.hod_user_id;
+      const principal = configured.principal_user_id;
+      const dean = configured.dean_user_id;
+      if (rejectingLevel === 'HOD' || rejectingUserId === hod)
+        return principal || dean || configured.higher_officer_id;
+      if (rejectingLevel === 'PRINCIPAL' || rejectingUserId === principal)
+        return dean || configured.higher_officer_id;
+      if (rejectingLevel === 'DEAN' || rejectingUserId === dean)
+        return configured.higher_officer_id;
+      if (rejectingUserId === configured.higher_officer_id) {
+        const [supervisor] = await manager.query<Array<{ reporting_officer_id: string | null }>>(
+          `SELECT reporting_officer_id FROM users WHERE tenant_id=$1 AND user_id=$2`,
+          [tenantId, rejectingUserId],
+        );
+        return supervisor?.reporting_officer_id ?? null;
+      }
+      // An office may have changed since the rejection. The current highest
+      // independent officer handles the appeal instead of the former holder.
+      return principal || dean || configured.higher_officer_id;
+    }
+    const [legacy] = await manager.query<Array<{ reporting_officer_id: string | null }>>(
+      `SELECT reporting_officer_id FROM users WHERE tenant_id=$1 AND user_id=$2`,
+      [tenantId, rejectingUserId],
+    );
+    return legacy?.reporting_officer_id ?? null;
+  }
+
+  private async rejectingOfficeLevel(manager: EntityManager, tenantId: string,
+    leaveId: string, rejectingUserId: string): Promise<string | null> {
+    const [row] = await manager.query<Array<{ level: string | null }>>(
+      `SELECT CASE WHEN office.kind IS NOT NULL THEN office.kind
+         WHEN c.dean_enabled=true AND c.dean_user_id=$3 THEN 'DEAN'
+         ELSE NULL END AS level
+       FROM hr_department_request_routes route
+       JOIN department_leadership c ON c.tenant_id=route.tenant_id AND c.dept_id=route.dept_id
+       LEFT JOIN department_offices office ON office.tenant_id=c.tenant_id
+         AND office.dept_id=c.dept_id
+         AND EXISTS(SELECT 1 FROM department_office_appointments a
+           WHERE a.office_id=office.office_id AND a.user_id=$3 AND a.valid_to IS NULL)
+       WHERE route.tenant_id=$1 AND route.leave_id=$2
+       ORDER BY office.kind LIMIT 1`, [tenantId, leaveId, rejectingUserId],
+    );
+    return row?.level ?? null;
+  }
+
+  private async currentHolderForAppealLevel(manager: EntityManager, tenantId: string,
+    leaveId: string, level: string | null): Promise<string | null> {
+    if (level === 'HOD' || level === 'PRINCIPAL') {
+      const [holder] = await manager.query<Array<{ user_id: string }>>(
+        `SELECT a.user_id FROM hr_department_request_routes route
+         JOIN department_offices o ON o.tenant_id=route.tenant_id AND o.dept_id=route.dept_id
+         JOIN department_office_appointments a ON a.office_id=o.office_id
+           AND a.valid_to IS NULL AND a.valid_from<=now()
+         JOIN users u ON u.user_id=a.user_id AND u.tenant_id=route.tenant_id
+           AND u.is_active=true AND u.deleted_at IS NULL
+         WHERE route.tenant_id=$1 AND route.leave_id=$2 AND o.kind=$3 LIMIT 1`,
+        [tenantId, leaveId, level],
+      );
+      return holder?.user_id ?? null;
+    }
+    if (level === 'DEAN') {
+      const [holder] = await manager.query<Array<{ dean_user_id: string | null }>>(
+        `SELECT c.dean_user_id FROM hr_department_request_routes route
+         JOIN department_leadership c ON c.tenant_id=route.tenant_id AND c.dept_id=route.dept_id
+         WHERE route.tenant_id=$1 AND route.leave_id=$2 AND c.dean_enabled=true`,
+        [tenantId, leaveId],
+      );
+      return holder?.dean_user_id ?? null;
+    }
+    return null;
+  }
+
+  async appealRejectedRequest(actorId: string, tenantId: string, leaveId: string,
+    reason: string, key: string) {
+    if (!key || key.length > 128) throw new BadRequestException('Idempotency-Key is required');
+    if (!reason?.trim() || reason.trim().length < 10)
+      throw new BadRequestException('Explain the appeal in at least 10 characters');
+    return this.dataSource.transaction(async (manager) => {
+      const [row] = await manager.query<Array<{ staff_user_id: string; status: string }>>(
+        `SELECT staff_user_id,status FROM staff_leave_requests
+         WHERE tenant_id=$1 AND leave_id=$2 FOR UPDATE`, [tenantId, leaveId],
+      );
+      if (!row || row.staff_user_id !== actorId) throw new NotFoundException('Request not found');
+      const [prior] = await manager.query<Array<{ appeal_id: string; idempotency_key: string }>>(
+        `SELECT appeal_id,idempotency_key FROM hr_staff_request_appeals
+         WHERE tenant_id=$1 AND leave_id=$2`, [tenantId, leaveId],
+      );
+      if (prior) {
+        if (prior.idempotency_key === key) return { appeal_id: prior.appeal_id, replayed: true };
+        throw new ConflictException('This request has already been appealed');
+      }
+      if (row.status !== 'REJECTED') throw new ConflictException('Only a rejected request can be appealed');
+      const [decision] = await manager.query<Array<{ actor_user_id: string }>>(
+        `SELECT actor_user_id FROM hr_staff_request_decisions
+         WHERE tenant_id=$1 AND leave_id=$2 AND action='REJECT'
+         ORDER BY decided_at DESC LIMIT 1`, [tenantId, leaveId],
+      );
+      if (!decision) throw new ConflictException('The rejecting officer is not recorded');
+      const rejectingLevel = await this.rejectingOfficeLevel(manager, tenantId,
+        leaveId, decision.actor_user_id);
+      const reviewerId = await this.resolveAppealReviewer(manager, tenantId, leaveId,
+        decision.actor_user_id, rejectingLevel);
+      if (!reviewerId || reviewerId === actorId || reviewerId === decision.actor_user_id)
+        throw new ConflictException('No independent higher reporting officer is configured for appeal');
+      const [active] = await manager.query<Array<{ user_id: string }>>(
+        `SELECT user_id FROM users WHERE tenant_id=$1 AND user_id=$2
+         AND is_active=true AND deleted_at IS NULL`, [tenantId, reviewerId],
+      );
+      if (!active) throw new ConflictException('Higher reporting officer is unavailable');
+      const [appeal] = await manager.query<Array<{ appeal_id: string }>>(
+        `INSERT INTO hr_staff_request_appeals
+          (tenant_id,leave_id,requester_user_id,rejecting_user_id,rejecting_level,
+           reviewer_user_id,idempotency_key,reason,status)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8,'PENDING_REVIEW') RETURNING appeal_id`,
+        [tenantId, leaveId, actorId, decision.actor_user_id, rejectingLevel,
+          reviewerId, key, reason.trim()],
+      );
+      await manager.query(`INSERT INTO hr_staff_request_appeal_events
+        (appeal_id,tenant_id,actor_user_id,action,idempotency_key,reason)
+        VALUES($1,$2,$3,'APPEAL',$4,$5)`,
+        [appeal.appeal_id, tenantId, actorId, key, reason.trim()]);
+      return { appeal_id: appeal.appeal_id, status: 'PENDING_REVIEW' };
+    });
+  }
+
+  async reviewAppeal(actorId: string, tenantId: string, appealId: string,
+    action: 'REJECT' | 'RECONSIDER', reason: string, key: string, expectedRevision?: number) {
+    if (!key || key.length > 128) throw new BadRequestException('Idempotency-Key is required');
+    if (!reason?.trim() || reason.trim().length < 10)
+      throw new BadRequestException('A decision reason of at least 10 characters is required');
+    if (!['REJECT', 'RECONSIDER'].includes(action)) throw new BadRequestException('Invalid appeal action');
+    return this.dataSource.transaction(async (manager) => {
+      const [appeal] = await manager.query<Array<{
+        appeal_id: string; leave_id: string; reviewer_user_id: string;
+        rejecting_user_id: string; rejecting_level: string | null;
+        requester_user_id: string; status: string; revision: number;
+      }>>(`SELECT * FROM hr_staff_request_appeals
+        WHERE tenant_id=$1 AND appeal_id=$2 FOR UPDATE`, [tenantId, appealId]);
+      if (!appeal || appeal.reviewer_user_id !== actorId)
+        throw new NotFoundException('Appeal not found in your review queue');
+      const [repeat] = await manager.query<Array<{ event_id: string }>>(
+        `SELECT event_id FROM hr_staff_request_appeal_events
+         WHERE appeal_id=$1 AND idempotency_key=$2`, [appealId, key],
+      );
+      if (repeat) return { appeal_id: appealId, replayed: true, status: appeal.status };
+      if (!Number.isInteger(expectedRevision) || expectedRevision !== Number(appeal.revision))
+        throw new ConflictException('Appeal changed; refresh before deciding');
+      if (appeal.status !== 'PENDING_REVIEW') throw new ConflictException('Appeal has already been reviewed');
+      const liveReviewer = await this.resolveAppealReviewer(manager, tenantId,
+        appeal.leave_id, appeal.rejecting_user_id, appeal.rejecting_level);
+      if (liveReviewer !== actorId)
+        throw new ConflictException('Reporting chain changed; appeal must be rerouted');
+      const status = action === 'REJECT' ? 'REJECTED' : 'PENDING_RECONSIDERATION';
+      if (action === 'RECONSIDER') {
+        const [request] = await manager.query<Array<{ status: string; current_step_order: number }>>(
+          `SELECT status,current_step_order FROM staff_leave_requests
+           WHERE tenant_id=$1 AND leave_id=$2 FOR UPDATE`, [tenantId, appeal.leave_id],
+        );
+        if (!request || request.status !== 'REJECTED')
+          throw new ConflictException('Request is no longer rejected');
+        const currentRejectingOfficer = await this.currentHolderForAppealLevel(manager,
+          tenantId, appeal.leave_id, appeal.rejecting_level);
+        const reconsideringOfficer = appeal.rejecting_level
+          ? currentRejectingOfficer : appeal.rejecting_user_id;
+        if (!reconsideringOfficer || reconsideringOfficer === actorId ||
+            reconsideringOfficer === appeal.requester_user_id)
+          throw new ConflictException('No independent rejecting office remains for reconsideration');
+        const [last] = await manager.query<Array<{ step_order: number }>>(
+          `SELECT max(step_order)::int AS step_order FROM hr_staff_request_decisions
+           WHERE tenant_id=$1 AND leave_id=$2`, [tenantId, appeal.leave_id],
+        );
+        const nextStep = Math.max(Number(request.current_step_order), Number(last?.step_order ?? 0)) + 1;
+        await manager.query(`INSERT INTO hr_department_request_routes
+          (leave_id,tenant_id,dept_id,approver_ids,current_index,leadership_revision)
+          SELECT r.leave_id,r.tenant_id,u.dept_id,$3::uuid[],0,c.revision
+          FROM staff_leave_requests r JOIN users u ON u.user_id=r.staff_user_id
+          JOIN department_leadership c ON c.tenant_id=r.tenant_id AND c.dept_id=u.dept_id
+          WHERE r.tenant_id=$1 AND r.leave_id=$2
+          ON CONFLICT(leave_id) DO UPDATE SET approver_ids=$3::uuid[],current_index=0,
+            leadership_revision=EXCLUDED.leadership_revision,updated_at=now()`,
+          [tenantId, appeal.leave_id, [reconsideringOfficer, actorId]]);
+        await manager.query(`UPDATE staff_leave_requests SET status='PENDING',workflow_id=NULL,
+          current_step_order=$3,current_approver_user_id=$4
+          WHERE tenant_id=$1 AND leave_id=$2`,
+          [tenantId, appeal.leave_id, nextStep, reconsideringOfficer]);
+        if (reconsideringOfficer !== appeal.rejecting_user_id)
+          await manager.query(`UPDATE hr_staff_request_appeals SET rejecting_user_id=$1
+            WHERE tenant_id=$2 AND appeal_id=$3`,
+            [reconsideringOfficer, tenantId, appealId]);
+      }
+      await manager.query(`UPDATE hr_staff_request_appeals SET status=$3,
+        reconsideration_count=CASE WHEN $3='PENDING_RECONSIDERATION' THEN 1 ELSE reconsideration_count END,
+        revision=revision+1,updated_at=now() WHERE tenant_id=$1 AND appeal_id=$2`,
+        [tenantId, appealId, status]);
+      await manager.query(`INSERT INTO hr_staff_request_appeal_events
+        (appeal_id,tenant_id,actor_user_id,action,idempotency_key,reason)
+        VALUES($1,$2,$3,$4,$5,$6)`,
+        [appealId, tenantId, actorId, action, key, reason.trim()]);
+      return { appeal_id: appealId, status };
+    });
   }
 
   /** Only one concurrent reviewer may claim a pending decision and its side effects. */
@@ -1104,6 +1381,8 @@ export class HrWorkforceService {
     wasOverride: boolean,
     manager: EntityManager,
     overrideAuditParams: string[] | null,
+    idempotencyKey?: string,
+    decisionReason?: string,
   ): Promise<StaffLeaveRequest> {
     const updated = await manager.query<StaffLeaveRequest[]>(
       `UPDATE staff_leave_requests
@@ -1128,13 +1407,64 @@ export class HrWorkforceService {
     if (!updated[0]) {
       throw new ConflictException('Request changed while approval was in progress');
     }
+    const [route] = await manager.query<Array<{ current_index: number; approver_ids: string[] }>>(
+      `SELECT current_index,approver_ids FROM hr_department_request_routes
+       WHERE tenant_id=$1 AND leave_id=$2 FOR UPDATE`,
+      [row.tenant_id, row.leave_id],
+    );
+    if (route?.approver_ids) {
+      const actualCurrent = route.approver_ids[route.current_index];
+      const actualNext = route.approver_ids[route.current_index + 1] ?? null;
+      if (actualCurrent !== actorUserId ||
+          (action === 'APPROVE' && actualNext !== row.current_approver_user_id))
+        throw new ConflictException('Department route changed during approval; refresh');
+    }
     await manager.query(
       `INSERT INTO hr_staff_request_decisions
-         (tenant_id, leave_id, step_order, actor_user_id, action, was_override)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
+         (tenant_id, leave_id, step_order, actor_user_id, action, was_override, idempotency_key, reason)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
       [row.tenant_id, row.leave_id, expected.stepOrder,
-        actorUserId, action, wasOverride],
+        actorUserId, action, wasOverride, idempotencyKey ?? null,
+        decisionReason?.trim() || null],
     );
+    if (action === 'APPROVE') {
+      const advanced = await manager.query<Array<{ current_index: number }>>(
+        `UPDATE hr_department_request_routes SET current_index=current_index+1,
+           updated_at=now() WHERE tenant_id=$1 AND leave_id=$2
+           AND approver_ids[current_index+1]=$3::uuid RETURNING current_index`,
+        [row.tenant_id, row.leave_id, actorUserId],
+      );
+      if (route?.approver_ids && !advanced.length)
+        throw new ConflictException('Department route changed during approval');
+    }
+    const [appeal] = (await manager.query<Array<{
+      appeal_id: string; status: string; rejecting_user_id: string;
+      reviewer_user_id: string;
+    }>>(`SELECT appeal_id,status,rejecting_user_id,reviewer_user_id
+      FROM hr_staff_request_appeals WHERE tenant_id=$1 AND leave_id=$2
+      AND status IN ('PENDING_RECONSIDERATION','PENDING_FINAL') FOR UPDATE`,
+      [row.tenant_id, row.leave_id])) ?? [];
+    if (appeal) {
+      const isReconsideration = appeal.status === 'PENDING_RECONSIDERATION'
+        && actorUserId === appeal.rejecting_user_id;
+      const isFinal = appeal.status === 'PENDING_FINAL'
+        && actorUserId === appeal.reviewer_user_id;
+      if (!isReconsideration && !isFinal)
+        throw new ForbiddenException('Appeal is not assigned to this officer');
+      const appealStatus = action === 'REJECT' ? 'REJECTED'
+        : isReconsideration ? 'PENDING_FINAL' : 'APPROVED';
+      await manager.query(`UPDATE hr_staff_request_appeals SET status=$3,
+        revision=revision+1,updated_at=now() WHERE tenant_id=$1 AND appeal_id=$2`,
+        [row.tenant_id, appeal.appeal_id, appealStatus]);
+      await manager.query(`INSERT INTO hr_staff_request_appeal_events
+        (appeal_id,tenant_id,actor_user_id,action,idempotency_key,details)
+        VALUES($1,$2,$3,$4,$5,$6::jsonb)`,
+        [appeal.appeal_id, row.tenant_id, actorUserId,
+          isReconsideration ? 'RECONSIDERATION_DECISION' : 'FINAL_DECISION',
+          `request-decision-${expected.stepOrder}-${action}`,
+          JSON.stringify({ decision: action, request_status: row.status })],
+      );
+    }
     await this.recordOverrideAfterClaim(overrideAuditParams, manager);
     return Object.assign(row, updated[0]);
   }
@@ -1145,6 +1475,11 @@ export class HrWorkforceService {
     expected: { status: string; stepOrder: number; approverUserId: string | null },
     actorUserId: string,
   ) {
+    const [departmentRoute] = await manager.query<Array<{ leave_id: string }>>(
+      `SELECT leave_id FROM hr_department_request_routes
+       WHERE tenant_id=$1 AND leave_id=$2`, [row.tenant_id, row.leave_id],
+    );
+    if (departmentRoute) return; // Explicit department confirmation may repeat after a policy change.
     const previous = await manager.query<Array<{ actor_user_id: string }>>(
       `SELECT actor_user_id FROM hr_staff_request_decisions
        WHERE tenant_id = $1 AND leave_id = $2 AND action = 'APPROVE'`,
@@ -1563,6 +1898,11 @@ export class HrWorkforceService {
     row: StaffLeaveRequest,
   ): Promise<string | null> {
     if (!row.workflow_id) {
+      const [route] = await this.dataSource.query<Array<{ leave_id: string }>>(
+        `SELECT leave_id FROM hr_department_request_routes WHERE tenant_id=$1 AND leave_id=$2`,
+        [tenantId, row.leave_id],
+      );
+      if (route) return 'DEPARTMENT_OFFICE';
       return row.current_step_order === 1
         ? 'REPORTING_MANAGER'
         : row.current_step_order === 2

@@ -78,6 +78,15 @@ function academicYearForDate(value?: string): string {
   return `${start}-${start + 1}`;
 }
 
+function extraClassId(timetableId?: string): string | null {
+  if (!timetableId?.startsWith('extra:')) return null;
+  const id = timetableId.slice('extra:'.length);
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+    throw new BadRequestException('Invalid extra class session');
+  }
+  return id;
+}
+
 @Injectable()
 export class AcademicsFacultyService {
   constructor(
@@ -96,6 +105,25 @@ export class AcademicsFacultyService {
     private readonly notificationEmitter: NotificationEmitterService,
     private readonly teachingDepartments: FacultyTeachingDepartmentsService,
   ) {}
+
+  private async assertApprovedExtraClass(
+    db: DataSource | EntityManager,
+    tenantId: string,
+    courseId: string,
+    facultyUserId: string,
+    date: string,
+    adjustmentId: string,
+  ) {
+    const [row] = await db.query<Array<{ adjustment_id: string }>>(
+      `SELECT adjustment_id FROM class_adjustments
+       WHERE tenant_id=$1 AND course_id=$2 AND faculty_user_id=$3
+         AND adjustment_id=$4::uuid AND adjustment_type='EXTRA_CLASS'
+         AND status IN ('APPROVED','NOTIFIED')
+         AND (new_date AT TIME ZONE 'Asia/Kolkata')::date=$5::date`,
+      [tenantId, courseId, facultyUserId, adjustmentId, date],
+    );
+    if (!row) throw new ForbiddenException('Extra class is not approved for this faculty, course and date');
+  }
 
   async getFacultyTodayClasses(
     facultyUserId: string,
@@ -263,11 +291,74 @@ export class AcademicsFacultyService {
              AND cal.timetable_id = t.timetable_id AND cal.date = days.date) AS has_saved_attendance
        FROM days
        LEFT JOIN academic_timetables t ON t.tenant_id = $1 AND t.faculty_user_id = $2
-         AND ((t.deleted_at IS NULL AND t.valid_to IS NULL) OR t.valid_to >= days.date)
+         AND t.deleted_at IS NULL AND (t.valid_to IS NULL OR t.valid_to >= days.date)
          AND (t.valid_from IS NULL OR t.valid_from <= days.date)
          AND t.day_of_week = EXTRACT(ISODOW FROM days.date)
          AND t.course_id IN (SELECT course_id FROM faculty_courses)
+         AND NOT EXISTS (
+           SELECT 1 FROM academic_proxy_requests p
+           WHERE p.tenant_id=t.tenant_id AND p.timetable_id=t.timetable_id
+             AND p.date_of_proxy=days.date AND p.status='APPROVED'
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM academic_class_moves m
+           WHERE m.tenant_id=t.tenant_id AND m.source_timetable_id=t.timetable_id
+             AND m.source_date=days.date AND m.status='APPROVED'
+         )
        LEFT JOIN academic_courses c ON c.course_id = t.course_id AND c.tenant_id = t.tenant_id
+       UNION ALL
+       SELECT days.date::text, t.timetable_id::text, t.course_id, c.course_code, c.course_name,
+         COALESCE(m.target_start_time,t.start_time),COALESCE(m.target_end_time,t.end_time),
+         COALESCE(m.target_room,t.room),t.section,
+         EXISTS (SELECT 1 FROM course_attendance_logs cal
+           WHERE cal.tenant_id=t.tenant_id AND cal.course_id=t.course_id
+             AND cal.faculty_user_id=t.faculty_user_id AND cal.timetable_id=t.timetable_id
+             AND cal.date=days.date)
+       FROM days
+       JOIN academic_proxy_requests p ON p.tenant_id=$1 AND p.proxy_faculty_id=$2
+         AND p.date_of_proxy=days.date AND p.status='APPROVED'
+       JOIN academic_timetables t ON t.timetable_id=p.timetable_id AND t.tenant_id=p.tenant_id
+         AND t.course_id=p.course_id AND t.faculty_user_id=p.absent_faculty_id
+         AND t.deleted_at IS NULL
+       LEFT JOIN academic_class_moves m ON m.tenant_id=p.tenant_id
+         AND m.source_timetable_id=p.timetable_id AND m.target_date=days.date
+         AND m.status='APPROVED'
+       JOIN academic_courses c ON c.course_id=t.course_id AND c.tenant_id=t.tenant_id
+       WHERE (t.valid_from IS NULL OR t.valid_from<=COALESCE(m.source_date,days.date))
+         AND (t.valid_to IS NULL OR t.valid_to>=COALESCE(m.source_date,days.date))
+       UNION ALL
+       SELECT m.target_date::text, t.timetable_id::text, t.course_id, c.course_code, c.course_name,
+         m.target_start_time, m.target_end_time, m.target_room, t.section,
+         EXISTS (SELECT 1 FROM course_attendance_logs cal
+           WHERE cal.tenant_id=m.tenant_id AND cal.course_id=m.course_id
+             AND cal.faculty_user_id=m.original_faculty_id
+             AND cal.timetable_id=m.source_timetable_id AND cal.date=m.target_date)
+       FROM academic_class_moves m
+       JOIN academic_timetables t ON t.timetable_id=m.source_timetable_id AND t.tenant_id=m.tenant_id
+       JOIN academic_courses c ON c.course_id=m.course_id AND c.tenant_id=m.tenant_id
+       WHERE m.tenant_id=$1 AND m.original_faculty_id=$2
+         AND m.target_date BETWEEN $4::date AND ($4::date + 6)
+         AND m.status='APPROVED'
+         AND m.course_id IN (SELECT course_id FROM faculty_courses)
+         AND NOT EXISTS (SELECT 1 FROM academic_proxy_requests p
+           WHERE p.tenant_id=m.tenant_id AND p.timetable_id=m.source_timetable_id
+             AND p.date_of_proxy=m.target_date AND p.status='APPROVED')
+       UNION ALL
+       SELECT (a.new_date AT TIME ZONE 'Asia/Kolkata')::date::text,
+         'extra:' || a.adjustment_id::text, a.course_id, c.course_code, c.course_name,
+         (a.new_date AT TIME ZONE 'Asia/Kolkata')::time,
+         ((a.new_date AT TIME ZONE 'Asia/Kolkata') + interval '1 hour')::time,
+         a.proposed_room, NULL::text,
+         EXISTS (SELECT 1 FROM course_attendance_logs cal
+           WHERE cal.tenant_id=a.tenant_id AND cal.course_id=a.course_id
+             AND cal.faculty_user_id=a.faculty_user_id
+             AND cal.class_adjustment_id=a.adjustment_id)
+       FROM class_adjustments a
+       JOIN academic_courses c ON c.course_id=a.course_id AND c.tenant_id=a.tenant_id
+       WHERE a.tenant_id=$1 AND a.faculty_user_id=$2
+         AND a.adjustment_type='EXTRA_CLASS' AND a.status IN ('APPROVED','NOTIFIED')
+         AND (a.new_date AT TIME ZONE 'Asia/Kolkata')::date BETWEEN $4::date AND ($4::date + 6)
+         AND a.course_id IN (SELECT course_id FROM faculty_courses)
        UNION ALL
        SELECT days.date::text, 'held:' || e.source_key, e.course_id, c.course_code, c.course_name,
          (e.entry->>'start')::time, (e.entry->>'end')::time, e.entry->>'room', e.entry->>'batch', false
@@ -279,12 +370,26 @@ export class AcademicsFacultyService {
        ORDER BY date, start_time, timetable_id`,
       [tenantId, facultyUserId, deptId ?? null, start],
     );
+    const cancellationRows = rows.length ? await this.dataSource.query<Array<{
+      course_id: string; session_date: string; start_time: string;
+    }>>(
+      `SELECT DISTINCT course_id,
+              (new_date AT TIME ZONE 'Asia/Kolkata')::date::text AS session_date,
+              to_char(new_date AT TIME ZONE 'Asia/Kolkata', 'HH24:MI') AS start_time
+       FROM class_adjustments
+       WHERE tenant_id=$1 AND course_id=ANY($2::uuid[])
+         AND adjustment_type='CANCEL' AND status IN ('APPROVED','NOTIFIED')
+         AND (new_date AT TIME ZONE 'Asia/Kolkata')::date BETWEEN $3::date AND ($3::date + 6)`,
+      [tenantId, [...new Set(rows.map(row => row.course_id).filter(Boolean))], start],
+    ) : [];
+    const cancelledWeekSessions = new Set(cancellationRows.map(row => `${row.session_date}|${row.course_id}|${row.start_time}`));
     return Array.from({ length: 7 }, (_, index) => {
       const date = new Date(parsed);
       date.setUTCDate(date.getUTCDate() + index);
       const key = date.toISOString().slice(0, 10);
       return { date: key, sessions: rows.filter(row => row.date === key && row.timetable_id).map(row => ({
         ...row, has_saved_attendance: Boolean(row.has_saved_attendance), attendance_locked: this.isAttendanceLocked(key),
+        cancelled: cancelledWeekSessions.has(`${key}|${row.course_id}|${String(row.start_time).slice(0, 5)}`),
         awaiting_confirmation: String(row.timetable_id).startsWith('held:'),
       })) };
     });
@@ -346,9 +451,76 @@ export class AcademicsFacultyService {
        INNER JOIN academic_courses c ON c.course_id = t.course_id AND c.tenant_id = t.tenant_id
        WHERE t.tenant_id = $1
          AND t.faculty_user_id = $2
-         AND ((t.deleted_at IS NULL AND t.valid_to IS NULL) OR t.valid_to >= $5::date)
+         AND t.deleted_at IS NULL AND (t.valid_to IS NULL OR t.valid_to >= $5::date)
          AND (t.valid_from IS NULL OR t.valid_from <= $5::date)
          AND t.day_of_week = $4
+         AND NOT EXISTS (
+           SELECT 1 FROM academic_proxy_requests p
+           WHERE p.tenant_id=t.tenant_id AND p.timetable_id=t.timetable_id
+             AND p.date_of_proxy=$5::date AND p.status='APPROVED'
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM academic_class_moves m
+           WHERE m.tenant_id=t.tenant_id AND m.source_timetable_id=t.timetable_id
+             AND m.source_date=$5::date AND m.status='APPROVED'
+         )
+       UNION ALL
+       SELECT t.timetable_id::text, t.course_id, c.course_code, c.course_name,
+         COALESCE(m.target_room,t.room),COALESCE(m.target_start_time,t.start_time),
+         COALESCE(m.target_end_time,t.end_time),t.section,
+         (UPPER(c.course_code) ~ '(P|LAB)$' OR c.course_name ILIKE '%practical%'
+           OR c.course_name ILIKE '%lab%') AS is_practical,
+         EXISTS (SELECT 1 FROM course_attendance_logs cal
+           WHERE cal.tenant_id=t.tenant_id AND cal.course_id=t.course_id
+             AND cal.faculty_user_id=t.faculty_user_id AND cal.timetable_id=t.timetable_id
+             AND cal.date=$5::date) AS has_saved_attendance
+       FROM academic_proxy_requests p
+       JOIN academic_timetables t ON t.timetable_id=p.timetable_id AND t.tenant_id=p.tenant_id
+         AND t.course_id=p.course_id AND t.faculty_user_id=p.absent_faculty_id
+         AND t.deleted_at IS NULL
+       LEFT JOIN academic_class_moves m ON m.tenant_id=p.tenant_id
+         AND m.source_timetable_id=p.timetable_id AND m.target_date=$5::date
+         AND m.status='APPROVED'
+       JOIN academic_courses c ON c.course_id=t.course_id AND c.tenant_id=t.tenant_id
+       WHERE p.tenant_id=$1 AND p.proxy_faculty_id=$2
+         AND p.date_of_proxy=$5::date AND p.status='APPROVED'
+         AND (t.valid_from IS NULL OR t.valid_from<=COALESCE(m.source_date,$5::date))
+         AND (t.valid_to IS NULL OR t.valid_to>=COALESCE(m.source_date,$5::date))
+       UNION ALL
+       SELECT t.timetable_id::text, m.course_id, c.course_code, c.course_name,
+         m.target_room, m.target_start_time, m.target_end_time, t.section,
+         (UPPER(c.course_code) ~ '(P|LAB)$' OR c.course_name ILIKE '%practical%'
+           OR c.course_name ILIKE '%lab%') AS is_practical,
+         EXISTS (SELECT 1 FROM course_attendance_logs cal
+           WHERE cal.tenant_id=m.tenant_id AND cal.course_id=m.course_id
+             AND cal.faculty_user_id=m.original_faculty_id
+             AND cal.timetable_id=m.source_timetable_id AND cal.date=m.target_date) AS has_saved_attendance
+       FROM academic_class_moves m
+       JOIN academic_timetables t ON t.timetable_id=m.source_timetable_id AND t.tenant_id=m.tenant_id
+       JOIN academic_courses c ON c.course_id=m.course_id AND c.tenant_id=m.tenant_id
+       WHERE m.tenant_id=$1 AND m.original_faculty_id=$2
+         AND m.target_date=$5::date AND m.status='APPROVED'
+         AND m.course_id IN (SELECT course_id FROM faculty_courses)
+         AND NOT EXISTS (SELECT 1 FROM academic_proxy_requests p
+           WHERE p.tenant_id=m.tenant_id AND p.timetable_id=m.source_timetable_id
+             AND p.date_of_proxy=m.target_date AND p.status='APPROVED')
+       UNION ALL
+       SELECT 'extra:' || a.adjustment_id::text, a.course_id, c.course_code, c.course_name,
+         a.proposed_room, (a.new_date AT TIME ZONE 'Asia/Kolkata')::time,
+         ((a.new_date AT TIME ZONE 'Asia/Kolkata') + interval '1 hour')::time,
+         NULL::text,
+         -- Extra-class requests currently name a whole course, not a batch.
+         false AS is_practical,
+         EXISTS (SELECT 1 FROM course_attendance_logs cal
+           WHERE cal.tenant_id=a.tenant_id AND cal.course_id=a.course_id
+             AND cal.faculty_user_id=a.faculty_user_id
+             AND cal.class_adjustment_id=a.adjustment_id) AS has_saved_attendance
+       FROM class_adjustments a
+       JOIN academic_courses c ON c.course_id=a.course_id AND c.tenant_id=a.tenant_id
+       WHERE a.tenant_id=$1 AND a.faculty_user_id=$2
+         AND a.adjustment_type='EXTRA_CLASS' AND a.status IN ('APPROVED','NOTIFIED')
+         AND (a.new_date AT TIME ZONE 'Asia/Kolkata')::date=$5::date
+         AND a.course_id IN (SELECT course_id FROM faculty_courses)
        UNION ALL
        SELECT 'held:' || e.source_key, e.course_id, c.course_code,c.course_name,e.entry->>'room',
          (e.entry->>'start')::time,(e.entry->>'end')::time,e.entry->>'batch',e.entry->>'session_type'='LAB',false
@@ -360,6 +532,19 @@ export class AcademicsFacultyService {
        ORDER BY start_time`,
       [tenantId, facultyUserId, deptId ?? null, isoDay, date],
     );
+
+    const cancellations = rows.length ? await this.dataSource.query<Array<{
+      course_id: string; start_time: string;
+    }>>(
+      `SELECT DISTINCT course_id,
+              to_char(new_date AT TIME ZONE 'Asia/Kolkata', 'HH24:MI') AS start_time
+       FROM class_adjustments
+       WHERE tenant_id=$1 AND course_id=ANY($2::uuid[])
+         AND adjustment_type='CANCEL' AND status IN ('APPROVED','NOTIFIED')
+         AND (new_date AT TIME ZONE 'Asia/Kolkata')::date=$3::date`,
+      [tenantId, [...new Set(rows.map(row => row.course_id))], date],
+    ) : [];
+    const cancelledSessions = new Set(cancellations.map(row => `${row.course_id}|${row.start_time}`));
 
     return Promise.all(
       rows.map(async (row) => ({
@@ -374,6 +559,7 @@ export class AcademicsFacultyService {
         is_practical: Boolean(row.is_practical),
         has_saved_attendance: Boolean(row.has_saved_attendance),
         attendance_locked: this.isAttendanceLocked(date),
+        cancelled: cancelledSessions.has(`${row.course_id}|${String(row.start_time).slice(0, 5)}`),
         awaiting_confirmation: row.timetable_id.startsWith('held:'),
         student_count: row.timetable_id.startsWith('held:') || row.is_practical && !row.section
           ? 0
@@ -427,14 +613,31 @@ export class AcademicsFacultyService {
     // validating writes against all course enrollments rejects a complete UI roster.
     const db = manager ?? this.dataSource;
     const enrollmentRepo = manager?.getRepository(StudentCourseEnrollment) ?? this.enrollmentRepo;
+    const adjustmentId = extraClassId(timetableId);
+    if (adjustmentId) {
+      if (!date) throw new BadRequestException('Date is required for an extra class roster');
+      await this.assertApprovedExtraClass(db, tenantId, courseId, facultyUserId, date, adjustmentId);
+      timetableId = undefined;
+    }
+    const [approvedCover] = date && timetableId
+      ? await db.query<Array<{ absent_faculty_id: string }>>(
+          `SELECT absent_faculty_id FROM academic_proxy_requests
+           WHERE tenant_id=$1 AND course_id=$2 AND proxy_faculty_id=$3
+             AND timetable_id=$4::uuid AND date_of_proxy=$5::date
+             AND status='APPROVED' LIMIT 1`,
+          [tenantId, courseId, facultyUserId, timetableId, date],
+        )
+      : [];
+    const rosterFacultyId = approvedCover?.absent_faculty_id ?? facultyUserId;
     // A previously recorded sheet is an immutable roster snapshot. The original
     // actor retains read access even when their current allocation is superseded.
     if (timetableId && date && this.isAttendanceLocked(date)) {
       const [saved] = await db.query(`SELECT cal.attendance_data FROM course_attendance_logs cal
         JOIN academic_timetables t ON t.timetable_id=cal.timetable_id AND t.tenant_id=cal.tenant_id
         WHERE cal.tenant_id=$1 AND cal.course_id=$2 AND cal.faculty_user_id=$3
-          AND cal.timetable_id=$4::uuid AND cal.date=$5::date AND t.faculty_user_id=$3`,
-        [tenantId,courseId,facultyUserId,timetableId,date]);
+          AND cal.timetable_id=$4::uuid AND cal.date=$5::date AND t.faculty_user_id=$3
+          AND ($3::uuid=$6::uuid OR cal.marked_by_user_id=$6::uuid)`,
+        [tenantId,courseId,rosterFacultyId,timetableId,date,facultyUserId]);
       if (Array.isArray(saved?.attendance_data)) {
         const ids = saved.attendance_data.map((entry: {student_id:string})=>entry.student_id);
         return db.query(`SELECT u.user_id AS student_id,u.name,${ROLL_NUMBER_SQL} AS roll_number,
@@ -442,8 +645,11 @@ export class AcademicsFacultyService {
           WHERE u.tenant_id=$1 AND u.user_id=ANY($2::uuid[]) ORDER BY u.user_id`,[tenantId,ids]);
       }
     }
-    await this.assertFacultyTeachesCourse(courseId, facultyUserId, tenantId);
-
+    if (approvedCover) {
+      await this.assertCanMarkAttendance(courseId, facultyUserId, tenantId, date, timetableId);
+    } else {
+      await this.assertFacultyTeachesCourse(courseId, facultyUserId, tenantId);
+    }
     // Practical sessions are scheduled per batch/section.  Scope the roster
     // to the exact timetable slot when one is supplied so marking Batch A
     // cannot accidentally include or overwrite Batch B.
@@ -466,7 +672,7 @@ export class AcademicsFacultyService {
             AND ((t.deleted_at IS NULL AND t.valid_to IS NULL) OR t.valid_to >= $5::date)
             AND (t.valid_from IS NULL OR t.valid_from <= $5::date)
           LIMIT 1`,
-        [tenantId, timetableId, courseId, facultyUserId, date ?? localDateString()],
+        [tenantId, timetableId, courseId, rosterFacultyId, date ?? localDateString()],
       );
       if (!slot) throw new NotFoundException('Timetable slot not found');
       sectionCode = slot.is_practical ? slot.section?.trim() || null : null;
@@ -501,7 +707,7 @@ export class AcademicsFacultyService {
        FROM academic_course_allocations
        WHERE tenant_id = $1 AND course_id = $2 AND faculty_user_id = $3
          AND status = 'ACTIVE'`,
-      [tenantId, courseId, facultyUserId],
+      [tenantId, courseId, rosterFacultyId],
     );
     const currentAllocations = allocations.filter(
       (allocation) => allocation.academic_year === academicYearForDate(date),
@@ -774,6 +980,19 @@ export class AcademicsFacultyService {
     date = localDateString(),
     timetableId?: string,
   ) {
+    const adjustmentId = extraClassId(timetableId);
+    if (adjustmentId) {
+      await this.assertApprovedExtraClass(this.dataSource, tenantId, courseId, facultyUserId, date, adjustmentId);
+      await this.assertCanMarkAttendance(courseId, facultyUserId, tenantId);
+      const [saved] = await this.dataSource.query<Array<{ attendance_data: unknown }>>(
+        `SELECT attendance_data FROM course_attendance_logs
+         WHERE tenant_id=$1 AND course_id=$2 AND faculty_user_id=$3
+           AND date=$4::date AND class_adjustment_id=$5::uuid`,
+        [tenantId, courseId, facultyUserId, date, adjustmentId],
+      );
+      return { course_id: courseId, date, timetable_id: timetableId,
+        locked: this.isAttendanceLocked(date), attendance_data: saved?.attendance_data ?? null };
+    }
     if (timetableId && this.isAttendanceLocked(date)) {
       const [saved] = await this.dataSource.query(`SELECT cal.attendance_data FROM course_attendance_logs cal
         JOIN academic_timetables t ON t.timetable_id=cal.timetable_id AND t.tenant_id=cal.tenant_id
@@ -782,12 +1001,13 @@ export class AcademicsFacultyService {
         [tenantId,courseId,facultyUserId,timetableId,date]);
       if (Array.isArray(saved?.attendance_data)) return {course_id:courseId,date,timetable_id:timetableId,locked:true,attendance_data:saved.attendance_data};
     }
-    await this.assertCanMarkAttendance(courseId, facultyUserId, tenantId, date);
+    await this.assertCanMarkAttendance(courseId, facultyUserId, tenantId, date, timetableId);
     const effectiveFacultyId = await this.resolveAttendanceFacultyId(
       courseId,
       facultyUserId,
       tenantId,
       date,
+      timetableId,
     );
 
     const log = timetableId
@@ -820,12 +1040,13 @@ export class AcademicsFacultyService {
     date: string,
     beforeTimetableId: string,
   ) {
-    await this.assertCanMarkAttendance(courseId, facultyUserId, tenantId, date);
+    await this.assertCanMarkAttendance(courseId, facultyUserId, tenantId, date, beforeTimetableId);
     const effectiveFacultyId = await this.resolveAttendanceFacultyId(
       courseId,
       facultyUserId,
       tenantId,
       date,
+      beforeTimetableId,
     );
 
     const slot = await this.timetableRepo.findOne({
@@ -936,8 +1157,13 @@ export class AcademicsFacultyService {
     facultyUserId: string,
     tenantId: string,
     date = localDateString(),
+    timetableId?: string,
   ) {
-    await this.assertFacultyTeachesCourse(courseId, facultyUserId, tenantId);
+    const scopedRoster = timetableId
+      ? await this.getCourseStudents(courseId, facultyUserId, tenantId, timetableId, date)
+      : null;
+    if (!timetableId) await this.assertFacultyTeachesCourse(courseId, facultyUserId, tenantId);
+    const scopedIds = scopedRoster ? new Set(scopedRoster.map((row) => row.student_id)) : null;
     const [health] = await this.dataSource.query<
       Array<{
         scheduled_classes: string;
@@ -945,12 +1171,19 @@ export class AcademicsFacultyService {
         average_attendance_percent: string | null;
       }>
     >(
-      `WITH day_slots AS (
-         SELECT COUNT(*)::int AS scheduled_classes
-         FROM academic_timetables t
-         WHERE t.tenant_id = $1
-           AND t.faculty_user_id = $3
-           AND t.day_of_week = EXTRACT(ISODOW FROM $4::date)::int
+       `WITH day_slots AS (
+         SELECT (
+           (SELECT COUNT(*) FROM academic_timetables t
+            WHERE t.tenant_id=$1 AND t.faculty_user_id=$3
+              AND t.deleted_at IS NULL
+              AND t.day_of_week=EXTRACT(ISODOW FROM $4::date)::int)
+           +
+           (SELECT COUNT(*) FROM class_adjustments a
+            WHERE a.tenant_id=$1 AND a.faculty_user_id=$3
+              AND a.adjustment_type='EXTRA_CLASS'
+              AND a.status IN ('APPROVED','NOTIFIED')
+              AND (a.new_date AT TIME ZONE 'Asia/Kolkata')::date=$4::date)
+         )::int AS scheduled_classes
        ),
        day_conducted AS (
          SELECT COUNT(*)::int AS conducted_classes
@@ -958,7 +1191,7 @@ export class AcademicsFacultyService {
          WHERE cal.tenant_id = $1
            AND cal.faculty_user_id = $3
            AND cal.date = $4::date
-           AND cal.timetable_id IS NOT NULL
+           AND (cal.timetable_id IS NOT NULL OR cal.class_adjustment_id IS NOT NULL)
        ),
        conducted AS (
          SELECT
@@ -1035,8 +1268,12 @@ export class AcademicsFacultyService {
           health?.average_attendance_percent ?? 0,
         ),
       },
-      defaulters,
-      habitual_absentees: habitualAbsentees,
+      defaulters: scopedIds
+        ? defaulters.filter((row: { student_user_id: string }) => scopedIds.has(row.student_user_id))
+        : defaulters,
+      habitual_absentees: scopedIds
+        ? habitualAbsentees.filter((row: { student_user_id: string }) => scopedIds.has(row.student_user_id))
+        : habitualAbsentees,
     };
   }
 
@@ -1045,11 +1282,25 @@ export class AcademicsFacultyService {
     facultyUserId: string,
     tenantId: string,
     studentIds: string[],
+    date: string,
+    timetableId: string,
   ) {
-    await this.assertFacultyTeachesCourse(courseId, facultyUserId, tenantId);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date ?? '') ||
+        Number.isNaN(Date.parse(`${date}T00:00:00Z`)) ||
+        new Date(`${date}T00:00:00Z`).toISOString().slice(0, 10) !== date) {
+      throw new BadRequestException('Choose a valid class date');
+    }
+    if (!timetableId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(timetableId)) {
+      throw new BadRequestException('Select a scheduled class before sending warnings');
+    }
+    const scopedRoster = await this.getCourseStudents(courseId, facultyUserId, tenantId, timetableId, date);
+    const allowed = new Set(scopedRoster.map((student) => student.student_id));
     const ids = [...new Set((studentIds ?? []).filter(Boolean))];
     if (!ids.length)
       throw new BadRequestException('Select at least one student');
+    if (ids.some((id) => !allowed.has(id))) {
+      throw new ForbiddenException('Warnings can be sent only to students in this scheduled class');
+    }
 
     const rows = await this.dataSource.query<
       Array<{
@@ -1063,7 +1314,8 @@ export class AcademicsFacultyService {
        INNER JOIN academic_courses c ON c.course_id = e.course_id AND c.tenant_id = e.tenant_id
        WHERE e.tenant_id = $1
          AND e.course_id = $2
-         AND e.student_user_id = ANY($3::uuid[])`,
+         AND e.student_user_id = ANY($3::uuid[])
+         AND e.status='ENROLLED' AND COALESCE(e.attendance_percent,0)<75`,
       [tenantId, courseId, ids],
     );
 
@@ -1128,6 +1380,11 @@ export class AcademicsFacultyService {
     if (dto.timetable_id?.startsWith('held:')) {
       throw new BadRequestException('This class is awaiting department confirmation. Attendance cannot be recorded.');
     }
+    const adjustmentId = extraClassId(dto.timetable_id);
+    const timetableId = adjustmentId ? null : dto.timetable_id ?? null;
+    if (adjustmentId) {
+      await this.assertApprovedExtraClass(this.dataSource, tenantId, dto.course_id, facultyUserId, date, adjustmentId);
+    }
     if (!dto.timetable_id) {
       const [publication] = await this.dataSource.query(`SELECT EXISTS (
         SELECT 1 FROM academic_timetable_source_entries e
@@ -1143,12 +1400,14 @@ export class AcademicsFacultyService {
       facultyUserId,
       tenantId,
       date,
+      timetableId ?? undefined,
     );
     const effectiveFacultyId = await this.resolveAttendanceFacultyId(
       dto.course_id,
       facultyUserId,
       tenantId,
       date,
+      timetableId ?? undefined,
     );
     if (this.isAttendanceLocked(date)) {
       throw new ForbiddenException(
@@ -1159,7 +1418,6 @@ export class AcademicsFacultyService {
       throw new BadRequestException('Attendance data cannot be empty');
     }
 
-    const timetableId = dto.timetable_id ?? null;
     // The selected timetable is the authority for a practical batch.  Never
     // accept a student from another section, and require the complete slot
     // roster so a search result cannot silently reset everyone else to absent.
@@ -1192,6 +1450,71 @@ export class AcademicsFacultyService {
       throw new ForbiddenException('Practical batch is not mapped to a student section');
     }
     await this.dataSource.transaction(async (manager) => {
+      if (adjustmentId) {
+        await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))',
+          [`class-move:${tenantId}:${date}`]);
+        await this.assertApprovedExtraClass(manager, tenantId, dto.course_id, facultyUserId, date, adjustmentId);
+      }
+      if (timetableId) {
+        await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))',
+          [`class-move:${tenantId}:${date}`]);
+        const [effective] = await manager.query<Array<{
+          day_of_week: number; valid_from: string | null; valid_to: string | null;
+          source_date: string | null; target_date: string | null;
+        }>>(
+          `SELECT t.day_of_week,t.valid_from::text AS valid_from,t.valid_to::text AS valid_to,
+                  m.source_date::text AS source_date,m.target_date::text AS target_date
+           FROM academic_timetables t
+           LEFT JOIN academic_class_moves m ON m.tenant_id=t.tenant_id
+             AND m.source_timetable_id=t.timetable_id AND m.status='APPROVED'
+             AND (m.source_date=$4::date OR m.target_date=$4::date)
+           WHERE t.tenant_id=$1 AND t.timetable_id=$2::uuid AND t.course_id=$3
+             AND t.deleted_at IS NULL LIMIT 1`,
+          [tenantId,timetableId,dto.course_id,date],
+        );
+        if (!effective) throw new ForbiddenException('Selected class is no longer scheduled');
+        const [cancellation] = await manager.query<Array<{ cancelled: boolean }>>(
+          `SELECT EXISTS (
+             SELECT 1 FROM class_adjustments a
+             JOIN academic_timetables t ON t.tenant_id=a.tenant_id AND t.course_id=a.course_id
+             LEFT JOIN academic_class_moves m ON m.tenant_id=t.tenant_id
+               AND m.source_timetable_id=t.timetable_id AND m.target_date=$4::date
+               AND m.status='APPROVED'
+             WHERE a.tenant_id=$1 AND t.timetable_id=$2::uuid AND a.course_id=$3
+               AND a.adjustment_type='CANCEL' AND a.status IN ('APPROVED','NOTIFIED')
+               AND (a.new_date AT TIME ZONE 'Asia/Kolkata')::date=$4::date
+               AND (a.new_date AT TIME ZONE 'Asia/Kolkata')::time=COALESCE(m.target_start_time,t.start_time)
+           ) AS cancelled`,
+          [tenantId, timetableId, dto.course_id, date],
+        );
+        if (cancellation?.cancelled) {
+          throw new ForbiddenException('This class was cancelled. Attendance cannot be recorded.');
+        }
+        const isoDay = new Date(`${date}T00:00:00Z`).getUTCDay() || 7;
+        if (effective.source_date === date && effective.target_date !== date) {
+          throw new ForbiddenException('This class was moved to another date');
+        }
+        if (effective.target_date !== date && (
+          Number(effective.day_of_week) !== isoDay ||
+          (effective.valid_from && String(effective.valid_from).slice(0,10) > date) ||
+          (effective.valid_to && String(effective.valid_to).slice(0,10) < date)
+        )) {
+          throw new ForbiddenException('Attendance must use the scheduled class date');
+        }
+        await manager.query(
+          `SELECT pg_advisory_xact_lock(hashtext($1))`,
+          [`proxy:${tenantId}:${timetableId}:${date}`],
+        );
+        const [cover] = await manager.query<Array<{ proxy_faculty_id: string }>>(
+          `SELECT proxy_faculty_id FROM academic_proxy_requests
+           WHERE tenant_id = $1 AND timetable_id = $2::uuid
+             AND date_of_proxy = $3::date AND status = 'APPROVED' LIMIT 1`,
+          [tenantId, timetableId, date],
+        );
+        if (cover && cover.proxy_faculty_id !== facultyUserId) {
+          throw new ForbiddenException('This session is assigned to an approved substitute faculty');
+        }
+      }
       // Batch edits and attendance saves share this lock; neither can validate
       // against a roster that changes before its transaction commits.
       await manager.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`practical:${tenantId}:${dto.course_id}`]);
@@ -1216,25 +1539,30 @@ export class AcademicsFacultyService {
       // practical batch with a stale roster.
       await manager.query(
         `SELECT pg_advisory_xact_lock(hashtext($1))`,
-        [`${tenantId}:${dto.course_id}:${effectiveFacultyId}:${date}:${timetableId ?? 'none'}`],
+        [`${tenantId}:${dto.course_id}:${effectiveFacultyId}:${date}:${adjustmentId ?? timetableId ?? 'none'}`],
       );
       await manager.query(
         `DELETE FROM course_attendance_logs
          WHERE tenant_id = $1 AND course_id = $2 AND faculty_user_id = $3
            AND date = $4::date
-           AND (($5::uuid IS NULL AND timetable_id IS NULL) OR timetable_id = $5::uuid)`,
-        [tenantId, dto.course_id, effectiveFacultyId, date, timetableId],
+           AND (($6::uuid IS NOT NULL AND class_adjustment_id=$6::uuid)
+             OR ($6::uuid IS NULL AND class_adjustment_id IS NULL
+               AND (($5::uuid IS NULL AND timetable_id IS NULL) OR timetable_id=$5::uuid)))`,
+        [tenantId, dto.course_id, effectiveFacultyId, date, timetableId, adjustmentId],
       );
       await manager.query(
-        `INSERT INTO course_attendance_logs (tenant_id, course_id, faculty_user_id, date, timetable_id, attendance_data)
-         VALUES ($1, $2, $3, $4, $5::uuid, $6::jsonb)`,
+        `INSERT INTO course_attendance_logs (tenant_id, course_id, faculty_user_id, date,
+           timetable_id, class_adjustment_id, attendance_data, marked_by_user_id)
+         VALUES ($1, $2, $3, $4, $5::uuid, $6::uuid, $7::jsonb, $8::uuid)`,
         [
           tenantId,
           dto.course_id,
           effectiveFacultyId,
           date,
           timetableId,
+          adjustmentId,
           JSON.stringify(dto.attendance_data),
+          facultyUserId,
         ],
       );
     });
@@ -1371,6 +1699,7 @@ export class AcademicsFacultyService {
     facultyUserId: string,
     tenantId: string,
     date?: string,
+    timetableId?: string,
   ) {
     const row = await this.timetableRepo.findOne({
       where: {
@@ -1397,12 +1726,13 @@ export class AcademicsFacultyService {
     );
     if (marks.length) return;
 
-    if (date) {
+    if (date && timetableId) {
       const proxy = await this.dataSource.query(
         `SELECT 1 FROM academic_proxy_requests
          WHERE tenant_id = $1 AND proxy_faculty_id = $2 AND course_id = $3
-           AND date_of_proxy = $4::date AND status = 'APPROVED' LIMIT 1`,
-        [tenantId, facultyUserId, courseId, date],
+           AND date_of_proxy = $4::date AND status = 'APPROVED'
+           AND timetable_id = $5::uuid LIMIT 1`,
+        [tenantId, facultyUserId, courseId, date, timetableId],
       );
       if (proxy.length) return;
     }
@@ -1414,7 +1744,22 @@ export class AcademicsFacultyService {
     facultyUserId: string,
     tenantId: string,
     date: string,
+    timetableId?: string,
   ): Promise<string> {
+    // A substitute's permission is for one approved slot, not every class of
+    // the same course on this date. Resolve it before their own allocations:
+    // a colleague who also teaches this course still records against the
+    // original session owner.
+    if (timetableId) {
+      const proxy = await this.dataSource.query<Array<{ absent_faculty_id: string }>>(
+        `SELECT absent_faculty_id FROM academic_proxy_requests
+         WHERE tenant_id = $1 AND proxy_faculty_id = $2 AND course_id = $3
+           AND date_of_proxy = $4::date AND timetable_id = $5::uuid
+           AND status = 'APPROVED' LIMIT 1`,
+        [tenantId, facultyUserId, courseId, date, timetableId],
+      );
+      if (proxy[0]) return proxy[0].absent_faculty_id;
+    }
     const teaches = await this.timetableRepo.findOne({
       where: {
         tenant_id: tenantId,
@@ -1432,15 +1777,7 @@ export class AcademicsFacultyService {
     );
     if (allocation.length) return facultyUserId;
 
-    const proxy = await this.dataSource.query<
-      Array<{ absent_faculty_id: string }>
-    >(
-      `SELECT absent_faculty_id FROM academic_proxy_requests
-       WHERE tenant_id = $1 AND proxy_faculty_id = $2 AND course_id = $3
-         AND date_of_proxy = $4::date AND status = 'APPROVED' LIMIT 1`,
-      [tenantId, facultyUserId, courseId, date],
-    );
-    return proxy[0]?.absent_faculty_id ?? facultyUserId;
+    return facultyUserId;
   }
 
   private async assertFacultyTeachesCourse(

@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -117,8 +118,12 @@ export class SuperAdminController {
   hierarchyAssignableUsers(
     @Req() req: { user: AuthUser },
     @Query('q') q?: string,
+    @Query('dept_id') deptId?: string,
   ) {
-    return this.superAdmin.listAssignableUsers(this.tenant(req), q);
+    const selectedDept = deptId == null ? undefined : Number(deptId);
+    if (selectedDept != null && (!Number.isInteger(selectedDept) || selectedDept < 1))
+      throw new BadRequestException('Invalid department');
+    return this.superAdmin.listAssignableUsers(this.tenant(req), q, selectedDept);
   }
 
   @Post('assignments')

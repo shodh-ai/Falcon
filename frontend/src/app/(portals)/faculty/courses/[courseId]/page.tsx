@@ -15,17 +15,18 @@ import {
 import { FacultyMaterialsTab } from '@/components/lms/FacultyMaterialsTab';
 import { FacultyAssignmentsTab } from '@/components/lms/FacultyAssignmentsTab';
 import { FacultyAnnouncementsTab } from '@/components/lms/FacultyAnnouncementsTab';
+import { FacultyCourseStudentsTab } from '@/components/faculty/FacultyCourseStudentsTab';
 import { LmsExtendedTabs } from '@/components/lms/LmsExtendedTabs';
 import { useAuthedApi } from '@/lib/api';
 import type { FacultyWorkspace } from '@/lib/api/lms';
 
-type WorkspaceTab = 'materials' | 'assignments' | 'announcements' | 'live';
+type WorkspaceTab = 'materials' | 'assignments' | 'announcements' | 'live' | 'students';
 
 export default function FacultyCourseWorkspacePage() {
   const { courseId } = useParams<{ courseId: string }>();
   const api = useAuthedApi();
   const pathname = usePathname();
-  const workspacePrefix = pathname.startsWith('/hod/') ? '/hod/academics' : '/faculty';
+  const workspacePrefix = pathname?.startsWith('/hod/my-teaching/') ? '/hod/my-teaching' : '/faculty';
   const [workspace, setWorkspace] = useState<FacultyWorkspace | null>(null);
   const [error, setError] = useState<string | null>(null);
   const searchParams = useSearchParams();
@@ -37,6 +38,7 @@ export default function FacultyCourseWorkspacePage() {
     if (t === 'assignments' || t === 'da') setTab('assignments');
     if (t === 'announcements') setTab('announcements');
     if (t === 'live') setTab('live');
+    if (t === 'students') setTab('students');
   }, [searchParams]);
 
   const load = useCallback(() => {
@@ -109,10 +111,13 @@ export default function FacultyCourseWorkspacePage() {
           { id: 'assignments', label: 'Digital assignments (DA)' },
           { id: 'announcements', label: 'Announcements' },
           { id: 'live', label: 'Live & forum' },
+          { id: 'students', label: 'Students & reports' },
         ]}
       />
 
-      {tab === 'materials' ? (
+      {tab === 'students' ? (
+        <FacultyCourseStudentsTab courseId={courseId!} />
+      ) : tab === 'materials' ? (
         <FacultyMaterialsTab courseId={courseId!} workspace={workspace} onRefresh={load} />
       ) : tab === 'assignments' ? (
         <FacultyAssignmentsTab courseId={courseId!} />

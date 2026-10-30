@@ -1,3 +1,5 @@
+import { isVerifiedStaging } from '../../common/config/staging-environment';
+import { captureStagingIntegration } from '../../common/config/staging-mocks';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectDataSource } from '@nestjs/typeorm';
@@ -21,6 +23,7 @@ export class IntegrationsService {
   }
 
   private createGenAiClient(): GoogleGenerativeAI | null {
+    if (isVerifiedStaging()) return null;
     const raw = this.config.get<string>('GEMINI_API_KEY');
     const key = (raw ?? '').trim().replace(/^['"]|['"]$/g, '');
     if (!key) return null;
@@ -58,6 +61,21 @@ export class IntegrationsService {
     entityType: string,
     entityId?: string,
   ) {
+    if (isVerifiedStaging()) {
+      captureStagingIntegration('government-push', {
+        type,
+        entityType,
+        entityId,
+      });
+      return Promise.resolve([
+        {
+          integration_type: type,
+          entity_type: entityType,
+          entity_id: entityId ?? null,
+          staging_mock: true,
+        },
+      ]);
+    }
     return this.dataSource.query(
       `INSERT INTO integration_jobs (tenant_id, integration_type, entity_type, entity_id, payload)
        VALUES ('a0000000-0000-4000-8000-000000000001', $1, $2, $3, '{}'::jsonb)
@@ -67,6 +85,12 @@ export class IntegrationsService {
   }
 
   moodleSsoToken(userId: string, email: string) {
+    if (isVerifiedStaging())
+      return {
+        redirect_url: 'https://staging-falcon.jataka.io/student/helpdesk',
+        expires_in: 300,
+        note: 'STAGING MOCK — no external LMS connection',
+      };
     const base = this.config.get(
       'MOODLE_SSO_URL',
       'https://lms.example.edu/auth/oauth2/login.php',
@@ -267,6 +291,8 @@ export class IntegrationsService {
   }
 
   private async askGemini(prompt: string): Promise<string | null> {
+    if (isVerifiedStaging())
+      return 'STAGING MOCK — AI is simulated locally; no external model was called.';
     const client = this.ensureGenAi();
     if (!client) return null;
 

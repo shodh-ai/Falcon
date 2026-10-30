@@ -300,6 +300,7 @@ export class HrEmployeeBulkService {
     const hodUserId = await fetchDepartmentHodUserId(
       (sql, params) => qr.query(sql, params),
       deptId,
+      tenantId,
     );
 
     const tempPassword = this.generateTempPassword();

@@ -1,6 +1,7 @@
 'use client';
 
 import { FormEvent, useEffect, useState } from 'react';
+import { usePathname } from 'next/navigation';
 import { ChevronRight, Edit3, Plus, Trash2, X } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import {
@@ -12,6 +13,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { useAuthedApi } from '@/lib/api';
+import { ASSIGNMENT_FILE_ACCEPT, assignmentFileError } from '@/lib/faculty/assignment-files';
 import { useAuth } from '@/context/AuthContext';
 import type { AssignmentRosterRow, FacultyAssignment } from '@/lib/api/lms';
 import { downloadWithAuth, patchMultipart, postMultipart } from '@/lib/api/lms';
@@ -22,6 +24,8 @@ type Props = {
 
 export function FacultyAssignmentsTab({ courseId }: Props) {
   const api = useAuthedApi();
+  const pathname = usePathname();
+  const ownTeaching = pathname?.startsWith('/hod/my-teaching/') ?? false;
   const { token, user } = useAuth();
   const [assignments, setAssignments] = useState<FacultyAssignment[]>([]);
   const [createOpen, setCreateOpen] = useState(false);
@@ -52,7 +56,7 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
     setLoadError(null);
     try {
       const rows = await api.get<FacultyAssignment[]>(
-        `/api/academics/faculty/assignments?courseId=${encodeURIComponent(courseId)}`,
+        `/api/academics/faculty/assignments?courseId=${encodeURIComponent(courseId)}${ownTeaching ? '&scope=mine' : ''}`,
       );
       if (!Array.isArray(rows)) throw new Error('Assignments API returned an invalid response');
       setAssignments(rows);
@@ -64,7 +68,7 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
 
   useEffect(() => {
     void loadAssignments();
-  }, [api, courseId]);
+  }, [api, courseId, ownTeaching]);
 
   async function openRoster(assignmentId: string, title: string, maxMarks: number) {
     setSelectedId(assignmentId);
@@ -114,13 +118,9 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
       return;
     }
     if (refFile) {
-      const isPdf = refFile.type === 'application/pdf' || refFile.name.toLowerCase().endsWith('.pdf');
-      if (!isPdf) {
-        toast.error('Reference attachment must be a PDF');
-        return;
-      }
-      if (refFile.size > 5 * 1024 * 1024) {
-        toast.error('Reference PDF must be 5MB or smaller');
+      const fileError = assignmentFileError(refFile);
+      if (fileError) {
+        toast.error(fileError);
         return;
       }
     }
@@ -220,6 +220,10 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
   async function saveEdit(e: FormEvent) {
     e.preventDefault();
     if (!token || !editing) return;
+    if (editFile) {
+      const fileError = assignmentFileError(editFile);
+      if (fileError) { toast.error(fileError); return; }
+    }
     const form = new FormData();
     form.append('start_date', new Date(editStartAt).toISOString());
     form.append('due_date', new Date(editDueAt).toISOString());
@@ -334,7 +338,7 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
         </Button>
         <FacultyPanel
           title={selectedTitle}
-          description="Grade submissions and download student PDFs"
+          description="Grade submissions and download student files"
           count={submittedCount}
         >
           {rosterError ? <FacultyErrorBanner message={rosterError} /> : null}
@@ -404,11 +408,11 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
                                 void downloadWithAuth(
                                   `/api/academics/faculty/submissions/${row.submission_id}/download`,
                                   token,
-                                  `${row.student_name}-da.pdf`,
+                                  `${row.student_name}-assignment`,
                                 ).catch((e) => toast.error(String(e)))
                               }
                             >
-                              Download PDF
+                              Download file
                             </Button>
                             {row.status !== 'RETURNED_FOR_REVISION' && (
                               <Button
@@ -469,7 +473,7 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
       {!loadError && assignments.length === 0 ? (
         <FacultyEmptyState
           title="No digital assignments yet"
-          description="Create a DA to collect PDF submissions from enrolled students with a strict deadline."
+          description="Create a DA to collect assignment files from enrolled students with a strict deadline."
         />
       ) : (
         <div className="space-y-4">
@@ -485,7 +489,7 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
           />
           <AssignmentSection
             title="Closed"
-            description="Deadline has passed. Faculty can still edit dates or the reference PDF."
+            description="Deadline has passed. Faculty can still edit dates or the reference attachment."
             rows={closedAssignments}
           />
         </div>
@@ -584,13 +588,13 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
                 />
               </div>
               <div className="space-y-1.5">
-                <label className="text-xs font-medium text-muted-foreground">Attachment (optional PDF)</label>
+                <label className="text-xs font-medium text-muted-foreground">Attachment (optional)</label>
                 <Input
                   type="file"
-                  accept=".pdf,application/pdf"
+                  accept={ASSIGNMENT_FILE_ACCEPT}
                   onChange={(e) => setRefFile(e.target.files?.[0] ?? null)}
                 />
-                <p className="text-xs text-muted-foreground">PDF only · Max 5MB</p>
+                <p className="text-xs text-muted-foreground">PDF, Word, PowerPoint, Excel, PNG, JPEG, TXT · Max 10MB</p>
               </div>
               <div className="sticky bottom-0 -mx-5 -mb-5 flex gap-2 border-t border-border/50 bg-card/95 px-5 py-4 backdrop-blur supports-[backdrop-filter]:bg-card/80">
                 <Button type="submit">Publish Assignment</Button>
@@ -650,10 +654,10 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
                 <label className="text-xs font-medium text-muted-foreground">Replace question paper (optional)</label>
                 <Input
                   type="file"
-                  accept=".pdf,application/pdf"
+                  accept={ASSIGNMENT_FILE_ACCEPT}
                   onChange={(e) => setEditFile(e.target.files?.[0] ?? null)}
                 />
-                <p className="text-xs text-muted-foreground">PDF only · Max 5MB</p>
+                <p className="text-xs text-muted-foreground">PDF, Word, PowerPoint, Excel, PNG, JPEG, TXT · Max 10MB</p>
               </div>
               <div className="sticky bottom-0 -mx-5 -mb-5 flex gap-2 border-t border-border/50 bg-card/95 px-5 py-4 backdrop-blur supports-[backdrop-filter]:bg-card/80">
                 <Button type="submit">Save changes</Button>

@@ -12,7 +12,11 @@ describe('HR final review queue and approval routing', () => {
     advanceAfterApproval?: jest.Mock;
     transaction?: jest.Mock;
   } = {}) {
-    const query = options.query ?? jest.fn().mockResolvedValue([]);
+    const baseQuery = options.query ?? jest.fn().mockResolvedValue([]);
+    const query = jest.fn((sql: string, params?: unknown[]) => {
+      if (sql.includes('hr_department_request_routes')) return Promise.resolve([]);
+      return baseQuery(sql, params);
+    });
     const transaction = options.transaction ?? jest.fn(async (callback: (manager: unknown) => Promise<unknown>) =>
       callback({ query }),
     );
@@ -310,7 +314,9 @@ describe('HR final review queue and approval routing', () => {
       .mockResolvedValueOnce([])
       .mockRejectedValueOnce(new Error('Balance update failed'));
     const transaction = jest.fn(async (callback: (manager: unknown) => Promise<unknown>) =>
-      callback({ query: transactionalQuery }),
+      callback({ query: (sql: string, params?: unknown[]) =>
+        sql.includes('hr_department_request_routes') || sql.includes('hr_staff_request_appeals')
+          ? Promise.resolve([]) : transactionalQuery(sql, params) }),
     );
     const { service } = makeService({
       query, findOne: jest.fn().mockResolvedValue(row), transaction,
@@ -380,7 +386,7 @@ describe('HR final review queue and approval routing', () => {
       { adminOverride: true, roles: ['HRAdmin'] },
     );
     expect(advanceAfterApproval).toHaveBeenCalledWith(
-      tenantId, 7, 'LEAVE', 'staff-id', 1, 'workflow-id', approverId,
+      tenantId, 7, 'LEAVE', 'staff-id', 1, 'workflow-id', approverId, 'leave-id',
     );
     expect(query.mock.calls.some(([sql]) => String(sql).includes('INSERT INTO hr_staff_request_decisions'))).toBe(true);
   });

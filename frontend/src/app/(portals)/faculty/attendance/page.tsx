@@ -1,7 +1,7 @@
 'use client';
 
 import { Suspense, useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { usePathname, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { BookOpen, Check, Send, X } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
@@ -51,7 +51,12 @@ type FacultyClass = {
   has_saved_attendance?: boolean;
   attendance_locked?: boolean;
   awaiting_confirmation?: boolean;
+  cancelled?: boolean;
 };
+
+function isExtraClass(slotId: string | null | undefined) {
+  return Boolean(slotId?.startsWith('extra:'));
+}
 
 type Student = {
   student_id: string;
@@ -105,6 +110,7 @@ function todayIso() {
 
 function MarkAttendanceContent() {
   const api = useAuthedApi();
+  const teachingPrefix = usePathname()?.startsWith('/hod/my-teaching/') ? '/hod/my-teaching' : '/faculty';
   const { activeDeptId, loading: deptLoading } = useTeachingDepartment();
   const params = useSearchParams();
   const initialCourseId = params.get('courseId');
@@ -201,7 +207,7 @@ function MarkAttendanceContent() {
         if (!Array.isArray(data)) throw new Error('Timetable API returned an invalid response');
         setClassesError(null);
         setClasses(data);
-        const selectable = data.filter(c => !c.awaiting_confirmation);
+        const selectable = data.filter(c => !c.awaiting_confirmation && !c.cancelled);
         if (selectable.length === 0) {
           setSelectedCourseId(null);
           setSelectedTimetableId(null);
@@ -235,6 +241,13 @@ function MarkAttendanceContent() {
 
   useEffect(() => {
     if (!selectedCourseId) return;
+    if (selectedClass?.cancelled) {
+      setStudents([]);
+      setUnmappedCourseStudents([]);
+      setRosterLoading(false);
+      setRosterError(null);
+      return;
+    }
     let cancelled = false;
     const timetableId = selectedTimetableId ?? selectedClass?.timetable_id;
 
@@ -274,7 +287,7 @@ function MarkAttendanceContent() {
         ]);
         const courseAnalytics = await api
           .get<AttendanceAnalytics>(
-            `/api/academics/faculty/course/${selectedCourseId}/attendance/analytics?date=${selectedDate}`,
+            `/api/academics/faculty/course/${selectedCourseId}/attendance/analytics?date=${selectedDate}${timetableId ? `&timetableId=${encodeURIComponent(timetableId)}` : ''}`,
           )
           .catch(() => null);
         if (!Array.isArray(roster)) throw new Error('Student roster API returned an invalid response');
@@ -296,7 +309,7 @@ function MarkAttendanceContent() {
     return () => {
       cancelled = true;
     };
-  }, [api, selectedCourseId, selectedDate, selectedTimetableId, selectedClass?.timetable_id, selectedClass?.is_practical, rosterRefresh]);
+  }, [api, selectedCourseId, selectedDate, selectedTimetableId, selectedClass?.timetable_id, selectedClass?.is_practical, selectedClass?.cancelled, rosterRefresh]);
 
   async function openBatchEditor(target: PracticalBatchSlot) {
     setBatchTarget(target);
@@ -369,7 +382,11 @@ function MarkAttendanceContent() {
   }
 
   async function save() {
-    if (!selectedCourseId) return;
+    if (!selectedCourseId || rosterLoading) return;
+    if (selectedClass?.cancelled) {
+      toast.error('This class was cancelled. Attendance cannot be recorded.');
+      return;
+    }
     if (students.length === 0) {
       toast.error('No students on the roster — cannot save attendance.');
       return;
@@ -400,15 +417,15 @@ function MarkAttendanceContent() {
       setAttendanceRevision(value => value + 1);
       setClasses(rows => rows.map(row => row.timetable_id === timetableId && row.course_id === selectedCourseId
         ? { ...row, has_saved_attendance: true, attendance_locked: state.locked } : row));
-      const synced = result.attendance_updated?.length ?? 0;
-      if (synced === 0) {
-        toast.warning('Attendance saved to session log but no enrollment percentages were updated. Check student IDs.');
+      const saved = result.saved ?? payload.length;
+      if ((result.attendance_updated?.length ?? 0) === 0) {
+        toast.warning(`Attendance saved for ${saved} student${saved === 1 ? '' : 's'} in this class, but enrollment percentages could not be refreshed.`);
       } else {
-        toast.success(`Attendance saved · ${synced} student${synced === 1 ? '' : 's'} synced to enrollment %`);
+        toast.success(`Attendance saved for ${saved} student${saved === 1 ? '' : 's'} in this class.`);
       }
       const courseAnalytics = await api
         .get<AttendanceAnalytics>(
-          `/api/academics/faculty/course/${selectedCourseId}/attendance/analytics?date=${selectedDate}`,
+          `/api/academics/faculty/course/${selectedCourseId}/attendance/analytics?date=${selectedDate}${timetableId ? `&timetableId=${encodeURIComponent(timetableId)}` : ''}`,
         )
         .catch(() => null);
       setAnalytics(courseAnalytics);
@@ -420,12 +437,13 @@ function MarkAttendanceContent() {
   }
 
   async function sendWarnings() {
-    if (!selectedCourseId || !analytics?.defaulters.length) return;
+    if (!selectedCourseId || !selectedTimetableId || !analytics?.defaulters.length) return;
 
     try {
       const result = await api.post<{ notified: number }>(
         `/api/academics/faculty/course/${selectedCourseId}/attendance/warnings`,
-        { student_ids: analytics.defaulters.map((row) => row.student_user_id) },
+        { student_ids: analytics.defaulters.map((row) => row.student_user_id),
+          date: selectedDate, timetable_id: selectedTimetableId },
       );
       toast.success(`Warning sent to ${result.notified} student${result.notified === 1 ? '' : 's'} and linked parents`);
     } catch (e) {
@@ -444,7 +462,7 @@ function MarkAttendanceContent() {
         description="Mark and review student attendance records."
         actions={
           <Button variant="outline" size="sm" asChild>
-            <Link href="/faculty/logbook">
+            <Link href={`${teachingPrefix}/logbook`}>
               <BookOpen className="mr-1.5 h-4 w-4" />
               Open logbook
             </Link>
@@ -563,6 +581,8 @@ function MarkAttendanceContent() {
                       disabled={c.awaiting_confirmation}
                       onClick={() => {
                         setRosterLoading(true);
+                        setStudents([]);
+                        setAnalytics(null);
                         setSelectedCourseId(c.course_id);
                         setSelectedTimetableId(c.timetable_id);
                       }}
@@ -574,12 +594,14 @@ function MarkAttendanceContent() {
                       )}
                     >
                       <p className="font-semibold text-sgvu-navy">{c.course_code}</p>
+                      {c.cancelled ? <Badge variant="destructive" className="ml-2">Cancelled</Badge> : null}
+                      {isExtraClass(c.timetable_id) ? <span className="text-xs font-semibold text-amber-800">Approved extra class</span> : null}
                       <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{c.course_name}</p>
                       <p className="mt-1 text-[11px] text-muted-foreground">
                         {String(c.start_time).slice(0, 5)}–{String(c.end_time).slice(0, 5)} · {c.student_count} students
                       </p>
                       <p className={cn('mt-2 text-xs font-medium', c.has_saved_attendance ? 'text-emerald-700' : 'text-amber-800')}>
-                        {c.awaiting_confirmation ? 'Awaiting department confirmation' : c.has_saved_attendance === true ? 'Attendance recorded'
+                        {c.cancelled ? 'No attendance needed · class cancelled' : c.awaiting_confirmation ? 'Awaiting department confirmation' : c.has_saved_attendance === true ? 'Attendance recorded'
                           : c.has_saved_attendance === false ? c.attendance_locked ? 'Not recorded · date locked' : 'Attendance pending'
                           : 'Attendance status unavailable'}
                       </p>
@@ -592,10 +614,14 @@ function MarkAttendanceContent() {
 
           <FacultyPanel
             title={selectedClass ? `${selectedClass.course_code} — roster` : 'Student roster'}
-            description={selectedClass ? `${selectedClass.room ?? 'Room TBA'} · ${selectedClass.student_count} enrolled` : undefined}
+            description={selectedClass ? `${selectedClass.room ?? 'Room TBA'} · ${rosterLoading ? 'Loading roster' : `${students.length} in this class`}` : undefined}
           >
             {!selectedClass ? (
               <FacultyEmptyState description="Select a class from the list to load the roster." />
+            ) : selectedClass.cancelled ? (
+              <p role="status" className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-900">
+                This dated class was cancelled. There is no attendance to mark for this session.
+              </p>
             ) : rosterLoading ? (
               <FacultyInlineLoading label="Loading roster…" />
             ) : rosterError ? (
@@ -658,9 +684,9 @@ function MarkAttendanceContent() {
                       <X className="mr-1 h-3.5 w-3.5" />
                       All absent
                     </Button>
-                    <Button type="button" size="sm" variant="secondary" onClick={() => void copyPreviousAttendance()}>
+                    {!isExtraClass(selectedTimetableId) ? <Button type="button" size="sm" variant="secondary" onClick={() => void copyPreviousAttendance()}>
                       Take Same Attendance as Previous
-                    </Button>
+                    </Button> : null}
                   </div>
                 )}
 
@@ -752,7 +778,7 @@ function MarkAttendanceContent() {
                   </p>
                   <Button
                     className="sm:min-w-[10rem]"
-                    disabled={locked || saving || students.length === 0}
+                    disabled={locked || saving || rosterLoading || students.length === 0}
                     onClick={() => void save()}
                   >
                     {saving ? 'Saving…' : 'Save attendance'}
@@ -765,13 +791,13 @@ function MarkAttendanceContent() {
                       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                         <div>
                           <p className="text-sm font-bold text-red-950">Danger Zone: Below 75%</p>
-                          <p className="text-xs text-red-900/80">Pre-filtered defaulters list</p>
+                          <p className="text-xs text-red-900/80">Below 75% in this selected class only</p>
                         </div>
                         <Button
                           type="button"
                           size="sm"
                           variant="destructive"
-                          disabled={analytics.defaulters.length === 0}
+                          disabled={analytics.defaulters.length === 0 || isExtraClass(selectedTimetableId)}
                           onClick={() => void sendWarnings()}
                           className="gap-1.5"
                         >

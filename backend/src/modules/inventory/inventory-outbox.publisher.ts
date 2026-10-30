@@ -1,3 +1,4 @@
+import { publishStagingOutbox } from '../../common/config/staging-mocks';
 /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access -- TypeORM query rows are untyped */
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -14,6 +15,7 @@ export class InventoryOutboxPublisher {
     private readonly config: ConfigService,
   ) {}
   @Interval(30_000) async publish() {
+    if (await publishStagingOutbox(this.db, 'inv_outbox_events')) return;
     const endpoint = this.config.get<string>('INVENTORY_EVENT_WEBHOOK_URL');
     const privateKey = this.config.get<string>(
       'INVENTORY_EVENT_SIGNING_PRIVATE_KEY',

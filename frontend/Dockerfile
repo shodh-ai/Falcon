@@ -13,6 +13,8 @@ ARG NEXT_PUBLIC_API_URL
 ARG NEXT_PUBLIC_GOOGLE_CLIENT_ID
 ARG NEXT_PUBLIC_SAAS_BASE_DOMAIN
 ARG NEXT_PUBLIC_DEFAULT_TENANT_SUBDOMAIN
+ARG NEXT_PUBLIC_FALCON_ENVIRONMENT
+ARG NEXT_PUBLIC_DEDICATED_APP_HOSTS
 
 # Native deps for sharp / Next.js on Linux
 RUN apt-get update \
@@ -40,6 +42,8 @@ RUN env -i \
     NEXT_PUBLIC_GOOGLE_CLIENT_ID="${NEXT_PUBLIC_GOOGLE_CLIENT_ID}" \
     NEXT_PUBLIC_SAAS_BASE_DOMAIN="${NEXT_PUBLIC_SAAS_BASE_DOMAIN}" \
     NEXT_PUBLIC_DEFAULT_TENANT_SUBDOMAIN="${NEXT_PUBLIC_DEFAULT_TENANT_SUBDOMAIN}" \
+    NEXT_PUBLIC_FALCON_ENVIRONMENT="${NEXT_PUBLIC_FALCON_ENVIRONMENT}" \
+    NEXT_PUBLIC_DEDICATED_APP_HOSTS="${NEXT_PUBLIC_DEDICATED_APP_HOSTS}" \
     npm run build
 
 FROM node:20-bookworm-slim AS production
@@ -64,6 +68,7 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next-local/standalone ./
 # The standalone server keeps distDirRoot as `.next-local`; static assets must
 # live under the same dist directory or Next returns 404 for every CSS/JS asset.
 COPY --from=builder --chown=nextjs:nodejs /app/.next-local/static ./.next-local/static
+COPY staging-runtime.cjs ./staging-runtime.cjs
 
 USER nextjs
 

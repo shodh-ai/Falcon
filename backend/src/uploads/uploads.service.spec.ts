@@ -26,11 +26,17 @@ describe('Student upload download authorization', () => {
   it.each([`/uploads/${key}`, `s3://bucket/${key}`, key, resolve(root, key)])(
     'accepts an owned legacy reference: %s',
     async (reference) => {
-      query.mockResolvedValue([{ file_reference: reference }]);
+      query.mockImplementation((sql: string) =>
+        Promise.resolve(
+          sql.includes('student_onboarding_docs')
+            ? [{ file_reference: reference }]
+            : [],
+        ),
+      );
       await expect(
         service.assertStudentDownloadAccess(student, key),
       ).resolves.toBeUndefined();
-      expect(query).toHaveBeenCalledWith(expect.any(String), [
+      expect(query).toHaveBeenCalledWith(expect.stringContaining('student_onboarding_docs'), [
         tenant,
         'student-a',
       ]);
@@ -38,9 +44,13 @@ describe('Student upload download authorization', () => {
   );
 
   it('does not accept another student file merely because it is in the same tenant', async () => {
-    query.mockResolvedValue([
-      { file_reference: '/uploads/tenant-a/2026/10/own.pdf' },
-    ]);
+    query.mockImplementation((sql: string) =>
+      Promise.resolve(
+        sql.includes('student_onboarding_docs')
+          ? [{ file_reference: '/uploads/tenant-a/2026/10/own.pdf' }]
+          : [],
+      ),
+    );
     await expect(
       service.assertStudentDownloadAccess(student, key),
     ).rejects.toBeInstanceOf(NotFoundException);
@@ -66,7 +76,9 @@ describe('Student upload download authorization', () => {
     await expect(
       service.assertStudentDownloadAccess(student, forgedOtherStudentFile),
     ).rejects.toBeInstanceOf(NotFoundException);
-    const [sql] = query.mock.calls[0] as [string];
+    const [sql] = query.mock.calls.find(([statement]) =>
+      statement.includes('student_onboarding_docs'),
+    ) as [string];
     expect(sql).not.toContain('profile_photo_url');
     expect(sql).toContain('student_onboarding_docs');
   });
@@ -82,10 +94,38 @@ describe('Student upload download authorization', () => {
     expect(sql).toContain('t.is_active = true');
     expect(sql).toContain("t.status IN ('SCHEDULED', 'ACTIVE')");
     expect(sql).toContain('t.start_time <= NOW() AND t.end_time > NOW()');
-    expect(sql).toContain(
-      'r.student_user_id = $2 AND r.submitted_at IS NOT NULL',
+    expect(sql).toContain('r.student_user_id = $2');
+    expect(sql).toContain('r.submitted_at IS NOT NULL');
+    expect(sql).not.toContain('university_policies');
+  });
+
+  it('opens an eligible paper without querying unrelated legacy document tables', async () => {
+    query.mockImplementation((sql: string) =>
+      sql.includes('student_onboarding_docs')
+        ? Promise.reject(new Error('legacy document schema unavailable'))
+        : Promise.resolve([{ file_reference: `/uploads/${key}` }]),
     );
-    expect(sql).toContain("WHERE tenant_id = $1 AND status = 'ACTIVE'");
+    await service.assertStudentDownloadAccess(student, key);
+    expect(query).toHaveBeenCalledTimes(1);
+  });
+
+  it('checks policy files only when the optional policy table exists', async () => {
+    query
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ relation: 'university_policies' }])
+      .mockResolvedValueOnce([{ file_reference: `/uploads/${key}` }]);
+    await service.assertStudentDownloadAccess(student, key);
+    expect(query).toHaveBeenCalledTimes(4);
+  });
+
+  it('fails closed for unmatched files when the policy table is absent', async () => {
+    query.mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ relation: null }]);
+    await expect(
+      service.assertStudentDownloadAccess(student, key),
+    ).rejects.toBeInstanceOf(NotFoundException);
   });
 
   it('gives Applicants only owned references without campus policies or test papers', async () => {

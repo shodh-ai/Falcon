@@ -1,3 +1,4 @@
+import { configuredReportingOfficer } from '../department-leadership/reporting-officer';
 import {
   BadRequestException,
   ConflictException,
@@ -16,7 +17,10 @@ import {
 } from '../../entities/leave-request.entity';
 import { LeaveBalance } from '../../entities/leave-balance.entity';
 import { StaffAttendance } from '../../entities/staff-attendance.entity';
-import { StaffLeaveRequest } from '../../entities/staff-leave-request.entity';
+import {
+  StaffLeaveRequest,
+  StaffRequestType,
+} from '../../entities/staff-leave-request.entity';
 import { StaffPayslip } from '../../entities/staff-payslip.entity';
 import { StaffPayslipDownloadRequest } from '../../entities/staff-payslip-download-request.entity';
 import { StaffGatePass } from '../../entities/staff-gate-pass.entity';
@@ -639,8 +643,9 @@ export class HrService {
       status: 'PENDING',
     });
 
-    const user = await this.users.findOne({ where: { user_id: staffUserId } });
-    const reportingOfficerId = user?.reporting_officer_id ?? null;
+    const user = await this.users.findOne({ where: { user_id: staffUserId, tenant_id: tenantId } });
+    const configured = await configuredReportingOfficer((sql,args) => this.users.manager.query(sql,args), tenantId, staffUserId);
+    const reportingOfficerId = configured.configured ? configured.officer : user?.reporting_officer_id ?? null;
     const row = this.gatePasses.create({
       tenant_id: tenantId,
       staff_user_id: staffUserId,
@@ -1107,6 +1112,7 @@ export class HrService {
       const hodUserId = await fetchDepartmentHodUserId(
         (sql, params) => this.users.manager.query(sql, params),
         user.dept_id,
+        tenantId,
       );
 
       user.reporting_officer_id = resolveDefaultReportingOfficerId({
@@ -1313,6 +1319,8 @@ export class HrService {
     tenantId: string,
     entityId: number,
     status?: StaffLeaveRequest['status'],
+    requestTypes?: StaffRequestType[],
+    currentApproverUserId?: string,
   ) {
     const qb = this.staffLeaveRequests
       .createQueryBuilder('leave')
@@ -1327,6 +1335,14 @@ export class HrService {
       )
       .orderBy('leave.applied_at', 'DESC');
     if (status) qb.andWhere('leave.status = :status', { status });
+    if (requestTypes?.length) {
+      qb.andWhere('leave.request_type IN (:...requestTypes)', { requestTypes });
+    }
+    if (currentApproverUserId) {
+      qb.andWhere('leave.current_approver_user_id = :currentApproverUserId', {
+        currentApproverUserId,
+      });
+    }
     return qb.getMany();
   }
 
@@ -1674,6 +1690,7 @@ export class HrService {
       leave.current_step_order,
       leave.workflow_id,
       leave.current_approver_user_id,
+      leave.leave_id,
     );
 
     if (next.is_final) {
@@ -1751,6 +1768,7 @@ export class HrService {
       leave.current_step_order,
       leave.workflow_id,
       leave.current_approver_user_id,
+      leave.leave_id,
     );
 
     if (next.is_final) {

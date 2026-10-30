@@ -1,3 +1,8 @@
+import {
+  academicYearAt,
+  listDepartmentFacultyWorkload,
+  listDepartmentTimetable,
+} from './department-academic-queries';
 import { assertStudentResultsAvailable } from '../exam-cell/student-result-hold';
 import {
   BadRequestException,
@@ -44,6 +49,7 @@ import {
   selectStudentTimetableRows,
 } from './student-timetable-visibility';
 import { calculateStudentGradeSummary } from './student-grade-summary';
+import { getStudentExtraClassSessions } from './student-extra-class-sessions';
 
 type TimetableRange = {
   timetable_id?: string;
@@ -259,10 +265,12 @@ export class AcademicsService {
   }
 
   async getTodayTimetable(studentUserId: string) {
-    const { slots } = await this.resolveStudentWeeklyTimetable(studentUserId);
-    const isoDay = this.getIstDayOfWeek();
+    const { slots } = await this.getWeeklyTimetableCalendar(studentUserId);
+    const today = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Kolkata',
+    }).format(new Date());
     return slots
-      .filter((slot) => slot.day_of_week === isoDay)
+      .filter((slot) => slot.session_date === today)
       .map((slot) => ({
         ...slot,
         status: this.getSlotStatus(slot.start_time, slot.end_time),
@@ -441,6 +449,7 @@ export class AcademicsService {
         conflict_count: conflictCount,
         slots: baseSlots.map((slot) => ({
           ...slot,
+          is_extra_class: false,
           session_date:
             weekDates.find((d) => d.day_of_week === slot.day_of_week)?.date ??
             null,
@@ -449,9 +458,142 @@ export class AcademicsService {
       };
     }
 
-    const weekEnd = weekDates[weekDates.length - 1]?.date ?? weekStart;
-    const logs = await this.courseEnrollments.manager.query(
-      `SELECT cal.date::text AS date, cal.course_id, cal.timetable_id, cal.attendance_data
+    const sunday = new Date(`${weekStart}T00:00:00Z`);
+    sunday.setUTCDate(sunday.getUTCDate() + 6);
+    const weekEnd = sunday.toISOString().slice(0, 10);
+    const sundayDate = { day_of_week: 7, label: 'Sun', date: weekEnd };
+    const sessionDates = [...weekDates, sundayDate];
+    const moves = baseSlots.length
+      ? await this.courseEnrollments.manager.query<
+          Array<{
+            source_timetable_id: string;
+            source_date: string;
+            target_date: string;
+            target_start_time: string;
+            target_end_time: string;
+            target_room: string | null;
+          }>
+        >(
+          `SELECT source_timetable_id,source_date::text AS source_date,
+              target_date::text AS target_date,target_start_time,target_end_time,target_room
+       FROM academic_class_moves
+       WHERE tenant_id=$1 AND status='APPROVED'
+         AND source_timetable_id=ANY($2::uuid[])
+         AND (source_date BETWEEN $3::date AND $4::date
+           OR target_date BETWEEN $3::date AND $4::date)`,
+          [
+            tenantId,
+            baseSlots.map((slot) => slot.timetable_id),
+            weekStart,
+            weekEnd,
+          ],
+        )
+      : [];
+    const movedSources = new Set(
+      moves.map((move) => `${move.source_timetable_id}|${move.source_date}`),
+    );
+    const datedSlots: Array<
+      (typeof baseSlots)[number] & {
+        session_date: string | null;
+        is_extra_class?: boolean;
+        class_adjustment_id?: string;
+      }
+    > = baseSlots
+      .map((slot) => ({
+        ...slot,
+        session_date:
+          sessionDates.find((day) => day.day_of_week === slot.day_of_week)
+            ?.date ?? null,
+      }))
+      .filter(
+        (slot) =>
+          !movedSources.has(`${slot.timetable_id}|${slot.session_date}`),
+      );
+    for (const move of moves) {
+      if (move.target_date < weekStart || move.target_date > weekEnd) continue;
+      const original = baseSlots.find(
+        (slot) => slot.timetable_id === move.source_timetable_id,
+      );
+      if (!original) continue;
+      datedSlots.push({
+        ...original,
+        session_date: move.target_date,
+        day_of_week: new Date(`${move.target_date}T00:00:00Z`).getUTCDay() || 7,
+        start_time: this.normalizeTime(move.target_start_time),
+        end_time: this.normalizeTime(move.target_end_time),
+        room: move.target_room,
+      });
+    }
+    const covers = baseSlots.length
+      ? await this.courseEnrollments.manager.query<
+          Array<{
+            timetable_id: string;
+            session_date: string;
+            substitute_name: string;
+          }>
+        >(
+          `SELECT p.timetable_id,p.date_of_proxy::text AS session_date,
+              u.name AS substitute_name
+       FROM academic_proxy_requests p
+       JOIN users u ON u.user_id=p.proxy_faculty_id AND u.tenant_id=p.tenant_id
+       WHERE p.tenant_id=$1 AND p.status='APPROVED'
+         AND p.timetable_id=ANY($2::uuid[])
+         AND p.date_of_proxy BETWEEN $3::date AND $4::date`,
+          [
+            tenantId,
+            baseSlots.map((slot) => slot.timetable_id),
+            weekStart,
+            weekEnd,
+          ],
+        )
+      : [];
+    const coverNames = new Map(
+      covers.map((cover) => [
+        `${cover.timetable_id}|${cover.session_date}`,
+        cover.substitute_name,
+      ]),
+    );
+    const extras = await getStudentExtraClassSessions(
+      this.courseEnrollments.manager,
+      tenantId,
+      studentUserId,
+      courseIds,
+      weekStart,
+      weekEnd,
+    );
+    datedSlots.push(...extras);
+    if (datedSlots.some((slot) => slot.day_of_week === 7)) {
+      weekDates.push(sundayDate);
+    }
+    const cancellations = datedSlots.length
+      ? await this.courseEnrollments.manager.query<
+          Array<{ course_id: string; session_date: string; start_time: string }>
+        >(
+          `SELECT DISTINCT course_id,
+                  (new_date AT TIME ZONE 'Asia/Kolkata')::date::text AS session_date,
+                  to_char(new_date AT TIME ZONE 'Asia/Kolkata', 'HH24:MI') AS start_time
+           FROM class_adjustments
+           WHERE tenant_id=$1 AND course_id=ANY($2::uuid[])
+             AND adjustment_type='CANCEL' AND status IN ('APPROVED','NOTIFIED')
+             AND (new_date AT TIME ZONE 'Asia/Kolkata')::date BETWEEN $3::date AND $4::date`,
+          [tenantId, courseIds, weekStart, weekEnd],
+        )
+      : [];
+    const cancelledSessions = new Set(
+      cancellations.map(
+        (row) => `${row.session_date}|${row.course_id}|${row.start_time}`,
+      ),
+    );
+    const logs = await this.courseEnrollments.manager.query<
+      Array<{
+        date: string;
+        course_id: string;
+        timetable_id: string | null;
+        class_adjustment_id: string | null;
+        attendance_data: unknown;
+      }>
+    >(
+      `SELECT cal.date::text AS date, cal.course_id, cal.timetable_id, cal.class_adjustment_id, cal.attendance_data
        FROM course_attendance_logs cal
        WHERE cal.tenant_id = $1
          AND cal.course_id = ANY($2::uuid[])
@@ -462,33 +604,48 @@ export class AcademicsService {
 
     const attendanceMap = new Map<string, string>();
     for (const log of logs) {
-      const entries = Array.isArray(log.attendance_data)
+      const entries: unknown[] = Array.isArray(log.attendance_data)
         ? log.attendance_data
         : [];
-      const entry = entries.find((row) => row.student_id === studentUserId);
+      const entry = entries.find(
+        (row): row is { student_id: string; status: string } =>
+          row !== null &&
+          typeof row === 'object' &&
+          'student_id' in row &&
+          row.student_id === studentUserId &&
+          'status' in row &&
+          typeof row.status === 'string',
+      );
       if (!entry) continue;
+      const sessionId = log.class_adjustment_id
+        ? `extra:${log.class_adjustment_id}`
+        : (log.timetable_id ?? '');
       attendanceMap.set(
-        `${log.date}|${log.course_id}|${log.timetable_id ?? ''}`,
+        `${log.date}|${log.course_id}|${sessionId}`,
         entry.status,
       );
-      if (!attendanceMap.has(`${log.date}|${log.course_id}|`)) {
-        attendanceMap.set(`${log.date}|${log.course_id}|`, entry.status);
-      }
     }
 
-    const slots = baseSlots.map((slot) => {
-      const sessionDate =
-        weekDates.find((d) => d.day_of_week === slot.day_of_week)?.date ?? null;
+    const slots = datedSlots.map((slot) => {
+      const sessionDate = slot.session_date;
+      const cancelled = cancelledSessions.has(
+        `${sessionDate}|${slot.course_id}|${String(slot.start_time).slice(0, 5)}`,
+      );
       let attendance_status: 'PRESENT' | 'ABSENT' | 'PENDING' | null = null;
 
-      if (sessionDate && this.isSessionDone(sessionDate, slot.end_time)) {
+      if (
+        !cancelled &&
+        sessionDate &&
+        this.isSessionDone(sessionDate, slot.end_time)
+      ) {
         const withTimetable = `${sessionDate}|${slot.course_id}|${slot.timetable_id}`;
         const courseOnly = `${sessionDate}|${slot.course_id}|`;
         // A course-level attendance record must never mark the wrong
         // practical rotation as attended.
         const raw =
           attendanceMap.get(withTimetable) ??
-          (slot.section?.toUpperCase().startsWith('BATCH-')
+          (slot.is_extra_class ||
+          slot.section?.toUpperCase().startsWith('BATCH-')
             ? undefined
             : attendanceMap.get(courseOnly));
         if (!raw) {
@@ -500,15 +657,30 @@ export class AcademicsService {
         }
       }
 
-      return { ...slot, session_date: sessionDate, attendance_status };
+      return {
+        ...slot,
+        faculty_name:
+          coverNames.get(`${slot.timetable_id}|${sessionDate}`) ??
+          slot.faculty_name,
+        substitute_faculty_name:
+          coverNames.get(`${slot.timetable_id}|${sessionDate}`) ?? null,
+        session_date: sessionDate,
+        cancelled,
+        attendance_status,
+      };
     });
 
     return {
       week_start: weekStart,
       week_dates: weekDates,
       pending_practical_batches: pendingPracticalBatches,
-      conflict_count: conflictCount,
-      slots,
+      conflict_count: countStudentTimetableConflicts(datedSlots),
+      slots: slots.sort(
+        (a, b) =>
+          String(a.session_date).localeCompare(String(b.session_date)) ||
+          a.start_time.localeCompare(b.start_time) ||
+          a.timetable_id.localeCompare(b.timetable_id),
+      ),
     };
   }
 
@@ -1709,133 +1881,12 @@ export class AcademicsService {
     tenantId: string,
     deptIds: number[],
   ) {
-    if (!deptIds.length) return [];
-
-    const academicYear = this.currentAcademicYear();
-    const rows = await this.users.manager.query(
-      `WITH assigned AS (
-         SELECT a.tenant_id, a.faculty_user_id,
-                COALESCE(SUM(COALESCE(c.credits, 0)), 0)::int AS assigned_load_credits,
-                COUNT(DISTINCT a.course_id)::int AS assigned_course_count,
-                COUNT(DISTINCT a.course_id) FILTER (WHERE NOT EXISTS (
-                  SELECT 1
-                  FROM academic_timetables t
-                  WHERE t.tenant_id = a.tenant_id
-                    AND t.course_id = a.course_id
-                    AND t.faculty_user_id = a.faculty_user_id
-                    AND t.deleted_at IS NULL
-                ))::int AS unscheduled_course_count
-         FROM academic_course_allocations a
-         LEFT JOIN academic_courses c ON c.course_id = a.course_id
-         WHERE a.tenant_id = $1 AND a.academic_year = $3 AND a.status = 'ACTIVE'
-         GROUP BY a.tenant_id, a.faculty_user_id
-       ), faculty_courses AS (
-         -- Dedupe allocation rows before joining the faculty's own slots.
-         -- A co-teaching allocation alone does not assign every other
-         -- teacher's contact hours to this faculty member.
-         SELECT DISTINCT tenant_id, faculty_user_id, course_id
-         FROM academic_course_allocations
-         WHERE tenant_id = $1 AND academic_year = $3 AND status = 'ACTIVE'
-           AND faculty_user_id IS NOT NULL AND course_id IS NOT NULL
-       ), scheduled AS (
-         SELECT fc.faculty_user_id, fc.tenant_id,
-                SUM(EXTRACT(EPOCH FROM (t.end_time::time - t.start_time::time)) / 60)::numeric AS scheduled_minutes,
-                COUNT(DISTINCT t.course_id)::int AS scheduled_course_count
-         FROM faculty_courses fc
-         INNER JOIN academic_timetables t
-          ON t.tenant_id = fc.tenant_id
-          AND t.course_id = fc.course_id
-          AND t.faculty_user_id = fc.faculty_user_id
-          AND t.deleted_at IS NULL
-         GROUP BY fc.tenant_id, fc.faculty_user_id
-       ), held_sessions AS (
-         SELECT e.tenant_id, faculty_id,
-           COUNT(*)::int AS pending_sessions,
-           SUM(EXTRACT(EPOCH FROM ((e.entry->>'end')::time-(e.entry->>'start')::time))/60)::int AS pending_minutes
-         FROM academic_timetable_source_entries e
-         JOIN academic_timetable_publications p ON p.publication_id=e.publication_id AND p.state='ACTIVE' AND p.activated_on<=CURRENT_DATE
-         CROSS JOIN LATERAL unnest(e.faculty_user_ids) faculty_id
-         WHERE e.tenant_id=$1 AND e.state='HELD' AND p.manifest->>'academic_year'=$3
-         GROUP BY e.tenant_id,faculty_id
-       )
-       SELECT u.user_id, u.name, u.official_email AS email, u.dept_id,
-              d.dept_name,
-              hod.name AS hod_name,
-              hod.official_email AS hod_email,
-              fld.status AS load_declaration_status,
-              fld.reason AS load_declaration_reason,
-              fld.revision AS load_declaration_revision,
-              fld.academic_year AS load_declaration_academic_year,
-              COALESCE(assigned.assigned_load_credits, 0)::int AS assigned_load_credits,
-              -- Keep this alias for existing consumers; it is credits, not hours.
-              COALESCE(assigned.assigned_load_credits, 0)::int AS assigned_load_hours,
-              COALESCE(scheduled.scheduled_minutes, 0)::numeric AS scheduled_minutes,
-              COALESCE(held_sessions.pending_sessions,0)::int AS pending_sessions,
-              COALESCE(held_sessions.pending_minutes,0)::int AS pending_minutes,
-              (COALESCE(scheduled.scheduled_minutes, 0) / 60)::numeric AS scheduled_hours,
-              (COALESCE(scheduled.scheduled_minutes, 0) / 60)::numeric AS hours_per_week,
-              COALESCE(assigned.assigned_course_count, 0)::int AS course_count,
-              COALESCE(assigned.unscheduled_course_count, 0)::int AS unscheduled_course_count
-       FROM users u
-       LEFT JOIN departments d ON d.dept_id = u.dept_id
-       LEFT JOIN users hod ON hod.user_id = d.hod_user_id
-       LEFT JOIN scheduled ON scheduled.faculty_user_id = u.user_id
-        AND scheduled.tenant_id = u.tenant_id
-       LEFT JOIN assigned ON assigned.faculty_user_id = u.user_id
-        AND assigned.tenant_id = u.tenant_id
-       LEFT JOIN held_sessions ON held_sessions.faculty_id=u.user_id AND held_sessions.tenant_id=u.tenant_id
-       LEFT JOIN academic_faculty_load_declarations fld
-         ON fld.tenant_id = u.tenant_id
-        AND fld.faculty_user_id = u.user_id
-        AND fld.academic_year = $3
-       LEFT JOIN roles r ON r.role_id = u.role_id
-       WHERE u.tenant_id = $1
-         AND u.dept_id = ANY($2::int[])
-         AND r.role_name IN ('Faculty', 'HOD', 'Dean')
-       ORDER BY d.dept_name ASC, assigned_load_hours DESC, u.name ASC`,
-      [tenantId, deptIds, academicYear],
+    return listDepartmentFacultyWorkload(
+      (sql, args) => this.users.manager.query(sql, args),
+      tenantId,
+      deptIds,
+      this.currentAcademicYear(),
     );
-
-    return rows.map((row: Record<string, unknown>) => ({
-      user_id: row.user_id,
-      name: row.name,
-      email: row.email,
-      dept_id: row.dept_id,
-      dept_name: row.dept_name,
-      hod_name: row.hod_name,
-      hod_email: row.hod_email,
-      hours_per_week: Number(row.hours_per_week ?? 0),
-      assigned_load_credits: Number(
-        row.assigned_load_credits ?? row.assigned_load_hours ?? 0,
-      ),
-      assigned_load_hours: Number(row.assigned_load_hours ?? 0),
-      scheduled_hours: Number(row.scheduled_hours ?? 0),
-      scheduled_minutes: Number(row.scheduled_minutes ?? 0),
-      pending_sessions: Number(row.pending_sessions ?? 0),
-      pending_minutes: Number(row.pending_minutes ?? 0),
-      course_count: Number(row.course_count ?? 0),
-      unscheduled_course_count: Number(row.unscheduled_course_count ?? 0),
-      load_declaration_status: row.load_declaration_status ?? null,
-      load_declaration_reason: row.load_declaration_reason ?? null,
-      load_declaration_revision: Number(row.load_declaration_revision ?? 0),
-      load_declaration_academic_year:
-        row.load_declaration_academic_year ?? academicYear,
-      workload_status:
-        row.load_declaration_status === 'NO_TEACHING_LOAD'
-          ? 'NO_TEACHING_LOAD'
-          : Number(row.pending_sessions ?? 0) > 0
-          ? 'AWAITING_CONFIRMATION'
-          : Number(row.unscheduled_course_count ?? 0) > 0
-            ? 'SCHEDULE_MISSING'
-            : Number(row.course_count ?? 0) === 0 &&
-                Number(row.hours_per_week ?? 0) === 0
-              ? 'NO_ACTIVE_ALLOCATION'
-              : Number(row.hours_per_week ?? 0) > 16
-                ? 'OVERLOADED'
-                : Number(row.hours_per_week ?? 0) < 6
-                  ? 'UNDERUTILIZED'
-                  : 'BALANCED',
-    }));
   }
 
   async listHodSyllabusCoverage(tenantId: string, hodUserId: string) {
@@ -1881,45 +1932,11 @@ export class AcademicsService {
     tenantId: string,
     deptIds: number[],
   ) {
-    if (!deptIds.length) return [];
-
-    const academicYear = this.currentAcademicYear();
-
-    return this.users.manager.query(
-      `SELECT t.timetable_id, t.day_of_week, t.start_time, t.end_time, t.room,
-              c.course_id, c.course_code, c.course_name,
-              a.program_name, a.semester,
-              u.user_id AS faculty_user_id, u.name AS faculty_name,
-              u.dept_id, d.dept_name
-       FROM academic_timetables t
-       INNER JOIN academic_courses c ON c.course_id = t.course_id
-       LEFT JOIN LATERAL (
-         SELECT a.program_name, a.semester
-         FROM academic_course_allocations a
-         WHERE a.tenant_id = t.tenant_id
-           AND a.course_id = t.course_id
-           AND a.faculty_user_id = t.faculty_user_id
-           AND a.academic_year = $3
-           AND a.status = 'ACTIVE'
-         ORDER BY a.updated_at DESC NULLS LAST, a.allocation_id DESC
-         LIMIT 1
-       ) a ON TRUE
-       INNER JOIN users u ON u.user_id = t.faculty_user_id
-       LEFT JOIN departments d ON d.dept_id = u.dept_id
-       WHERE t.tenant_id = $1
-         AND u.dept_id = ANY($2::int[])
-         AND EXISTS (
-           SELECT 1
-           FROM academic_course_allocations current_allocation
-           WHERE current_allocation.tenant_id = t.tenant_id
-             AND current_allocation.course_id = t.course_id
-             AND current_allocation.faculty_user_id = t.faculty_user_id
-             AND current_allocation.academic_year = $3
-             AND current_allocation.status = 'ACTIVE'
-         )
-         AND t.deleted_at IS NULL
-       ORDER BY d.dept_name ASC, t.day_of_week ASC, t.start_time ASC, c.course_code ASC`,
-      [tenantId, deptIds, academicYear],
+    return listDepartmentTimetable(
+      (sql, args) => this.users.manager.query(sql, args),
+      tenantId,
+      deptIds,
+      this.currentAcademicYear(),
     );
   }
 
@@ -4731,9 +4748,7 @@ export class AcademicsService {
   ];
 
   private currentAcademicYear(date = new Date()) {
-    const year = date.getUTCFullYear();
-    const start = date.getUTCMonth() >= 6 ? year : year - 1;
-    return `${start}-${start + 1}`;
+    return academicYearAt(date);
   }
 
   async getHodDepartmentReports(tenantId: string, hodUserId: string) {

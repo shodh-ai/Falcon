@@ -60,6 +60,8 @@ export function AcquisitionWorkspace() {
   const [fundingSources, setFundingSources] = useState<
     AcquisitionFundingSource[]
   >([]);
+  const [fundingSourcesLoading, setFundingSourcesLoading] = useState(false);
+  const [fundingSourcesError, setFundingSourcesError] = useState<string | null>(null);
 
   const reload = useCallback(
     () =>
@@ -74,6 +76,8 @@ export function AcquisitionWorkspace() {
   }, [reload]);
   useEffect(() => {
     if (!showWizard) return;
+    setFundingSourcesLoading(true);
+    setFundingSourcesError(null);
     void api
       .fundingSources()
       .then((sources) => {
@@ -87,7 +91,11 @@ export function AcquisitionWorkspace() {
           }));
         }
       })
-      .catch((error) => toast.error(error.message));
+      .catch((error) => {
+        setFundingSources([]);
+        setFundingSourcesError(error instanceof Error ? error.message : 'Funding sources could not be verified');
+      })
+      .finally(() => setFundingSourcesLoading(false));
   }, [api, showWizard]);
 
   const setLine = (index: number, patch: Partial<AcquisitionLineInput>) =>
@@ -300,6 +308,7 @@ export function AcquisitionWorkspace() {
                   aria-label="Funding source"
                   className="h-10 w-full rounded-md border bg-background px-3 text-sm"
                   value={draft.funding_source_id}
+                  disabled={fundingSourcesLoading || fundingSources.length === 0 || !!fundingSourcesError}
                   onChange={(e) => {
                     const selected = fundingSources.find(
                       (source) => source.funding_source_id === e.target.value,
@@ -313,7 +322,7 @@ export function AcquisitionWorkspace() {
                     });
                   }}
                 >
-                  <option value="">Select funding source</option>
+                  <option value="">{fundingSourcesLoading ? 'Loading funding sources…' : 'Select funding source'}</option>
                   {fundingSources.map((source) => (
                     <option
                       key={source.funding_source_id}
@@ -327,7 +336,11 @@ export function AcquisitionWorkspace() {
                   This is the approved budget, program or grant that will fund
                   the request. You do not need to enter an ID.
                 </p>
-                {!fundingSources.length ? <p role="status" className="text-xs text-amber-800">No funding source is available for your current scope. Ask Finance to publish an approved budget, program or grant before saving.</p> : null}
+                {fundingSourcesError ? (
+                  <p role="alert" className="text-xs text-red-700">Funding sources could not be verified: {fundingSourcesError}. Close and reopen the wizard to retry.</p>
+                ) : !fundingSourcesLoading && !fundingSources.length ? (
+                  <p role="status" className="text-xs text-amber-800">No active funding sources are available for your scope. Ask Finance to publish an approved budget, program or grant before saving.</p>
+                ) : null}
               </div>
               <Textarea
                 className="md:col-span-2"

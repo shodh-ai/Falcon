@@ -4,7 +4,6 @@ import { Select } from '@/components/ui/select';
 import { FormEvent, useEffect, useState } from 'react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { useAuthedApi } from '@/lib/api';
 import { isFacultyDemoSmokeId } from '@/lib/faculty-demo-mode';
 
@@ -19,14 +18,18 @@ type Lecture = {
 };
 
 type Colleague = { user_id: string; name: string; email: string };
+const classDate = (value: string) => String(value).slice(0, 10);
+const displayDate = (value: string) => classDate(value).split('-').reverse().join('/');
 
 export function ProxyTeachingDialog({
   startDate,
   endDate,
+  reason = 'Leave — alternate teaching arrangement',
   onDone,
 }: {
   startDate: string;
   endDate: string;
+  reason?: string;
   onDone?: () => void;
 }) {
   const api = useAuthedApi();
@@ -46,7 +49,7 @@ export function ProxyTeachingDialog({
           ),
           api.get<Colleague[]>('/api/academics/faculty/proxy/colleagues'),
         ]);
-        setLectures(lec);
+        setLectures(Array.isArray(lec) ? lec : []);
         setColleagues(col);
       } catch {
         setLectures([]);
@@ -57,12 +60,12 @@ export function ProxyTeachingDialog({
   }, [api, startDate, endDate]);
 
   if (loading) return <p className="text-sm text-muted-foreground">Checking scheduled lectures…</p>;
-  if (!lectures.length) return null;
+  if (!lectures.length) return <p className="mt-2 text-sm text-muted-foreground">No scheduled class found for this date.</p>;
 
   async function submit(e: FormEvent) {
     e.preventDefault();
     const selected = lectures.filter(
-      (lec) => selections[`${lec.timetable_id}-${lec.lecture_date}`],
+      (lec) => selections[`${lec.timetable_id}-${classDate(lec.lecture_date)}`],
     );
     if (!selected.length) {
       toast.error('Select at least one proxy faculty for a lecture before submitting.');
@@ -76,12 +79,12 @@ export function ProxyTeachingDialog({
     setSaving(true);
     try {
       for (const lec of selected) {
-        const proxyId = selections[`${lec.timetable_id}-${lec.lecture_date}`];
+        const proxyId = selections[`${lec.timetable_id}-${classDate(lec.lecture_date)}`];
         await api.post('/api/academics/faculty/proxy-requests', {
           timetable_id: lec.timetable_id,
           proxy_faculty_id: proxyId,
-          date_of_proxy: lec.lecture_date,
-          reason: 'Leave — alternate teaching arrangement',
+          date_of_proxy: classDate(lec.lecture_date),
+          reason,
         });
       }
       toast.success('Alternate teaching arrangements submitted for HOD approval');
@@ -100,12 +103,12 @@ export function ProxyTeachingDialog({
         Arrangement.
       </p>
       {lectures.map((lec) => {
-        const key = `${lec.timetable_id}-${lec.lecture_date}`;
+        const key = `${lec.timetable_id}-${classDate(lec.lecture_date)}`;
         return (
           <div key={key} className="grid gap-2 sm:grid-cols-[1fr_auto] sm:items-center">
             <div className="text-sm">
-              <span className="font-semibold">{lec.course_code}</span> · {lec.lecture_date} ·{' '}
-              {String(lec.start_time).slice(0, 5)}
+              <span className="font-semibold">{lec.course_code}</span> · {displayDate(lec.lecture_date)} ·{' '}
+              {String(lec.start_time).slice(0, 5)}–{String(lec.end_time).slice(0, 5)}
             </div>
             <Select
               className="rounded-lg border border-border/60 bg-background px-3 py-2 text-sm"

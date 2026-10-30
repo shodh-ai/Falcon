@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -143,6 +144,11 @@ export class SuperAdminService {
     if (!entityId) {
       throw new BadRequestException('entity_id is required');
     }
+    if(dto.entity_type==='DEPARTMENT' && dto.assignment_type==='HOD'){
+      if(!Number.isInteger(Number(entityId)) || Number(entityId)<=0)throw new BadRequestException('Department ID must be a positive number');
+      const managed=await this.dataSource.query('SELECT 1 FROM department_leadership WHERE tenant_id=$1 AND dept_id=$2',[tenantId,Number(entityId)]);
+      if(managed.length)throw new ConflictException('Use Department leadership & officeholders to change this managed HOD office');
+    }
 
     const user = await this.dataSource.query<{ user_id: string }[]>(
       `SELECT user_id FROM users WHERE user_id = $1 AND tenant_id = $2 AND is_active = true`,
@@ -283,6 +289,10 @@ export class SuperAdminService {
     if (!row) {
       throw new NotFoundException('Assignment not found');
     }
+    if(row.assignment_type==='HOD' && row.entity_type==='DEPARTMENT'){
+      const managed=await this.dataSource.query('SELECT 1 FROM department_leadership WHERE tenant_id=$1 AND dept_id=$2',[tenantId,Number(row.entity_id)]);
+      if(managed.length)throw new ConflictException('End the managed office appointment in Department leadership & officeholders');
+    }
 
     if (row.assignment_type === 'DEAN' && row.entity_type === 'SCHOOL') {
       const schoolId = Number(row.entity_id);
@@ -323,18 +333,20 @@ export class SuperAdminService {
     return { revoked: true };
   }
 
-  async listAssignableUsers(tenantId: string, q?: string) {
+  async listAssignableUsers(tenantId: string, q?: string, deptId?: number) {
     const term = q?.trim();
     return this.dataSource.query<
-      { user_id: string; name: string; email: string; role_name: string }[]
+      { user_id: string; name: string; email: string; role_name: string; dept_id: number | null }[]
     >(
-      `SELECT u.user_id, u.name, u.official_email AS email, r.role_name
+      `SELECT u.user_id, u.name, u.official_email AS email, r.role_name,u.dept_id
        FROM users u
        INNER JOIN roles r ON r.role_id = u.role_id
        WHERE u.tenant_id = $1
          AND u.is_active = true
          AND u.deleted_at IS NULL
-         AND r.role_name IN ('Dean', 'HOD', 'Faculty', 'SuperAdmin')
+         AND ($3::int IS NULL OR u.dept_id=$3)
+         AND NOT EXISTS(SELECT 1 FROM student_profiles sp
+           WHERE sp.tenant_id=u.tenant_id AND sp.user_id=u.user_id)
          AND (
            $2::text IS NULL OR $2 = ''
            OR u.name ILIKE '%' || $2 || '%'
@@ -342,7 +354,7 @@ export class SuperAdminService {
          )
        ORDER BY u.name ASC
        LIMIT 50`,
-      [tenantId, term ?? ''],
+      [tenantId, term ?? '', deptId ?? null],
     );
   }
 

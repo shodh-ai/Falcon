@@ -25,8 +25,8 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import type { Response } from 'express';
 import {
-  assignmentPdfInterceptor,
-  assignmentReferencePdfInterceptor,
+  assignmentFileInterceptor,
+  assignmentReferenceFileInterceptor,
   courseMaterialInterceptor,
   courseMaterialsInterceptor,
 } from './lms-upload.config';
@@ -316,6 +316,7 @@ export class AcademicsController {
   getFacultyCourseAttendanceAnalytics(
     @Param('courseId') courseId: string,
     @Query('date') date: string | undefined,
+    @Query('timetableId') timetableId: string | undefined,
     @Req() req: { user: AuthUser },
   ) {
     return this.facultyAcademics.getAttendanceAnalytics(
@@ -323,6 +324,7 @@ export class AcademicsController {
       req.user.user_id,
       this.resolveTenantId(req.user),
       date,
+      timetableId,
     );
   }
 
@@ -331,13 +333,15 @@ export class AcademicsController {
   sendFacultyCourseAttendanceWarnings(
     @Param('courseId') courseId: string,
     @Req() req: { user: AuthUser },
-    @Body() dto: { student_ids?: string[] },
+    @Body() dto: { student_ids?: string[]; date: string; timetable_id: string },
   ) {
     return this.facultyAcademics.sendAttendanceWarnings(
       courseId,
       req.user.user_id,
       this.resolveTenantId(req.user),
       dto.student_ids ?? [],
+      dto.date,
+      dto.timetable_id,
     );
   }
 
@@ -384,17 +388,19 @@ export class AcademicsController {
   listFacultyAssignments(
     @Req() req: { user: AuthUser },
     @Query('courseId') courseId?: string,
+    @Query('scope') scope?: string,
   ) {
     return this.assignments.listFacultyAssignments(
       req.user.user_id,
       this.resolveTenantId(req.user),
       courseId,
+      scope === 'mine',
     );
   }
 
   @Post('faculty/assignments')
   @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
-  @UseInterceptors(assignmentReferencePdfInterceptor())
+  @UseInterceptors(assignmentReferenceFileInterceptor())
   createFacultyAssignment(
     @Req() req: { user: AuthUser },
     @Body()
@@ -420,7 +426,7 @@ export class AcademicsController {
 
   @Patch('faculty/assignments/:assignmentId')
   @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
-  @UseInterceptors(assignmentReferencePdfInterceptor())
+  @UseInterceptors(assignmentReferenceFileInterceptor())
   updateFacultyAssignment(
     @Param('assignmentId') assignmentId: string,
     @Req() req: { user: AuthUser },
@@ -498,6 +504,8 @@ export class AcademicsController {
     );
     const file = await this.assignments.streamSubmissionFile(submission);
     res.setHeader('Content-Type', file.mimeType);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Cache-Control', 'private, no-store');
     res.setHeader(
       'Content-Disposition',
       `attachment; filename="${file.filename}"`,
@@ -818,6 +826,36 @@ export class AcademicsController {
       this.resolveTenantId(req.user),
       req.user.user_id,
       courseId,
+    );
+  }
+
+  @Get('hod/courses/:courseId/oversight')
+  @Roles('HOD')
+  hodCourseOversight(
+    @Req() req: { user: AuthUser },
+    @Param('courseId') courseId: string,
+  ) {
+    return this.courseLms.getHodCourseWorkspace(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      courseId,
+    );
+  }
+
+  @Post('hod/courses/:courseId/faculty/:facultyUserId/notification')
+  @Roles('HOD')
+  hodNotifyCourseFaculty(
+    @Req() req: { user: AuthUser },
+    @Param('courseId') courseId: string,
+    @Param('facultyUserId') facultyUserId: string,
+    @Body() body: { message?: string },
+  ) {
+    return this.courseLms.notifyHodCourseFaculty(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      courseId,
+      facultyUserId,
+      body.message ?? '',
     );
   }
 
@@ -1878,6 +1916,78 @@ export class AcademicsController {
     );
   }
 
+  @Patch('faculty/proxy-requests/:proxyId/cancel')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  cancelProxyRequest(
+    @Req() req: { user: AuthUser },
+    @Param('proxyId') proxyId: string,
+    @Body() body: { reason: string },
+  ) {
+    return this.academicProxy.cancelProxyRequest(
+      req.user.user_id, this.resolveTenantId(req.user), proxyId, body.reason,
+    );
+  }
+
+  @Patch('faculty/proxy-requests/:proxyId/offer')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  respondToProxyOffer(
+    @Req() req: { user: AuthUser },
+    @Param('proxyId') proxyId: string,
+    @Body() body: { action: 'ACCEPT' | 'DECLINE' },
+  ) {
+    return this.academicProxy.actOnProxyOffer(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      proxyId,
+      body.action,
+    );
+  }
+
+  @Get('hod/proxy/faculty')
+  @Roles('HOD', 'Dean', 'SuperAdmin')
+  hodProxyFaculty(@Req() req: { user: AuthUser }) {
+    return this.academicProxy.listDepartmentFacultyForHod(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+    );
+  }
+
+  @Get('hod/proxy/lectures')
+  @Roles('HOD', 'Dean', 'SuperAdmin')
+  hodProxyLectures(
+    @Req() req: { user: AuthUser },
+    @Query('faculty_id') facultyId: string,
+    @Query('start_date') startDate: string,
+    @Query('end_date') endDate: string,
+  ) {
+    return this.academicProxy.listDepartmentLecturesForHod(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      facultyId,
+      startDate,
+      endDate,
+    );
+  }
+
+  @Post('hod/proxy-requests')
+  @Roles('HOD', 'Dean', 'SuperAdmin')
+  createHodProxyRequest(
+    @Req() req: { user: AuthUser },
+    @Body() body: {
+      absent_faculty_id: string;
+      timetable_id: string;
+      proxy_faculty_id: string;
+      date_of_proxy: string;
+      reason?: string;
+    },
+  ) {
+    return this.academicProxy.createProxyRequestByHod(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      body,
+    );
+  }
+
   @Get('hod/approvals/proxy-requests')
   @Roles('HOD', 'Dean', 'SuperAdmin')
   hodProxyApprovals(@Req() req: { user: AuthUser }) {
@@ -2028,7 +2138,7 @@ export class AcademicsController {
 
   @Post('assignments/:assignmentId/submit')
   @Roles('Student')
-  @UseInterceptors(assignmentPdfInterceptor())
+  @UseInterceptors(assignmentFileInterceptor())
   submitAssignment(
     @Param('assignmentId') assignmentId: string,
     @Req() req: { user: AuthUser },
@@ -2047,13 +2157,15 @@ export class AcademicsController {
   async facultyWorkspaceCourses(
     @Req() req: { user: AuthUser },
     @Query('deptId') deptIdRaw?: string,
+    @Query('scope') scope?: 'mine' | 'department',
   ) {
-    const deptId = await this.resolveFacultyDeptId(req, deptIdRaw);
+    const hodScope = this.isHod(req.user) && scope !== 'mine';
+    const deptId = hodScope ? null : await this.resolveFacultyDeptId(req, deptIdRaw);
     return this.facultyWorkspaces.listFacultyCourses(
       req.user.user_id,
       this.resolveTenantId(req.user),
       deptId,
-      this.isHod(req.user),
+      hodScope,
     );
   }
 
@@ -2259,6 +2371,18 @@ export class AcademicsController {
     return this.facultyWorkspaces.listClassAdjustments(
       req.user.user_id,
       this.resolveTenantId(req.user),
+    );
+  }
+
+  @Get('faculty/workspaces/adjustments/extra-class-slots')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  suggestExtraClassSlots(
+    @Req() req: { user: AuthUser },
+    @Query('courseId') courseId: string,
+    @Query('date') date: string,
+  ) {
+    return this.facultyWorkspaces.suggestExtraClassSlots(
+      req.user.user_id, this.resolveTenantId(req.user), courseId, date,
     );
   }
 
@@ -2589,16 +2713,20 @@ export class AcademicsController {
 
   @Get('faculty/workspaces/analytics/students/:studentUserId/report')
   @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
-  facultySubjectStudentReport(
+  async facultySubjectStudentReport(
     @Req() req: { user: AuthUser },
     @Param('studentUserId') studentUserId: string,
     @Query('courseId') courseId: string,
   ) {
+    // Match the exact allocation-scoped roster exposed in the course workspace.
+    // Owning a shared course code must not reveal another section's student record.
+    const tenantId = this.resolveTenantId(req.user);
+    const roster = await this.facultyAcademics.getCourseStudents(courseId, req.user.user_id, tenantId);
+    if (!roster.some((student: { student_id: string }) => student.student_id === studentUserId)) {
+      throw new ForbiddenException('Student is not in your allocated course roster');
+    }
     return this.facultyWorkspaces.getFacultySubjectStudentReport(
-      req.user.user_id,
-      this.resolveTenantId(req.user),
-      courseId,
-      studentUserId,
+      req.user.user_id, tenantId, courseId, studentUserId,
     );
   }
 
@@ -3029,6 +3157,8 @@ export class AcademicsController {
     );
     const file = await this.assignments.streamAssignmentFile(assignment);
     res.setHeader('Content-Type', file.mimeType);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Cache-Control', 'private, no-store');
     res.setHeader(
       'Content-Disposition',
       `attachment; filename="${file.filename}"`,
@@ -3049,10 +3179,10 @@ export class AcademicsController {
       assignmentId,
     );
     const file = await this.assignments.streamSubmissionFile(submission);
-    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Type', file.mimeType);
     res.setHeader(
       'Content-Disposition',
-      `inline; filename="${file.filename.replace(/["\r\n]/g, '_')}"`,
+      `${file.mimeType === 'application/pdf' ? 'inline' : 'attachment'}; filename="${file.filename.replace(/["\r\n]/g, '_')}"`,
     );
     res.setHeader('Cache-Control', 'private, no-store');
     res.setHeader('X-Content-Type-Options', 'nosniff');

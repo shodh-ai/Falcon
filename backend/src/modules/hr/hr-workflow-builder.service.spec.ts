@@ -10,7 +10,7 @@ describe('HrWorkflowBuilderService', () => {
 
   function createService(query: jest.Mock, transaction?: jest.Mock) {
     const dataSource = {
-      query,
+      query: jest.fn((sql:string,args:unknown[])=>sql.includes('JOIN department_leadership c')?Promise.resolve([]):query(sql,args)),
       transaction: transaction ?? jest.fn((callback) => callback({ query })),
     } as unknown as DataSource;
     const accessControl = {

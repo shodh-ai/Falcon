@@ -16,6 +16,8 @@ import { useAuthedApi } from '@/lib/api';
 import { DeanApprovalTimeline } from '@/components/dean/DeanApprovalTimeline';
 import { buildDeanPageQuery, type PaginatedApiResponse } from '@/lib/dean-pagination';
 import { PaginationBar } from '@/components/ui/PaginationBar';
+import { HrAppealsPanel } from '@/components/self-service/HrAppealsPanel';
+import { DepartmentHrApprovalsPanel } from '@/components/self-service/DepartmentHrApprovalsPanel';
 
 type InboxRow = {
   id: string;
@@ -150,6 +152,8 @@ export default function DeanInboxPage() {
 
   return (
     <HodPageFrame>
+      <HrAppealsPanel />
+      <DepartmentHrApprovalsPanel />
       <HodPageHeader
         title="Dean Inbox"
         description="School-wide approvals escalated from departments — funding, attendance policy, events, and grievances."

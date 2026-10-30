@@ -55,6 +55,7 @@ const DOMAINS = [
   'MOU',
   'SPACE',
 ] as const;
+const POLICY_READ_ROLES = ['campusadmin', 'superadmin', 'cio', 'cfo', 'chairman', 'president', 'internalauditor'] as const;
 
 function BandNode({ data }: { data: Record<string, unknown> }) {
   const roles = (data.required_roles as string[]) ?? [];
@@ -155,6 +156,7 @@ export function DofaPolicyVault() {
   const api = useAuthedApi();
   const { user } = useAuth();
   const r = rolesOf(user);
+  const canRead = r.some((role) => POLICY_READ_ROLES.includes(role as (typeof POLICY_READ_ROLES)[number]));
   const canPropose = r.some((x) =>
     ['campusadmin', 'superadmin', 'cio'].includes(x),
   );
@@ -181,6 +183,7 @@ export function DofaPolicyVault() {
   const editable = canPropose && selected?.status === 'DRAFT';
 
   const loadGraphs = useCallback(() => {
+    if (!canRead) return;
     void api
       .get<GraphMeta[]>(`/api/dofa/policy/graphs?domain=${domain}`)
       .then((list) => {
@@ -190,12 +193,12 @@ export function DofaPolicyVault() {
         if (pub) setSelectedId(pub.graph_id);
         else { setSelectedId(null); setSelected(null); setNodes([]); setEdges([]); }
       })
-      .catch((error) => { setGraphs([]); setSelectedId(null); setSelected(null); setGraphLoadError(error instanceof Error ? error.message : 'Policy graphs could not be loaded'); });
-  }, [api, domain, setEdges, setNodes]);
+      .catch((error) => { setGraphs([]); setSelectedId(null); setSelected(null); setGraphLoadError(`Could not load the policy graph. ${error instanceof Error ? error.message : 'Please retry.'}`); });
+  }, [api, domain, setEdges, setNodes, canRead]);
 
   useEffect(() => {
-    loadGraphs();
-  }, [loadGraphs]);
+    if (canRead) loadGraphs();
+  }, [loadGraphs, canRead]);
 
   useEffect(() => {
     if (!selectedId) return;
@@ -402,6 +405,10 @@ export function DofaPolicyVault() {
         };
       }),
     );
+  }
+
+  if (!canRead) {
+    return <div className="p-6"><div role="alert" className="mx-auto max-w-3xl rounded-lg border border-amber-300 bg-amber-50 p-5 text-sm text-amber-950"><h1 className="text-lg font-bold">Policy Vault access required</h1><p className="mt-2">Your current role cannot view this policy workspace.</p><p className="mt-2 text-xs">Roles with read access: CampusAdmin, SuperAdmin, CIO, CFO, Chairman, President, InternalAuditor.</p></div></div>;
   }
 
   return (

@@ -571,6 +571,108 @@ export class FacultyProfileService {
     };
   }
 
+  async getWeeklyWorkload(tenantId: string, userId: string, requestedWeek?: string) {
+    const dateParts = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit',
+    }).formatToParts(new Date());
+    const part = (type: string) => dateParts.find(item => item.type === type)?.value;
+    const today = `${part('year')}-${part('month')}-${part('day')}`;
+    const day = new Date(`${today}T00:00:00Z`);
+    day.setUTCDate(day.getUTCDate() - ((day.getUTCDay() + 6) % 7));
+    const weekStart = requestedWeek ?? day.toISOString().slice(0, 10);
+    const parsed = /^\d{4}-\d{2}-\d{2}$/.test(weekStart)
+      ? new Date(`${weekStart}T00:00:00Z`) : new Date(NaN);
+    if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== weekStart || parsed.getUTCDay() !== 1) {
+      throw new BadRequestException('week_start must be a valid Monday in YYYY-MM-DD format');
+    }
+
+    const scheduled = await this.dataSource.query<Array<{
+      timetable_id: string; course_id: string; course_code: string;
+      class_date: string; start_time: string; minutes: number;
+    }>>(
+      `WITH days AS (SELECT ($3::date + n)::date AS class_date FROM generate_series(0, 6) n)
+       SELECT t.timetable_id::text, t.course_id, c.course_code,
+              d.class_date::text, t.start_time::text,
+              (EXTRACT(EPOCH FROM (t.end_time - t.start_time)) / 60)::int AS minutes
+       FROM days d
+       JOIN academic_timetables t ON t.tenant_id = $1 AND t.faculty_user_id = $2
+         AND t.deleted_at IS NULL AND t.day_of_week = EXTRACT(ISODOW FROM d.class_date)::int
+         AND (t.valid_from IS NULL OR t.valid_from <= d.class_date)
+         AND (t.valid_to IS NULL OR t.valid_to >= d.class_date)
+         AND NOT EXISTS (SELECT 1 FROM academic_proxy_requests p WHERE p.tenant_id = t.tenant_id
+           AND p.timetable_id = t.timetable_id AND p.date_of_proxy = d.class_date AND p.status = 'APPROVED')
+         AND NOT EXISTS (SELECT 1 FROM academic_class_moves m WHERE m.tenant_id = t.tenant_id
+           AND m.source_timetable_id = t.timetable_id AND m.source_date = d.class_date AND m.status = 'APPROVED')
+       JOIN academic_courses c ON c.course_id = t.course_id AND c.tenant_id = t.tenant_id
+       UNION ALL
+       SELECT t.timetable_id::text, t.course_id, c.course_code,
+              p.date_of_proxy::text, COALESCE(m.target_start_time, t.start_time)::text,
+              (EXTRACT(EPOCH FROM (COALESCE(m.target_end_time, t.end_time) - COALESCE(m.target_start_time, t.start_time))) / 60)::int
+       FROM academic_proxy_requests p
+       JOIN academic_timetables t ON t.timetable_id = p.timetable_id AND t.tenant_id = p.tenant_id
+         AND t.deleted_at IS NULL
+       LEFT JOIN academic_class_moves m ON m.tenant_id = p.tenant_id AND m.source_timetable_id = p.timetable_id
+         AND m.target_date = p.date_of_proxy AND m.status = 'APPROVED'
+       JOIN academic_courses c ON c.course_id = t.course_id AND c.tenant_id = t.tenant_id
+       WHERE p.tenant_id = $1 AND p.proxy_faculty_id = $2 AND p.status = 'APPROVED'
+         AND p.date_of_proxy BETWEEN $3::date AND $3::date + 6
+         AND (t.valid_from IS NULL OR t.valid_from <= COALESCE(m.source_date, p.date_of_proxy))
+         AND (t.valid_to IS NULL OR t.valid_to >= COALESCE(m.source_date, p.date_of_proxy))
+       UNION ALL
+       SELECT m.source_timetable_id::text, m.course_id, c.course_code,
+              m.target_date::text, m.target_start_time::text,
+              (EXTRACT(EPOCH FROM (m.target_end_time - m.target_start_time)) / 60)::int
+       FROM academic_class_moves m
+       JOIN academic_timetables t ON t.timetable_id = m.source_timetable_id AND t.tenant_id = m.tenant_id
+       JOIN academic_courses c ON c.course_id = m.course_id AND c.tenant_id = m.tenant_id
+       WHERE m.tenant_id = $1 AND m.original_faculty_id = $2 AND m.status = 'APPROVED'
+         AND m.target_date BETWEEN $3::date AND $3::date + 6
+         AND NOT EXISTS (SELECT 1 FROM academic_proxy_requests p WHERE p.tenant_id = m.tenant_id
+           AND p.timetable_id = m.source_timetable_id AND p.date_of_proxy = m.target_date AND p.status = 'APPROVED')`,
+      [tenantId, userId, weekStart],
+    );
+    const changes = await this.dataSource.query<Array<{
+      adjustment_id: string; adjustment_type: string; course_id: string;
+      class_date: string; start_time: string;
+    }>>(
+      `SELECT adjustment_id, adjustment_type, course_id,
+              (new_date AT TIME ZONE 'Asia/Kolkata')::date::text AS class_date,
+              (new_date AT TIME ZONE 'Asia/Kolkata')::time::text AS start_time
+       FROM class_adjustments
+       WHERE tenant_id = $1 AND faculty_user_id = $2
+         AND adjustment_type IN ('CANCEL', 'EXTRA_CLASS')
+         AND status IN ('APPROVED', 'NOTIFIED')
+         AND (new_date AT TIME ZONE 'Asia/Kolkata')::date BETWEEN $3::date AND $3::date + 6`,
+      [tenantId, userId, weekStart],
+    );
+
+    const cancelled = new Set<string>();
+    let unmatchedCancellations = 0;
+    for (const change of changes.filter(row => row.adjustment_type === 'CANCEL')) {
+      const candidates = scheduled.filter(slot => slot.course_id === change.course_id &&
+        slot.class_date === change.class_date && slot.start_time.slice(0, 5) === change.start_time.slice(0, 5));
+      if (candidates.length === 1) cancelled.add(`${candidates[0].timetable_id}:${candidates[0].class_date}`);
+      else unmatchedCancellations += 1;
+    }
+    const cancelledSlots = scheduled.filter(slot => cancelled.has(`${slot.timetable_id}:${slot.class_date}`));
+    const approvedExtras = changes.filter(row => row.adjustment_type === 'EXTRA_CLASS');
+    const scheduledMinutes = scheduled.reduce((sum, slot) => sum + Number(slot.minutes), 0);
+    const cancelledMinutes = cancelledSlots.reduce((sum, slot) => sum + Number(slot.minutes), 0);
+    const extraMinutes = approvedExtras.length * 60;
+    return {
+      week_start: weekStart,
+      scheduled_sessions: scheduled.length,
+      scheduled_minutes: scheduledMinutes,
+      cancelled_sessions: cancelledSlots.length,
+      cancelled_minutes: cancelledMinutes,
+      extra_sessions: approvedExtras.length,
+      extra_minutes: extraMinutes,
+      effective_sessions: scheduled.length - cancelledSlots.length + approvedExtras.length,
+      effective_minutes: scheduledMinutes - cancelledMinutes + extraMinutes,
+      unmatched_cancellations: unmatchedCancellations,
+    };
+  }
+
   private async countActiveMentees(proctorUserId: string) {
     const rows = await this.dataSource.query(
       `SELECT COUNT(*)::int AS count FROM academic_mentorships

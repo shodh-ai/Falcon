@@ -33,6 +33,11 @@ const nextConfig: NextConfig = {
       '@radix-ui/react-dropdown-menu',
     ],
   },
+  // Disable disposable webpack disk caches for clean local release builds.
+  webpack(config) {
+    if (process.env.FALCON_CLEAN_BUILD === '1') config.cache = false;
+    return config;
+  },
   images: {
     formats: ['image/avif', 'image/webp'],
   },

@@ -17,7 +17,7 @@ export type CourseAttendanceEntry = {
 
 @Entity('course_attendance_logs')
 @Index(['tenant_id', 'course_id', 'date'])
-@Index(['tenant_id', 'course_id', 'faculty_user_id', 'date'], { unique: true })
+@Index(['tenant_id', 'course_id', 'faculty_user_id', 'date'])
 export class CourseAttendanceLog extends BaseTenantEntity {
   @PrimaryGeneratedColumn('uuid')
   log_id: string;
@@ -38,6 +38,15 @@ export class CourseAttendanceLog extends BaseTenantEntity {
 
   @Column({ type: 'date' })
   date: string;
+
+  @Column({ type: 'uuid', nullable: true })
+  timetable_id: string | null;
+
+  @Column({ type: 'uuid', nullable: true })
+  class_adjustment_id: string | null;
+
+  @Column({ type: 'uuid', nullable: true })
+  marked_by_user_id: string | null;
 
   @Column({ type: 'jsonb' })
   attendance_data: CourseAttendanceEntry[];

@@ -10,6 +10,7 @@ import { UploadsService } from './uploads.service';
 import { ObjectStorageService } from '../storage/object-storage.service';
 import { ROLES_KEY } from '../common/decorators/roles.decorator';
 import { SHARED_UPLOAD_ROLES } from './upload-file-access';
+import { EXAM_CELL_SELF_SERVICE_ROLES } from '../modules/hr/hr-workforce.constants';
 
 jest.mock('uuid', () => ({ v4: () => '00000000-0000-4000-8000-000000000001' }));
 jest.mock('fs', () => ({
@@ -188,11 +189,13 @@ describe('Shared uploads Student isolation', () => {
     ]);
     expect(Reflect.getMetadata(ROLES_KEY, method('downloadFile'))).toEqual([
       ...SHARED_UPLOAD_ROLES,
+      ...EXAM_CELL_SELF_SERVICE_ROLES,
       'Applicant',
     ]);
-    expect(
-      Reflect.getMetadata(ROLES_KEY, method('uploadSingle')),
-    ).toBeUndefined();
+    expect(Reflect.getMetadata(ROLES_KEY, method('uploadSingle'))).toEqual([
+      ...SHARED_UPLOAD_ROLES,
+      ...EXAM_CELL_SELF_SERVICE_ROLES,
+    ]);
     expect(
       Reflect.getMetadata(ROLES_KEY, method('uploadMultiple')),
     ).toBeUndefined();

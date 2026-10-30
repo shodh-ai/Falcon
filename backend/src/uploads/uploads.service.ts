@@ -72,6 +72,38 @@ export class UploadsService {
       return;
 
     const student = uploadRoles(user).includes('student');
+    // Authorize a live test paper against its own records first. A legacy
+    // document/finance table can be incomplete on an upgraded tenant, and a
+    // failure in that unrelated lookup must not block a valid exam attempt.
+    if (student) {
+      try {
+        const papers = await this.dataSource.query<
+          Array<{ file_reference: string | null }>
+        >(
+          `SELECT t.question_paper_url AS file_reference FROM weekly_tests t
+           JOIN student_course_enrollments e ON e.course_id = t.course_id
+             AND e.tenant_id = t.tenant_id AND e.student_user_id = $2
+             AND e.status = 'ENROLLED' AND e.deleted_at IS NULL
+           WHERE t.tenant_id = $1 AND t.is_active = true
+             AND t.status IN ('SCHEDULED', 'ACTIVE')
+             AND t.start_time <= NOW() AND t.end_time > NOW()
+             AND NOT EXISTS (SELECT 1 FROM weekly_test_responses r
+               WHERE r.test_id = t.test_id AND r.student_user_id = $2
+                 AND r.submitted_at IS NOT NULL)`,
+          [tenantId, userId],
+        );
+        if (
+          papers.some(
+            (paper) =>
+              this.canonicalKey(paper.file_reference ?? '', tenantId) === key,
+          )
+        )
+          return;
+      } catch {
+        // The failed lookup grants no paper access. Other owned files can
+        // still be checked through their independent references below.
+      }
+    }
     try {
       const files = await this.dataSource.query<
         Array<{ file_reference: string | null }>
@@ -88,21 +120,7 @@ export class UploadsService {
          JOIN finance_fee_demands d ON d.demand_id = t.demand_id
          WHERE d.tenant_id = $1 AND d.student_user_id = $2
            AND t.tenant_id = $1 AND t.student_user_id = $2 AND t.status = 'SUCCESS'
-         ${
-           student
-             ? `UNION ALL SELECT file_url FROM university_policies
-         WHERE tenant_id = $1 AND status = 'ACTIVE'
-         UNION ALL SELECT t.question_paper_url FROM weekly_tests t
-         JOIN student_course_enrollments e ON e.course_id = t.course_id
-           AND e.tenant_id = t.tenant_id AND e.student_user_id = $2
-           AND e.status = 'ENROLLED' AND e.deleted_at IS NULL
-         WHERE t.tenant_id = $1 AND t.is_active = true
-           AND t.status IN ('SCHEDULED', 'ACTIVE')
-           AND t.start_time <= NOW() AND t.end_time > NOW()
-           AND NOT EXISTS (SELECT 1 FROM weekly_test_responses r
-             WHERE r.test_id = t.test_id AND r.student_user_id = $2 AND r.submitted_at IS NOT NULL)`
-             : ''
-         }`,
+         `,
         [tenantId, userId],
       );
       if (
@@ -112,6 +130,32 @@ export class UploadsService {
         )
       )
         return;
+
+      // Campus policies are optional in older tenant schemas. Their missing
+      // table must not prevent a student from opening an authorized test paper
+      // or another file returned by the query above.
+      if (student) {
+        const [policyTable] = await this.dataSource.query<
+          Array<{ relation: string | null }>
+        >("SELECT to_regclass('university_policies') AS relation");
+        if (policyTable?.relation) {
+          const policies = await this.dataSource.query<
+            Array<{ file_reference: string | null }>
+          >(
+            `SELECT file_url AS file_reference FROM university_policies
+             WHERE tenant_id = $1 AND status = 'ACTIVE'`,
+            [tenantId],
+          );
+          if (
+            policies.some(
+              (policy) =>
+                this.canonicalKey(policy.file_reference ?? '', tenantId) ===
+                key,
+            )
+          )
+            return;
+        }
+      }
     } catch {
       // A failed ownership lookup must never become unrestricted storage access.
       throw new NotFoundException('File not found');

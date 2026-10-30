@@ -1,3 +1,5 @@
+import { isVerifiedStaging } from '../config/staging-environment';
+
 export const FALCON_EMAIL_ADDRESS = 'noreply.ums@mygyanvihar.com';
 export const FALCON_EMAIL_FROM = `Falcon <${FALCON_EMAIL_ADDRESS}>`;
 
@@ -5,6 +7,23 @@ export type FalconEmailConfigReader = (name: string) => unknown;
 
 /** Resolve only the approved institutional SMTP path; never alter shared config. */
 export function falconEmailTransportOptions(read: FalconEmailConfigReader) {
+  if (isVerifiedStaging()) {
+    if (read('EMAIL_HOST') !== 'falcon-staging-mail' ||
+        String(read('EMAIL_PORT')) !== '1025' ||
+        read('EMAIL_SECURE') !== 'false' ||
+        read('EMAIL_USER') !== FALCON_EMAIL_ADDRESS ||
+        typeof read('EMAIL_PASSWORD') !== 'string' ||
+        String(read('EMAIL_PASSWORD')).length < 32) {
+      throw new Error('Staging email capture configuration is unavailable');
+    }
+    return {
+      host: 'falcon-staging-mail', port: 1025, secure: false,
+      requireTLS: true, connectionTimeout: 10_000, greetingTimeout: 10_000,
+      socketTimeout: 20_000,
+      auth: { user: FALCON_EMAIL_ADDRESS, pass: String(read('EMAIL_PASSWORD')) },
+      disableFileAccess: true, disableUrlAccess: true,
+    };
+  }
   const host = read('EMAIL_HOST');
   const user = read('EMAIL_USER');
   const pass = read('EMAIL_PASSWORD');

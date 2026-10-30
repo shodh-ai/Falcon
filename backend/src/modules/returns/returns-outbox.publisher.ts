@@ -1,3 +1,4 @@
+import { publishStagingOutbox } from '../../common/config/staging-mocks';
 /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access */
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -14,6 +15,7 @@ export class ReturnsOutboxPublisher {
     private readonly config: ConfigService,
   ) {}
   @Interval(30000) async publish() {
+    if (await publishStagingOutbox(this.db, 'ret_outbox_events')) return;
     const endpoint = this.config.get<string>('RETURNS_EVENT_WEBHOOK_URL'),
       privateKey = this.config.get<string>('RETURNS_EVENT_SIGNING_PRIVATE_KEY');
     if (!endpoint || !privateKey) return;

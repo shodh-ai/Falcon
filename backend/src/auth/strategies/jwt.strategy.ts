@@ -8,6 +8,7 @@ import { normalizeOnboardingStatusForWizard } from '../../modules/student-onboar
 import type { AuthTokenPayload } from '../interfaces/auth-provider.interface';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { assertInvitedStaging } from '../../common/config/staging-invites';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
@@ -34,6 +35,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     if (!payload.tenantId) {
       throw new UnauthorizedException('Token missing tenant context');
     }
+    assertInvitedStaging(payload.sub, payload.tenantId);
 
     if (payload.authType === 'parent') {
       return {
@@ -91,6 +93,10 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         payload.tenantId,
       )) ?? user;
 
+    await this.authService.applyLeadershipClaims(refreshedUser,payload.office_context);
+    if((payload.leadership_auth_revision ?? 0)!==(refreshedUser.leadership_auth_revision ?? 0)){
+      throw new UnauthorizedException('Office assignment changed; sign in again');
+    }
     const roleClaims = this.authService.getRoleClaims(refreshedUser);
 
     const baseUser = {
@@ -100,6 +106,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       role: roleClaims.primaryRole,
       roles: roleClaims.roles,
       primaryRole: roleClaims.primaryRole,
+      office_context: refreshedUser.office_context,
       role_id: refreshedUser.role_id,
       department: refreshedUser.department?.dept_name,
       dept_id: refreshedUser.dept_id,

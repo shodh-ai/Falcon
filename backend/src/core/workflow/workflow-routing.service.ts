@@ -11,6 +11,7 @@ import { HostelAllocation } from '../../entities/hostel-allocation.entity';
 import { HostelRoom } from '../../entities/hostel-room.entity';
 import { Role } from '../../entities/role.entity';
 import type { HelpdeskTicketCategory } from '../../entities/helpdesk-ticket.entity';
+import {configuredReportingOfficer} from '../../modules/department-leadership/reporting-officer';
 
 export type RoutedApprover = {
   userId: string;
@@ -71,13 +72,16 @@ export class WorkflowRoutingService {
   /** Direct reporting officer (HOD) for faculty/staff. */
   async getReportingOfficer(staffUserId: string): Promise<RoutedApprover> {
     const staff = await this.users.findOne({ where: { user_id: staffUserId } });
-    if (!staff?.reporting_officer_id) {
+    if(!staff)throw new NotFoundException('Staff user not found');
+    const configured=await configuredReportingOfficer((sql,args)=>this.users.manager.query(sql,args),staff.tenant_id,staffUserId);
+    const officerId=configured.configured?configured.officer:staff.reporting_officer_id;
+    if (!officerId || officerId===staffUserId) {
       throw new NotFoundException(
         'No reporting officer assigned for this user.',
       );
     }
     const officer = await this.users.findOne({
-      where: { user_id: staff.reporting_officer_id },
+      where: { user_id: officerId, tenant_id:staff.tenant_id, is_active:true },
     });
     if (!officer) {
       throw new NotFoundException('Reporting officer user record not found.');

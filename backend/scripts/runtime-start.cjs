@@ -9,6 +9,31 @@ const MATERIALIZED_VIEWS = [
   'exec_mv_academic_schools', 'exec_daily_university_health',
 ];
 
+// These exact expand-only relations have narrower mutation authority than the
+// existing business CRUD boundary. Keep this matrix aligned with the reviewed
+// limited_business_tables constant in runtime-role.sql. Missing relations are
+// allowed so this launcher can safely precede their separately owned migration.
+const LIMITED_BUSINESS_TABLES = Object.freeze(Object.fromEntries([
+  ['department_leadership', true, ['structure', 'higher_officer_id', 'revision', 'dean_enabled', 'dean_user_id']],
+  ['department_offices', true, ['login_alias']],
+  ['department_office_appointments', true, ['valid_to']],
+  ['department_office_session_revisions', true, ['revision']],
+  ['department_leadership_events', true, []],
+  ['student_identity_email_changes', false, []],
+  ['hr_department_request_routes', true, ['approver_ids', 'current_index', 'leadership_revision', 'updated_at']],
+  ['department_leadership_changes', true, []],
+  ['hr_staff_request_appeals', true, ['rejecting_user_id', 'reviewer_user_id', 'status', 'reconsideration_count', 'revision', 'updated_at']],
+  ['hr_staff_request_appeal_events', true, []],
+].map(([name, insert, updateColumns]) => [name, Object.freeze({
+  insert, updateColumns: Object.freeze(updateColumns),
+})])));
+
+const LIMITED_BUSINESS_VALUES = Object.entries(LIMITED_BUSINESS_TABLES).map(
+  ([name, policy]) => `('${name}', ${policy.insert}, ARRAY[${
+    policy.updateColumns.map(column => `'${column}'`).join(',')
+  }]::text[])`,
+).join(',\n');
+
 function databasePolicy(env, policy) {
   if (!policy || Object.keys(policy).sort().join(',') !==
       'enforce_least_privilege,host,name,port,role') {
@@ -100,7 +125,26 @@ const ROLE_QUERY = `SELECT current_database() AS database_name,
   EXISTS (SELECT 1 FROM pg_parameter_acl p
     WHERE has_parameter_privilege(current_user,p.parname,'SET,ALTER SYSTEM')) AS configuration_grants,
   EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
-    WHERE CASE WHEN n.nspname='public' AND c.relkind IN ('r','p','v')
+    LEFT JOIN (VALUES ${LIMITED_BUSINESS_VALUES})
+      p(relation_name,can_insert,update_columns) ON p.relation_name=c.relname
+    WHERE CASE WHEN n.nspname='public' AND c.relkind='r' AND p.relation_name IS NOT NULL
+      THEN (
+        NOT has_table_privilege(current_user,c.oid,'SELECT')
+        OR has_table_privilege(current_user,c.oid,'INSERT')<>p.can_insert
+        OR (NOT p.can_insert AND has_any_column_privilege(current_user,c.oid,'INSERT'))
+        OR has_table_privilege(current_user,c.oid,'UPDATE,DELETE')
+        OR EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid=c.oid
+          AND a.attnum>0 AND NOT a.attisdropped
+          AND NOT (a.attname=ANY(p.update_columns))
+          AND has_column_privilege(current_user,c.oid,a.attnum,'UPDATE'))
+        OR EXISTS (SELECT 1 FROM unnest(p.update_columns) wanted(column_name)
+          WHERE NOT EXISTS (SELECT 1 FROM pg_attribute a
+            WHERE a.attrelid=c.oid AND a.attnum>0 AND NOT a.attisdropped
+              AND a.attname=wanted.column_name
+              AND has_column_privilege(current_user,c.oid,a.attnum,'UPDATE')))
+      )
+      WHEN n.nspname='public' AND p.relation_name IS NOT NULL THEN true
+      WHEN n.nspname='public' AND c.relkind IN ('r','p','v')
         AND c.relname<>'schema_migrations'
       THEN NOT (has_table_privilege(current_user,c.oid,'SELECT')
         AND has_table_privilege(current_user,c.oid,'INSERT')
@@ -158,9 +202,13 @@ async function runRuntime({ env=process.env, verifyStorage,
   // Apply before boundary checks or application imports can create files.
   setUmask(0o027);
   if (env.NODE_ENV !== 'production') throw new Error('Hardened runtime requires NODE_ENV=production');
+  // Never accept an injected claim that the staging target was verified.
+  delete env.FALCON_STAGING_VERIFIED;
   const storage = (verifyStorage || require('./storage-boundary.cjs').assertStorageBoundary)({env});
+  const staging = require('./staging-boundary.cjs').assertStagingBoundary({env,storage});
   databasePolicy(env, storage.baseline.database);
   const database = await verifyDb({env, policy: storage.baseline.database});
+  if (staging) env.FALCON_STAGING_VERIFIED='1';
   log(JSON.stringify({storage_boundary_verified:true,
     database_boundary_verified:true, least_privilege_enforced:database.least_privilege_enforced}));
   (loadApplication || (() => require('../dist/main.js')))();
@@ -170,4 +218,4 @@ if (require.main === module) runRuntime().catch(error => {
   console.error(error.message);
   process.exitCode=1;
 });
-module.exports={databasePolicy,verifyDatabase,runRuntime,MATERIALIZED_VIEWS,ROLE_QUERY};
+module.exports={databasePolicy,verifyDatabase,runRuntime,MATERIALIZED_VIEWS,ROLE_QUERY,LIMITED_BUSINESS_TABLES};

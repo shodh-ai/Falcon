@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { AppTopBar } from '@/components/layout/AppTopBar';
+import { PrincipalWorkspaceReturn } from '@/components/layout/PrincipalWorkspaceReturn';
 import { AppSidebar } from '@/components/layout/AppSidebar';
 import { useAuth } from '@/context/AuthContext';
 import { resolveUserRoleList } from '@/lib/available-workspaces';
@@ -113,6 +114,7 @@ export function AppShell({ config, children, profileHref, headerExtra, contentMa
             py already provides ~20px, so only a small extra keeps total trailing space ≈32px. */}
         <main className={cn('min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto pb-[calc(4.5rem+env(safe-area-inset-bottom))] lg:pb-3', isExamCellPortal && 'pb-4')}>
           <div className={cn('mx-auto w-full min-w-0 px-3 py-3 sm:px-5 sm:py-5 lg:px-6', contentMaxWidthClass)}>
+            <PrincipalWorkspaceReturn />
             {children}
           </div>
         </main>

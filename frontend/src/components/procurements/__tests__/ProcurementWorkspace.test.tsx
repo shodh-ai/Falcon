@@ -55,6 +55,6 @@ describe("Module 2 persona workspace", () => {
     );
     expect(get).not.toHaveBeenCalledWith("/api/procurements/v1/dashboard");
     expect(screen.getByLabelText("Procurement requirement")).toBeInTheDocument();
-    expect(screen.getByText("Open this procurement case")).toBeInTheDocument();
+    expect(await screen.findByText("Open this procurement case")).toBeInTheDocument();
   });
 });

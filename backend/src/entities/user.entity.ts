@@ -58,6 +58,13 @@ export class User extends BaseTenantEntity {
   @Column({ type: 'varchar', length: 255, nullable: true, select: false })
   password_hash: string | null;
 
+  /** Transient; persisted in department_office_session_revisions, not users. */
+  leadership_auth_revision: number;
+
+  /** Transient, server-resolved office claims. Never persisted as personal roles. */
+  leadership_roles?: { roles: string[]; primaryRole?: string };
+  office_context?: import('../modules/department-leadership/leadership.types').OfficeContext;
+
   @Column({ type: 'numeric', precision: 12, scale: 2, nullable: true })
   salary_base: string | null;
 

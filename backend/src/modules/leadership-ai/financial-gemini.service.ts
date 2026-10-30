@@ -1,3 +1,4 @@
+import { isVerifiedStaging } from '../../common/config/staging-environment';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectDataSource } from '@nestjs/typeorm';
@@ -38,6 +39,12 @@ export class FinancialGeminiService {
     tenantId: string,
     question: string,
   ): Promise<{ answer: string; sql?: string; rows?: unknown[] }> {
+    if (isVerifiedStaging())
+      return {
+        answer:
+          'STAGING MOCK — financial AI is simulated; no query or external call was generated.',
+        rows: [],
+      };
     const model = this.getModel();
     const prompt = `You are Falcon AI, a financial assistant for a university Chairman.
 ${FINANCE_SCHEMA}
@@ -102,6 +109,12 @@ Rules: SELECT only. No INSERT/UPDATE/DELETE. Always scope to tenant.`;
       [tenantId],
     );
 
+    if (isVerifiedStaging())
+      return {
+        narrative:
+          'STAGING MOCK — deterministic local analysis; no external model was called.',
+        deltas,
+      };
     const model = this.getModel();
     const result = await model.generateContent(
       `You are Falcon AI. Explain why expenses changed month-over-month for the Chairman.
@@ -134,6 +147,12 @@ Respond in plain text with "Main Reasons:" followed by bullet points with amount
       }),
     );
 
+    if (isVerifiedStaging())
+      return {
+        narrative:
+          'STAGING MOCK — local projection from dummy records; no external model was called.',
+        projections,
+      };
     const model = this.getModel();
     const result = await model.generateContent(
       `Admissions drop scenario: ${admissionsDropPct}% decline.

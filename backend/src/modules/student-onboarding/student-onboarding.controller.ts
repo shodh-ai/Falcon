@@ -292,7 +292,7 @@ export class StudentOnboardingController extends BaseOnboardingController {
 @Controller('api/staff/onboarding')
 @BelongsToModule('CORE')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('Faculty', 'HOD', 'Dean')
+@Roles('Faculty', 'HOD', 'Dean', 'Principal')
 export class StaffOnboardingController extends BaseOnboardingController {
   constructor(
     onboarding: StudentOnboardingService,

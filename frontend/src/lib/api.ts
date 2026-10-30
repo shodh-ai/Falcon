@@ -40,28 +40,9 @@ function tenantHeaders(): Record<string, string> {
   return { 'x-tenant-subdomain': getSubdomainFromClient() };
 }
 
-import {
-  parseApiError,
-  extractApiErrorMessage,
-} from '@/lib/notifications/parse-api-error';
-import {
-  isExamCellDevFallbackEnabled,
-  resolveExamCellDevFallback,
-  shouldUseExamCellFallback,
-} from '@/lib/exam-cell/dev-fallback';
+import { extractApiErrorMessage } from '@/lib/notifications/parse-api-error';
 
 type Method = 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
-
-function tryExamCellDevFallback<T>(
-  path: string,
-  method: Method,
-  body?: unknown,
-): T | undefined {
-  if (!isExamCellDevFallbackEnabled() || !path.startsWith('/api/exam-cell/'))
-    return undefined;
-  const data = resolveExamCellDevFallback(path, method, body);
-  return data as T;
-}
 
 async function request<T>(
   token: string | null,
@@ -90,8 +71,6 @@ async function request<T>(
         : undefined,
     });
   } catch (err) {
-    const fallback = tryExamCellDevFallback<T>(path, method, body);
-    if (fallback !== undefined) return fallback;
     throw wrapFetchError(err, path);
   }
 
@@ -101,10 +80,6 @@ async function request<T>(
   }
 
   if (!response.ok) {
-    if (shouldUseExamCellFallback(response.status)) {
-      const fallback = tryExamCellDevFallback<T>(path, method, body);
-      if (fallback !== undefined) return fallback;
-    }
     const text = await response.text().catch(() => '');
     throw new Error(extractApiErrorMessage(text, response.status, path));
   }

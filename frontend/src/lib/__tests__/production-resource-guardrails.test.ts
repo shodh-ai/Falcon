@@ -14,7 +14,7 @@ describe("production resource guardrails", () => {
     );
     expect(config).toContain("cpus: 2");
     expect(config).toContain("memoryBasedWorkersCount: false");
-    expect(packageJson).toContain("--max-old-space-size=2048");
+    expect(packageJson).toContain("--max-old-space-size=3072");
   });
 
   it("publishes tested images off-host before protected promotion", () => {

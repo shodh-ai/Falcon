@@ -53,5 +53,7 @@ describe('Attendance date navigation', () => {
     expect(attendanceWeekStart('2026-11-01')).toBe('2026-10-26');
     expect(attendanceDayStatus([{awaiting_confirmation:true}]).label).toBe('Awaiting confirmation');
     expect(attendanceDayStatus([{has_saved_attendance:true},{has_saved_attendance:false,awaiting_confirmation:true}]).tone).toBe('pending');
+    expect(attendanceDayStatus([{ cancelled: true, has_saved_attendance: false }]).label).toBe('Cancelled');
+    expect(attendanceDayStatus([{ has_saved_attendance: true }, { cancelled: true, has_saved_attendance: false }]).detail).toContain('1 cancelled');
   });
 });
