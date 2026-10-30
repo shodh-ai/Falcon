@@ -625,7 +625,7 @@ export class HrTeamService {
               u.name AS employee_name, u.official_email AS employee_email,
               p.employee_id
        FROM staff_leave_requests r
-       JOIN users u ON u.user_id = r.staff_user_id
+        JOIN users u ON u.user_id = r.staff_user_id AND u.tenant_id = r.tenant_id
        LEFT JOIN hr_employee_profiles p ON p.user_id = u.user_id AND p.tenant_id = r.tenant_id
        WHERE r.tenant_id = $1
          AND r.status = 'PENDING'
@@ -1025,10 +1025,11 @@ export class HrTeamService {
               u.name AS employee_name, p.employee_id,
               approver.name AS approver_name
        FROM staff_leave_requests r
-       JOIN users u ON u.user_id = r.staff_user_id
+       JOIN users u ON u.user_id = r.staff_user_id AND u.tenant_id = r.tenant_id
        LEFT JOIN hr_employee_profiles p ON p.user_id = u.user_id AND p.tenant_id = r.tenant_id
-       LEFT JOIN users approver ON approver.user_id = r.current_approver_user_id
-       WHERE r.tenant_id = $1 AND r.status = 'PENDING'${entityClause}
+       LEFT JOIN users approver
+         ON approver.user_id = r.current_approver_user_id AND approver.tenant_id = r.tenant_id
+        WHERE r.tenant_id = $1 AND r.status IN ('PENDING', 'HOD_APPROVED')${entityClause}
        ORDER BY r.applied_at ASC`,
       params,
     );

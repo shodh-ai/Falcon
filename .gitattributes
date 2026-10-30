@@ -1,0 +1,4 @@
+# Keep these existing LF-normalized HR workflow files stable on Windows.
+backend/src/modules/hr/hr-workflow-routing.service.spec.ts text eol=lf
+backend/src/modules/hr/hr-workflow-routing.service.ts text eol=lf
+backend/src/modules/hr/hr-workforce.service.ts text eol=lf

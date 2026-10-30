@@ -19,12 +19,14 @@ import { useHrEntity } from '@/context/HrEntityContext';
 type LeaveRequest = {
   leave_id?: string;
   staff_leave_id?: string;
+  request_type?: string;
   leave_type: string;
   start_date: string;
   end_date: string;
   reason: string;
   status: string;
   staff?: { name?: string; email?: string };
+  employee?: { name?: string; email?: string; department?: string | null };
 };
 
 type BalanceRow = {
@@ -54,6 +56,8 @@ export default function HrLeavesPage() {
   const { entityId, entityReady } = useHrEntity();
   const [tab, setTab] = useState<'approvals' | 'balances'>('approvals');
   const [pending, setPending] = useState<LeaveRequest[]>([]);
+  const [pendingError, setPendingError] = useState<string | null>(null);
+  const [pendingLoading, setPendingLoading] = useState(true);
   const [balances, setBalances] = useState<BalanceRow[]>([]);
   const [staff, setStaff] = useState<DirectoryRow[]>([]);
   const [onBehalfOpen, setOnBehalfOpen] = useState(false);
@@ -72,7 +76,17 @@ export default function HrLeavesPage() {
   useEffect(() => {
     if (!entityReady) return;
     if (tab === 'approvals') {
-      void api.get<LeaveRequest[]>('/api/hr/leaves/all?status=HOD_APPROVED').then(setPending);
+      void api
+        .get<LeaveRequest[]>('/api/hr/workforce/final-pending?types=LEAVE,ON_DUTY')
+        .then((rows) => {
+          setPending(rows);
+          setPendingError(null);
+        })
+        .catch((error: unknown) => {
+          setPending([]);
+          setPendingError(error instanceof Error ? error.message : 'Could not load final approvals.');
+        })
+        .finally(() => setPendingLoading(false));
     } else {
       void api.get<BalanceRow[]>(`/api/hr/leaves/balances-grid?year=${year}`).then(setBalances);
     }
@@ -120,9 +134,11 @@ export default function HrLeavesPage() {
 
   async function hrApprove(leaveId: string, status: 'HR_APPROVED' | 'REJECTED') {
     try {
-      await api.patch(`/api/hr/staff-leaves/${leaveId}/status`, { status });
+      await api.patch(`/api/hr/workforce/team/${leaveId}/action`, {
+        action: status === 'REJECTED' ? 'REJECT' : 'APPROVE',
+      });
       toast.success(status === 'HR_APPROVED' ? 'Leave approved' : 'Leave rejected');
-      setPending(await api.get<LeaveRequest[]>('/api/hr/leaves/all?status=HOD_APPROVED'));
+      setPending(await api.get<LeaveRequest[]>('/api/hr/workforce/final-pending?types=LEAVE,ON_DUTY'));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Action failed');
     }
@@ -142,7 +158,7 @@ export default function HrLeavesPage() {
     <>
       <HrPageHeader
         title="Leave Management & Balances"
-        description="Final HR sign-off on HoD-approved requests and organization-wide leave balance grid."
+        description="Final HR sign-off for leave and on-duty requests that completed their first approval stage."
         actions={
           <Button variant="outline" size="sm" onClick={() => setOnBehalfOpen(true)}>
             <UserPlus className="mr-2 h-4 w-4" />
@@ -157,12 +173,37 @@ export default function HrLeavesPage() {
           { id: 'balances', label: 'Leave balances' },
         ]}
         active={tab}
-        onChange={(id) => setTab(id as 'approvals' | 'balances')}
+        onChange={(id) => {
+          const nextTab = id as 'approvals' | 'balances';
+          if (nextTab === 'approvals') setPendingLoading(true);
+          setTab(nextTab);
+        }}
       />
 
       {tab === 'approvals' ? (
         <div className="space-y-3 pt-2">
-          {pending.length === 0 ? (
+          {pendingLoading ? (
+            <p role="status" className="text-sm text-muted-foreground">Loading final approvals…</p>
+          ) : pendingError ? (
+            <div role="alert" className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+              {pendingError}
+              <Button
+                size="sm"
+                variant="outline"
+                className="ml-3"
+                onClick={() => {
+                  setPendingLoading(true);
+                  void api
+                    .get<LeaveRequest[]>('/api/hr/workforce/final-pending?types=LEAVE,ON_DUTY')
+                    .then((rows) => { setPending(rows); setPendingError(null); })
+                    .catch((error: unknown) => setPendingError(error instanceof Error ? error.message : 'Could not load final approvals.'))
+                    .finally(() => setPendingLoading(false));
+                }}
+              >
+                Retry
+              </Button>
+            </div>
+          ) : pending.length === 0 ? (
             <HrEmptyState
               icon={Inbox}
               title="No pending leaves"
@@ -179,8 +220,8 @@ export default function HrLeavesPage() {
                   <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
                     <div className="flex min-w-0 flex-1 items-start gap-4">
                       <HrPersonCell
-                        name={l.staff?.name ?? 'Staff member'}
-                        subtitle={l.staff?.email ?? `${l.leave_type} · ${l.start_date} → ${l.end_date}`}
+                        name={l.employee?.name ?? l.staff?.name ?? 'Staff member'}
+                        subtitle={`${l.request_type?.replace(/_/g, ' ') ?? l.leave_type} · ${l.start_date}${l.end_date !== l.start_date ? ` → ${l.end_date}` : ''}`}
                       />
                       <div className="hidden sm:block">
                         <HrStatusBadge status={l.status} />

@@ -528,8 +528,10 @@ export class HrAccessControlService {
     requesterUserId: string,
     module: HrDelegationModule,
     specificUserId?: string | null,
+    excludedUserId?: string | null,
   ): Promise<string | null> {
     if (specificUserId) {
+      if (specificUserId === excludedUserId) return null;
       const row = await this.getUserModuleAccess(
         tenantId,
         specificUserId,
@@ -553,6 +555,7 @@ export class HrAccessControlService {
        INNER JOIN hr_access_controls hac
          ON hac.user_id = u.user_id AND hac.tenant_id = u.tenant_id
        WHERE u.tenant_id = $1 AND u.is_active = true
+          AND ($4::uuid IS NULL OR u.user_id <> $4::uuid)
          AND hac.module_name = $2 AND hac.can_approve = true
          AND (
            hac.department_scope IS NULL
@@ -561,20 +564,24 @@ export class HrAccessControlService {
          )
        ORDER BY u.name
        LIMIT 1`,
-      [tenantId, module, deptId],
+      [tenantId, module, deptId, excludedUserId ?? null],
     );
     return rows[0]?.user_id ?? null;
   }
 
-  async resolveHrAdminApprover(tenantId: string): Promise<string | null> {
+  async resolveHrAdminApprover(
+    tenantId: string,
+    excludedUserId?: string | null,
+  ): Promise<string | null> {
     const rows = await this.dataSource.query<Array<{ user_id: string }>>(
       `SELECT u.user_id FROM users u
        JOIN roles r ON r.role_id = u.role_id
        WHERE u.tenant_id = $1 AND u.is_active = true
+         AND ($2::uuid IS NULL OR u.user_id <> $2::uuid)
          AND r.role_name IN ('HRAdmin', 'SuperAdmin')
        ORDER BY CASE WHEN r.role_name = 'HRAdmin' THEN 0 ELSE 1 END, u.name
        LIMIT 1`,
-      [tenantId],
+      [tenantId, excludedUserId ?? null],
     );
     return rows[0]?.user_id ?? null;
   }
@@ -585,7 +592,37 @@ export class HrAccessControlService {
     roles: string[],
     approverType: string | null | undefined,
     requestType: string,
+    approverRef?: string | null,
   ): Promise<void> {
+    if (approverType === 'ROLE') {
+      if (!approverRef) {
+        throw new ForbiddenException('The configured approver role is missing');
+      }
+      const matchingRoles = await this.dataSource.query<
+        Array<{ role_name: string }>
+      >(
+        `SELECT role_name FROM (
+           SELECT primary_role.role_name
+           FROM users u
+           JOIN roles primary_role ON primary_role.role_id = u.role_id
+           WHERE u.tenant_id = $1 AND u.user_id = $2 AND u.is_active = true
+           UNION
+           SELECT secondary_role.role_name
+           FROM users u
+           JOIN user_roles ur ON ur.user_id = u.user_id
+           JOIN roles secondary_role ON secondary_role.role_id = ur.role_id
+           WHERE u.tenant_id = $1 AND u.user_id = $2 AND u.is_active = true
+         ) actor_roles
+         WHERE role_name = $3`,
+        [tenantId, actorUserId, approverRef],
+      );
+      if (!matchingRoles.length) {
+        throw new ForbiddenException(
+          'The assigned approver role is no longer active',
+        );
+      }
+      return;
+    }
     if (this.isMasterRole(roles)) return;
     if (
       !approverType ||

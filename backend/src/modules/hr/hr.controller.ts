@@ -1076,10 +1076,33 @@ export class HrController {
     @Req() req: { user: AuthUser },
     @Query('status') status?: StaffLeaveStatus,
     @Query('entity_id') entityId?: string,
+    @Query('request_type') requestType?: string,
   ) {
     const tenantId = this.resolveTenantId(req.user);
     const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
-    return this.hr.listAllStaffLeaves(tenantId, entity, status);
+    const requestTypes = requestType
+      ? requestType.split(',').map((value) => value.trim().toUpperCase())
+      : undefined;
+    const allowedTypes = new Set<StaffRequestType>([
+      'LEAVE',
+      'ON_DUTY',
+      'REGULARIZATION',
+      'COMP_OFF_CREDIT',
+    ]);
+    if (
+      requestTypes?.some(
+        (value) => !allowedTypes.has(value as StaffRequestType),
+      )
+    ) {
+      throw new BadRequestException('Unsupported workforce request type');
+    }
+    return this.hr.listAllStaffLeaves(
+      tenantId,
+      entity,
+      status,
+      requestTypes as StaffRequestType[] | undefined,
+      status === 'HOD_APPROVED' ? req.user.user_id : undefined,
+    );
   }
 
   @Get('holidays')
@@ -1104,11 +1127,16 @@ export class HrController {
     @Req() req: { user: AuthUser },
     @Body('status') status: 'HOD_APPROVED' | 'HR_APPROVED' | 'REJECTED',
   ) {
-    return this.hr.actOnStaffLeave(
-      leaveId,
+    if (!['HOD_APPROVED', 'HR_APPROVED', 'REJECTED'].includes(status)) {
+      throw new BadRequestException('Unsupported leave approval action');
+    }
+    return this.workforce.actOnTeamRequest(
+      req.user.user_id,
       this.resolveTenantId(req.user),
-      status,
-      req.user,
+      leaveId,
+      status === 'REJECTED' ? 'REJECT' : 'APPROVE',
+      undefined,
+      { roles: this.resolveRoles(req.user) },
     );
   }
 
@@ -1118,10 +1146,13 @@ export class HrController {
     @Param('leaveId') leaveId: string,
     @Req() req: { user: AuthUser },
   ) {
-    return this.hr.hodApproveStaffLeave(
-      leaveId,
+    return this.workforce.actOnTeamRequest(
+      req.user.user_id,
       this.resolveTenantId(req.user),
-      req.user,
+      leaveId,
+      'APPROVE',
+      undefined,
+      { roles: this.resolveRoles(req.user) },
     );
   }
 
@@ -1132,11 +1163,16 @@ export class HrController {
     @Req() req: { user: AuthUser },
     @Body('remarks') remarks: string,
   ) {
-    return this.hr.hodRejectStaffLeave(
-      leaveId,
+    if (!remarks?.trim()) {
+      throw new BadRequestException('Rejection remarks are required');
+    }
+    return this.workforce.actOnTeamRequest(
+      req.user.user_id,
       this.resolveTenantId(req.user),
-      req.user,
+      leaveId,
+      'REJECT',
       remarks,
+      { roles: this.resolveRoles(req.user) },
     );
   }
 
@@ -1731,12 +1767,16 @@ export class HrController {
     @Req() req: { user: AuthUser },
     @Body() body: { action: 'APPROVE' | 'REJECT'; comment?: string },
   ) {
-    return this.team.adminOverrideRequest(
+    if (body.action !== 'APPROVE' && body.action !== 'REJECT') {
+      throw new BadRequestException('Action must be APPROVE or REJECT');
+    }
+    return this.workforce.actOnTeamRequest(
       req.user.user_id,
       this.resolveTenantId(req.user),
       leaveId,
       body.action,
       body.comment,
+      { adminOverride: true, roles: this.resolveRoles(req.user) },
     );
   }
 
@@ -2173,6 +2213,33 @@ export class HrController {
       req.user.user_id,
       this.resolveTenantId(req.user),
       type,
+      this.resolveRoles(req.user),
+    );
+  }
+
+  @Get('workforce/final-pending')
+  @SkipEntityScope()
+  @Roles(...WORKFORCE_SELF_SERVICE_ROLES)
+  workforceFinalPending(
+    @Req() req: { user: AuthUser },
+    @Query('types') types: string,
+  ) {
+    const requestTypes = types
+      ?.split(',')
+      .map((value) => value.trim().toUpperCase())
+      .filter((value): value is StaffRequestType =>
+        ['LEAVE', 'ON_DUTY', 'REGULARIZATION'].includes(value),
+      );
+    if (
+      !requestTypes?.length ||
+      requestTypes.length !== types.split(',').length
+    ) {
+      throw new BadRequestException('Provide valid final-stage request types');
+    }
+    return this.workforce.listFinalStageRequests(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      requestTypes,
       this.resolveRoles(req.user),
     );
   }

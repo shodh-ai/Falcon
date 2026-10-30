@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Check, Inbox, X } from 'lucide-react';
 import { FalconLoader } from '@/components/brand/FalconLoader';
@@ -38,6 +38,8 @@ type AdminPendingItem = {
   reason: string | null;
   employee_name: string;
   approver_name: string | null;
+  status: string;
+  current_step_order: number | null;
 };
 
 type AdminPendingResponse = {
@@ -55,31 +57,48 @@ export default function HrInboxPage() {
   const [adminPending, setAdminPending] = useState<AdminPendingResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState<string | null>(null);
+  const [inboxError, setInboxError] = useState<string | null>(null);
+  const [adminError, setAdminError] = useState<string | null>(null);
 
-  const load = () => {
-    setLoading(true);
+  const load = useCallback(() => {
     const tasks: Promise<void>[] = [
       api
         .get<InboxResponse>('/api/hr/inbox/pending')
-        .then(setInbox)
-        .catch(() => setInbox({ count: 0, items: [] }))
+        .then((response) => {
+          setInbox(response);
+          setInboxError(null);
+        })
+        .catch((error: unknown) => {
+          setInbox(null);
+          setInboxError(error instanceof Error ? error.message : 'Could not load your approval queue.');
+        })
         .then(() => undefined),
     ];
     if (isHrAdmin) {
       tasks.push(
         api
           .get<AdminPendingResponse>('/api/hr/admin/pending-requests')
-          .then(setAdminPending)
-          .catch(() => setAdminPending({ count: 0, items: [] }))
+          .then((response) => {
+            setAdminPending(response);
+            setAdminError(null);
+          })
+          .catch((error: unknown) => {
+            setAdminPending(null);
+            setAdminError(error instanceof Error ? error.message : 'Could not load the supervisory queue.');
+          })
           .then(() => undefined),
       );
+    } else {
+      setAdminPending(null);
+      setAdminError(null);
     }
     void Promise.all(tasks).finally(() => setLoading(false));
-  };
+  }, [api, isHrAdmin]);
 
   useEffect(() => {
-    load();
-  }, [api]);
+    const timer = window.setTimeout(load, 0);
+    return () => window.clearTimeout(timer);
+  }, [load]);
 
   async function act(leaveId: string, action: 'APPROVE' | 'REJECT', override = false) {
     setActing(leaveId);
@@ -161,17 +180,37 @@ export default function HrInboxPage() {
         ))}
       </div>
 
-      {!inbox?.items.length && (
+      {inboxError && (
+        <div role="alert" className="mt-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+          {inboxError}
+          <Button size="sm" variant="outline" className="ml-3" onClick={load}>Retry</Button>
+        </div>
+      )}
+      {!inboxError && inbox && !inbox.items.length && (
         <p className="text-sm text-muted-foreground">You&apos;re all caught up — no pending approvals.</p>
       )}
 
-      {isHrAdmin && (adminPending?.count ?? 0) > 0 && (
+      {isHrAdmin && (
         <section className="mt-10 space-y-3">
           <HrPageHeader
             title="HR Admin Override"
-            description="Bypass stalled approvers so payroll and attendance are not blocked."
+            description="Supervisory view of active approval stages for this tenant. Bypass actions are recorded in the HR override audit log."
+            actions={<Button size="sm" variant="outline" onClick={load}>Refresh</Button>}
           />
-          <Badge variant="destructive">{adminPending?.count} system-wide pending</Badge>
+          {adminError && (
+            <div role="alert" className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+              {adminError}
+              <Button size="sm" variant="outline" className="ml-3" onClick={load}>Retry</Button>
+            </div>
+          )}
+          {!adminError && adminPending && (
+            <Badge variant={adminPending.count ? 'destructive' : 'secondary'}>
+              {adminPending.count} active request{adminPending.count === 1 ? '' : 's'}
+            </Badge>
+          )}
+          {!adminError && adminPending?.items.length === 0 && (
+            <p className="text-sm text-muted-foreground">No active requests need supervisory action.</p>
+          )}
           {(adminPending?.items ?? []).map((item) => (
             <Card key={`admin-${item.leave_id}`} className="border-amber-200">
               <CardContent className="flex flex-wrap items-start justify-between gap-4 p-4">
@@ -184,7 +223,7 @@ export default function HrInboxPage() {
                     {item.end_date !== item.start_date ? ` – ${item.end_date}` : ''}
                   </p>
                   <p className="text-xs text-amber-800">
-                    Assigned approver: {item.approver_name ?? 'Unassigned'}
+                    Stage {item.current_step_order ?? 'unassigned'} · {item.status.replace(/_/g, ' ')} · Assigned approver: {item.approver_name ?? 'Unassigned'}
                   </p>
                   {item.reason && <p className="mt-2 text-sm">{item.reason}</p>}
                 </div>

@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import type { DataSource } from 'typeorm';
 import { HrWorkflowBuilderService } from './hr-workflow-builder.service';
 import type { HrAccessControlService } from './hr-access-control.service';
@@ -38,6 +39,7 @@ describe('HrWorkflowBuilderService', () => {
       step_order: 1,
       approver_user_id: hodId,
       approver_type: 'REPORTING_MANAGER',
+      approver_ref: null,
     });
   });
 
@@ -59,7 +61,26 @@ describe('HrWorkflowBuilderService', () => {
       step_order: 2,
       approver_user_id: hrId,
       approver_type: 'ROLE',
+      approver_ref: 'HR',
     });
+  });
+
+  it('fails closed instead of skipping an unavailable required approval stage', async () => {
+    const query = jest
+      .fn()
+      .mockResolvedValueOnce([{ workflow_id: 'workflow-1' }])
+      .mockResolvedValueOnce([
+        { step_order: 2, approver_type: 'HR_EXECUTIVE', approver_ref: null },
+      ])
+      .mockResolvedValueOnce([]);
+    const service = createService(query);
+
+    await expect(
+      service.resolveNextApprover(tenantId, 1, 'LEAVE', requesterId, 1, {
+        workflowId: 'workflow-1',
+        strict: true,
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('resolves an HR fallback when the requester has no manager or HOD', async () => {
