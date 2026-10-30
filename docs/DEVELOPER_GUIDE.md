@@ -2,20 +2,34 @@
 
 Practical setup and day-to-day development for the SGVU Campus OS monorepo.
 
+The team branch model is `feature/*` or `fix/*` → reviewed PR into `staging`
+→ shared testing → reviewed release PR into `main`. The shared environment and
+its automation are not yet operational. See [STAGING_READINESS.md](./STAGING_READINESS.md)
+for the current prerequisites and the pending work in
+[PR #188](https://github.com/shodh-ai/Falcon/pull/188).
+
 ---
 
 ## Prerequisites
 
 | Tool | Version | Notes |
 |------|---------|-------|
-| Node.js | 20.x | Matches CI (`.github/workflows/falcon-tests.yml`) |
-| PostgreSQL | 16.x | Default DB `university_governance` |
+| Node.js | 20.x, at least 20.19 | Most CI jobs and Dockerfiles use 20; notification security CI uses 22.23.3 |
+| PostgreSQL | 16.x for the general local/CI fixture; 18 for the protected shared-runtime policy | Use a disposable local database. The isolated runtime-role CI fixture and reviewed shared staging policy require PostgreSQL 18. |
 | Redis | 6+ | Required for BullMQ background jobs |
 | MinIO (optional) | — | S3-compatible uploads; disk fallback available |
 
 ---
 
 ## Quick start (local)
+
+Use disposable local PostgreSQL, Redis and uploads with synthetic data only.
+Before starting the backend, obtain a separately reviewed local schema and
+synthetic fixture setup for that exact database. This guide does not supply a
+bootstrap command: historical migrations include data changes and resets, and
+replaying the directory is not a verified fresh schema baseline. These commands
+are not a shared-staging or production setup procedure. Keep actual credentials
+out of Git; example configuration does not establish a safe target.
 
 ```bash
 # Clone and enter repo
@@ -25,7 +39,7 @@ cd Falcon
 cd backend
 cp .env.example .env
 npm install
-npm run db:migrate
+# Configure local-only values and finish the separately reviewed disposable schema setup first.
 npm run start:dev          # builds TS → runs on :4000
 
 # Frontend (new terminal)
@@ -38,14 +52,21 @@ Open `http://localhost:3000`. API at `http://localhost:4000`.
 
 ### Dev login
 
-When Google OAuth is not configured, use:
+For an isolated local backend with `NODE_ENV=development`, the development route
+can log in an existing, active synthetic account in the selected local tenant.
+It does not create that account. For example, after a reviewed local fixture setup
+creates the fictional `developer@example.test` account:
 
 ```bash
 # GET (browser or curl)
-http://localhost:4000/auth/dev-login/hod@mygyanvihar.com
+http://localhost:4000/auth/dev-login/developer@example.test
 ```
 
-Or `POST /auth/local-login` with email/password for seeded users.
+The route bypasses password authentication and can update role mappings; keep the
+local backend inaccessible to other users. Shared staging and production must use
+`NODE_ENV=production`, where this route is disabled. Never lower that setting to
+enable development login. Use `POST /auth/local-login` with separately provisioned
+synthetic credentials for approved local/shared-staging password-login tests.
 
 ---
 
@@ -58,7 +79,7 @@ Copy from `backend/.env.example`. Critical variables:
 | Variable | Purpose | Example |
 |----------|---------|---------|
 | `DB_HOST`, `DB_PORT`, `DB_USERNAME`, `DB_PASSWORD`, `DB_DATABASE` | PostgreSQL | `localhost:5434` |
-| `JWT_SECRET` | Token signing | Change in production |
+| `JWT_SECRET` | Token signing | Generate separate private values for local development, shared staging and production |
 | `JWT_EXPIRATION` | Token TTL | `7d` |
 | `DEFAULT_TENANT_SUBDOMAIN` | Default tenant | `sgvu` |
 | `SAAS_BASE_DOMAIN` | Multi-tenant host | `localhost` |
@@ -69,7 +90,7 @@ Copy from `backend/.env.example`. Critical variables:
 | `S3_*` | File uploads | MinIO defaults |
 | `EMAIL_*` | External email configuration | Does not enable Examination Cell delivery |
 | `GEMINI_API_KEY` | AI document validation | Optional locally |
-| `DB_SYNCHRONIZE` | **Never `true` in prod** | Use migrations instead |
+| `DB_SYNCHRONIZE` | Must be `false` in shared staging and production | Review schema changes separately; do not enable synchronization to bypass missing schema |
 | `DB_POOL_MAX`, `DB_POOL_MIN` | Connection pool | See PERFORMANCE.md |
 
 ### Examination Cell first-release delivery limits (22 October 2026)
@@ -112,14 +133,51 @@ Implementation: `frontend/src/lib/api-base-url.ts`, `frontend/src/middleware.ts`
 | Branch | Purpose |
 |--------|---------|
 | `main` | Production-ready releases |
-| `develop` | Integration branch for features |
-| Feature branches | `feature/<ticket>-short-description` from `develop` |
+| `staging` | Shared integration branch for reviewed features and fixes |
+| `feature/<ticket>-short-description` | New work, branched from `origin/staging` |
+| `fix/<ticket>-short-description` | Bug fixes, branched from `origin/staging` |
 
-**Rules:**
+Existing `develop` and `testing` branches are retained; new team work follows
+`staging`. Check [staging readiness](./STAGING_READINESS.md) before starting work
+against an older staging baseline. Synchronizing `main` into `staging` requires
+a reviewed PR; do not reset either branch or discard newer checks.
 
-- All merges to `main` / `develop` must pass `cd tests && npm run test:ci`
-- Database migrations are forward-only — never edit applied migration files
-- RBAC-sensitive changes require unit or integration test updates in `tests/`
+From a clean checkout, create a separate branch:
+
+```bash
+git fetch origin
+git switch --create feature/my-feature origin/staging
+# Make changes, run appropriate checks, and review git diff.
+git add path/to/changed-file
+git commit -m "Describe the change"
+git push --set-upstream origin feature/my-feature
+```
+
+Replace the example path and branch name. For bugs, use `fix/my-bug` instead.
+Open a GitHub Pull Request with **base: staging** and your feature/fix branch as
+the compare branch. Attach actual test results and request a teammate's review.
+Developers do not push unreviewed changes directly into `staging` or `main`.
+
+The CI extension for `staging` is still pending in PR #188. Until it is reviewed
+and merged, this branch's workflow triggers only for `main`, `develop` and
+`testing`; missing checks are not passing checks. Do not bypass protection to
+merge a feature while the required staging checks are unavailable. No shared
+staging website or PR preview is verified; record local evidence and state that
+no deployed test was performed.
+
+After staging CI and hosting are approved and configured, reviewed merges into
+`staging` must pass CI on the resulting commit. The team then tests that exact
+revision in the isolated shared environment and records the results. Release
+through a reviewed `staging` → `main` PR, identifying the tested revision and
+database compatibility. Obtain separate production release authorization and
+confirm hosting triggers before a `main` merge; that merge can publish production
+images through the existing workflow. A green PR alone does not authorize deployment.
+
+- Run the relevant checks, including `cd tests && npm run test:ci` only with its disposable test services. Report anything not run.
+- Database migrations are forward-only; never edit applied migration files. Review deployment order and recovery separately.
+- RBAC-sensitive changes require unit or integration test updates in `tests/`.
+- Fix staging bugs through `fix/*` and the same PR process. An approved urgent production fix must return to staging through a reviewed synchronization PR.
+- Roll back only to a verified image/configuration pair after checking schema compatibility. A Git revert does not reverse database changes.
 
 ---
 
@@ -156,7 +214,13 @@ flowchart LR
 
 **Workflow:** `.github/workflows/falcon-tests.yml`
 
-**Pre-merge / pre-deploy:**
+At this staging baseline, push/PR triggers cover `main`, `develop` and `testing`.
+PR #188 proposes adding `staging` while retaining existing checks. Its staging
+image publisher is an inactive template, not an enabled deployment workflow.
+See [STAGING_READINESS.md](./STAGING_READINESS.md) before interpreting CI success
+as readiness for shared staging or production.
+
+**Local verification with disposable test services:**
 
 ```bash
 cd tests && npm run test:ci
@@ -172,20 +236,28 @@ See [TESTING_GUIDE.md](./TESTING_GUIDE.md) for coverage thresholds and test layo
 
 All schema changes are **SQL files** in `backend/migrations/`.
 
+The command below is for an explicitly selected disposable local database after
+reviewing all pending SQL. It can change or delete data. Shared staging requires
+a separately reviewed baseline and migration sequence; production uses its
+authorized deployment procedure. Never substitute production credentials for an
+incomplete local setup.
+
 ```bash
 cd backend
 
 # Apply pending migrations
 npm run db:migrate
-
-# Repair migration tracking (if needed)
-npm run db:migrate:repair
-
-# Optional seed pass
-npm run db:seed
 ```
 
-### Critical pilot migrations
+Do not use migration repair, force/replay or seed commands as a generic recovery
+step. Inspect the actual schema and ledger, preserve failure evidence, and obtain
+review of the target and recovery plan first. Seed/import scripts can contain
+institution data; they are not an approved synthetic staging fixture set.
+
+### Historical pilot migration references
+
+These filenames document earlier pilot work. Their presence here does not
+approve execution on a new local, shared staging or production database.
 
 | Migration | Purpose |
 |-----------|---------|
@@ -193,31 +265,20 @@ npm run db:seed
 | `20260713140000_me_timetable_workload_seed.sql` | Mechanical Engineering seed |
 | `20260710120000_dean_school_scope_mapping.sql` | Dean ↔ school mapping |
 
-### Department-specific seeds
+### Historical department and demo tools — not approved setup
 
-Pre-built scripts for pilot departments:
+These tools were written for particular pilot datasets. Inspect their inputs,
+target and effects separately before any authorized use; they are not the
+synthetic fixture procedure for a new developer or shared staging environment.
 
-```bash
-# Verify ME seed applied
-node scripts/verify-me-seed.js
-
-# Generate new dept migration from timetable PDFs (Python)
-python3 scripts/build-me-seed-data.py
-python3 scripts/generate-me-migration.py
-```
+| Historical tool in `backend/scripts/` | Scope and limitation |
+| --- | --- |
+| `verify-me-seed.js` | Opens a database connection using `DB_*` or its defaults and reads institution records. Do not run it as generic setup verification. |
+| `build-me-seed-data.py`, `generate-me-migration.py` | Prepare department data/SQL from pilot inputs; neither the inputs nor generated SQL are approved synthetic staging fixtures. |
+| `generate-enterprise-demo-seed.js` | Writes demo SQL without a database connection. Generated SQL still needs target, schema, data and credential review before any execution. |
 
 Similar pipelines exist for Civil, EE, Pharmacy, Physio (`build-*-seed-data.py`).
-
-### Enterprise demo seed generator
-
-Generate scalable demo SQL without touching CI databases:
-
-```bash
-cd backend
-node scripts/generate-enterprise-demo-seed.js \
-  --schools=2 --departments=6 --faculty=30 --students=500 \
-  --output=scripts/output/demo-seed.sql
-```
+No command in this historical inventory is authorized by the staging setup.
 
 ---
 
@@ -226,11 +287,16 @@ node scripts/generate-enterprise-demo-seed.js \
 | Location | Command | Output |
 |----------|---------|--------|
 | `backend/` | `npm run build` | `dist/` (tsc) |
-| `backend/` | `npm run start:prod` | Production server |
-| `frontend/` | `npm run build` | `.next/` static export |
-| `frontend/` | `npm run start` | Production Next server |
+| `backend/` | `npm run start:prod` | Direct `node dist/main.js`; skips the protected launcher and is unsuitable for shared staging or production |
+| `frontend/` | `npm run build` | `.next-local/` build output, including a standalone server; not a static export |
+| `frontend/` | `npm run start` | Existing local `next start` script for the built frontend |
 
 Backend uses `tsc -p tsconfig.build.json` (not `nest build`).
+The backend Docker image starts with `node scripts/runtime-start.cjs`, which
+verifies the provisioned storage/database boundary before loading the app.
+Preserve that command for shared staging and production; it does not migrate or
+bootstrap the database. The frontend Docker image copies `.next-local/standalone`
+and the matching static assets, then runs `node server.js`.
 
 ---
 
@@ -296,7 +362,7 @@ Run from `tests/` — see [TESTING_GUIDE.md](./TESTING_GUIDE.md).
 ### Add a migration
 
 1. Create `backend/migrations/YYYYMMDDHHMMSS_description.sql`.
-2. Run `npm run db:migrate` locally.
+2. Review all pending SQL and test it on a disposable local database, including failure and recovery behavior.
 3. Document in CHANGELOG and MECHANICAL_PILOT_LAUNCH_CHECKLIST if pilot-critical.
 
 ---
@@ -308,9 +374,9 @@ Run from `tests/` — see [TESTING_GUIDE.md](./TESTING_GUIDE.md).
 | Symptom | Fix |
 |---------|-----|
 | `ECONNREFUSED` PostgreSQL | Check `DB_HOST`/`DB_PORT`; default example uses `5434` |
-| Migration fails | Run `npm run db:migrate:repair`; inspect SQL error |
+| Migration fails | Stop; compare the schema and ledger with the intended SQL and review recovery. Do not blindly repair tracking or replay migrations. |
 | Redis connection errors | Start Redis or disable Bull-dependent features locally |
-| `JWT malformed` | Clear browser token; re-login via dev-login |
+| `JWT malformed` | Clear the stale browser token and use the environment's normal login. Development login is only for the isolated local setup described above. |
 
 ### Frontend 403 on portal routes
 
@@ -321,7 +387,7 @@ Run from `tests/` — see [TESTING_GUIDE.md](./TESTING_GUIDE.md).
 ### Dean/HOD sees wrong department data
 
 - Verify `schools.dean_user_id` and `departments.hod_user_id` in DB.
-- Run dean scope migration: `20260710120000_dean_school_scope_mapping.sql`.
+- Compare the actual schema and migration ledger with the intended dean scope change (`20260710120000_dean_school_scope_mapping.sql`). Review the pending sequence before any write; do not blindly replay it.
 - Test: `cd tests && npm run test:unit -- dean-scope`.
 
 ### Exam Cell 403 on publish
@@ -355,8 +421,8 @@ Run from `tests/` — see [TESTING_GUIDE.md](./TESTING_GUIDE.md).
 |--------|---------|
 | `backend/scripts/run-migrations.js` | Migration runner |
 | `backend/scripts/audit-db.js` | DB health audit |
-| `backend/scripts/verify-me-seed.js` | ME pilot data verification |
-| `backend/scripts/generate-enterprise-demo-seed.js` | Scalable demo SQL |
+| `backend/scripts/verify-me-seed.js` | Historical ME pilot DB reader; not generic setup verification |
+| `backend/scripts/generate-enterprise-demo-seed.js` | Historical demo SQL generator; generated fixtures are not approved for staging |
 
 ---
 
@@ -367,6 +433,7 @@ Run from `tests/` — see [TESTING_GUIDE.md](./TESTING_GUIDE.md).
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | System design |
 | [API_REFERENCE.md](./API_REFERENCE.md) | REST endpoints |
 | [TESTING_GUIDE.md](./TESTING_GUIDE.md) | Test suite (Phases A–B.1) |
+| [STAGING_READINESS.md](./STAGING_READINESS.md) | Staging prerequisites, pending PR #188, and current setup limits |
 | [SECURITY_GUIDE.md](./SECURITY_GUIDE.md) | RBAC & hardening |
 | [DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md) | Production deploy |
 | [PROJECT_ROADMAP.md](./PROJECT_ROADMAP.md) | Future work |
