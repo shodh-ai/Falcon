@@ -9,7 +9,8 @@ import { SWRProvider } from "@/components/providers/SWRProvider";
 import { ModuleRuntimeProvider } from "@/context/ModuleRuntimeContext";
 
 export const metadata: Metadata = {
-  title: "Falcon | SGVU Campus OS",
+  title: process.env.NEXT_PUBLIC_FALCON_ENVIRONMENT === 'staging'
+    ? "Falcon Staging | Dummy Data" : "Falcon | SGVU Campus OS",
   description:
     "Falcon — the premium Campus Operating System for Suresh Gyan Vihar University. Academics, HR, finance, hostel, and compliance in one workspace.",
   icons: {
@@ -39,6 +40,11 @@ export default function RootLayout({
       className={`${GeistSans.variable} ${GeistMono.variable} antialiased`}
     >
       <body className="min-h-svh">
+        {process.env.NEXT_PUBLIC_FALCON_ENVIRONMENT === 'staging' ? (
+          <div role="status" className="falcon-staging-banner">
+            STAGING — DUMMY DATA
+          </div>
+        ) : null}
         {runtimeApiUrl && !runtimeApiUrl.includes('localhost') ? (
           <script
             dangerouslySetInnerHTML={{

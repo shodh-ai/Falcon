@@ -91,6 +91,26 @@ function isProtectedPortalPath(pathname: string): boolean {
   );
 }
 
+function stagingHeaders(response: NextResponse): NextResponse {
+  if (process.env.NEXT_PUBLIC_FALCON_ENVIRONMENT === 'staging') {
+    response.headers.set('X-Falcon-Environment', 'staging');
+    response.headers.set('X-Falcon-Release', process.env.FALCON_RELEASE_ID ?? '');
+    response.headers.set('Cache-Control', 'no-store');
+    response.headers.set('X-Robots-Tag', 'noindex, nofollow, noarchive');
+    response.headers.set('Content-Security-Policy', [
+      "default-src 'self'",
+      "script-src 'self' 'unsafe-inline'",
+      "style-src 'self' 'unsafe-inline'",
+      "img-src 'self' data: blob: https://staging-apifalcon.jataka.io",
+      "font-src 'self' data:",
+      "connect-src 'self' https://staging-apifalcon.jataka.io wss://staging-apifalcon.jataka.io",
+      "frame-src 'self' blob: https://staging-apifalcon.jataka.io", "frame-ancestors 'none'", "form-action 'self'",
+      "base-uri 'self'", "object-src 'none'",
+    ].join('; '));
+  }
+  return response;
+}
+
 export function proxy(request: NextRequest) {
   const subdomain = extractSubdomain(request);
   const { pathname } = request.nextUrl;
@@ -101,7 +121,7 @@ export function proxy(request: NextRequest) {
       const loginUrl = request.nextUrl.clone();
       loginUrl.pathname = '/';
       loginUrl.searchParams.set('next', pathname);
-      return NextResponse.redirect(loginUrl);
+      return stagingHeaders(NextResponse.redirect(loginUrl));
     }
   }
 
@@ -113,7 +133,7 @@ export function proxy(request: NextRequest) {
   });
   response.headers.set('x-tenant-subdomain', subdomain);
 
-  return response;
+  return stagingHeaders(response);
 }
 
 export const config = {

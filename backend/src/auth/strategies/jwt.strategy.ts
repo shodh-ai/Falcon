@@ -8,6 +8,7 @@ import { normalizeOnboardingStatusForWizard } from '../../modules/student-onboar
 import type { AuthTokenPayload } from '../interfaces/auth-provider.interface';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { assertInvitedStaging } from '../../common/config/staging-invites';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
@@ -34,6 +35,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     if (!payload.tenantId) {
       throw new UnauthorizedException('Token missing tenant context');
     }
+    assertInvitedStaging(payload.sub, payload.tenantId);
 
     if (payload.authType === 'parent') {
       return {

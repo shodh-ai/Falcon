@@ -1,0 +1,140 @@
+name: Publish tested staging images
+
+on:
+  workflow_call:
+    inputs:
+      release_sha:
+        required: true
+        type: string
+      deploy:
+        required: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: falcon-staging-release-${{ inputs.release_sha }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        component: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_sha }}
+      - name: Verify the immutable source
+        env:
+          RELEASE_SHA: ${{ inputs.release_sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+          printf '%s' "$RELEASE_SHA" | grep -Eq '^[0-9a-f]{40}$'
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish isolated staging package
+        id: image
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.component }}
+          file: ${{ matrix.component }}/Dockerfile
+          platforms: linux/amd64
+          tags: ghcr.io/shodh-ai/falcon-staging-${{ matrix.component }}:sha-${{ inputs.release_sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/shodh-ai/Falcon
+            org.opencontainers.image.revision=${{ inputs.release_sha }}
+            io.falcon.environment=staging
+          cache-from: type=gha,scope=staging-${{ matrix.component }}
+          cache-to: type=gha,mode=max,scope=staging-${{ matrix.component }}
+          provenance: false
+          sbom: false
+          outputs: type=registry,push=true,oci-mediatypes=false
+          build-args: |
+            NEXT_PUBLIC_FALCON_ENVIRONMENT=staging
+            NEXT_PUBLIC_API_URL=https://staging-apifalcon.jataka.io
+            NEXT_PUBLIC_GOOGLE_CLIENT_ID=
+            NEXT_PUBLIC_SAAS_BASE_DOMAIN=jataka.io
+            NEXT_PUBLIC_DEFAULT_TENANT_SUBDOMAIN=staging
+            NEXT_PUBLIC_DEDICATED_APP_HOSTS=staging-falcon.jataka.io,staging-apifalcon.jataka.io
+      - name: Write digest receipt
+        env:
+          RELEASE_SHA: ${{ inputs.release_sha }}
+          COMPONENT: ${{ matrix.component }}
+          DIGEST: ${{ steps.image.outputs.digest }}
+        run: |
+          python3 - <<'PY'
+          import json,os,re
+          from pathlib import Path
+          digest=os.environ['DIGEST']
+          assert re.fullmatch(r'sha256:[0-9a-f]{64}',digest)
+          Path('receipt.json').write_text(json.dumps({
+              'sha':os.environ['RELEASE_SHA'],'component':os.environ['COMPONENT'],'digest':digest}))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: falcon-staging-image-${{ matrix.component }}
+          path: receipt.json
+          retention-days: 30
+
+  deploy:
+    name: Deploy staging only
+    needs: publish
+    if: inputs.deploy && github.ref == 'refs/heads/staging' && vars.STAGING_DEPLOYMENT_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    environment: staging
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    concurrency:
+      group: falcon-staging-deployment
+      cancel-in-progress: false
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: falcon-staging-image-*
+          path: receipts
+      - name: Request staging-only deployment
+        env:
+          STAGING_SSH_PRIVATE_KEY: ${{ secrets.STAGING_SSH_PRIVATE_KEY }}
+          STAGING_SSH_KNOWN_HOSTS: ${{ vars.STAGING_SSH_KNOWN_HOSTS }}
+          RELEASE_SHA: ${{ inputs.release_sha }}
+        run: |
+          umask 077
+          python3 - <<'PY'
+          import json,os,re,subprocess,urllib.request,urllib.parse
+          from pathlib import Path
+          root=Path(os.environ['RUNNER_TEMP'])/'falcon-staging';root.mkdir(mode=0o700)
+          key=root/'key';key.write_text(os.environ['STAGING_SSH_PRIVATE_KEY']);key.chmod(0o600)
+          hosts=root/'known_hosts';hosts.write_text(os.environ['STAGING_SSH_KNOWN_HOSTS'])
+          assert key.stat().st_size>64 and hosts.stat().st_size>32
+          receipts={}
+          for path in Path('receipts').glob('*/receipt.json'):
+              item=json.loads(path.read_text());assert item['sha']==os.environ['RELEASE_SHA']
+              assert item['component'] not in receipts
+              assert re.fullmatch(r'sha256:[0-9a-f]{64}',item['digest'])
+              receipts[item['component']]=item['digest']
+          assert set(receipts)=={'backend','frontend'}
+          audience=':'.join(['falcon-staging-deploy',os.environ['RELEASE_SHA'],receipts['backend'],receipts['frontend']])
+          request=urllib.request.Request(os.environ['ACTIONS_ID_TOKEN_REQUEST_URL']+'&'+urllib.parse.urlencode({'audience':audience}),
+              headers={'Authorization':'Bearer '+os.environ['ACTIONS_ID_TOKEN_REQUEST_TOKEN']})
+          with urllib.request.urlopen(request,timeout=15) as response:token=json.load(response)['value']
+          payload=json.dumps({'version':1,'sha':os.environ['RELEASE_SHA'],
+              'backend_digest':receipts['backend'],'frontend_digest':receipts['frontend'],'oidc_token':token})
+          command=['ssh','-o','BatchMode=yes','-o','StrictHostKeyChecking=yes',
+              '-o','UserKnownHostsFile='+str(hosts),'-o','ConnectTimeout=15','-p','22587',
+              '-i',str(key),'falcon-staging-deploy@163.227.92.175','deploy']
+          result=subprocess.run(command,input=payload,text=True,timeout=900)
+          raise SystemExit(result.returncode)
+          PY

@@ -5,6 +5,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { createHmac, timingSafeEqual } from 'crypto';
+import { isVerifiedStaging } from '../../common/config/staging-environment';
 
 export type GatewayOrderResult = {
   order_id: string;
@@ -38,6 +39,7 @@ export class GatewayPaymentService {
    * Never enable in internet-facing production.
    */
   mockPaymentsAllowed(): boolean {
+    if (isVerifiedStaging()) return process.env.ALLOW_MOCK_PAYMENTS === 'true';
     const production = ['NODE_ENV', 'DATABASE_ENV', 'DEPLOYMENT_ENV'].some(
       (key) =>
         ['production', 'prod'].includes(

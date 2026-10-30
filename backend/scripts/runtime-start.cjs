@@ -202,9 +202,13 @@ async function runRuntime({ env=process.env, verifyStorage,
   // Apply before boundary checks or application imports can create files.
   setUmask(0o027);
   if (env.NODE_ENV !== 'production') throw new Error('Hardened runtime requires NODE_ENV=production');
+  // Never accept an injected claim that the staging target was verified.
+  delete env.FALCON_STAGING_VERIFIED;
   const storage = (verifyStorage || require('./storage-boundary.cjs').assertStorageBoundary)({env});
+  const staging = require('./staging-boundary.cjs').assertStagingBoundary({env,storage});
   databasePolicy(env, storage.baseline.database);
   const database = await verifyDb({env, policy: storage.baseline.database});
+  if (staging) env.FALCON_STAGING_VERIFIED='1';
   log(JSON.stringify({storage_boundary_verified:true,
     database_boundary_verified:true, least_privilege_enforced:database.least_privilege_enforced}));
   (loadApplication || (() => require('../dist/main.js')))();

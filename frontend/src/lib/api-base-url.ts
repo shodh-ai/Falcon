@@ -20,6 +20,14 @@ function isLocalhostUrl(url: string): boolean {
 }
 
 function readEnvApiUrl(): string | undefined {
+  // SSR stays on the private staging network. Never inject this address into
+  // browser HTML: layout.tsx continues to inject the explicit public API_URL.
+  if (typeof window === 'undefined' && process.env.FALCON_ENVIRONMENT === 'staging') {
+    if (!/^http:\/\/falcon-staging-api(?:-[0-9a-f]{16})?:4000$/.test(process.env.INTERNAL_API_URL ?? '')) {
+      throw new Error('Private staging API target is required');
+    }
+    return process.env.INTERNAL_API_URL;
+  }
   const fromServer = process.env.API_URL?.trim();
   if (fromServer && !isLocalhostUrl(fromServer)) {
     return trimTrailingSlash(fromServer);

@@ -1,5 +1,19 @@
 @import "tailwindcss";
 
+.falcon-staging-banner {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 2147483647;
+  padding: 4px 12px;
+  background: #fbbf24;
+  color: #1c1917;
+  text-align: center;
+  font: 700 12px/20px system-ui, sans-serif;
+  pointer-events: none;
+}
+
 /* SGVU brand + shadcn/ui design tokens (Tailwind v4) */
 :root {
   --sgvu-navy: #08234a;

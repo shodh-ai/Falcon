@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import { assertInvitedStaging } from '../../common/config/staging-invites';
 import type { User } from '../../entities/user.entity';
 import type {
   AuthTokenPayload,
@@ -13,6 +14,7 @@ export class LocalAuthProvider implements IAuthProvider {
   constructor(private readonly jwtService: JwtService) {}
 
   signToken(user: User, tenantId: string, tenantSchema: string): string {
+    assertInvitedStaging(user.user_id, tenantId);
     const roleClaims = this.getRoleClaims(user);
     const payload: AuthTokenPayload = {
       sub: user.user_id,
