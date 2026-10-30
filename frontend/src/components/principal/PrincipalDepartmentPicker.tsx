@@ -9,21 +9,25 @@ export function usePrincipalDepartments() {
   const [departments, setDepartments] = useState<PrincipalDepartment[]>([]);
   const [selected, setSelected] = useState("");
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   useEffect(() => {
     void api.get<PrincipalDepartment[]>("/api/academics/principal/offices")
       .then((rows) => {
+        if (!Array.isArray(rows)) throw new Error("Principal department list is unavailable");
         setDepartments(rows);
+        setError("");
         const remembered = typeof window === "undefined" ? "" : sessionStorage.getItem("principal-department") ?? "";
         setSelected(rows.some((row) => String(row.dept_id) === remembered)
           ? remembered : String(rows[0]?.dept_id ?? ""));
       })
+      .catch((cause) => setError(cause instanceof Error ? cause.message : "Principal department list is unavailable"))
       .finally(() => setLoading(false));
   }, [api]);
   const choose = (value: string) => {
     setSelected(value);
     sessionStorage.setItem("principal-department", value);
   };
-  return { departments, selected, choose, loading };
+  return { departments, selected, choose, loading, error };
 }
 
 export function PrincipalDepartmentSummary({ departments, selected, choose }: {

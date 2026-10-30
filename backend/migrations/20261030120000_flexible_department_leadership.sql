@@ -79,12 +79,6 @@ CREATE TABLE IF NOT EXISTS hr_staff_request_appeal_events (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_hr_staff_request_appeal_event_key
   ON hr_staff_request_appeal_events(appeal_id,idempotency_key);
 
-DO $$
-BEGIN
-  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'falcon_runtime') THEN
-    GRANT SELECT, INSERT, UPDATE ON TABLE hr_department_request_routes,
-      department_leadership_changes, hr_staff_request_appeals,
-      hr_staff_request_appeal_events TO falcon_runtime;
-    GRANT SELECT, UPDATE ON TABLE department_leadership TO falcon_runtime;
-  END IF;
-END $$;
+-- Runtime grants are applied by the reviewed scoped grant operation after
+-- the schema-and-ledger transaction. The migration owner never broadens the
+-- API role implicitly, and the old application keeps running during rollout.

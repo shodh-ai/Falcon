@@ -44,7 +44,9 @@ beforeEach(() => {
   mocks.pathname = "/faculty/dashboard";
   mocks.user = { roles: ["Principal", "Faculty"] };
   mocks.get.mockImplementation(async (path: string) =>
-    path.endsWith(row.case_id)
+    path === "/api/academics/principal/offices"
+      ? [{ dept_id: 43, dept_name: "Synthetic department", school_name: "Synthetic school" }]
+      : path.endsWith(row.case_id)
       ? { sessions: [], history: [] }
       : path.endsWith("/cases")
         ? { cases: [row] }
@@ -91,7 +93,9 @@ describe("Principal workspace boundaries", () => {
     expect(screen.queryByText("Pending my decision")).not.toBeInTheDocument();
   });
   it("does not count HOD-owned follow-ups in Pending my decision", async () => {
-    mocks.get.mockResolvedValue({
+    mocks.get.mockImplementation(async (path: string) => path === "/api/academics/principal/offices"
+      ? [{ dept_id: 43, dept_name: "Synthetic department", school_name: "Synthetic school" }]
+      : {
       office: { dept_id: 43, login_alias: "principal@example.edu" },
       academic_year: "2026-2027",
       workload: [],
