@@ -68,17 +68,32 @@ class Host:
         if len(r.stdout)>2*1024*1024:raise RuntimeError('STAGING_COMMAND_OUTPUT_BOUND')
         return r.stdout
 
+    def authorize_run(self,identity):
+        number=int(identity['run_number'])
+        if number < self.state.get('last_run_number',0):raise RuntimeError('STAGING_SUPERSEDED_RUN')
+        self.run_number=number
+
     def require_ready(self):
         if not self.state.get('initialized'):raise RuntimeError('STAGING_BOOTSTRAP_REQUIRED')
-        if not self.initial and trusted_json(self.private/'acceptance.json').get('enabled') is not True:
-            raise RuntimeError('STAGING_ACCEPTANCE_REQUIRED')
+        if not self.initial:
+            report=load('acceptance').validate_acceptance(trusted_json(self.private/'acceptance.json'))
+            evidence=self.private/'acceptance-evidence.json'
+            trusted_json(evidence)
+            if hashlib.sha256(evidence.read_bytes()).hexdigest()!=report['evidence_sha256']:
+                raise RuntimeError('STAGING_ACCEPTANCE_EVIDENCE_HASH')
 
     def guard(self,*,candidate_mib=0):
         memory=int(next(line.split()[1] for line in Path('/proc/meminfo').read_text().splitlines() if line.startswith('MemAvailable:')))*1024
         disk=os.statvfs(ROOT)
+        if time.monotonic()-getattr(self,'usage_checked_at',-120)>60:
+            usage=self.run(['du','-s','-B1','--',str(ROOT)],timeout=15).decode().split()[0]
+            if not usage.isdigit():raise RuntimeError('STAGING_WORKING_SET_MEASUREMENT')
+            # Include retained generations; low space never authorizes cleanup.
+            self.working_bytes=max(int(usage),self.state.get('working_bytes',0))
+            self.usage_checked_at=time.monotonic()
         self.stack.capacity(memory,disk.f_bavail*disk.f_frsize,
                             initial=self.initial and not self.state.get('current') and not self.initial_gate_passed,candidate_mib=candidate_mib,
-                            working_bytes=self.state.get('working_bytes',0))
+                            working_bytes=self.working_bytes)
         self.initial_gate_passed=True
 
     def inspect(self,identifier):
@@ -249,6 +264,7 @@ class Host:
         if self.state.get('current'):
             atomic_json(ROOT/'preservation'/('release-'+self.state['current']['release_id']+'.json'),self.state['current'])
         self.state['current']=candidate
+        if hasattr(self,'run_number'):self.state['last_run_number']=self.run_number
         atomic_json(self.private/'state.json',self.state)
         atomic_json(self.private/'candidate.json',{'status':'committed','release_id':candidate['release_id']})
 

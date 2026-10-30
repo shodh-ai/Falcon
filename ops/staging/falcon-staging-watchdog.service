@@ -1,0 +1,17 @@
+[Unit]
+Description=FALCON staging-only resource and isolation safety check
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 -I -B /opt/falcon-staging/current/watchdog.py
+User=root
+UMask=0077
+Nice=15
+IOSchedulingClass=idle
+MemoryMax=128M
+MemorySwapMax=0
+CPUQuota=25%
+TimeoutStartSec=300
+NoNewPrivileges=yes
+PrivateTmp=yes

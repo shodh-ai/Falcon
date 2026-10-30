@@ -1,3 +1,4 @@
+import { publishStagingOutbox } from '../../common/config/staging-mocks';
 /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access -- TypeORM raw-query rows */
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -15,6 +16,7 @@ export class PhysicalIdentityOutboxPublisher {
   ) {}
   @Interval(30_000)
   async publish() {
+    if (await publishStagingOutbox(this.db, 'pix_outbox_events')) return;
     const endpoint = this.config.get<string>(
         'PHYSICAL_IDENTITY_EVENT_WEBHOOK_URL',
       ),

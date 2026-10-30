@@ -1,3 +1,5 @@
+import { isVerifiedStaging } from '../../common/config/staging-environment';
+import { captureStagingIntegration } from '../../common/config/staging-mocks';
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
@@ -107,6 +109,10 @@ export class NotificationsService {
   }
 
   sendSms(phone: string | string[], message: string): Promise<void> {
+    if (isVerifiedStaging()) {
+      captureStagingIntegration('sms', { phone, message });
+      return Promise.resolve();
+    }
     void phone;
     void message;
     this.logger.debug('SMS provider is not configured; delivery skipped');

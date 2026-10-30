@@ -1,3 +1,4 @@
+import { publishStagingOutbox } from '../../common/config/staging-mocks';
 /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access */
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -14,6 +15,7 @@ export class AssetRetirementOutboxPublisher {
     private readonly config: ConfigService,
   ) {}
   @Interval(30000) async publish() {
+    if (await publishStagingOutbox(this.db, 'retirement_outbox_events')) return;
     const endpoint = this.config.get<string>(
         'ASSET_RETIREMENT_EVENT_WEBHOOK_URL',
       ),

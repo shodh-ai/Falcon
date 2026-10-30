@@ -90,6 +90,7 @@ jobs:
             src/common/config/staging-environment.spec.ts \
             src/auth/strategies/staging-jwt-boundary.spec.ts \
             src/common/config/staging-invites.spec.ts \
+            src/common/config/staging-mocks.spec.ts \
             src/auth/password-reset.security.spec.ts
 
       - name: Validate notification staging preparation offline

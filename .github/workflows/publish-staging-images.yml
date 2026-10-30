@@ -110,6 +110,8 @@ jobs:
           STAGING_SSH_PRIVATE_KEY: ${{ secrets.STAGING_SSH_PRIVATE_KEY }}
           STAGING_SSH_KNOWN_HOSTS: ${{ vars.STAGING_SSH_KNOWN_HOSTS }}
           RELEASE_SHA: ${{ inputs.release_sha }}
+          STAGING_SSH_HOST: ${{ vars.STAGING_SSH_HOST }}
+          STAGING_SSH_PORT: ${{ vars.STAGING_SSH_PORT }}
         run: |
           umask 077
           python3 - <<'PY'
@@ -130,11 +132,14 @@ jobs:
           request=urllib.request.Request(os.environ['ACTIONS_ID_TOKEN_REQUEST_URL']+'&'+urllib.parse.urlencode({'audience':audience}),
               headers={'Authorization':'Bearer '+os.environ['ACTIONS_ID_TOKEN_REQUEST_TOKEN']})
           with urllib.request.urlopen(request,timeout=15) as response:token=json.load(response)['value']
+          host=os.environ['STAGING_SSH_HOST'];port=os.environ['STAGING_SSH_PORT']
+          assert re.fullmatch(r'[A-Za-z0-9.-]{1,253}',host)
+          assert port.isdigit() and 1<=int(port)<=65535
           payload=json.dumps({'version':1,'sha':os.environ['RELEASE_SHA'],
               'backend_digest':receipts['backend'],'frontend_digest':receipts['frontend'],'oidc_token':token})
           command=['ssh','-o','BatchMode=yes','-o','StrictHostKeyChecking=yes',
-              '-o','UserKnownHostsFile='+str(hosts),'-o','ConnectTimeout=15','-p','22587',
-              '-i',str(key),'falcon-staging-deploy@163.227.92.175','deploy']
+              '-o','UserKnownHostsFile='+str(hosts),'-o','ConnectTimeout=15','-p',port,
+              '-i',str(key),'falcon-staging-deploy@'+host,'deploy']
           result=subprocess.run(command,input=payload,text=True,timeout=900)
           raise SystemExit(result.returncode)
           PY

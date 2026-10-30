@@ -14,14 +14,14 @@ class OidcTests(unittest.TestCase):
   'ref':'refs/heads/staging','event_name':'push','sha':'a'*40,
   'sub':'repo:'+oidc.REPOSITORY+':environment:staging','workflow_ref':oidc.WORKFLOW,
   'job_workflow_ref':oidc.JOB_WORKFLOW,'runner_environment':'github-hosted',
-  'iat':1000,'nbf':1000,'exp':1300,'jti':'synthetic-nonce-123456789','run_id':'1234'}
+  'iat':1000,'nbf':1000,'exp':1300,'jti':'synthetic-nonce-123456789','run_id':'1234','run_number':'12'}
  def test_only_staging_push_and_deployment_environment_allowed(self):
   self.assertEqual(oidc.claims_allowed(self.claims(),'a'*40,1100)['run_id'],'1234')
   for key in ['iss','aud','repository','ref','event_name','sha','sub','workflow_ref','job_workflow_ref','runner_environment']:
    with self.assertRaises(ValueError,msg=key):oidc.claims_allowed({**self.claims(),key:'wrong'},'a'*40,1100)
  def test_production_pull_request_and_expired_identities_refused(self):
   for patch in [{'ref':'refs/heads/main'},{'event_name':'pull_request'},{'exp':1050},{'iat':1500},
-    {'exp':5000},{'nbf':1600},{'jti':'../anything'},{'run_id':'shell;command'}]:
+    {'exp':5000},{'nbf':1600},{'jti':'../anything'},{'run_id':'shell;command'},{'run_number':'-1'},{'run_number':None}]:
    with self.assertRaises(ValueError):oidc.claims_allowed({**self.claims(),**patch},'a'*40,1100)
  def test_identity_is_bound_to_exact_release_digest_audience(self):
   audience='falcon-staging-deploy:'+'a'*40+':sha256:'+'b'*64+':sha256:'+'c'*64

@@ -60,6 +60,31 @@ def check_production(baseline):
 def memory():return int(next(x.split()[1] for x in Path('/proc/meminfo').read_text().splitlines() if x.startswith('MemAvailable:')))*1024
 
 
+def reviewed_schema(text):
+    # A fresh PostgreSQL database already contains public. Preserve the export,
+    # and change only that exact schema declaration for the staging import.
+    declaration='CREATE SCHEMA public;'
+    if text.count(declaration)!=1:raise RuntimeError('STAGING_PUBLIC_SCHEMA_DECLARATION')
+    return text.replace(declaration,'CREATE SCHEMA IF NOT EXISTS public;',1)
+
+
+def stop_initialized_data():
+    """A failed cold bootstrap leaves its files intact and releases only staging RAM."""
+    record=ROOT/'private/coolify.json'
+    if not record.exists():return
+    project=json.loads(record.read_text()).get('service_uuid','')
+    if not re.fullmatch(r'[a-z0-9]{16,64}',project):return
+    ids=run(['docker','ps','-q','--filter','label=com.docker.compose.project='+project,
+             '--filter','label=io.falcon.environment=staging']).decode().split()
+    for identifier in ids:
+        value=inspect(identifier);labels=value['Config'].get('Labels') or {}
+        if labels.get('com.docker.compose.service') not in ('falcon-staging-postgres','falcon-staging-redis','falcon-staging-mail'):
+            raise RuntimeError('STAGING_COLD_STOP_SCOPE')
+        if not all(m['Source'].startswith(str(ROOT)+'/') for m in value['Mounts']):
+            raise RuntimeError('STAGING_COLD_STOP_MOUNTS')
+        run(['docker','stop','--time','30',identifier],timeout=40)
+
+
 def main():
     if os.geteuid()!=0 or sys.platform!='linux':raise RuntimeError('OWNER_REQUIRED')
     os.umask(0o077);os.nice(15)
@@ -136,8 +161,9 @@ def main():
     if set(ext)-{'uuid-ossp','pg_trgm','pgcrypto'}:raise RuntimeError('STAGING_EXTENSION_SCOPE')
     sql(''.join('CREATE EXTENSION IF NOT EXISTS "'+name+'" WITH SCHEMA public;\n' for name in ext))
     if not (ROOT/'bootstrap/schema-restored.json').exists():
-        sql((ROOT/'bootstrap/schema.sql').read_text())
-        write(ROOT/'bootstrap/schema-restored.json',{'schema_sha256':prep['schema_sha256'],'postgres_id':pg})
+        sql(reviewed_schema((ROOT/'bootstrap/schema.sql').read_text()))
+        write(ROOT/'bootstrap/schema-restored.json',{'schema_sha256':prep['schema_sha256'],'postgres_id':pg,
+              'import_transform':'CREATE SCHEMA public -> IF NOT EXISTS; all other export bytes retained'})
     if not (ROOT/'bootstrap/role-created.json').exists():
         password=secrets['DB_PASSWORD']
         if not re.fullmatch(r'[A-Za-z0-9_-]{64}',password):raise RuntimeError('STAGING_RUNTIME_PASSWORD_FORMAT')
@@ -192,6 +218,13 @@ def main():
        'data_images':images,'data_containers':identifiers,'initialized':True,
        'working_bytes':1024**3,'current':None,'source_schema_sha256':prep['schema_sha256'],
        'owner_user_id':owners[0]['user_id'],'owner_tenant_id':owners[0]['tenant_id']}
+    if (private/'reset-pending.json').exists():
+        marker=json.loads((private/'reset-pending.json').read_text())
+        route=Path('/data/coolify/proxy/dynamic/falcon-staging-guarded.yaml')
+        if json.loads(route.read_text())!={'http':{'routers':{},'services':{},'middlewares':{}}} or \
+           hashlib.sha256(route.read_bytes()).hexdigest()!=marker.get('empty_route_sha256'):
+            raise RuntimeError('STAGING_RESET_ROUTE_DRIFT')
+        state['empty_route_sha256']=marker['empty_route_sha256']
     write(private/'state.json',state)
     # Cold until the protected staging branch and acceptance gates are ready.
     for value in identifiers.values():run(['docker','stop','--time','30',value['id']],timeout=40)
@@ -202,6 +235,8 @@ def main():
 if __name__=='__main__':
     try:main()
     except Exception as error:
+        try:stop_initialized_data()
+        except Exception:pass
         code=str(error) if isinstance(error,(RuntimeError,ValueError)) and re.fullmatch(r'[A-Z0-9_]+',str(error)) else type(error).__name__
         print(json.dumps({'status':'refused','code':code}),file=sys.stderr)
         raise SystemExit(1)

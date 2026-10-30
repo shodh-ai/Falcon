@@ -1,3 +1,4 @@
+import { publishStagingOutbox } from '../../common/config/staging-mocks';
 /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return -- TypeORM query() rows are untyped */
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -17,6 +18,7 @@ export class AcquisitionOutboxPublisher {
 
   @Interval(30_000)
   async publish() {
+    if (await publishStagingOutbox(this.db, 'acq_outbox_events')) return;
     const privateKey = this.config.get<string>(
       'IRMS_CALLBACK_SIGNING_PRIVATE_KEY',
     );

@@ -1,3 +1,4 @@
+import { publishStagingOutbox } from '../../common/config/staging-mocks';
 /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access -- TypeORM query rows are untyped */
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -16,6 +17,7 @@ export class ProductVerificationOutboxPublisher {
 
   @Interval(30_000)
   async publish() {
+    if (await publishStagingOutbox(this.db, 'pv_outbox_events')) return;
     const endpoint = this.config.get<string>(
       'PRODUCT_VERIFICATION_EVENT_WEBHOOK_URL',
     );

@@ -35,7 +35,8 @@ def claims_allowed(claims,sha,now,audience='falcon-staging-deploy'):
     require(isinstance(claims.get('nbf',claims['iat']),int) and claims.get('nbf',claims['iat'])<=now+30,'OIDC_NOT_YET_VALID')
     require(re.fullmatch(r'[A-Za-z0-9-]{16,128}',str(claims.get('jti',''))),'OIDC_NONCE')
     require(re.fullmatch(r'[0-9]+',str(claims.get('run_id',''))),'OIDC_RUN')
-    return {k:claims[k] for k in ['sha','jti','run_id','iat','exp']}
+    require(re.fullmatch(r'[1-9][0-9]{0,15}',str(claims.get('run_number',''))),'OIDC_RUN_NUMBER')
+    return {k:claims[k] for k in ['sha','jti','run_id','run_number','iat','exp']}
 
 
 def verify_rsa(message,signature,key):

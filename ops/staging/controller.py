@@ -91,6 +91,7 @@ def main():
     lockfd=os.open(str(host.private/'deploy.lock'),os.O_WRONLY|os.O_CREAT|os.O_NOFOLLOW,0o600)
     with os.fdopen(lockfd,'w') as lock:
         fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        host.authorize_run(identity)
         signal.alarm(900)
         try:
             result=deploy_release(host,request)
