@@ -51,7 +51,7 @@ export default function HodDepartmentTimetablePage() {
   return <HodPageFrame>
     <HodPageHeader title="Department timetable" workspaceLabel="Department oversight" description="A read-only view of classes taught by your department and classes taken by its students. Your personal schedule is under My Teaching."
       meta={<><HodMetricChip label="Weekly classes" value={filtered.length} emphasis /><HodMetricChip label="Courses" value={new Set(filtered.map((slot) => slot.course_code)).size} /><HodMetricChip label="Faculty" value={faculty.length} /></>}
-      actions={<><HodActionButton href="/hod/my-teaching/timetable" variant="outline">My timetable</HodActionButton><HodActionButton href="/hod/academics/course-allocation" variant="primary">Course allocation</HodActionButton></>} />
+      actions={<><HodActionButton href="/hod/my-teaching/timetable" variant="outline">My teaching timetable</HodActionButton><HodActionButton href="/hod/academics/course-allocation" variant="primary">Course allocation</HodActionButton></>} />
     {error && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</p>}
     <div className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
       <div className="flex flex-wrap gap-4">

@@ -1,3 +1,4 @@
+import { allocationDepartmentScope, enrolledDepartmentScope } from './department-course-scope';
 import {
   BadRequestException,
   ForbiddenException,
@@ -799,29 +800,11 @@ export class CourseLmsService {
       const scoped = await this.dataSource.query(
         `SELECT 1
          WHERE EXISTS (
-           SELECT 1
-           FROM academic_course_allocations a
-           JOIN users assigned ON assigned.user_id = a.faculty_user_id
-           WHERE a.tenant_id = $1 AND a.course_id = $2
-             AND a.status = 'ACTIVE'
-             AND assigned.dept_id = ANY($3::int[])
-         )
-         OR EXISTS (
-           SELECT 1
-           FROM academic_timetables t
-           JOIN users assigned ON assigned.user_id = t.faculty_user_id
-           WHERE t.tenant_id = $1 AND t.course_id = $2
-             AND t.deleted_at IS NULL
-             AND assigned.dept_id = ANY($3::int[])
-         )
-         OR EXISTS (
-           SELECT 1
-           FROM student_course_enrollments e
-           JOIN users student ON student.user_id = e.student_user_id
-           WHERE e.tenant_id = $1 AND e.course_id = $2
-             AND e.status IN ('ENROLLED', 'COMPLETED', 'FAILED')
-             AND student.dept_id = ANY($3::int[])
-         )`,
+           SELECT 1 FROM academic_course_allocations a
+           JOIN users assigned ON assigned.user_id = a.faculty_user_id AND assigned.tenant_id = a.tenant_id
+           WHERE a.tenant_id = $1 AND a.course_id = $2 AND a.status = 'ACTIVE'
+             AND ${allocationDepartmentScope('a', 'assigned', '$3::int[]')}
+         ) OR ${enrolledDepartmentScope('$2', '$1', '$3::int[]')}`,
         [tenantId, courseId, hodDepartmentIds],
       );
       if (scoped.length) return;

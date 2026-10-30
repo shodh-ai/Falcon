@@ -1,3 +1,4 @@
+import { allocationDepartmentScope, enrolledDepartmentScope } from './department-course-scope';
 import {
   BadRequestException,
   ForbiddenException,
@@ -94,8 +95,12 @@ export class FacultyWorkspacesService {
     hodScope = false,
   ) {
     const hodDepartmentIds = hodScope
-      ? await this.resolveHodDepartmentIds(facultyUserId)
+      ? await this.resolveHodDepartmentIds(facultyUserId, tenantId)
       : [];
+    if (hodScope && !hodDepartmentIds.length) return [];
+    if (hodScope && deptId != null && !hodDepartmentIds.includes(deptId)) {
+      throw new ForbiddenException('Department is outside your oversight scope');
+    }
     if (hodDepartmentIds.length) {
       return this.dataSource.query(
         `WITH scoped_courses AS (
@@ -113,30 +118,18 @@ export class FacultyWorkspacesService {
            FROM academic_course_allocations a
            INNER JOIN academic_courses c
              ON c.course_id = a.course_id AND c.tenant_id = a.tenant_id
-           LEFT JOIN users assigned ON assigned.user_id = a.faculty_user_id
+           LEFT JOIN users assigned ON assigned.user_id = a.faculty_user_id AND assigned.tenant_id = a.tenant_id
            WHERE a.tenant_id = $1
              AND a.status = 'ACTIVE'
              AND a.course_id IS NOT NULL
              AND (
-               assigned.dept_id = ANY($2::int[])
-               OR EXISTS (
-                 SELECT 1
-                 FROM student_course_enrollments e
-                 JOIN users student ON student.user_id = e.student_user_id
-                 WHERE e.tenant_id = a.tenant_id
-                   AND e.course_id = a.course_id
-                   AND e.status IN ('ENROLLED', 'COMPLETED', 'FAILED')
-                   AND student.dept_id = ANY($2::int[])
-               )
+               ${allocationDepartmentScope('a', 'assigned', '$2::int[]')}
+               OR ${enrolledDepartmentScope('a.course_id', 'a.tenant_id', '$2::int[]')}
              )
-             AND ($3::int IS NULL OR assigned.dept_id = $3 OR EXISTS (
-               SELECT 1
-               FROM student_course_enrollments e2
-               JOIN users student2 ON student2.user_id = e2.student_user_id
-               WHERE e2.tenant_id = a.tenant_id AND e2.course_id = a.course_id
-                 AND e2.status IN ('ENROLLED', 'COMPLETED', 'FAILED')
-                 AND student2.dept_id = $3
-             ))
+             AND ($3::int IS NULL OR
+               ${allocationDepartmentScope('a', 'assigned', 'ARRAY[$3::int]')}
+               OR ${enrolledDepartmentScope('a.course_id', 'a.tenant_id', 'ARRAY[$3::int]')}
+             )
            UNION
            SELECT DISTINCT
              NULL::uuid AS allocation_id,
@@ -154,10 +147,10 @@ export class FacultyWorkspacesService {
              AND EXISTS (
                SELECT 1
                FROM student_course_enrollments e
-               JOIN users student ON student.user_id = e.student_user_id
+               JOIN users student ON student.user_id = e.student_user_id AND student.tenant_id = e.tenant_id
                WHERE e.tenant_id = c.tenant_id
                  AND e.course_id = c.course_id
-                 AND e.status IN ('ENROLLED', 'COMPLETED', 'FAILED')
+                 AND e.status = 'ENROLLED' AND student.deleted_at IS NULL
                  AND student.dept_id = ANY($2::int[])
                  AND ($3::int IS NULL OR student.dept_id = $3)
              )
@@ -221,14 +214,18 @@ export class FacultyWorkspacesService {
 
   private async resolveHodDepartmentIds(
     facultyUserId: string,
+    tenantId: string,
   ): Promise<number[]> {
     const rows = await this.dataSource.query<Array<{ dept_id: number }>>(
-      `SELECT dept_id FROM departments WHERE hod_user_id = $1 AND deleted_at IS NULL
+      `SELECT d.dept_id FROM departments d
+       JOIN users hod ON hod.user_id = d.hod_user_id AND hod.tenant_id = $2
+       WHERE d.hod_user_id = $1 AND d.deleted_at IS NULL AND hod.deleted_at IS NULL
        UNION
        SELECT u.dept_id FROM users u
        JOIN roles r ON r.role_id = u.role_id
-       WHERE u.user_id = $1 AND u.dept_id IS NOT NULL AND lower(r.role_name) = 'hod'`,
-      [facultyUserId],
+       WHERE u.user_id = $1 AND u.tenant_id = $2 AND u.deleted_at IS NULL
+         AND u.dept_id IS NOT NULL AND lower(r.role_name) = 'hod'`,
+      [facultyUserId, tenantId],
     );
     return [...new Set(rows.map((row) => Number(row.dept_id)).filter(Boolean))];
   }
@@ -238,7 +235,10 @@ export class FacultyWorkspacesService {
     tenantId: string,
     deptId?: number | null,
   ) {
-    const hodDepartmentIds = await this.resolveHodDepartmentIds(facultyUserId);
+    const hodDepartmentIds = await this.resolveHodDepartmentIds(facultyUserId, tenantId);
+    if (hodDepartmentIds.length && deptId != null && !hodDepartmentIds.includes(deptId)) {
+      throw new ForbiddenException('Department is outside your oversight scope');
+    }
     // ALLOCATION_WITH_DEPT_FROM already LEFT JOINs academic_courses AS c —
     // do not join `c` again (Postgres: table name "c" specified more than once).
     const allocations = hodDepartmentIds.length
@@ -251,24 +251,15 @@ export class FacultyWorkspacesService {
              u.user_id AS faculty_user_id,
              u.name AS faculty_name
            FROM academic_course_allocations a
-           INNER JOIN users u ON u.user_id = a.faculty_user_id
+           INNER JOIN users u ON u.user_id = a.faculty_user_id AND u.tenant_id = a.tenant_id
            INNER JOIN academic_courses c ON c.course_id = a.course_id AND c.tenant_id = a.tenant_id
            WHERE a.tenant_id = $1
              AND a.status = 'ACTIVE'
              AND a.course_id IS NOT NULL
-             AND (
-               u.dept_id = ANY($2::int[])
-               OR EXISTS (
-                 SELECT 1
-                 FROM student_course_enrollments e
-                 JOIN users student ON student.user_id = e.student_user_id
-                 WHERE e.tenant_id = a.tenant_id
-                   AND e.course_id = a.course_id
-                   AND e.status IN ('ENROLLED', 'COMPLETED', 'FAILED')
-                   AND student.dept_id = ANY($2::int[])
-               )
-             )
-             AND ($3::int IS NULL OR u.dept_id = $3)`,
+             AND (${allocationDepartmentScope('a', 'u', '$2::int[]')}
+               OR ${enrolledDepartmentScope('a.course_id', 'a.tenant_id', '$2::int[]')})
+             AND ($3::int IS NULL OR ${allocationDepartmentScope('a', 'u', 'ARRAY[$3::int]')}
+               OR ${enrolledDepartmentScope('a.course_id', 'a.tenant_id', 'ARRAY[$3::int]')})`,
           [tenantId, hodDepartmentIds, deptId ?? null],
         )
       : await this.dataSource.query(
@@ -305,22 +296,17 @@ export class FacultyWorkspacesService {
              t.section
            FROM academic_timetables t
            INNER JOIN academic_courses c ON c.course_id = t.course_id AND c.tenant_id = t.tenant_id
-           LEFT JOIN users u ON u.user_id = t.faculty_user_id
+           LEFT JOIN users u ON u.user_id = t.faculty_user_id AND u.tenant_id = t.tenant_id
            WHERE t.tenant_id = $1
              AND t.deleted_at IS NULL
-             AND (
-               u.dept_id = ANY($2::int[])
-               OR EXISTS (
-                 SELECT 1
-                 FROM student_course_enrollments e
-                 JOIN users student ON student.user_id = e.student_user_id
-                 WHERE e.tenant_id = t.tenant_id
-                   AND e.course_id = t.course_id
-                   AND e.status IN ('ENROLLED', 'COMPLETED', 'FAILED')
-                   AND student.dept_id = ANY($2::int[])
-               )
-             )
-             AND ($3::int IS NULL OR u.dept_id = $3)
+             AND (EXISTS (
+               SELECT 1 FROM academic_course_allocations a
+               WHERE a.tenant_id = t.tenant_id AND a.course_id = t.course_id
+                 AND a.faculty_user_id = t.faculty_user_id AND a.status = 'ACTIVE'
+                 AND ${allocationDepartmentScope('a', 'u', '$2::int[]')}
+                 AND ($3::int IS NULL OR ${allocationDepartmentScope('a', 'u', 'ARRAY[$3::int]')})
+             ) OR (${enrolledDepartmentScope('t.course_id', 't.tenant_id', '$2::int[]')}
+                 AND ($3::int IS NULL OR ${enrolledDepartmentScope('t.course_id', 't.tenant_id', 'ARRAY[$3::int]')})))
            ORDER BY t.day_of_week, t.start_time, c.course_code`,
           [tenantId, hodDepartmentIds, deptId ?? null],
         )
@@ -685,53 +671,6 @@ export class FacultyWorkspacesService {
     tenantId: string,
     deptId?: number | null,
   ) {
-    const hodDepartmentIds = await this.resolveHodDepartmentIds(facultyUserId);
-    if (hodDepartmentIds.length) {
-      return this.dataSource.query(
-        `SELECT
-           t.timetable_id::text AS timetable_id,
-           t.day_of_week,
-           t.start_time,
-           t.end_time,
-           t.room,
-           t.section,
-           c.course_id,
-           c.course_code,
-           c.course_name,
-           t.faculty_user_id,
-           false AS awaiting_confirmation
-         FROM academic_timetables t
-         INNER JOIN academic_courses c ON c.course_id = t.course_id AND c.tenant_id = t.tenant_id
-         LEFT JOIN users u ON u.user_id = t.faculty_user_id
-         WHERE t.tenant_id = $1
-           AND t.deleted_at IS NULL
-           AND (
-             u.dept_id = ANY($2::int[])
-             OR EXISTS (
-               SELECT 1
-               FROM student_course_enrollments e
-               JOIN users student ON student.user_id = e.student_user_id
-               WHERE e.tenant_id = t.tenant_id
-                 AND e.course_id = t.course_id
-                 AND e.status IN ('ENROLLED', 'COMPLETED', 'FAILED')
-                 AND student.dept_id = ANY($2::int[])
-             )
-           )
-           AND ($3::int IS NULL OR u.dept_id = $3)
-         UNION ALL
-         SELECT 'held:' || e.source_key,(e.entry->>'day')::int,(e.entry->>'start')::time,(e.entry->>'end')::time,
-           e.entry->>'room',e.entry->>'batch',c.course_id,c.course_code,c.course_name,
-           NULL::uuid AS faculty_user_id,true
-         FROM academic_timetable_source_entries e
-         JOIN academic_timetable_publications p ON p.publication_id=e.publication_id AND p.state='ACTIVE' AND p.activated_on<=CURRENT_DATE
-         JOIN academic_courses c ON c.course_id=e.course_id AND c.tenant_id=e.tenant_id
-         WHERE e.tenant_id=$1 AND e.state='HELD' AND EXISTS (
-           SELECT 1 FROM users u WHERE u.tenant_id=e.tenant_id AND u.user_id=ANY(e.faculty_user_ids)
-             AND u.dept_id=ANY($2::int[]) AND ($3::int IS NULL OR u.dept_id=$3))
-         ORDER BY day_of_week, start_time, course_code`,
-        [tenantId, hodDepartmentIds, deptId ?? null],
-      );
-    }
     return this.dataSource.query(
       `WITH ${this.teachingDepartments.facultyCoursesCte(3)}
        SELECT
