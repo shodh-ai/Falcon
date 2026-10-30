@@ -1,7 +1,7 @@
 'use client';
 
 import { Suspense, useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { usePathname, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { BookOpen, Check, Send, X } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
@@ -110,6 +110,7 @@ function todayIso() {
 
 function MarkAttendanceContent() {
   const api = useAuthedApi();
+  const teachingPrefix = usePathname().startsWith('/hod/my-teaching/') ? '/hod/my-teaching' : '/faculty';
   const { activeDeptId, loading: deptLoading } = useTeachingDepartment();
   const params = useSearchParams();
   const initialCourseId = params.get('courseId');
@@ -461,7 +462,7 @@ function MarkAttendanceContent() {
         description="Mark and review student attendance records."
         actions={
           <Button variant="outline" size="sm" asChild>
-            <Link href="/faculty/logbook">
+            <Link href={`${teachingPrefix}/logbook`}>
               <BookOpen className="mr-1.5 h-4 w-4" />
               Open logbook
             </Link>

@@ -889,6 +889,7 @@ export const hodPortal: PortalConfig = {
   personaLabel: 'HOD Workspace',
   personaTitle: 'Department Workspace',
   homeHref: '/hod/dashboard',
+  hideWorkspaceSwitcher: true,
   navGroups: [
     {
       title: 'Overview',
@@ -901,9 +902,11 @@ export const hodPortal: PortalConfig = {
     {
       title: 'My Teaching',
       items: [
-        { label: 'My Timetable', href: '/faculty/timetable', icon: CalendarClock, keywords: ['my classes', 'schedule'] },
-        { label: 'My Courses', href: '/faculty/courses', icon: BookOpen, keywords: ['my subjects', 'teaching'] },
-        { label: 'Mark Attendance', href: '/faculty/attendance', icon: ClipboardCheck, keywords: ['my class attendance'] },
+        { label: 'My Timetable', href: '/hod/my-teaching/timetable', icon: CalendarClock, keywords: ['my classes', 'schedule'] },
+        { label: 'My Courses', href: '/hod/my-teaching/courses', icon: BookOpen, keywords: ['my subjects', 'teaching'] },
+        { label: 'Mark Attendance', href: '/hod/my-teaching/attendance', icon: ClipboardCheck, keywords: ['my class attendance'] },
+        { label: 'My Workload', href: '/hod/my-teaching/workload', icon: BarChart3, keywords: ['weekly hours', 'cancelled', 'extra classes'] },
+        { label: 'Grade Change Request', href: '/hod/my-teaching/grade-change', icon: PenLine, keywords: ['my grades', 'request'] },
       ],
     },
     {
@@ -954,7 +957,6 @@ export const hodPortal: PortalConfig = {
         { label: 'End-Semester Marks Approval', href: '/hod/academics/end-term-results', icon: ClipboardCheck, keywords: ['exam', 'hod', 'end term', 'marks approval'] },
         { label: 'Result Analytics', href: '/hod/academics/result-analytics', icon: BarChart3, keywords: ['pass', 'fail', 'exam', 'grades'] },
         { label: 'Compiled Results', href: '/hod/dashboard?tab=results', icon: FileSpreadsheet, keywords: ['marks', 'grades', 'export', 'semester'] },
-        { label: 'Grade Change Request', href: '/hod/academics/grade-change', icon: PenLine, keywords: ['grade change', 'request', 'sis'] },
         { label: 'Grade Change DOFA', href: '/hod/approvals/grade-change', icon: PenLine, keywords: ['sis', 'grade change', 'dofa', 'coe', 'approve'] },
         { label: 'DOFA Inbox (Universal)', href: '/hod/approvals/dofa-inbox', icon: Inbox, keywords: ['nervous system', 'grade change', 'approvals'] },
       ],
@@ -974,6 +976,16 @@ export const hodPortal: PortalConfig = {
     myHrOperationsNavGroup('hod'),
   ],
   commandItems: flattenNavToCommandItems([
+    {
+      title: 'My Teaching',
+      items: [
+        { label: 'My Timetable', href: '/hod/my-teaching/timetable', icon: CalendarClock },
+        { label: 'My Courses', href: '/hod/my-teaching/courses', icon: BookOpen },
+        { label: 'Mark Attendance', href: '/hod/my-teaching/attendance', icon: ClipboardCheck },
+        { label: 'My Workload', href: '/hod/my-teaching/workload', icon: BarChart3 },
+        { label: 'Grade Change Request', href: '/hod/my-teaching/grade-change', icon: PenLine },
+      ],
+    },
     {
       title: 'Overview',
       items: [
@@ -1021,7 +1033,6 @@ export const hodPortal: PortalConfig = {
         { label: 'End-Semester Marks Approval', href: '/hod/academics/end-term-results', icon: ClipboardCheck, keywords: ['exam', 'end term', 'hod marks'] },
         { label: 'Result Analytics', href: '/hod/academics/result-analytics', icon: BarChart3, keywords: ['pass fail'] },
         { label: 'Compiled Results', href: '/hod/dashboard?tab=results', icon: FileSpreadsheet, keywords: ['compiled results'] },
-        { label: 'Grade Change Request', href: '/hod/academics/grade-change', icon: PenLine, keywords: ['grade change', 'request'] },
         { label: 'Grade Change DOFA', href: '/hod/approvals/grade-change', icon: PenLine, keywords: ['grade change', 'dofa'] },
         { label: 'DOFA Inbox (Universal)', href: '/hod/approvals/dofa-inbox', icon: Inbox, keywords: ['dofa inbox'] },
       ],

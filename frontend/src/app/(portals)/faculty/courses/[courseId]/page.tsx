@@ -26,7 +26,7 @@ export default function FacultyCourseWorkspacePage() {
   const { courseId } = useParams<{ courseId: string }>();
   const api = useAuthedApi();
   const pathname = usePathname();
-  const workspacePrefix = pathname.startsWith('/hod/') ? '/hod/academics' : '/faculty';
+  const workspacePrefix = pathname.startsWith('/hod/my-teaching/') ? '/hod/my-teaching' : '/faculty';
   const [workspace, setWorkspace] = useState<FacultyWorkspace | null>(null);
   const [error, setError] = useState<string | null>(null);
   const searchParams = useSearchParams();

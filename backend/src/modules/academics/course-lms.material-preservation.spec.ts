@@ -60,6 +60,7 @@ describe('LMS recoverable material deletion', () => {
       {} as never,
       objectStorage as never,
       {} as never,
+      {} as never,
     );
     return {
       target,
@@ -137,18 +138,18 @@ describe('LMS recoverable material deletion', () => {
     expect(hash(file)).toBe(originalHash);
   });
 
-  it('keeps existing assigned-faculty authorization', async () => {
+  it('does not permit a different assigned faculty to delete the uploader’s material', async () => {
     const { target, materials } = fixture();
     const access = target as unknown as {
       assertFacultyTeaches: () => Promise<void>;
     };
     jest.spyOn(access, 'assertFacultyTeaches').mockResolvedValue();
-    await target.deleteCourseMaterial(
+    await expect(target.deleteCourseMaterial(
       'assigned-faculty',
       'tenant-a',
       'material-a',
-    );
-    expect(materials.softRemove).toHaveBeenCalledTimes(1);
+    )).rejects.toBeInstanceOf(ForbiddenException);
+    expect(materials.softRemove).not.toHaveBeenCalled();
   });
 
   it('keeps object-store keys without calling storage removal', async () => {

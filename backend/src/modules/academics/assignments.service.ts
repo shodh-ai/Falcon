@@ -57,8 +57,9 @@ export class AssignmentsService {
     facultyUserId: string,
     tenantId: string,
     courseId?: string,
+    ownOnly = false,
   ) {
-    const hodDepartmentIds = await this.resolveHodDepartmentIds(facultyUserId);
+    const hodDepartmentIds = ownOnly ? [] : await this.resolveHodDepartmentIds(facultyUserId);
     if (hodDepartmentIds.length) {
       const scoped = await this.timetable.query(
         `SELECT DISTINCT a.assignment_id
@@ -925,12 +926,7 @@ export class AssignmentsService {
     }
   }
 
-  /**
-   * Faculty can manage only assignments they created. HODs may additionally
-   * manage assignments created by lecturers whose course is in the HOD's own
-   * department scope. The check is tenant and course scoped to prevent using
-   * an assignment id to cross department boundaries.
-   */
+  /** Editing an assignment belongs to its author, including when the viewer is an HOD. */
   private async assertFacultyMayManageAssignment(
     facultyUserId: string,
     tenantId: string,
@@ -939,16 +935,7 @@ export class AssignmentsService {
     if (assignment.tenant_id !== tenantId) {
       throw new NotFoundException('Assignment not found');
     }
-    if (assignment.faculty_user_id === facultyUserId) return;
-
-    try {
-      await this.assertFacultyTeachesCourse(
-        assignment.course_id,
-        facultyUserId,
-        tenantId,
-      );
-    } catch {
-      // Do not leak whether an assignment exists outside the caller's scope.
+    if (assignment.faculty_user_id !== facultyUserId) {
       throw new NotFoundException('Assignment not found');
     }
   }
@@ -1319,36 +1306,6 @@ export class AssignmentsService {
       [tenantId, courseId, facultyUserId],
     );
     if (marks.length) return;
-
-    const hodDepartmentIds = await this.resolveHodDepartmentIds(facultyUserId);
-    if (hodDepartmentIds.length) {
-      const scoped = await this.timetable.query(
-        `SELECT 1
-         WHERE EXISTS (
-           SELECT 1 FROM academic_course_allocations ca
-           JOIN users assigned ON assigned.user_id = ca.faculty_user_id
-           WHERE ca.tenant_id = $1 AND ca.course_id = $2
-             AND ca.status = 'ACTIVE'
-             AND assigned.dept_id = ANY($3::int[])
-         )
-         OR EXISTS (
-           SELECT 1 FROM academic_timetables t
-           JOIN users assigned ON assigned.user_id = t.faculty_user_id
-           WHERE t.tenant_id = $1 AND t.course_id = $2
-             AND t.deleted_at IS NULL
-             AND assigned.dept_id = ANY($3::int[])
-         )
-         OR EXISTS (
-           SELECT 1 FROM student_course_enrollments e
-           JOIN users student ON student.user_id = e.student_user_id
-           WHERE e.tenant_id = $1 AND e.course_id = $2
-             AND e.status IN ('ENROLLED', 'COMPLETED', 'FAILED')
-             AND student.dept_id = ANY($3::int[])
-         )`,
-        [tenantId, courseId, hodDepartmentIds],
-      );
-      if (scoped.length) return;
-    }
 
     throw new NotFoundException('Course not found in your teaching timetable');
   }

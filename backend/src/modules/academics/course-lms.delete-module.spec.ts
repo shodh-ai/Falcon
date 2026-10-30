@@ -41,6 +41,7 @@ describe('CourseLmsService unit deletion', () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never,
     );
     return { target, modules, materials, dataSource };
   }

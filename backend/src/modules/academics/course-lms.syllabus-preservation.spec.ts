@@ -43,6 +43,7 @@ describe('Syllabus replacement material preservation', () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never,
     );
     const access = target as unknown as {
       assertFacultyTeaches: () => Promise<void>;

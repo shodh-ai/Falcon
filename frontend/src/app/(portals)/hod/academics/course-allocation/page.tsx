@@ -5,6 +5,7 @@ import { Loader2, Save, X, GripVertical } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import {
   HodMetricChip,
+  HodDayTabs,
   HodPageFrame,
   HodPageHeader,
   HodTableHead,
@@ -41,7 +42,6 @@ type TimetableSlot = {
 
 type FacultyOption = { user_id: string; name: string; email: string | null };
 
-const DOW = ['', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const DAYS = [
   { val: 1, label: 'Mon' },
   { val: 2, label: 'Tue' },
@@ -51,12 +51,21 @@ const DAYS = [
   { val: 6, label: 'Sat' },
 ];
 const HOURS = [9, 10, 11, 12, 13, 14, 15, 16];
-const LUNCH_HOUR = 13;
+function formatTime(value: string) {
+  const [hour, minute] = value.split(':').map(Number);
+  return `${hour % 12 || 12}:${String(minute).padStart(2, '0')} ${hour >= 12 ? 'PM' : 'AM'}`;
+}
 
-function formatTime(hour: number) {
-  const h = hour > 12 ? hour - 12 : hour;
-  const ampm = hour >= 12 ? 'PM' : 'AM';
-  return `${h}:00 ${ampm}`;
+function addHour(value: string) {
+  const [hour, minute] = value.split(':').map(Number);
+  const total = hour * 60 + minute + 60;
+  return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}:00`;
+}
+
+function moveEnd(originalStart: string, originalEnd: string, newStart: string) {
+  const minutes = (value: string) => { const [hour, minute] = value.split(':').map(Number); return hour * 60 + minute; };
+  const total = minutes(newStart) + minutes(originalEnd) - minutes(originalStart);
+  return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}:00`;
 }
 
 export default function HodCourseAllocationPage() {
@@ -68,6 +77,7 @@ export default function HodCourseAllocationPage() {
   const [saving, setSaving] = useState(false);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [selectedSemester, setSelectedSemester] = useState<string>('');
+  const [selectedDay, setSelectedDay] = useState<number | 'all'>(1);
 
   type DraftSlot = { faculty_user_id: string; day_of_week: number; start_time: string; end_time: string };
   const [draft, setDraft] = useState<Record<string, DraftSlot>>({});
@@ -138,19 +148,23 @@ export default function HodCourseAllocationPage() {
     });
   }, [gridSlots, activeAllocations, selectedSemester]);
 
+  const timePoints = useMemo(() => [...new Set([
+    ...HOURS.map((hour) => `${String(hour).padStart(2, '0')}:00:00`),
+    ...activeGridSlots.map((slot) => slot.start_time),
+  ])].sort(), [activeGridSlots]);
+  const dayCounts = useMemo(() => Object.fromEntries(DAYS.map((day) => [day.val, activeGridSlots.filter((slot) => slot.day_of_week === day.val).length])), [activeGridSlots]);
+
   function handleDragStart(e: React.DragEvent, sourceData: any) {
     e.dataTransfer.setData('application/json', JSON.stringify(sourceData));
     e.dataTransfer.effectAllowed = 'move';
   }
 
-  function handleDrop(e: React.DragEvent, dayOfWeek: number, hour: number) {
+  function handleDrop(e: React.DragEvent, dayOfWeek: number, start_time: string) {
     e.preventDefault();
-    if (hour === LUNCH_HOUR) return;
 
     try {
       const data = JSON.parse(e.dataTransfer.getData('application/json'));
-      const start_time = `${hour.toString().padStart(2, '0')}:00:00`;
-      const end_time = `${(hour + 1).toString().padStart(2, '0')}:00:00`;
+      const end_time = addHour(start_time);
 
       if (data.type === 'NEW') {
         const newSlot: TimetableSlot = {
@@ -168,8 +182,8 @@ export default function HodCourseAllocationPage() {
         setGridSlots(prev => [...prev, newSlot]);
       } else if (data.type === 'MOVE') {
         setGridSlots(prev => prev.map(s => {
-          if (s === data.slot || (s.day_of_week === data.slot.day_of_week && s.start_time === data.slot.start_time && s.course_id === data.slot.course_id)) {
-            return { ...s, day_of_week: dayOfWeek, start_time, end_time };
+          if (s.timetable_id === data.slot.timetable_id) {
+            return { ...s, day_of_week: dayOfWeek, start_time, end_time: moveEnd(s.start_time, s.end_time, start_time) };
           }
           return s;
         }));
@@ -344,76 +358,40 @@ export default function HodCourseAllocationPage() {
 
       <div className="mt-4 flex flex-col xl:flex-row gap-4 mb-8">
 
-        {/* Left Side: Compact Timetable Grid */}
-        <div className="flex-1 bg-white rounded-xl shadow-sm border border-gray-100 overflow-x-auto">
-          <table className="w-full min-w-[600px] border-collapse">
-            <thead>
-              <tr>
-                <th className="p-2 border-b border-r bg-slate-50 text-[10px] font-bold text-slate-500 uppercase tracking-wider w-16 text-center">Time</th>
-                {DAYS.map(day => (
-                  <th key={day.val} className="p-2 border-b border-r bg-slate-50 text-[10px] font-bold text-sgvu-navy uppercase tracking-wider text-center w-24">
-                    {day.label}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {HOURS.map(hour => {
-                const isLunch = hour === LUNCH_HOUR;
-                const timeStr = `${hour.toString().padStart(2, '0')}:00:00`;
-                return (
-                  <tr key={hour}>
-                    <td className="p-1 border-b border-r bg-slate-50 text-[10px] font-semibold text-slate-500 text-center whitespace-nowrap align-middle">
-                      {formatTime(hour)}
-                    </td>
-                    {isLunch ? (
-                      <td colSpan={6} className="p-1 border-b bg-slate-100 text-center text-[10px] text-slate-400 font-bold uppercase tracking-[0.2em]">
-                        Lunch
-                      </td>
-                    ) : (
-                      DAYS.map(day => {
-                        const slotsInCell = activeGridSlots.filter(s => s.day_of_week === day.val && s.start_time === timeStr);
-                        return (
-                          <td
-                            key={`${day.val}-${hour}`}
-                            className="p-1 border-b border-r h-14 align-top relative min-w-[90px]"
-                            onDragOver={handleDragOver}
-                            onDrop={(e) => handleDrop(e, day.val, hour)}
-                          >
-                            <div className="absolute inset-0 z-0 p-0.5">
-                              <div className="w-full h-full border hover:border-sgvu-gold/50 rounded transition-colors" />
-                            </div>
-                            <div className="relative z-10 flex flex-col gap-0.5 w-full h-full">
-                              {slotsInCell.map((slot, i) => (
-                                <div
-                                  key={i}
-                                  draggable
-                                  onDragStart={(e) => handleDragStart(e, { type: 'MOVE', slot })}
-                                  className="group bg-sgvu-navy text-white text-[9px] rounded p-1 shadow-sm cursor-grab active:cursor-grabbing border-l-2 border-sgvu-gold hover:shadow-md transition-all relative flex flex-col leading-tight"
-                                >
-                                  <button
-                                    onClick={() => removeSlot(slot)}
-                                    className="absolute top-0.5 right-0.5 opacity-0 group-hover:opacity-100 transition-opacity bg-red-500 hover:bg-red-600 rounded-full text-white"
-                                    title="Remove slot"
-                                  >
-                                    <X className="h-2 w-2" />
-                                  </button>
-                                  <span className="font-bold truncate pr-3">{slot.course_code}</span>
-                                  {slot.faculty_name && (
-                                    <span className="text-[7.5px] font-medium truncate opacity-90 leading-[10px] mt-0.5">{slot.faculty_name}</span>
-                                  )}
-                                </div>
-                              ))}
-                            </div>
-                          </td>
-                        );
-                      })
-                    )}
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+        {/* Exact published times, including half-hour and 50-minute starts. */}
+        <div className="min-w-0 flex-1 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+          <div className="border-b border-slate-100 px-4 py-4">
+            <h2 className="text-base font-bold text-sgvu-navy">Schedule by day</h2>
+            <p className="mt-1 text-sm text-slate-600">All recorded start times are shown. Drag a course into an open time or move a card; saving remains subject to clash checks.</p>
+          </div>
+          <div className="px-4 pt-4"><HodDayTabs days={DAYS.map((day) => ({ id: day.val, label: day.label }))} active={selectedDay} onChange={setSelectedDay} counts={dayCounts} /></div>
+          <div className="max-h-[720px] space-y-5 overflow-y-auto p-4">
+            {DAYS.filter((day) => selectedDay === 'all' || selectedDay === day.val).map((day) => (
+              <section key={day.val} aria-label={`${day.label} classes`}>
+                {selectedDay === 'all' && <h3 className="mb-2 text-sm font-bold text-sgvu-navy">{day.label}</h3>}
+                <div className="divide-y divide-slate-100 rounded-xl border border-slate-200">
+                  {timePoints.map((time) => {
+                    const slots = activeGridSlots.filter((slot) => slot.day_of_week === day.val && slot.start_time === time);
+                    return <div key={`${day.val}-${time}`} className="grid min-h-16 grid-cols-[92px_minmax(0,1fr)] gap-3 px-3 py-2 sm:grid-cols-[118px_minmax(0,1fr)]">
+                      <span className="pt-2 text-sm font-semibold tabular-nums text-slate-600">{formatTime(time)}</span>
+                      <div className="flex min-h-12 flex-wrap gap-2 rounded-lg border border-dashed border-slate-200 p-1.5 transition-colors hover:border-sgvu-gold hover:bg-amber-50/30"
+                        onDragOver={handleDragOver} onDrop={(event) => handleDrop(event, day.val, time)}>
+                        {slots.length ? slots.map((slot) => {
+                          const tone = /practical|lab/i.test(slot.course_name || '') ? 'border-amber-200 bg-amber-50 text-amber-950' : /tutorial/i.test(slot.course_name || '') ? 'border-emerald-200 bg-emerald-50 text-emerald-950' : 'border-blue-200 bg-blue-50 text-sgvu-navy';
+                          return <div key={slot.timetable_id || `${slot.course_id}-${slot.faculty_user_id}`} draggable onDragStart={(event) => handleDragStart(event, { type: 'MOVE', slot })}
+                            className={`group relative min-w-[210px] max-w-full flex-1 cursor-grab rounded-lg border px-3 py-2 text-sm shadow-sm active:cursor-grabbing ${tone}`}>
+                            <button type="button" onClick={() => removeSlot(slot)} className="absolute right-2 top-2 rounded p-1 hover:bg-white/80" aria-label={`Remove ${slot.course_code} on ${day.label} at ${formatTime(time)}`}><X className="h-4 w-4" /></button>
+                            <p className="pr-7 font-bold">{slot.course_code} · {slot.course_name}</p>
+                            <p className="mt-1 text-xs">{slot.faculty_name || 'Faculty not shown'} · {formatTime(slot.start_time)}–{formatTime(slot.end_time)}{slot.room ? ` · ${slot.room}` : ''}</p>
+                          </div>;
+                        }) : <span className="self-center px-2 text-xs text-slate-400">Open time · drop a course to add a one-hour slot</span>}
+                      </div>
+                    </div>;
+                  })}
+                </div>
+              </section>
+            ))}
+          </div>
         </div>
 
         {/* Right Side: Unassigned Pool */}
