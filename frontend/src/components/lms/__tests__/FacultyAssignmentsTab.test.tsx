@@ -87,6 +87,6 @@ describe('FacultyAssignmentsTab create modal', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Publish Assignment' }));
 
     await waitFor(() => expect(mocks.postMultipart).toHaveBeenCalledTimes(1));
-    expect(screen.queryByRole('dialog', { name: /create digital assignment/i })).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: /create digital assignment/i })).not.toBeInTheDocument());
   });
 });
