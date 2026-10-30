@@ -45,12 +45,16 @@ DECLARE
   -- Exact companion matrix to LIMITED_BUSINESS_TABLES in runtime-start.cjs.
   -- Absence is permitted before the separate expand-only schema deployment.
   limited_business_tables constant jsonb := '{
-    "department_leadership": {"insert": true, "update_columns": ["structure", "higher_officer_id", "revision"]},
+    "department_leadership": {"insert": true, "update_columns": ["structure", "higher_officer_id", "revision", "dean_enabled", "dean_user_id"]},
     "department_offices": {"insert": true, "update_columns": ["login_alias"]},
     "department_office_appointments": {"insert": true, "update_columns": ["valid_to"]},
     "department_office_session_revisions": {"insert": true, "update_columns": ["revision"]},
     "department_leadership_events": {"insert": true, "update_columns": []},
-    "student_identity_email_changes": {"insert": false, "update_columns": []}
+    "student_identity_email_changes": {"insert": false, "update_columns": []},
+    "hr_department_request_routes": {"insert": true, "update_columns": ["approver_ids", "current_index", "leadership_revision", "updated_at"]},
+    "department_leadership_changes": {"insert": true, "update_columns": []},
+    "hr_staff_request_appeals": {"insert": true, "update_columns": ["rejecting_user_id", "reviewer_user_id", "status", "reconsideration_count", "revision", "updated_at"]},
+    "hr_staff_request_appeal_events": {"insert": true, "update_columns": []}
   }'::jsonb;
   refresh_views constant text[] := ARRAY[
     'iqac_mv_placement_stats', 'iqac_mv_faculty_metrics',

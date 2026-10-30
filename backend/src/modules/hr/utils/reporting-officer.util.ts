@@ -41,7 +41,10 @@ export async function fetchDepartmentHodUserId(
     const rows=await query(`SELECT CASE WHEN c.dept_id IS NULL THEN d.hod_user_id ELSE a.user_id END AS hod_user_id
       FROM departments d LEFT JOIN department_leadership c ON c.dept_id=d.dept_id AND c.tenant_id=$2
       LEFT JOIN department_offices o ON o.tenant_id=c.tenant_id AND o.dept_id=c.dept_id
-        AND o.kind=CASE WHEN c.structure='HOD_ONLY' THEN 'HOD' ELSE 'PRINCIPAL' END
+        AND o.kind=CASE
+          WHEN c.structure IN ('HOD_ONLY','PRINCIPAL_HOD') THEN 'HOD'
+          WHEN c.structure='PRINCIPAL_ONLY' THEN 'PRINCIPAL'
+          ELSE NULL END
       LEFT JOIN department_office_appointments a ON a.office_id=o.office_id AND a.valid_to IS NULL AND a.valid_from<=now()
       WHERE d.dept_id=$1 LIMIT 1`,[deptId,tenantId]);
     return rows[0]?.hod_user_id??null;

@@ -650,6 +650,21 @@ export function HodCommandCenter() {
         }
       />
 
+      <div className="mb-5 grid gap-3 md:grid-cols-3" aria-label="HOD workspace shortcuts">
+        <Link href="/hod/inbox?scope=dept" className="rounded-xl border bg-white p-4 shadow-sm hover:border-sgvu-gold">
+          <span className="text-sm font-semibold text-sgvu-navy">Approval inbox</span>
+          <span className="mt-1 block text-xs text-slate-600">{m.pending_inbox_total} request(s) waiting for a decision</span>
+        </Link>
+        <Link href="/hod/faculty/workload" className="rounded-xl border bg-white p-4 shadow-sm hover:border-sgvu-gold">
+          <span className="text-sm font-semibold text-sgvu-navy">Team and workload</span>
+          <span className="mt-1 block text-xs text-slate-600">See your department's faculty and teaching load</span>
+        </Link>
+        <Link href="/faculty/timetable" className="rounded-xl border bg-white p-4 shadow-sm hover:border-sgvu-gold">
+          <span className="text-sm font-semibold text-sgvu-navy">My teaching</span>
+          <span className="mt-1 block text-xs text-slate-600">Open your own classes, courses and attendance</span>
+        </Link>
+      </div>
+
       {sectionErrors.length > 0 ? (
         <div
           role="alert"

@@ -6,6 +6,7 @@ import {
   DepartmentCasesPanel,
   type OversightCase,
 } from "./DepartmentCasesPanel";
+import { PrincipalDepartmentPicker, PrincipalDepartmentSummary, usePrincipalDepartments } from "./PrincipalDepartmentPicker";
 type Row = Record<string, string | number | null>;
 type Overview = {
   office: { login_alias: string; dept_id: number };
@@ -107,6 +108,7 @@ function Table({
 }
 export function PrincipalOversightPage({ view }: { view: PrincipalView }) {
   const api = useAuthedApi();
+  const { departments, selected, choose, loading: officesLoading, error: officesError } = usePrincipalDepartments();
   const [data, setData] = useState<Overview | null>(null),
     [directory, setDirectory] = useState<Directory | null>(null),
     [error, setError] = useState(""),
@@ -114,15 +116,23 @@ export function PrincipalOversightPage({ view }: { view: PrincipalView }) {
     [search, setSearch] = useState("");
   const load = useCallback(
     async (isActive: () => boolean = () => true) => {
+      if (!selected) {
+        if (!officesLoading) {
+          setError(officesError || "No Principal department is assigned to this account.");
+          setLoading(false);
+        }
+        return;
+      }
       setLoading(true);
       setError("");
       try {
         const result = await api.get<Overview>(
           "/api/academics/department-oversight/principal",
+          { "x-department-id": selected },
         );
         const people =
           view === "department"
-            ? await api.get<Directory>("/api/academics/principal/overview")
+            ? await api.get<Directory>("/api/academics/principal/overview", { "x-department-id": selected })
             : null;
         if (!isActive()) return;
         setData(result);
@@ -141,7 +151,7 @@ export function PrincipalOversightPage({ view }: { view: PrincipalView }) {
         if (isActive()) setLoading(false);
       }
     },
-    [api, view],
+    [api, view, selected, officesLoading, officesError],
   );
   useEffect(() => {
     let active = true;
@@ -206,6 +216,8 @@ export function PrincipalOversightPage({ view }: { view: PrincipalView }) {
           Refresh data
         </button>
       </header>
+      <PrincipalDepartmentPicker departments={departments} selected={selected} choose={choose} />
+      {view === 'dashboard' && <PrincipalDepartmentSummary departments={departments} selected={selected} choose={choose} />}
       {error ? (
         <p
           role="alert"
@@ -481,7 +493,7 @@ export function PrincipalOversightPage({ view }: { view: PrincipalView }) {
                 </p>
               </>
             )}
-            {view === "exceptions" && <DepartmentCasesPanel />}
+            {view === "exceptions" && <DepartmentCasesPanel departmentId={selected} />}
             {view === "audit" && (
               <>
                 <p className="text-sm text-muted-foreground">

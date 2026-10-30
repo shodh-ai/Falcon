@@ -24,6 +24,7 @@ import {
 } from '@/lib/workforce-dates';
 import { useShowMoreList, ShowMoreButton } from '@/components/self-service/ShowMoreList';
 import { ProxyTeachingDialog } from '@/components/faculty/ProxyTeachingDialog';
+import { HrAppealsPanel } from '@/components/self-service/HrAppealsPanel';
 import { isEmptyArray, withFacultyDemoFallback } from '@/lib/faculty-demo-mode';
 import {
   facultyDemoLeaveBalances,
@@ -41,6 +42,8 @@ type Request = {
   end_time?: string | null;
   status: string;
   reason: string | null;
+  current_approver_name?: string | null;
+  effective_chain?: string[] | null;
 };
 
 type ApplyMode = 'LEAVE' | 'ON_DUTY';
@@ -282,8 +285,12 @@ export function MyLeavesPanel({ allowDemoFallback = true, enableTeachingProxy = 
                       {r.start_time && r.end_time ? ` · ${r.start_time.slice(0, 5)}–${r.end_time.slice(0, 5)}` : ''}
                     </p>
                     {r.reason ? <p className="mt-0.5 text-xs text-muted-foreground truncate max-w-md">{r.reason}</p> : null}
+                    {r.current_approver_name && <p className="mt-1 text-xs text-muted-foreground">Awaiting {r.current_approver_name}</p>}
+                    {r.effective_chain?.length ? <p className="text-xs text-muted-foreground">Approval path: {r.effective_chain.join(' → ')}</p> : null}
                   </div>
-                  <Badge variant={statusBadgeVariant(r.status)} className="shrink-0 text-[10px]">{leaveStatusLabel(r.status)}</Badge>
+                  <Badge variant={statusBadgeVariant(r.status)} className="shrink-0 text-[10px]">
+                    {r.effective_chain?.length && r.status === 'HR_APPROVED' ? 'Approved' : leaveStatusLabel(r.status)}
+                  </Badge>
                 </li>
               ))}
             </ul>
@@ -291,6 +298,7 @@ export function MyLeavesPanel({ allowDemoFallback = true, enableTeachingProxy = 
           </>
         )}
       </FacultyPanel>
+      <HrAppealsPanel rejectedRequests={requests} onChanged={() => void load()} />
     </div>
   );
 }

@@ -4,6 +4,7 @@ import { DepartmentLeadershipService } from './department-leadership.service';
 import {
   DepartmentLeadershipController,
   PrincipalWorkspaceController,
+  DeanLeadershipWorkspaceController,
 } from './department-leadership.controller';
 import { OfficeAuditInterceptor } from './office-audit.interceptor';
 @Module({
@@ -11,7 +12,7 @@ import { OfficeAuditInterceptor } from './office-audit.interceptor';
     DepartmentLeadershipService,
     { provide: APP_INTERCEPTOR, useClass: OfficeAuditInterceptor },
   ],
-  controllers: [DepartmentLeadershipController, PrincipalWorkspaceController],
+  controllers: [DepartmentLeadershipController, PrincipalWorkspaceController, DeanLeadershipWorkspaceController],
   exports: [DepartmentLeadershipService],
 })
 export class DepartmentLeadershipModule {}

@@ -1677,6 +1677,7 @@ export class HrService {
       leave.current_step_order,
       leave.workflow_id,
       leave.current_approver_user_id,
+      leave.leave_id,
     );
 
     if (next.is_final) {
@@ -1754,6 +1755,7 @@ export class HrService {
       leave.current_step_order,
       leave.workflow_id,
       leave.current_approver_user_id,
+      leave.leave_id,
     );
 
     if (next.is_final) {

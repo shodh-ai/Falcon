@@ -3,7 +3,7 @@
 This is release preparation. These files do not apply a migration, change a live
 role, restart an application or activate a department.
 
-The six leadership tables have exact runtime permissions. Existing tables retain
+The ten limited leadership and HR route tables have exact runtime permissions. Existing tables retain
 their reviewed business CRUD, sequence, migration-ledger and reporting-view
 boundaries. The API remains a non-owner role without DDL, elevated membership or
 privilege delegation. No credential, storage policy, mount or upload ACL changes
@@ -17,9 +17,16 @@ are required.
 | `department_office_session_revisions` | Yes | Yes | `revision` |
 | `department_leadership_events` | Yes | Yes | None |
 | `student_identity_email_changes` | Yes | No | None |
+| `hr_department_request_routes` | Yes | Yes | `approver_ids`, `current_index`, `leadership_revision`, `updated_at` |
+| `department_leadership_changes` | Yes | Yes | None |
+| `hr_staff_request_appeals` | Yes | Yes | `rejecting_user_id`, `reviewer_user_id`, `status`, `reconsideration_count`, `revision`, `updated_at` |
+| `hr_staff_request_appeal_events` | Yes | Yes | None |
+
+The `department_leadership` UPDATE list also includes `dean_enabled` and
+`dean_user_id` for the flexible editor.
 
 No table-level UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER, MAINTAIN or grant option
-is permitted on these six tables. Runtime INSERT/UPDATE on the email ledger is
+is permitted on these ten tables. Runtime INSERT/UPDATE on the email ledger is
 unnecessary: the explicit email-mapping maintenance operation uses separately
 reviewed maintenance authority. The API can append audit events and end an
 appointment through `valid_to`; it cannot rewrite an event or appointment identity.
@@ -30,7 +37,7 @@ Both the full role policy and startup verification must agree on the named
 exceptions. Effective permissions include PUBLIC, inherited and column-level
 grants. Missing required permissions and additional forbidden permissions must
 fail closed. Unknown ordinary application tables retain the existing CRUD rule.
-Absence of the six tables is accepted by the protection check so the compatibility
+Absence of the ten tables is accepted by the protection check so the compatibility
 image can start before this additive migration.
 
 ## Required release order
@@ -56,12 +63,12 @@ currently healthy process unable to restart. Do not leave that recovery gap.
    and hash. Use reviewed bounded lock/statement timeouts; do not use API credentials,
    seed, repair, force, replay or bootstrap modes. The migration must not contain an
    inner transaction commit: the runner owns SQL plus ledger atomicity.
-4. Apply the separately reviewed **six-table grant delta**, preserving unrelated
+4. Apply the separately reviewed **ten-table grant delta**, preserving unrelated
    grants. Do not run the fresh-role provisioner against existing `falcon_runtime`.
    The full `runtime-role.sql` policy also retains these exceptions for future
    reviewed regrants; do not substitute a broad automatic regrant for the scoped
    operation. Confirm required objects/columns exist and are the expected kind,
-   ownership and shape before granting. The grant helper validates the six ordinary
+   ownership and shape before granting. The grant helper validates the ten ordinary
    table names and allowed UPDATE columns; it is not a complete migration-shape
    validator. Separately compare every column/type/default, index and foreign key
    with the reviewed migration. Keep credentials private.
@@ -96,7 +103,7 @@ Record an unavailable or skipped PG18 fixture as **unproven**, including its con
 execution blocker. Mock tests or a different PostgreSQL major do not establish the
 PG18 production acceptance gate.
 
-On 29 October 2026, the corrected role fixture completed all **19 tests with no
+On 29 October 2026, the prior six-table role fixture completed all **19 tests with no
 failures or skips** in a disposable, disconnected PostgreSQL 18 container. It used
 synthetic relations and roles, and the real exported startup query. The API,
 frontend, PostgreSQL and Redis production identities, images, mounts, start times
@@ -105,7 +112,11 @@ test containers were removed. The 22 Node launcher/deployment tests and local
 197-test Python suite also passed; the latter skips its opt-in container class
 locally, which was exercised separately by the 19-test server run.
 
-This establishes the grant/metadata-query behavior against synthetic PG18 data.
+That evidence established the prior six-table grant/metadata-query behavior against
+synthetic PG18 data. The expanded ten-table fixture passed in the PR #193 CI
+storage and database deployment-boundaries job on 30 October 2026, using a
+disposable PostgreSQL 18 container and synthetic data. This establishes the
+isolated grant-policy gate only.
 It does not establish final-image startup, password-authenticated production login,
 business workflow acceptance, the complete leadership migration shape, or the
 compatibility-image rolling deployment/restart/rollback sequence. Those remain

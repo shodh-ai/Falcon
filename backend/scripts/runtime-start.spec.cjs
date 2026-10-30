@@ -166,14 +166,18 @@ test('database denial prevents app bootstrap and no secret is logged',async()=>{
 });
 
 const limitedPolicy={
-  department_leadership:{insert:true,updateColumns:['structure','higher_officer_id','revision']},
+  department_leadership:{insert:true,updateColumns:['structure','higher_officer_id','revision','dean_enabled','dean_user_id']},
   department_offices:{insert:true,updateColumns:['login_alias']},
   department_office_appointments:{insert:true,updateColumns:['valid_to']},
   department_office_session_revisions:{insert:true,updateColumns:['revision']},
   department_leadership_events:{insert:true,updateColumns:[]},
   student_identity_email_changes:{insert:false,updateColumns:[]},
+  hr_department_request_routes:{insert:true,updateColumns:['approver_ids','current_index','leadership_revision','updated_at']},
+  department_leadership_changes:{insert:true,updateColumns:[]},
+  hr_staff_request_appeals:{insert:true,updateColumns:['rejecting_user_id','reviewer_user_id','status','reconsideration_count','revision','updated_at']},
+  hr_staff_request_appeal_events:{insert:true,updateColumns:[]},
 };
-test('leadership boundary lists only six exact immutable object policies',()=>{
+test('leadership boundary lists only reviewed exact immutable object policies',()=>{
   assert.deepEqual(LIMITED_BUSINESS_TABLES,limitedPolicy);
   assert.ok(Object.isFrozen(LIMITED_BUSINESS_TABLES));
   for(const table of Object.values(LIMITED_BUSINESS_TABLES)){

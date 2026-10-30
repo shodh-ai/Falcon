@@ -17,6 +17,9 @@ export function finalHrReviewSql(requestAlias: string, stepAlias: string) {
       ${requestAlias}.workflow_id IS NULL
       AND ${requestAlias}.current_step_order = 2
       AND ${requestAlias}.status IN ('PENDING', 'HOD_APPROVED')
+      AND NOT EXISTS (SELECT 1 FROM hr_department_request_routes department_route
+        WHERE department_route.tenant_id = ${requestAlias}.tenant_id
+          AND department_route.leave_id = ${requestAlias}.leave_id)
     )
   )`;
 }

@@ -7,6 +7,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager } from 'typeorm';
 import type { StaffRequestType } from '../../entities/staff-leave-request.entity';
 import { HrWorkflowBuilderService } from './hr-workflow-builder.service';
+import { resolveLeadershipChain, LeadershipChain } from '../department-leadership/approval-chain';
 
 export type WorkflowInitResult = {
   workflow_id: string | null;
@@ -14,6 +15,7 @@ export type WorkflowInitResult = {
   approver_user_id: string | null;
   approver_type: string | null;
   is_final: boolean;
+  leadership_route?: LeadershipChain;
 };
 
 @Injectable()
@@ -42,10 +44,30 @@ export class HrWorkflowRoutingService {
     persist: (routing: WorkflowInitResult, manager: EntityManager) => Promise<T>,
   ): Promise<T> {
     return this.dataSource.transaction(async (manager) => {
+      const [requester] = await manager.query<Array<{ dept_id: number | null }>>(
+        `SELECT dept_id FROM users WHERE tenant_id=$1 AND user_id=$2`,
+        [tenantId, requesterUserId],
+      );
+      if (requester?.dept_id) await manager.query(
+        `SELECT pg_advisory_xact_lock(hashtext($1))`,
+        [`${tenantId}:${requester.dept_id}:leadership`],
+      );
       const routing = await this.initializeRequest(
         tenantId, entityId, requestType, requesterUserId, manager,
       );
-      return persist(routing, manager);
+      const saved = await persist(routing, manager);
+      if (routing.leadership_route) {
+        const leaveId = (saved as { leave_id?: string }).leave_id;
+        if (!leaveId) throw new BadRequestException('Request ID was not persisted');
+        await manager.query(
+          `INSERT INTO hr_department_request_routes
+            (leave_id,tenant_id,dept_id,approver_ids,leadership_revision)
+           VALUES($1,$2,$3,$4::uuid[],$5)`,
+          [leaveId, tenantId, routing.leadership_route.deptId,
+            routing.leadership_route.approverIds, routing.leadership_route.revision],
+        );
+      }
+      return saved;
     });
   }
 
@@ -58,6 +80,18 @@ export class HrWorkflowRoutingService {
   ): Promise<WorkflowInitResult> {
     const actionType = this.actionTypeForRequest(requestType);
     const querySource = manager ?? this.dataSource;
+    const leadership = await resolveLeadershipChain(
+      (sql, args) => querySource.query(sql, args), tenantId, requesterUserId,
+      !!manager,
+    );
+    if (leadership) {
+      return {
+        workflow_id: null, step_order: 1,
+        approver_user_id: leadership.approverIds[0],
+        approver_type: 'DEPARTMENT_OFFICE', is_final: false,
+        leadership_route: leadership,
+      };
+    }
     const workflow = await querySource.query(
       `SELECT workflow_id FROM hr_approval_workflows
        WHERE tenant_id = $1 AND entity_id = $2 AND action_type = $3 AND is_active = true
@@ -129,7 +163,28 @@ export class HrWorkflowRoutingService {
     currentStepOrder: number,
     workflowId: string | null,
     currentApproverUserId?: string | null,
+    leaveId?: string,
   ): Promise<WorkflowInitResult> {
+    if (leaveId) {
+      const [route] = await this.dataSource.query<Array<{
+        approver_ids: string[]; current_index: number;
+      }>>(
+        `SELECT approver_ids,current_index FROM hr_department_request_routes
+         WHERE tenant_id=$1 AND leave_id=$2`, [tenantId, leaveId],
+      );
+      if (route) {
+        if (route.approver_ids[route.current_index] !== currentApproverUserId) {
+          throw new ForbiddenException('The department approval route changed; refresh the request');
+        }
+        const nextId = route.approver_ids[route.current_index + 1];
+        return {
+          workflow_id: null, step_order: currentStepOrder + (nextId ? 1 : 0),
+          approver_user_id: nextId ?? null,
+          approver_type: nextId ? 'DEPARTMENT_OFFICE' : null,
+          is_final: !nextId,
+        };
+      }
+    }
     if (workflowId === null) {
       if (currentStepOrder === 2) {
         return {

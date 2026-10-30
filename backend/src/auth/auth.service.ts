@@ -908,7 +908,7 @@ export class AuthService {
     if(!this.leadership)return;
     const context=await this.leadership.context(user.tenant_id,user.user_id);
     user.leadership_auth_revision=context.authRevision ?? 0;
-    if(!context.managed && !context.offices.length){
+    if(!context.managed && !context.offices.length && !context.explicitDean){
       if(selected)throw new UnauthorizedException('Office appointment changed; sign in again');
       return;
     }
@@ -919,6 +919,7 @@ export class AuthService {
       !(context.managed && user.role?.role_name==='HOD' && r==='Dean' && !context.explicitDean));
     if(context.offices.some(o=>o.kind==='HOD'))roles.push('HOD');
     if(context.offices.some(o=>o.kind==='PRINCIPAL'))roles.push('Principal');
+    if(context.explicitDean && !roles.includes('Dean'))roles.push('Dean');
     const office=selected ? context.offices.find(o=>o.appointment_id===selected.appointment_id && o.office_id===selected.office_id) : context.offices.find(o=>o.kind==='PRINCIPAL') ?? context.offices[0];
     if(selected && !office)throw new UnauthorizedException('Office appointment changed; sign in again');
     user.office_context=office;

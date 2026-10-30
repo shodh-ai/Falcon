@@ -48,7 +48,14 @@ describe('Exam Cell employee self-service', () => {
   });
 
   it('reports failed leave loading and retries the real endpoints', async () => {
-    api.get.mockRejectedValueOnce(new Error('Unavailable')).mockResolvedValue([]);
+    let failedBalanceOnce = false;
+    api.get.mockImplementation((path: string) => {
+      if (path === '/api/hr/leaves/my-balances' && !failedBalanceOnce) {
+        failedBalanceOnce = true;
+        return Promise.reject(new Error('Unavailable'));
+      }
+      return Promise.resolve([]);
+    });
     render(<WorkforcePage />);
     expect(await screen.findByText(/Some leave information could not be loaded/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));

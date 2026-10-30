@@ -26,12 +26,16 @@ HOST_SPEC = importlib.util.spec_from_file_location('fixture_host_preflight', SQL
 HOST = importlib.util.module_from_spec(HOST_SPEC)
 HOST_SPEC.loader.exec_module(HOST)
 LIMITED_TABLES = {
-    'department_leadership': {'insert': True, 'updateColumns': ['structure', 'higher_officer_id', 'revision']},
+    'department_leadership': {'insert': True, 'updateColumns': ['structure', 'higher_officer_id', 'revision', 'dean_enabled', 'dean_user_id']},
     'department_offices': {'insert': True, 'updateColumns': ['login_alias']},
     'department_office_appointments': {'insert': True, 'updateColumns': ['valid_to']},
     'department_office_session_revisions': {'insert': True, 'updateColumns': ['revision']},
     'department_leadership_events': {'insert': True, 'updateColumns': []},
     'student_identity_email_changes': {'insert': False, 'updateColumns': []},
+    'hr_department_request_routes': {'insert': True, 'updateColumns': ['approver_ids', 'current_index', 'leadership_revision', 'updated_at']},
+    'department_leadership_changes': {'insert': True, 'updateColumns': []},
+    'hr_staff_request_appeals': {'insert': True, 'updateColumns': ['rejecting_user_id', 'reviewer_user_id', 'status', 'reconsideration_count', 'revision', 'updated_at']},
+    'hr_staff_request_appeal_events': {'insert': True, 'updateColumns': []},
 }
 VIEWS = ('iqac_mv_placement_stats', 'iqac_mv_faculty_metrics',
          'iqac_mv_student_counts', 'iqac_mv_repository_health',
@@ -341,6 +345,7 @@ INSERT INTO public.business_records(value) VALUES ('synthetic baseline');
 CREATE TABLE public.department_leadership (
  tenant_id uuid NOT NULL, dept_id integer NOT NULL,
  structure text NOT NULL, higher_officer_id uuid, revision integer NOT NULL DEFAULT 1,
+ dean_enabled boolean NOT NULL DEFAULT false, dean_user_id uuid,
  PRIMARY KEY (tenant_id,dept_id));
 CREATE TABLE public.department_offices (
  office_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),tenant_id uuid NOT NULL,
@@ -360,6 +365,26 @@ CREATE TABLE public.student_identity_email_changes (
  tenant_id uuid NOT NULL,user_id uuid NOT NULL,student_login_id text NOT NULL,
  old_email text,new_email text NOT NULL,mailbox_provisioned boolean NOT NULL DEFAULT false,
  changed_at timestamptz NOT NULL DEFAULT now(),PRIMARY KEY (tenant_id,user_id));
+CREATE TABLE public.hr_department_request_routes (
+ leave_id uuid PRIMARY KEY,tenant_id uuid NOT NULL,dept_id integer NOT NULL,
+ approver_ids uuid[] NOT NULL,current_index integer NOT NULL DEFAULT 0,
+ leadership_revision integer NOT NULL,updated_at timestamptz NOT NULL DEFAULT now());
+CREATE TABLE public.department_leadership_changes (
+ change_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),tenant_id uuid NOT NULL,
+ dept_id integer NOT NULL,idempotency_key text NOT NULL,request_hash text NOT NULL,
+ applied_revision integer NOT NULL,created_at timestamptz NOT NULL DEFAULT now());
+CREATE TABLE public.hr_staff_request_appeals (
+ appeal_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),tenant_id uuid NOT NULL,
+ leave_id uuid NOT NULL,requester_user_id uuid NOT NULL,rejecting_user_id uuid NOT NULL,
+ rejecting_level text,reviewer_user_id uuid NOT NULL,idempotency_key text NOT NULL,
+ reason text NOT NULL,status text NOT NULL,reconsideration_count integer NOT NULL DEFAULT 0,
+ revision integer NOT NULL DEFAULT 1,created_at timestamptz NOT NULL DEFAULT now(),
+ updated_at timestamptz NOT NULL DEFAULT now());
+CREATE TABLE public.hr_staff_request_appeal_events (
+ event_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),appeal_id uuid NOT NULL,
+ tenant_id uuid NOT NULL,actor_user_id uuid NOT NULL,action text NOT NULL,
+ idempotency_key text NOT NULL,reason text,details jsonb NOT NULL DEFAULT '{}',
+ created_at timestamptz NOT NULL DEFAULT now());
 INSERT INTO public.student_identity_email_changes
  (tenant_id,user_id,student_login_id,old_email,new_email)
  VALUES ('10000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000002',
@@ -515,7 +540,7 @@ INSERT INTO public.department_leadership_events(tenant_id,dept_id,actor_user_id,
             ','.join("'" + table + "'" for table in LIMITED_TABLES) +
             "]) GROUP BY c.oid,c.relname,c.relacl ORDER BY c.relname;").stdout
 
-    def test_scoped_leadership_job_changes_only_six_objects_and_refuses_incomplete_schema(self):
+    def test_scoped_leadership_job_changes_only_reviewed_objects_and_refuses_incomplete_schema(self):
         # The production helper pins the existing role name. It is created only
         # within this generated synthetic database, with no real credentials.
         role = 'falcon_runtime'

@@ -1,5 +1,5 @@
 -- Explicit scoped migration follow-up, never API startup or automatic grants.
--- Applies only the six exact leadership relation ACLs to existing falcon_runtime.
+-- Applies only the reviewed limited relation ACLs to existing falcon_runtime.
 -- Review/test against isolated PostgreSQL18 before use. No credential handling,
 -- role creation, existing data edits, ownership, PUBLIC/other-role revocation,
 -- database/schema/sequence grants or other-table ACL changes are performed.
@@ -44,14 +44,18 @@ DECLARE
   update_columns text[];
   update_column_sql text;
   -- Exact companion matrix to LIMITED_BUSINESS_TABLES in runtime-start.cjs.
-  -- Unlike the compatibility launcher, this job requires all six tables.
+  -- Unlike the compatibility launcher, this job requires every listed table.
   limited_business_tables constant jsonb := '{
-    "department_leadership": {"insert": true, "update_columns": ["structure", "higher_officer_id", "revision"]},
+    "department_leadership": {"insert": true, "update_columns": ["structure", "higher_officer_id", "revision", "dean_enabled", "dean_user_id"]},
     "department_offices": {"insert": true, "update_columns": ["login_alias"]},
     "department_office_appointments": {"insert": true, "update_columns": ["valid_to"]},
     "department_office_session_revisions": {"insert": true, "update_columns": ["revision"]},
     "department_leadership_events": {"insert": true, "update_columns": []},
-    "student_identity_email_changes": {"insert": false, "update_columns": []}
+    "student_identity_email_changes": {"insert": false, "update_columns": []},
+    "hr_department_request_routes": {"insert": true, "update_columns": ["approver_ids", "current_index", "leadership_revision", "updated_at"]},
+    "department_leadership_changes": {"insert": true, "update_columns": []},
+    "hr_staff_request_appeals": {"insert": true, "update_columns": ["rejecting_user_id", "reviewer_user_id", "status", "reconsideration_count", "revision", "updated_at"]},
+    "hr_staff_request_appeal_events": {"insert": true, "update_columns": []}
   }'::jsonb;
 BEGIN
   IF role_name <> 'falcon_runtime' THEN
@@ -131,8 +135,8 @@ BEGIN
     RAISE EXCEPTION 'SECURITY DEFINER access or triggers require separate review';
   END IF;
   IF (SELECT count(*) FROM pg_class c WHERE c.relnamespace=schema_oid
-        AND limited_business_tables ? c.relname AND c.relkind='r') <> 6 THEN
-    RAISE EXCEPTION 'All six exact leadership tables must exist before scoped grants';
+        AND limited_business_tables ? c.relname AND c.relkind='r') <> 10 THEN
+    RAISE EXCEPTION 'All ten exact limited tables must exist before scoped grants';
   END IF;
 
   FOR relation_row IN SELECT c.oid,c.relname,c.relkind FROM pg_class c

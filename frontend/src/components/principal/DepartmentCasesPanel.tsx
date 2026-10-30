@@ -30,9 +30,11 @@ const label = (v: string) => v.toLowerCase().replaceAll("_", " ");
 export function DepartmentCasesPanel({
   role = "principal",
   onlyEscalations = false,
+  departmentId,
 }: {
   role?: "principal" | "hod";
   onlyEscalations?: boolean;
+  departmentId?: string;
 }) {
   const api = useAuthedApi(),
     base = `/api/academics/department-oversight/${role}/cases`;
@@ -57,7 +59,8 @@ export function DepartmentCasesPanel({
     async (isActive: () => boolean = () => true) => {
       setLoading(true);
       try {
-        const data = await api.get<{ cases: OversightCase[] }>(base);
+        const data = await api.get<{ cases: OversightCase[] }>(base,
+          departmentId ? { "x-department-id": departmentId } : undefined);
         const pending =
           role === "hod"
             ? await api.get<Move[]>(
@@ -77,7 +80,7 @@ export function DepartmentCasesPanel({
         if (isActive()) setLoading(false);
       }
     },
-    [api, base, role],
+    [api, base, role, departmentId],
   );
   useEffect(() => {
     let active = true;
@@ -99,6 +102,7 @@ export function DepartmentCasesPanel({
     try {
       await api.post(base, body, {
         "Idempotency-Key": keyFor(JSON.stringify(body)),
+        ...(departmentId ? { "x-department-id": departmentId } : {}),
       });
       command.current = null;
       setTitle("");
@@ -119,6 +123,7 @@ export function DepartmentCasesPanel({
     try {
       await api.patch(`${base}/${row.case_id}`, body, {
         "If-Match": String(row.revision),
+        ...(departmentId ? { "x-department-id": departmentId } : {}),
         "Idempotency-Key": keyFor(
           JSON.stringify({ id: row.case_id, revision: row.revision, ...body }),
         ),

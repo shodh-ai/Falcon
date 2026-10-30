@@ -887,14 +887,23 @@ export const hrPortal: PortalConfig = {
 
 export const hodPortal: PortalConfig = {
   personaLabel: 'HOD Workspace',
-  personaTitle: 'Department Command Center',
+  personaTitle: 'Department Workspace',
   homeHref: '/hod/dashboard',
   navGroups: [
     {
       title: 'Overview',
       items: [
         { label: 'Dashboard', href: '/hod/dashboard', icon: LayoutDashboard, keywords: ['command center', 'metrics', 'attendance'] },
+        { label: 'Approval Inbox', href: '/hod/inbox?scope=dept', icon: Inbox, keywords: ['staff requests', 'leave', 'on duty', 'regularization'] },
         { label: 'Department Timetable', href: '/hod/department-timetable', icon: CalendarClock, keywords: ['schedule', 'rooms', 'master'] },
+      ],
+    },
+    {
+      title: 'My Teaching',
+      items: [
+        { label: 'My Timetable', href: '/faculty/timetable', icon: CalendarClock, keywords: ['my classes', 'schedule'] },
+        { label: 'My Courses', href: '/faculty/courses', icon: BookOpen, keywords: ['my subjects', 'teaching'] },
+        { label: 'Mark Attendance', href: '/faculty/attendance', icon: ClipboardCheck, keywords: ['my class attendance'] },
       ],
     },
     {

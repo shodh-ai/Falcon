@@ -14,12 +14,16 @@ const MATERIALIZED_VIEWS = [
 // limited_business_tables constant in runtime-role.sql. Missing relations are
 // allowed so this launcher can safely precede their separately owned migration.
 const LIMITED_BUSINESS_TABLES = Object.freeze(Object.fromEntries([
-  ['department_leadership', true, ['structure', 'higher_officer_id', 'revision']],
+  ['department_leadership', true, ['structure', 'higher_officer_id', 'revision', 'dean_enabled', 'dean_user_id']],
   ['department_offices', true, ['login_alias']],
   ['department_office_appointments', true, ['valid_to']],
   ['department_office_session_revisions', true, ['revision']],
   ['department_leadership_events', true, []],
   ['student_identity_email_changes', false, []],
+  ['hr_department_request_routes', true, ['approver_ids', 'current_index', 'leadership_revision', 'updated_at']],
+  ['department_leadership_changes', true, []],
+  ['hr_staff_request_appeals', true, ['rejecting_user_id', 'reviewer_user_id', 'status', 'reconsideration_count', 'revision', 'updated_at']],
+  ['hr_staff_request_appeal_events', true, []],
 ].map(([name, insert, updateColumns]) => [name, Object.freeze({
   insert, updateColumns: Object.freeze(updateColumns),
 })])));
