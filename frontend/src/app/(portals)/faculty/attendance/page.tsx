@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import { usePathname, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
+import { AttendanceWindow } from '@/components/faculty/AttendanceWindow';
 import { AttendanceReopeningPanel } from '@/components/faculty/AttendanceReopeningPanel';
 import { BookOpen, Check, Send, X } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
@@ -21,6 +22,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { useAuthedApi } from '@/lib/api';
+import { useAuth } from '@/context/AuthContext';
+import { downloadAuthedFile } from '@/lib/hod-download';
 import { useTeachingDepartment } from '@/components/faculty/TeachingDepartmentContext';
 import { withTeachingDeptId } from '@/lib/faculty/teaching-departments';
 import { AttendanceWeekNavigator } from '@/components/faculty/AttendanceWeekNavigator';
@@ -59,6 +62,13 @@ type FacultyClass = {
 function isExtraClass(slotId: string | null | undefined) {
   return Boolean(slotId?.startsWith('extra:'));
 }
+
+type AttendanceState = {
+  locked: boolean;
+  attendance_data: { student_id: string; status: UiStatus }[] | null;
+  marking_deadline?: string;
+  reopened_until?: string;
+};
 
 type Student = {
   student_id: string;
@@ -112,6 +122,7 @@ function todayIso() {
 
 function MarkAttendanceContent() {
   const api = useAuthedApi();
+  const { token } = useAuth();
   const teachingPrefix = usePathname()?.startsWith('/hod/my-teaching/') ? '/hod/my-teaching' : '/faculty';
   const { activeDeptId, loading: deptLoading } = useTeachingDepartment();
   const params = useSearchParams();
@@ -126,6 +137,9 @@ function MarkAttendanceContent() {
   const [selectedDate, setSelectedDate] = useState(todayIso());
   const [attendanceRevision, setAttendanceRevision] = useState(0);
   const [locked, setLocked] = useState(false);
+  const [markingDeadline, setMarkingDeadline] = useState<string | null>(null);
+  const [reopenedUntil, setReopenedUntil] = useState<string | null>(null);
+  const [exportingAverage, setExportingAverage] = useState(false);
   const [hasSavedAttendance, setHasSavedAttendance] = useState(false);
   const [loading, setLoading] = useState(true);
   const [rosterLoading, setRosterLoading] = useState(false);
@@ -255,7 +269,7 @@ function MarkAttendanceContent() {
 
     function applyRoster(
       rosterResolved: Student[],
-      stateResolved: { locked: boolean; attendance_data: { student_id: string; status: UiStatus }[] | null },
+      stateResolved: AttendanceState,
       analyticsResolved: AttendanceAnalytics | null,
       unmappedResolved: Student[],
     ) {
@@ -264,6 +278,8 @@ function MarkAttendanceContent() {
       setUnmappedCourseStudents(unmappedResolved);
       setAnalytics(analyticsResolved);
       setLocked(Boolean(stateResolved.locked));
+      setMarkingDeadline(stateResolved.marking_deadline ?? null);
+      setReopenedUntil(stateResolved.reopened_until ?? null);
       setHasSavedAttendance(Boolean(stateResolved.attendance_data?.length));
       setAttendance(
         stateResolved.locked && !stateResolved.attendance_data?.length
@@ -283,7 +299,7 @@ function MarkAttendanceContent() {
           api.get<Student[]>(
             `/api/academics/faculty/course/${selectedCourseId}/students?date=${selectedDate}${timetableQuery}`,
           ),
-          api.get<{ locked: boolean; attendance_data: { student_id: string; status: UiStatus }[] | null }>(
+          api.get<AttendanceState>(
             `/api/academics/faculty/course/${selectedCourseId}/attendance?date=${selectedDate}${timetableQuery}`,
           ),
         ]);
@@ -383,8 +399,37 @@ function MarkAttendanceContent() {
     });
   }
 
+  async function downloadAverageAttendance() {
+    if (!token || !selectedCourseId || !selectedTimetableId || !selectedClass) {
+      toast.error("Select a class and sign in before downloading the report.");
+      return;
+    }
+    setExportingAverage(true);
+    try {
+      const safeCode = selectedClass.course_code.replace(
+        /[^A-Za-z0-9_-]+/g,
+        "-",
+      );
+      await downloadAuthedFile(
+        `/api/academics/faculty/course/${encodeURIComponent(selectedCourseId)}/attendance/average-export?date=${encodeURIComponent(selectedDate)}&timetableId=${encodeURIComponent(selectedTimetableId)}`,
+        token,
+        `average-attendance-${safeCode}-${selectedDate}.xlsx`,
+      );
+      toast.success("Average attendance Excel downloaded.");
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Could not download attendance Excel.",
+      );
+    } finally {
+      setExportingAverage(false);
+    }
+  }
+
+
   async function save() {
-    if (!selectedCourseId || rosterLoading) return;
+    if (!selectedCourseId || rosterLoading || locked) return;
     if (selectedClass?.cancelled) {
       toast.error('This class was cancelled. Attendance cannot be recorded.');
       return;
@@ -411,10 +456,12 @@ function MarkAttendanceContent() {
           attendance_data: payload,
         },
       );
-      const state = await api.get<{ locked: boolean }>(
+      const state = await api.get<AttendanceState>(
         `/api/academics/faculty/course/${selectedCourseId}/attendance?date=${selectedDate}${timetableId ? `&timetableId=${encodeURIComponent(timetableId)}` : ''}`,
       );
       setLocked(state.locked);
+      setMarkingDeadline(state.marking_deadline ?? null);
+      setReopenedUntil(state.reopened_until ?? null);
       setHasSavedAttendance(true);
       setAttendanceRevision(value => value + 1);
       setClasses(rows => rows.map(row => row.timetable_id === timetableId && row.course_id === selectedCourseId
@@ -642,6 +689,9 @@ function MarkAttendanceContent() {
                     onChange={(e) => setSearchQuery(e.target.value)}
                   />
                   <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
+                    <Button variant="outline" disabled={exportingAverage || !token || !selectedTimetableId || rosterLoading} onClick={() => void downloadAverageAttendance()}>
+                      {exportingAverage ? 'Exporting…' : 'Export average attendance'}
+                    </Button>
                     {locked ? <Badge variant="secondary">Locked · read-only</Badge> : null}
                     <FacultyMetricChip label="Present" value={presentCount} emphasis />
                     <FacultyMetricChip label="Absent" value={absentCount} />
@@ -673,6 +723,7 @@ function MarkAttendanceContent() {
                   </div>
                 ) : null}
 
+                {!locked && <AttendanceWindow deadline={reopenedUntil || markingDeadline} reopened={Boolean(reopenedUntil)} onExpired={() => setLocked(true)} />}
                 {locked && selectedTimetableId && <AttendanceReopeningPanel courseId={selectedCourseId || undefined} sessionKey={selectedTimetableId} date={selectedDate} />}
                 {locked && !hasSavedAttendance ? (
                   <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">

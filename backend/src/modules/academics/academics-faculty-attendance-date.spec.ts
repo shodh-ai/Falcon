@@ -43,6 +43,17 @@ function createService(options?: {
 }
 
 describe('Faculty attendance date and practical batch safety', () => {
+  it('locks after three full days at campus midnight, independently of server timezone', () => {
+    const { service } = createService();
+    jest.useFakeTimers();
+    try {
+      jest.setSystemTime(new Date('2026-10-31T18:29:59Z'));
+      expect((service as any).isAttendanceLocked('2026-10-28')).toBe(false);
+      jest.setSystemTime(new Date('2026-10-31T18:30:00Z'));
+      expect((service as any).isAttendanceLocked('2026-10-28')).toBe(true);
+    } finally { jest.useRealTimers(); }
+  });
+
   it('rejects a held session before authorization, casting or any database write', async () => {
     const {service,dataSource}=createService();
     await expect(service.saveCourseAttendanceLog('f','t',{course_id:'c',timetable_id:'held:p2-d2-5',attendance_data:[{student_id:'s',status:'PRESENT'}]})).rejects.toBeInstanceOf(BadRequestException);

@@ -10,6 +10,7 @@ import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, In, Repository } from 'typeorm';
 import { mkdirSync, writeFileSync } from 'fs';
 import { extname } from 'path';
+import * as ExcelJS from 'exceljs';
 import { v4 as uuidv4 } from 'uuid';
 import { AttendanceRecord } from '../../entities/attendance-record.entity';
 import { AcademicTimetable } from '../../entities/academic-timetable.entity';
@@ -78,6 +79,17 @@ function academicYearForDate(value?: string): string {
   const year = date.getUTCFullYear();
   const start = date.getUTCMonth() >= 6 ? year : year - 1;
   return `${start}-${start + 1}`;
+}
+
+function academicYearKey(value: string): string {
+  const match = /^(\d{4})\s*[-/]\s*(\d{2}|\d{4})$/.exec(value.trim());
+  if (!match) return value.trim().toUpperCase();
+  const start = Number(match[1]);
+  const end =
+    match[2].length === 2
+      ? Number(`${String(start).slice(0, 2)}${match[2]}`)
+      : Number(match[2]);
+  return `${start}-${end}`;
 }
 
 function extraClassId(timetableId?: string): string | null {
@@ -714,7 +726,7 @@ export class AcademicsFacultyService {
       [tenantId, courseId, rosterFacultyId],
     );
     const currentAllocations = allocations.filter(
-      (allocation) => allocation.academic_year === academicYearForDate(date),
+      (allocation) => academicYearKey(allocation.academic_year) === academicYearKey(academicYearForDate(date)),
     );
     let scopedRows = rows;
     if (allocations.length) {
@@ -1197,6 +1209,7 @@ export class AcademicsFacultyService {
     const reopen = this.isAttendanceLocked(date)
       ? await attendanceReopening((sql, args) => this.dataSource.query(sql, args), tenantId, facultyUserId, courseId, timetableId, date) : null;
     const locked = this.isAttendanceLocked(date) && !reopen;
+    const marking_deadline = this.attendanceMarkingDeadline(date).toISOString();
     const adjustmentId = extraClassId(timetableId);
     if (adjustmentId) {
       await this.assertApprovedExtraClass(this.dataSource, tenantId, courseId, facultyUserId, date, adjustmentId);
@@ -1208,7 +1221,7 @@ export class AcademicsFacultyService {
         [tenantId, courseId, facultyUserId, date, adjustmentId],
       );
       return { course_id: courseId, date, timetable_id: timetableId,
-        locked, reopened_until: reopen?.expires_at, attendance_data: saved?.attendance_data ?? null };
+        locked, marking_deadline, reopened_until: reopen?.expires_at, attendance_data: saved?.attendance_data ?? null };
     }
     if (timetableId && locked) {
       const [saved] = await this.dataSource.query(`SELECT cal.attendance_data FROM course_attendance_logs cal
@@ -1216,7 +1229,7 @@ export class AcademicsFacultyService {
         WHERE cal.tenant_id=$1 AND cal.course_id=$2 AND cal.faculty_user_id=$3
           AND cal.timetable_id=$4::uuid AND cal.date=$5::date AND t.faculty_user_id=$3`,
         [tenantId,courseId,facultyUserId,timetableId,date]);
-      if (Array.isArray(saved?.attendance_data)) return {course_id:courseId,date,timetable_id:timetableId,locked:true,attendance_data:saved.attendance_data};
+      if (Array.isArray(saved?.attendance_data)) return {course_id:courseId,date,timetable_id:timetableId,locked:true,marking_deadline,attendance_data:saved.attendance_data};
     }
     await this.assertCanMarkAttendance(courseId, facultyUserId, tenantId, date, timetableId);
     const effectiveFacultyId = await this.resolveAttendanceFacultyId(
@@ -1246,6 +1259,7 @@ export class AcademicsFacultyService {
       date,
       timetable_id: timetableId ?? null,
       locked,
+      marking_deadline,
       reopened_until: reopen?.expires_at,
       attendance_data: log[0]?.attendance_data ?? null,
     };
@@ -1492,6 +1506,238 @@ export class AcademicsFacultyService {
       habitual_absentees: scopedIds
         ? habitualAbsentees.filter((row: { student_user_id: string }) => scopedIds.has(row.student_user_id))
         : habitualAbsentees,
+    };
+  }
+
+  async exportAverageAttendance(
+    courseId: string,
+    facultyUserId: string,
+    tenantId: string,
+    date: string,
+    timetableId: string,
+  ) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date ?? '') || !Number.isFinite(Date.parse(`${date}T00:00:00Z`)) || new Date(`${date}T00:00:00Z`).toISOString().slice(0, 10) !== date) {
+      throw new BadRequestException('date must be a valid YYYY-MM-DD value');
+    }
+    if (!timetableId?.trim()) {
+      throw new BadRequestException(
+        'Choose a scheduled class before exporting attendance',
+      );
+    }
+
+    const roster = await this.getCourseStudents(
+      courseId,
+      facultyUserId,
+      tenantId,
+      timetableId,
+      date,
+    );
+    const effectiveFacultyId = await this.resolveAttendanceFacultyId(
+      courseId,
+      facultyUserId,
+      tenantId,
+      date,
+      extraClassId(timetableId) ? undefined : timetableId,
+    );
+    const [course] = await this.dataSource.query<
+      Array<{ course_code: string; course_name: string }>
+    >(
+      `SELECT course_code,course_name FROM academic_courses
+       WHERE tenant_id=$1 AND course_id=$2 LIMIT 1`,
+      [tenantId, courseId],
+    );
+    if (!course) throw new NotFoundException('Course not found');
+
+    const entries = await this.dataSource.query<
+      Array<{ student_user_id: string; status: string }>
+    >(
+      `SELECT entry.value->>'student_id' AS student_user_id,
+              UPPER(entry.value->>'status') AS status
+       FROM course_attendance_logs cal
+       CROSS JOIN LATERAL jsonb_array_elements(cal.attendance_data) entry(value)
+       WHERE cal.tenant_id=$1 AND cal.course_id=$2
+         AND cal.faculty_user_id=$3 AND cal.date<=$4::date
+         AND cal.deleted_at IS NULL
+       ORDER BY cal.date,cal.log_id`,
+      [tenantId, courseId, effectiveFacultyId, date],
+    );
+
+    const counts = new Map<
+      string,
+      {
+        recorded: number;
+        present: number;
+        absent: number;
+        excused: number;
+        late: number;
+      }
+    >();
+    for (const row of entries) {
+      const current = counts.get(row.student_user_id) ?? {
+        recorded: 0,
+        present: 0,
+        absent: 0,
+        excused: 0,
+        late: 0,
+      };
+      current.recorded += 1;
+      if (row.status === 'PRESENT') current.present += 1;
+      else if (row.status === 'ABSENT') current.absent += 1;
+      else if (row.status === 'EXCUSED') current.excused += 1;
+      else if (row.status === 'LATE') current.late += 1;
+      counts.set(row.student_user_id, current);
+    }
+
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'Falcon Campus OS';
+    workbook.created = new Date();
+    workbook.calcProperties.fullCalcOnLoad = true;
+    const sheet = workbook.addWorksheet('Average Attendance', {
+      views: [{ state: 'frozen', ySplit: 7 }],
+    });
+    sheet.columns = [
+      { key: 'serial', width: 8 },
+      { key: 'roll_number', width: 20 },
+      { key: 'name', width: 30 },
+      { key: 'recorded', width: 18 },
+      { key: 'present', width: 12 },
+      { key: 'absent', width: 12 },
+      { key: 'excused', width: 18 },
+      { key: 'late', width: 10 },
+      { key: 'average', width: 16 },
+      { key: 'status', width: 22 },
+    ];
+    sheet.mergeCells('A1:J1');
+    sheet.getCell('A1').value = 'Average Attendance Report';
+    sheet.getCell('A2').value = 'Course';
+    sheet.getCell('B2').value = `${course.course_code} — ${course.course_name}`;
+    sheet.getCell('A3').value = 'As of date';
+    sheet.getCell('B3').value = date;
+    sheet.getCell('A4').value = 'Students';
+    sheet.getCell('B4').value = roster.length;
+    sheet.getCell('D4').value = 'Course average';
+    sheet.getCell('A5').value = 'Attendance credit';
+    sheet.getCell('B5').value =
+      'Present, late and excused entries count as attended';
+
+    const headerRowNumber = 7;
+    const header = sheet.getRow(headerRowNumber);
+    header.values = [
+      'S.No.',
+      'Enrollment / Roll No.',
+      'Student Name',
+      'Recorded Sessions',
+      'Present',
+      'Absent',
+      'Leave / Excused',
+      'Late',
+      'Average Attendance %',
+      'Status',
+    ];
+
+    const firstDataRow = headerRowNumber + 1;
+    let creditedTotal = 0;
+    let recordedTotal = 0;
+    roster.forEach((student, index) => {
+      const count = counts.get(student.student_id) ?? {
+        recorded: 0,
+        present: 0,
+        absent: 0,
+        excused: 0,
+        late: 0,
+      };
+      const credited = count.present + count.excused + count.late;
+      const average = count.recorded ? (credited / count.recorded) * 100 : 0;
+      creditedTotal += credited;
+      recordedTotal += count.recorded;
+      const excelRow = firstDataRow + index;
+      const row = sheet.getRow(excelRow);
+      row.values = [
+        index + 1,
+        student.roll_number,
+        student.name,
+        count.recorded,
+        count.present,
+        count.absent,
+        count.excused,
+        count.late,
+        {
+          formula: `IF(D${excelRow}=0,0,(E${excelRow}+G${excelRow}+H${excelRow})/D${excelRow}*100)`,
+          result: average,
+        },
+        count.recorded === 0
+          ? 'No recorded sessions'
+          : average < 75
+            ? 'Below 75%'
+            : '75% or above',
+      ];
+      row.getCell(9).numFmt = '0.00"%"';
+    });
+
+    const lastDataRow = Math.max(
+      firstDataRow,
+      firstDataRow + roster.length - 1,
+    );
+    const courseAverage = recordedTotal
+      ? (creditedTotal / recordedTotal) * 100
+      : 0;
+    sheet.getCell('E4').value = roster.length
+      ? {
+          formula: `IF(SUM(D${firstDataRow}:D${lastDataRow})=0,0,(SUM(E${firstDataRow}:E${lastDataRow})+SUM(G${firstDataRow}:G${lastDataRow})+SUM(H${firstDataRow}:H${lastDataRow}))/SUM(D${firstDataRow}:D${lastDataRow})*100)`,
+          result: courseAverage,
+        }
+      : 0;
+    sheet.getCell('E4').numFmt = '0.00"%"';
+    sheet.autoFilter = {
+      from: { row: headerRowNumber, column: 1 },
+      to: {
+        row: Math.max(headerRowNumber, firstDataRow + roster.length - 1),
+        column: 10,
+      },
+    };
+
+    sheet.getCell('A1').font = {
+      bold: true,
+      size: 18,
+      color: { argb: 'FF082A55' },
+    };
+    sheet.getCell('A1').alignment = { horizontal: 'center' };
+    header.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    header.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FF082A55' },
+    };
+    header.alignment = {
+      vertical: 'middle',
+      horizontal: 'center',
+      wrapText: true,
+    };
+    header.height = 32;
+    sheet.getRows(2, 4)?.forEach((row) => {
+      row.getCell(1).font = { bold: true };
+      row.getCell(4).font = { bold: true };
+    });
+    for (
+      let rowNumber = firstDataRow;
+      rowNumber < firstDataRow + roster.length;
+      rowNumber += 1
+    ) {
+      const row = sheet.getRow(rowNumber);
+      row.alignment = { vertical: 'middle' };
+      if ((rowNumber - firstDataRow) % 2 === 1) {
+        row.fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: 'FFF4F7FB' },
+        };
+      }
+    }
+
+    const safeCode = course.course_code.replace(/[^A-Za-z0-9_-]+/g, '-');
+    return {
+      buffer: Buffer.from(await workbook.xlsx.writeBuffer()),
+      filename: `average-attendance-${safeCode}-${date}.xlsx`,
     };
   }
 
@@ -2027,14 +2273,18 @@ export class AcademicsFacultyService {
     );
   }
 
+  private attendanceMarkingDeadline(date: string) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date ?? '') || !Number.isFinite(Date.parse(`${date}T00:00:00Z`)) ||
+        new Date(`${date}T00:00:00Z`).toISOString().slice(0, 10) !== date) {
+      throw new BadRequestException('date must be a valid YYYY-MM-DD value');
+    }
+    const deadline = new Date(`${date}T00:00:00+05:30`);
+    deadline.setUTCDate(deadline.getUTCDate() + 4);
+    return deadline;
+  }
+
   private isAttendanceLocked(date: string) {
-    const selected = new Date(`${date}T00:00:00`);
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const diffDays = Math.floor(
-      (today.getTime() - selected.getTime()) / 86_400_000,
-    );
-    return diffDays > 3;
+    return Date.now() >= this.attendanceMarkingDeadline(date).getTime();
   }
 
   private async persistMaterialFile(
