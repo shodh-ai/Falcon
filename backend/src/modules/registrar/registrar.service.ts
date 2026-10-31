@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
   Optional,
@@ -7,7 +8,7 @@ import {
 import { InjectDataSource } from '@nestjs/typeorm';
 import { createHash, randomBytes } from 'crypto';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
-import { DataSource } from 'typeorm';
+import { DataSource, EntityManager } from 'typeorm';
 import { EnterpriseAuditService } from '../../core/audit/enterprise-audit.service';
 import { FalconNotificationsService } from '../../core/notifications/falcon-notifications.service';
 import { AdmissionsService } from '../admissions/admissions.service';
@@ -27,6 +28,30 @@ const LIFECYCLE = [
 ] as const;
 
 export type LifecycleStatus = (typeof LIFECYCLE)[number];
+
+const REQUIRED_DEGREE_CHECKS = [
+  'credits',
+  'cgpa',
+  'backlogs',
+  'finance',
+  'library',
+  'hostel',
+] as const;
+
+function hasVerifiedDegreeChecks(audit: {
+  requirements_policy_status?: unknown;
+  clearance_statuses?: unknown;
+}) {
+  if (
+    audit.requirements_policy_status !== 'CONFIRMED' ||
+    !audit.clearance_statuses ||
+    typeof audit.clearance_statuses !== 'object'
+  ) {
+    return false;
+  }
+  const statuses = audit.clearance_statuses as Record<string, unknown>;
+  return REQUIRED_DEGREE_CHECKS.every((check) => statuses[check] === 'CLEARED');
+}
 
 @Injectable()
 export class RegistrarService {
@@ -596,6 +621,23 @@ export class RegistrarService {
     const certType = String(current.certificate_type).toUpperCase();
     const isDegreeDoc =
       certType === 'DEGREE' || certType === 'DUPLICATE_DEGREE';
+    if (action === 'ISSUE' && isDegreeDoc) {
+      const issued = await this.issueDegreeCertificate(
+        tenantId,
+        actorUserId,
+        requestId,
+      );
+      if (issued.issued_now) {
+        await this.notifyRegistrars(tenantId, {
+          title: 'Degree certificate issued',
+          message: `Degree certificate issued for request ${requestId.slice(0, 8)}. Verify: ${issued.row.verification_code}`,
+          actionLink: '/admin/certificates',
+          severity: 'success',
+          intent: 'status_update',
+        });
+      }
+      return issued.row;
+    }
     const allowed: Record<string, string[]> = {
       GENERATE: ['DRAFT', 'REJECTED'],
       SIGN: ['GENERATED'],
@@ -701,6 +743,87 @@ export class RegistrarService {
       { status: currentStatus },
     );
     return row;
+  }
+
+  /**
+   * A degree issuance is one atomic database state transition. The lock and
+   * conditional update make retries of the same request idempotent and prevent
+   * two concurrent callers from both issuing it. A distinct degree award key
+   * is not present on certificate requests, so cross-request duplicate-award
+   * prevention remains dependent on that source relationship being established.
+   */
+  private async issueDegreeCertificate(
+    tenantId: string,
+    actorUserId: string,
+    requestId: string,
+  ): Promise<{ row: Record<string, unknown>; issued_now: boolean }> {
+    const result = await this.db.transaction(async (manager) => {
+      const [current] = await manager.query(
+        `SELECT * FROM registrar_certificate_requests
+         WHERE tenant_id = $1 AND request_id = $2 FOR UPDATE`,
+        [tenantId, requestId],
+      );
+      if (!current) throw new NotFoundException('Certificate request not found');
+      if (String(current.certificate_type).toUpperCase() === 'DEGREE' ||
+          String(current.certificate_type).toUpperCase() === 'DUPLICATE_DEGREE') {
+        // expected degree request types
+      } else {
+        throw new BadRequestException('Request is not a degree certificate.');
+      }
+
+      if (String(current.status).toUpperCase() === 'ISSUED') {
+        return { row: current as Record<string, unknown>, issued_now: false };
+      }
+      if (String(current.status).toUpperCase() !== 'SIGNED') {
+        throw new BadRequestException(
+          `Cannot ISSUE certificate in status ${String(current.status).toUpperCase()}. Allowed from: SIGNED.`,
+        );
+      }
+
+      const [student] = await manager.query(
+        `SELECT user_id FROM users WHERE tenant_id = $1 AND user_id = $2 FOR UPDATE`,
+        [tenantId, current.student_user_id],
+      );
+      if (!student) throw new NotFoundException('Student not found');
+
+      await this.assertDegreeIssuanceAllowed(
+        tenantId,
+        current.student_user_id,
+        manager,
+      );
+      const issuedAt = new Date();
+      const verificationCode = createHash('sha256')
+        .update(`${requestId}:${current.student_user_id}:${issuedAt.toISOString()}`)
+        .digest('hex')
+        .slice(0, 16)
+        .toUpperCase();
+      const [row] = await manager.query(
+        `UPDATE registrar_certificate_requests
+         SET status = 'ISSUED', issued_at = $3, issued_by = $4,
+             verification_code = $5, updated_at = NOW()
+         WHERE tenant_id = $1 AND request_id = $2 AND status = 'SIGNED'
+         RETURNING *`,
+        [tenantId, requestId, issuedAt, actorUserId, verificationCode],
+      );
+      if (!row) {
+        throw new ConflictException('The degree request was issued or changed concurrently.');
+      }
+
+      await this.enterpriseAudit.log(
+        {
+          tenantId,
+          userId: actorUserId,
+          module: 'registrar_degree_certificate',
+          action: 'DEGREE_CERTIFICATE_ISSUED',
+          recordId: requestId,
+          oldValue: { status: 'SIGNED' },
+          newValue: { status: 'ISSUED', issued_at: issuedAt.toISOString() },
+        },
+        manager,
+      );
+      return { row: row as Record<string, unknown>, issued_now: true };
+    });
+    return result;
   }
 
   async verifyCertificatePublic(code: string) {
@@ -2731,10 +2854,10 @@ export class RegistrarService {
              d.dept_name AS department_name,
              decider.name AS registrar_decided_by_name
       FROM degree_eligibility_audits a
-      JOIN users u ON u.user_id = a.student_user_id
-      LEFT JOIN student_profiles sp ON sp.user_id = a.student_user_id
+      JOIN users u ON u.user_id = a.student_user_id AND u.tenant_id = a.tenant_id
+      LEFT JOIN student_profiles sp ON sp.user_id = a.student_user_id AND sp.tenant_id = a.tenant_id
       LEFT JOIN departments d ON d.dept_id = u.dept_id
-      LEFT JOIN users decider ON decider.user_id = a.registrar_decided_by
+      LEFT JOIN users decider ON decider.user_id = a.registrar_decided_by AND decider.tenant_id = a.tenant_id
       WHERE a.tenant_id = $1`;
     if (q?.trim()) {
       params.push(`%${q.trim().toLowerCase()}%`);
@@ -2751,12 +2874,17 @@ export class RegistrarService {
   private async assertDegreeIssuanceAllowed(
     tenantId: string,
     studentUserId: string,
+    manager?: EntityManager,
   ) {
-    const [audit] = await this.db.query(
-      `SELECT audit_id, final_status, registrar_decision
+    const query = manager
+      ? manager.query.bind(manager)
+      : this.db.query.bind(this.db);
+    const [audit] = await query(
+      `SELECT audit_id, final_status, registrar_decision,
+              requirements_policy_status, clearance_statuses
        FROM degree_eligibility_audits
        WHERE tenant_id = $1 AND student_user_id = $2
-       ORDER BY checked_at DESC
+       ORDER BY checked_at DESC, audit_id DESC
        LIMIT 1`,
       [tenantId, studentUserId],
     );
@@ -2768,6 +2896,11 @@ export class RegistrarService {
     if (String(audit.final_status).toUpperCase() !== 'ELIGIBLE') {
       throw new BadRequestException(
         'Degree issuance blocked: Exam Cell final status must be ELIGIBLE.',
+      );
+    }
+    if (!hasVerifiedDegreeChecks(audit)) {
+      throw new BadRequestException(
+        'Degree issuance blocked: the policy and every required clearance must be verified.',
       );
     }
     if (
@@ -2792,58 +2925,110 @@ export class RegistrarService {
     if (!['APPROVED', 'REJECTED'].includes(normalized)) {
       throw new BadRequestException('Decision must be APPROVED or REJECTED');
     }
-    const [audit] = await this.db.query(
-      `SELECT * FROM degree_eligibility_audits WHERE tenant_id = $1 AND audit_id = $2`,
-      [tenantId, auditId],
-    );
-    if (!audit)
-      throw new NotFoundException('Degree eligibility audit not found');
-
-    if (
-      normalized === 'APPROVED' &&
-      String(audit.final_status).toUpperCase() !== 'ELIGIBLE'
-    ) {
-      throw new BadRequestException(
-        'Only audits with Exam Cell status ELIGIBLE can be approved for degree issuance.',
+    const row = await this.db.transaction(async (manager) => {
+      const [reference] = await manager.query(
+        `SELECT * FROM degree_eligibility_audits
+         WHERE tenant_id = $1 AND audit_id = $2`,
+        [tenantId, auditId],
       );
-    }
-    if (normalized === 'APPROVED' && !remarks?.trim()) {
-      throw new BadRequestException(
-        'Approval remarks are required for Registrar degree approval.',
+      if (!reference)
+        throw new NotFoundException('Degree eligibility audit not found');
+
+      const [student] = await manager.query(
+        `SELECT user_id FROM users WHERE tenant_id = $1 AND user_id = $2 FOR UPDATE`,
+        [tenantId, reference.student_user_id],
       );
-    }
+      if (!student) throw new NotFoundException('Student not found');
+      const [audit] = await manager.query(
+        `SELECT * FROM degree_eligibility_audits WHERE tenant_id = $1 AND audit_id = $2 FOR UPDATE`,
+        [tenantId, auditId],
+      );
+      if (!audit || audit.student_user_id !== reference.student_user_id)
+        throw new ConflictException('Eligibility audit changed; reload before deciding.');
 
-    const [row] = await this.db.query(
-      `UPDATE degree_eligibility_audits
-       SET registrar_decision = $3,
-           registrar_remarks = $4,
-           registrar_decided_by = $5,
-           registrar_decided_at = NOW()
-       WHERE tenant_id = $1 AND audit_id = $2
-       RETURNING *`,
-      [tenantId, auditId, normalized, remarks?.trim() || null, actorUserId],
-    );
+      const [latest] = await manager.query(
+        `SELECT audit_id, checked_at FROM degree_eligibility_audits
+         WHERE tenant_id = $1 AND student_user_id = $2
+         ORDER BY checked_at DESC, audit_id DESC LIMIT 1 FOR UPDATE`,
+        [tenantId, audit.student_user_id],
+      );
+      if (latest?.audit_id !== audit.audit_id) {
+        throw new ConflictException(
+          'This eligibility audit is stale. Run a new audit before making a Registrar decision.',
+        );
+      }
+      if (String(audit.registrar_decision ?? 'PENDING').toUpperCase() !== 'PENDING') {
+        throw new ConflictException('This eligibility audit already has a Registrar decision.');
+      }
 
-    await this.db.query(
-      `INSERT INTO registrar_degree_approval_history
-        (tenant_id, audit_id, student_user_id, decision, remarks, decided_by)
-       VALUES ($1,$2,$3,$4,$5,$6)`,
-      [
-        tenantId,
-        auditId,
-        audit.student_user_id,
-        normalized,
-        remarks?.trim() || null,
-        actorUserId,
-      ],
-    );
+      if (
+        normalized === 'APPROVED' &&
+        String(audit.final_status).toUpperCase() !== 'ELIGIBLE'
+      ) {
+        throw new BadRequestException(
+          'Only audits with Exam Cell status ELIGIBLE can be approved for degree issuance.',
+        );
+      }
+      if (normalized === 'APPROVED' && !hasVerifiedDegreeChecks(audit)) {
+        throw new BadRequestException(
+          'Degree approval is blocked until the requirements policy and all required clearances are verified.',
+        );
+      }
+      if (normalized === 'APPROVED' && !remarks?.trim()) {
+        throw new BadRequestException(
+          'Approval remarks are required for Registrar degree approval.',
+        );
+      }
+
+      const [updated] = await manager.query(
+        `UPDATE degree_eligibility_audits
+         SET registrar_decision = $3,
+             registrar_remarks = $4,
+             registrar_decided_by = $5,
+             registrar_decided_at = NOW()
+         WHERE tenant_id = $1 AND audit_id = $2 AND registrar_decision = 'PENDING'
+         RETURNING *`,
+        [tenantId, auditId, normalized, remarks?.trim() || null, actorUserId],
+      );
+      if (!updated) {
+        throw new ConflictException('This eligibility audit already has a Registrar decision.');
+      }
+
+      await manager.query(
+        `INSERT INTO registrar_degree_approval_history
+          (tenant_id, audit_id, student_user_id, decision, remarks, decided_by)
+         VALUES ($1,$2,$3,$4,$5,$6)`,
+        [
+          tenantId,
+          auditId,
+          audit.student_user_id,
+          normalized,
+          remarks?.trim() || null,
+          actorUserId,
+        ],
+      );
+      await this.enterpriseAudit.log(
+        {
+          tenantId,
+          userId: actorUserId,
+          module: 'registrar_degree_eligibility',
+          action: `DEGREE_ELIGIBILITY_${normalized}`,
+          recordId: auditId,
+          oldValue: { registrar_decision: audit.registrar_decision ?? 'PENDING' },
+          newValue: { registrar_decision: normalized },
+        },
+        manager,
+      );
+
+      return updated;
+    });
 
     await this.notifyRegistrars(tenantId, {
       title:
         normalized === 'APPROVED'
           ? 'Degree eligibility approved'
           : 'Degree eligibility rejected',
-      message: `Registrar ${normalized.toLowerCase()} degree eligibility for student ${String(audit.student_user_id).slice(0, 8)}.`,
+      message: `Registrar ${normalized.toLowerCase()} degree eligibility for student ${String(row.student_user_id).slice(0, 8)}.`,
       actionLink: '/admin/degree-eligibility',
       severity: normalized === 'APPROVED' ? 'success' : 'warning',
       intent: 'action_required',
@@ -2856,7 +3041,7 @@ export class RegistrarService {
     return this.db.query(
       `SELECT h.*, u.name AS decided_by_name
        FROM registrar_degree_approval_history h
-       LEFT JOIN users u ON u.user_id = h.decided_by
+       LEFT JOIN users u ON u.user_id = h.decided_by AND u.tenant_id = h.tenant_id
        WHERE h.tenant_id = $1 AND h.audit_id = $2
        ORDER BY h.created_at DESC`,
       [tenantId, auditId],

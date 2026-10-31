@@ -1,5 +1,14 @@
+import { requireTenantId } from '../../common/utils/require-tenant-id';
+import { plainToInstance } from 'class-transformer';
+import { validateSync } from 'class-validator';
+import { QuestionPaperWorkflowService } from './question-paper-workflow.service';
+import { CreateQuestionPaperDto } from './dto/question-paper.dto';
+import { EXAM_DAY_ATTENDANCE_STATUSES, ExamDayDateQueryDto, MarkExamDayAttendanceDto } from './dto/exam-day.dto';
 import {
   BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Optional,
   Injectable,
   NotFoundException,
   ServiceUnavailableException,
@@ -22,6 +31,7 @@ export class ExamCellOperationsService {
     private readonly audit: ExamCellAuditService,
     private readonly notificationDispatch: NotificationDispatchService,
     private readonly semesterResults: SemesterResultsService,
+    @Optional() private readonly questionPapers?: QuestionPaperWorkflowService,
   ) {}
 
   private async queryOrEmpty<T extends Record<string, unknown>>(
@@ -303,100 +313,16 @@ export class ExamCellOperationsService {
   /* ── Question papers ── */
 
   async listQuestionPapers(tenantId: string, status?: string) {
-    const params: unknown[] = [tenantId];
-    let sql = `
-      SELECT qp.*, sub.subject_name, sub.subject_code,
-             es.exam_date, es.exam_type, setter.name AS setter_name
-      FROM public.exam_question_papers qp
-      LEFT JOIN academic_subjects sub ON sub.subject_id = qp.subject_id
-      LEFT JOIN exam_schedules es ON es.exam_schedule_id = qp.exam_schedule_id AND es.tenant_id = qp.tenant_id
-      LEFT JOIN users setter ON setter.user_id = qp.setter_user_id AND setter.tenant_id = qp.tenant_id
-      WHERE qp.tenant_id = $1`;
-    if (status) {
-      params.push(status);
-      sql += ` AND qp.status = $${params.length}`;
-    }
-    sql += ' ORDER BY qp.created_at DESC LIMIT 100';
-    return this.queryOrEmpty(sql, params);
+    return this.paperWorkflow().list(tenantId, status);
   }
 
   async createQuestionPaperRecord(
     tenantId: string,
     actorUserId: string,
-    dto: {
-      exam_schedule_id?: string;
-      subject_id?: number;
-      setter_user_id?: string;
-      notes?: string;
-    },
+    dto: CreateQuestionPaperDto,
+    role: string,
   ) {
-    for (const field of ['exam_schedule_id', 'setter_user_id'] as const) {
-      if (dto[field] != null && !isUUID(dto[field])) {
-        throw new BadRequestException(`${field} must be a UUID`);
-      }
-    }
-    return this.db.transaction(async (manager) => {
-      if (dto.exam_schedule_id != null) {
-        const [schedule] = await manager.query<
-          Array<{ exam_schedule_id: string }>
-        >(
-          `SELECT exam_schedule_id FROM exam_schedules
-           WHERE tenant_id = $1 AND exam_schedule_id = $2 FOR KEY SHARE`,
-          [tenantId, dto.exam_schedule_id],
-        );
-        if (!schedule) throw new NotFoundException('Exam schedule not found');
-      }
-      if (dto.setter_user_id != null) {
-        const [setter] = await manager.query<Array<{ user_id: string }>>(
-          `SELECT user_id FROM users
-           WHERE tenant_id = $1 AND user_id = $2 FOR KEY SHARE`,
-          [tenantId, dto.setter_user_id],
-        );
-        if (!setter)
-          throw new NotFoundException('Question paper setter not found');
-      }
-      let rows: Record<string, unknown>[];
-      try {
-        rows = await manager.query(
-          `INSERT INTO public.exam_question_papers
-           (tenant_id, exam_schedule_id, subject_id, setter_user_id, notes, created_by, status)
-         VALUES ($1,$2,$3,$4,$5,$6,'UPLOADED')
-         RETURNING *`,
-          [
-            tenantId,
-            dto.exam_schedule_id ?? null,
-            dto.subject_id ?? null,
-            dto.setter_user_id ?? null,
-            dto.notes ?? null,
-            actorUserId,
-          ],
-        );
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        if (/relation "exam_question_papers" does not exist/i.test(message)) {
-          throw new BadRequestException(
-            'Question paper table not found. Run database migrations (npm run db:migrate) and restart the backend.',
-          );
-        }
-        throw new BadRequestException(
-          message || 'Could not create question paper record',
-        );
-      }
-      const row = rows[0];
-      if (!row)
-        throw new BadRequestException('Could not create question paper record');
-      await this.audit.log(
-        tenantId,
-        actorUserId,
-        {
-          action: 'QP_UPLOADED',
-          resource_type: 'exam_question_paper',
-          resource_id: String(row.qp_id),
-        },
-        manager,
-      );
-      return row;
-    });
+    return this.paperWorkflow().create(tenantId, actorUserId, role, dto);
   }
 
   async updateQuestionPaperStatus(
@@ -404,146 +330,211 @@ export class ExamCellOperationsService {
     qpId: string,
     actorUserId: string,
     status: string,
+    role: string,
+    reason?: string,
   ) {
-    const allowed = [
-      'UNDER_MODERATION',
-      'COE_APPROVED',
-      'PRINT_AUTHORIZED',
-      'REJECTED',
-    ];
-    if (!allowed.includes(status)) {
-      throw new BadRequestException('Invalid QP status transition');
-    }
-    return this.db.transaction(async (manager) => {
-      const [row] = await manager.query<Array<Record<string, unknown>>>(
-        `WITH updated AS (UPDATE exam_question_papers
-       SET status = $3::varchar, updated_at = NOW(),
-           approved_by = CASE WHEN $3::varchar IN ('COE_APPROVED','PRINT_AUTHORIZED') THEN $4 ELSE approved_by END,
-           approved_at = CASE WHEN $3::varchar IN ('COE_APPROVED','PRINT_AUTHORIZED') THEN NOW() ELSE approved_at END
-       WHERE tenant_id = $1 AND qp_id = $2
-       RETURNING *) SELECT * FROM updated`,
-        [tenantId, qpId, status, actorUserId],
+    return this.paperWorkflow().updateStatus(
+      tenantId,
+      qpId,
+      actorUserId,
+      role,
+      { status, reason },
+    );
+  }
+
+  private paperWorkflow(): QuestionPaperWorkflowService {
+    if (!this.questionPapers)
+      throw new ServiceUnavailableException(
+        'Question-paper workflow is unavailable',
       );
-      if (!row) throw new NotFoundException('Question paper not found');
-      await this.audit.log(
-        tenantId,
-        actorUserId,
-        {
-          action: `QP_${status}`,
-          resource_type: 'exam_question_paper',
-          resource_id: qpId,
-          new_value: { status },
-        },
-        manager,
-      );
-      return row;
-    });
+    return this.questionPapers;
   }
 
   /* ── Exam day ── */
 
-  async listTodayExams(tenantId: string) {
-    const today = new Date().toISOString().slice(0, 10);
-    return this.queryOrEmpty(
+  private examDayTenant(tenantId: string): string {
+    const scopedTenantId = requireTenantId(tenantId);
+    if (!isUUID(scopedTenantId)) {
+      throw new ForbiddenException('Valid tenant context required');
+    }
+    return scopedTenantId;
+  }
+
+  private validateExamDayScheduleId(examScheduleId: string): void {
+    if (!isUUID(examScheduleId)) {
+      throw new BadRequestException('A valid examination schedule is required');
+    }
+  }
+
+  async listTodayExams(tenantId: string, date?: string) {
+    const scopedTenantId = this.examDayTenant(tenantId);
+    if (validateSync(plainToInstance(ExamDayDateQueryDto, { date })).length)
+      throw new BadRequestException(
+        'Use a valid examination date (YYYY-MM-DD)',
+      );
+    const today = date ?? new Date().toISOString().slice(0, 10);
+    return this.db.query<Array<Record<string, unknown>>>(
       `SELECT es.exam_schedule_id, es.exam_type, es.exam_date::text AS exam_date, es.start_time, es.end_time, es.venue,
               sub.subject_name, sub.subject_code,
               COALESCE((
                 SELECT COUNT(*)::int FROM exam_day_attendance da
-                WHERE da.tenant_id = es.tenant_id
-                  AND da.exam_schedule_id = es.exam_schedule_id
+                WHERE da.exam_schedule_id = es.exam_schedule_id AND da.tenant_id = es.tenant_id
               ), 0) AS marked_count
        FROM exam_schedules es
        LEFT JOIN academic_subjects sub ON sub.subject_id = es.subject_id
-       WHERE es.tenant_id = $1 AND es.exam_date = $2
+       WHERE es.tenant_id = $1 AND es.exam_date = $2 AND es.deleted_at IS NULL AND es.status <> 'CANCELLED'
        ORDER BY es.start_time`,
-      [tenantId, today],
+      [scopedTenantId, today],
     );
   }
 
   async listExamDayRoster(tenantId: string, examScheduleId: string) {
-    return this.queryOrEmpty(
-      `SELECT esa.student_user_id, u.name AS student_name, sp.enrollment_number,
+    const scopedTenantId = this.examDayTenant(tenantId);
+    this.validateExamDayScheduleId(examScheduleId);
+    return this.db.query<Array<Record<string, unknown>>>(
+      `SELECT esa.student_user_id, u.name AS student_name,
+              COALESCE(to_jsonb(sp)->>'enrollment_number', sp.enrollment_no, sp.prn_number) AS enrollment_number,
               esa.room, esa.seat_number,
               da.status AS attendance_status, da.attendance_id
        FROM exam_seating_allocations esa
-       JOIN users u ON u.user_id = esa.student_user_id
-       LEFT JOIN student_profiles sp ON sp.user_id = u.user_id
+       JOIN exam_schedules es
+         ON es.exam_schedule_id = esa.exam_schedule_id AND es.tenant_id = esa.tenant_id
+       JOIN users u ON u.user_id = esa.student_user_id AND u.tenant_id = esa.tenant_id
+       LEFT JOIN student_profiles sp ON sp.user_id = u.user_id AND sp.tenant_id = esa.tenant_id
        LEFT JOIN exam_day_attendance da
-         ON da.tenant_id = esa.tenant_id
-        AND da.exam_schedule_id = esa.exam_schedule_id
-        AND da.student_user_id = esa.student_user_id
+         ON da.exam_schedule_id = esa.exam_schedule_id AND da.student_user_id = esa.student_user_id
+           AND da.tenant_id = esa.tenant_id
        WHERE esa.tenant_id = $1 AND esa.exam_schedule_id = $2
        ORDER BY esa.room, esa.seat_number, u.name`,
-      [tenantId, examScheduleId],
+      [scopedTenantId, examScheduleId],
     );
   }
 
   async listExamDayAttendance(tenantId: string, examScheduleId: string) {
-    return this.queryOrEmpty(
-      `SELECT da.*, u.name AS student_name, sp.enrollment_number,
+    const scopedTenantId = this.examDayTenant(tenantId);
+    this.validateExamDayScheduleId(examScheduleId);
+    return this.db.query<Array<Record<string, unknown>>>(
+      `SELECT da.*, u.name AS student_name,
+              COALESCE(to_jsonb(sp)->>'enrollment_number', sp.enrollment_no, sp.prn_number) AS enrollment_number,
               marker.name AS marked_by_name
        FROM exam_day_attendance da
-       JOIN users u ON u.user_id = da.student_user_id
-       LEFT JOIN student_profiles sp ON sp.user_id = da.student_user_id
-       LEFT JOIN users marker ON marker.user_id = da.marked_by
+       JOIN exam_schedules es
+         ON es.exam_schedule_id = da.exam_schedule_id AND es.tenant_id = da.tenant_id
+       JOIN users u ON u.user_id = da.student_user_id AND u.tenant_id = da.tenant_id
+       LEFT JOIN student_profiles sp ON sp.user_id = da.student_user_id AND sp.tenant_id = da.tenant_id
+       LEFT JOIN users marker ON marker.user_id = da.marked_by AND marker.tenant_id = da.tenant_id
        WHERE da.tenant_id = $1 AND da.exam_schedule_id = $2
        ORDER BY u.name`,
-      [tenantId, examScheduleId],
+      [scopedTenantId, examScheduleId],
     );
   }
 
   async markExamDayAttendance(
     tenantId: string,
     actorUserId: string,
-    dto: {
-      exam_schedule_id: string;
-      student_user_id: string;
-      status: string;
-    },
+    dto: MarkExamDayAttendanceDto,
   ) {
-    const allowed = ['PRESENT', 'ABSENT', 'MEDICAL', 'DEBARRED', 'LATE'];
-    if (!allowed.includes(dto.status)) {
+    const scopedTenantId = this.examDayTenant(tenantId);
+    this.validateExamDayScheduleId(dto.exam_schedule_id);
+    if (!isUUID(dto.student_user_id)) {
+      throw new BadRequestException('A valid student is required');
+    }
+    if (
+      !(EXAM_DAY_ATTENDANCE_STATUSES as readonly string[]).includes(dto.status)
+    ) {
       throw new BadRequestException('Invalid attendance status');
     }
-    const [schedule] = await this.db.query(
-      `SELECT exam_schedule_id FROM exam_schedules
-       WHERE tenant_id = $1 AND exam_schedule_id = $2`,
-      [tenantId, dto.exam_schedule_id],
-    );
-    if (!schedule) throw new BadRequestException('Exam schedule not found');
 
-    const [student] = await this.db.query(
-      `SELECT u.user_id
-       FROM users u
-       JOIN roles r ON r.role_id = u.role_id
-       WHERE u.tenant_id = $1 AND u.user_id = $2 AND r.role_name = 'Student'
-       LIMIT 1`,
-      [tenantId, dto.student_user_id],
-    );
-    if (!student) throw new BadRequestException('Student not found in tenant');
+    return this.db.transaction(async (manager) => {
+      const [schedule] = await manager.query<
+        Array<{ exam_schedule_id: string }>
+      >(
+        `SELECT exam_schedule_id FROM exam_schedules
+         WHERE tenant_id = $1 AND exam_schedule_id = $2 AND deleted_at IS NULL AND status <> 'CANCELLED'
+         FOR UPDATE`,
+        [scopedTenantId, dto.exam_schedule_id],
+      );
+      if (!schedule) throw new NotFoundException('Exam schedule not found');
 
-    const [row] = await this.db.query(
-      `INSERT INTO exam_day_attendance
+      // The existing seating roster is the Exam Day screen's source of candidates.
+      // Keep its ownership and membership stable until the write has committed.
+      const [candidate] = await manager.query<Array<{ seating_id: string }>>(
+        `SELECT esa.seating_id FROM exam_seating_allocations esa
+         JOIN users u ON u.user_id = esa.student_user_id AND u.tenant_id = esa.tenant_id
+         WHERE esa.tenant_id = $1 AND esa.exam_schedule_id = $2 AND esa.student_user_id = $3
+         FOR SHARE OF esa, u`,
+        [scopedTenantId, dto.exam_schedule_id, dto.student_user_id],
+      );
+      if (!candidate) {
+        throw new BadRequestException(
+          'Student is not on this examination roster',
+        );
+      }
+
+      // Receipt/missing-report writers take this same schedule lock first.
+      // Never turn a candidate absent while a physical receipt or unresolved
+      // missing-script report still says that the candidate sat the exam.
+      if (!['PRESENT', 'LATE'].includes(dto.status)) {
+        const conflicts = await manager.query<Array<{ kind: string }>>(
+          `SELECT 'RECEIPT' AS kind FROM answer_sheet_tracking
+           WHERE tenant_id=$1 AND exam_schedule_id=$2 AND student_user_id=$3 AND collected_at IS NOT NULL
+           UNION ALL
+           SELECT 'MISSING' AS kind FROM exam_script_discrepancies
+           WHERE tenant_id=$1 AND exam_schedule_id=$2 AND student_user_id=$3 AND status='MISSING'
+           LIMIT 1`,
+          [scopedTenantId, dto.exam_schedule_id, dto.student_user_id],
+        );
+        if (conflicts.length)
+          throw new ConflictException(
+            'Resolve the script receipt or missing-script discrepancy before marking this candidate absent, medical or debarred',
+          );
+      }
+
+      const result = await manager.query<
+        | Array<{ attendance_id: string; status: string }>
+        | [Array<{ attendance_id: string; status: string }>, number]
+      >(
+        `INSERT INTO exam_day_attendance
          (tenant_id, exam_schedule_id, student_user_id, status, marked_by)
        VALUES ($1,$2,$3,$4,$5)
        ON CONFLICT (exam_schedule_id, student_user_id)
        DO UPDATE SET status = EXCLUDED.status, marked_by = EXCLUDED.marked_by, marked_at = NOW()
+       WHERE exam_day_attendance.tenant_id = EXCLUDED.tenant_id
        RETURNING *`,
-      [
-        tenantId,
-        dto.exam_schedule_id,
-        dto.student_user_id,
-        dto.status,
+        [
+          scopedTenantId,
+          dto.exam_schedule_id,
+          dto.student_user_id,
+          dto.status,
+          actorUserId,
+        ],
+      );
+      const [row] = (Array.isArray(result[0]) ? result[0] : result) as Array<{
+        attendance_id: string;
+        status: string;
+      }>;
+      if (!row) {
+        throw new BadRequestException(
+          'Attendance record scope is inconsistent',
+        );
+      }
+      await this.audit.log(
+        scopedTenantId,
         actorUserId,
-      ],
-    );
-    await this.audit.log(tenantId, actorUserId, {
-      action: 'EXAM_DAY_ATTENDANCE_MARKED',
-      resource_type: 'exam_day_attendance',
-      resource_id: row?.attendance_id,
-      new_value: { status: dto.status, student_user_id: dto.student_user_id },
+        {
+          action: 'EXAM_DAY_ATTENDANCE_MARKED',
+          resource_type: 'exam_day_attendance',
+          resource_id: row.attendance_id,
+          new_value: {
+            status: dto.status,
+            exam_schedule_id: dto.exam_schedule_id,
+            student_user_id: dto.student_user_id,
+          },
+        },
+        manager,
+      );
+      return row;
     });
-    return row;
   }
 
   /* ── Exam centres ── */

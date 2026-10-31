@@ -23,6 +23,19 @@ describe('Student upload download authorization', () => {
     } as unknown as DataSource);
   });
 
+  it.each(['Student', 'Faculty', 'ExamCell', 'SuperAdmin'])(
+    'requires the dedicated question-paper endpoint even for %s',
+    async (role) => {
+      await expect(
+        service.assertStudentDownloadAccess(
+          { ...student, roles: [role] },
+          `${tenant}/exam-cell/question-papers/private.pdf`,
+        ),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(query).not.toHaveBeenCalled();
+    },
+  );
+
   it.each([`/uploads/${key}`, `s3://bucket/${key}`, key, resolve(root, key)])(
     'accepts an owned legacy reference: %s',
     async (reference) => {
@@ -36,10 +49,10 @@ describe('Student upload download authorization', () => {
       await expect(
         service.assertStudentDownloadAccess(student, key),
       ).resolves.toBeUndefined();
-      expect(query).toHaveBeenCalledWith(expect.stringContaining('student_onboarding_docs'), [
-        tenant,
-        'student-a',
-      ]);
+      expect(query).toHaveBeenCalledWith(
+        expect.stringContaining('student_onboarding_docs'),
+        [tenant, 'student-a'],
+      );
     },
   );
 
@@ -120,7 +133,8 @@ describe('Student upload download authorization', () => {
   });
 
   it('fails closed for unmatched files when the policy table is absent', async () => {
-    query.mockResolvedValueOnce([])
+    query
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([{ relation: null }]);
     await expect(
