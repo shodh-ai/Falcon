@@ -102,7 +102,7 @@ export const MODULE_CATALOGUE: readonly ModuleDefinition[] = [
   definition(
     'sis_academics',
     'SIS / Academics',
-    ['/academics', '/student/academics', '/faculty'],
+    ['/academics', '/student/academics', '/faculty', '/principal/dashboard'],
     [
       '/api/academics',
       '/api/faculty-ai',

@@ -25,7 +25,7 @@ export default function FacultyCoursesIndexPage() {
     isMultiDepartment: false,
   };
   const pathname = usePathname();
-  const workspacePrefix = pathname.startsWith('/hod/') ? '/hod/academics' : '/faculty';
+  const workspacePrefix = pathname?.startsWith('/hod/my-teaching/') ? '/hod/my-teaching' : '/faculty';
 
   const totalCredits = courses.reduce((sum, c) => sum + (Number(c.credits) || 0), 0);
   const isFetchError = error && error !== 'No courses allocated to your timetable yet.';

@@ -1,11 +1,11 @@
-"use client";
+'use client';
 
-import { Suspense, useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
-import Link from "next/link";
-import { BookOpen, Check, Download, Loader2, Send, X } from "lucide-react";
-import { toast } from "@/lib/notifications/falcon-toast";
-import { cn } from "@/lib/utils";
+import { Suspense, useEffect, useMemo, useState } from 'react';
+import { usePathname, useSearchParams } from 'next/navigation';
+import Link from 'next/link';
+import { BookOpen, Check, Send, X } from 'lucide-react';
+import { toast } from '@/lib/notifications/falcon-toast';
+import { cn } from '@/lib/utils';
 import {
   FacultyPageHeader,
   FacultyPageShell,
@@ -281,7 +281,7 @@ function MarkAttendanceContent() {
         if (!Array.isArray(data)) throw new Error('Timetable API returned an invalid response');
         setClassesError(null);
         setClasses(data);
-        const selectable = data.filter(c => !c.awaiting_confirmation);
+        const selectable = data.filter(c => !c.awaiting_confirmation && !c.cancelled);
         if (selectable.length === 0) {
           setSelectedCourseId(null);
           setSelectedTimetableId(null);
@@ -315,6 +315,13 @@ function MarkAttendanceContent() {
 
   useEffect(() => {
     if (!selectedCourseId) return;
+    if (selectedClass?.cancelled) {
+      setStudents([]);
+      setUnmappedCourseStudents([]);
+      setRosterLoading(false);
+      setRosterError(null);
+      return;
+    }
     let cancelled = false;
     const timetableId = selectedTimetableId ?? selectedClass?.timetable_id;
 
@@ -463,6 +470,10 @@ function MarkAttendanceContent() {
 
   async function save() {
     if (!selectedCourseId || rosterLoading) return;
+    if (selectedClass?.cancelled) {
+      toast.error('This class was cancelled. Attendance cannot be recorded.');
+      return;
+    }
     if (students.length === 0) {
       toast.error('No students on the roster — cannot save attendance.');
       return;
@@ -601,7 +612,7 @@ function MarkAttendanceContent() {
         description="Mark and review student attendance records."
         actions={
           <Button variant="outline" size="sm" asChild>
-            <Link href="/faculty/logbook">
+            <Link href={`${teachingPrefix}/logbook`}>
               <BookOpen className="mr-1.5 h-4 w-4" />
               Open logbook
             </Link>
@@ -784,6 +795,10 @@ function MarkAttendanceContent() {
           >
             {!selectedClass ? (
               <FacultyEmptyState description="Select a class from the list to load the roster." />
+            ) : selectedClass.cancelled ? (
+              <p role="status" className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-900">
+                This dated class was cancelled. There is no attendance to mark for this session.
+              </p>
             ) : rosterLoading ? (
               <FacultyInlineLoading label="Loading roster…" />
             ) : rosterError ? (

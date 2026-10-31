@@ -41,6 +41,7 @@ type TimetableSlot = {
   live_join_url: string | null;
   session_date: string | null;
   attendance_status: 'PRESENT' | 'ABSENT' | 'PENDING' | null;
+  cancelled?: boolean;
 };
 
 type WeekTimetableResponse = {
@@ -149,7 +150,9 @@ function SlotButton({
       title={`${subject} · ${batch ? `${batch} · ` : ''}${timing} · ${room}`}
       className={cn(
         'flex w-full items-start gap-3 rounded-xl border p-3 text-left transition-colors hover:border-sgvu-gold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sgvu-gold',
-        slot.is_virtual
+        slot.cancelled
+          ? 'border-red-200 bg-red-50 text-red-900 opacity-80'
+          : slot.is_virtual
           ? 'border-blue-200 bg-blue-50/70 text-blue-950'
           : 'border-sgvu-navy/10 bg-white text-sgvu-navy hover:bg-sgvu-navy/[0.03]',
       )}
@@ -164,6 +167,7 @@ function SlotButton({
           <span className="font-medium text-muted-foreground">{slot.course_code}</span>
           {slot.is_extra_class && <Badge variant="outline">Approved extra class</Badge>}
           {batch && <Badge variant="secondary">{batch}</Badge>}
+          {slot.cancelled && <Badge variant="destructive">Cancelled</Badge>}
           {slot.is_virtual && <Badge variant="outline">Online</Badge>}
         </div>
         <p className="mt-1.5 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
@@ -348,6 +352,11 @@ export default function TimetablePage() {
                 <DialogTitle>{selectedSlot.course_name}</DialogTitle>
               </DialogHeader>
               <div className="space-y-4 text-sm">
+                {selectedSlot.cancelled && (
+                  <p role="status" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-900">
+                    This class was cancelled. No attendance is expected for this session.
+                  </p>
+                )}
                 <div>
                   <p className="text-xs uppercase tracking-wide text-muted-foreground">Course code</p>
                   <p className="font-semibold text-sgvu-navy">{selectedSlot.course_code}</p>

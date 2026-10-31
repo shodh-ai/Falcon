@@ -1,8 +1,7 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppSidebar } from '@/components/layout/AppSidebar';
 import { examCellPortal, facultyPortal, withAccountSettingsNav } from '@/lib/navigation';
-import { getExamCellSection } from '@/lib/exam-cell/sections';
 
 const mocks = vi.hoisted(() => ({ pathname: '/exam-cell/dashboard' }));
 vi.mock('next/navigation', () => ({ usePathname: () => mocks.pathname }));
@@ -16,44 +15,36 @@ const sidebarProps = {
   onToggleCollapse: vi.fn(),
 };
 
-describe('Examination Cell consolidated sidebar', () => {
+describe('Examination Cell sidebar', () => {
   beforeEach(() => {
     mocks.pathname = '/exam-cell/dashboard';
     vi.clearAllMocks();
   });
 
-  it('shows eight section links and keeps every specialist route in its section', () => {
+  it('shows every specialist route and the HR links in their navigation groups', () => {
     render(<AppSidebar {...sidebarProps} />);
     const nav = screen.getByRole('navigation', { name: 'Workspace modules' });
-    expect(within(nav).getAllByRole('link')).toHaveLength(8);
-    for (const group of examCellPortal.navGroups) {
-      const landing = group.items.find((item) => item.href === group.homeHref) ?? group.items[0];
-      expect(within(nav).getByRole('link', { name: group.title })).toHaveAttribute('href', landing.href);
-      for (const item of group.items) {
-        expect(getExamCellSection(item.href)?.items.some((candidate) => candidate.href === item.href)).toBe(true);
-      }
+    const expected = config.navGroups.flatMap((group) => group.items);
+    const links = within(nav).getAllByRole('link');
+    expect(links).toHaveLength(expected.length);
+    expect(links.map((link) => link.getAttribute('href'))).toEqual(expected.map((item) => item.href));
+    expect(new Set(expected.map((item) => item.href)).size).toBe(expected.length);
+    for (const group of config.navGroups) {
+      expect(within(nav).getByText(group.title)).toBeInTheDocument();
     }
   });
 
-  it('marks the current section without falsely marking its landing page', () => {
+  it('marks only the selected specialist route as current', () => {
     mocks.pathname = '/exam-cell/course-grades';
     render(<AppSidebar {...sidebarProps} />);
-    expect(screen.getByRole('link', { name: 'Marks & Results' })).toHaveAttribute('aria-current', 'location');
-    expect(screen.getByRole('link', { name: 'Dashboard' })).not.toHaveAttribute('aria-current');
+    expect(screen.getByRole('link', { name: 'Course Grades' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('link', { name: 'Command Center' })).not.toHaveAttribute('aria-current');
   });
 
-  it('preserves mobile drawer navigation and collapsed section access', () => {
-    const closeDrawer = vi.fn();
-    const { rerender } = render(
-      <div onClick={(event) => { event.preventDefault(); closeDrawer(); }}>
-        <AppSidebar {...sidebarProps} collapsed />
-      </div>,
-    );
-    expect(screen.getAllByRole('link')).toHaveLength(8);
-    fireEvent.click(screen.getByRole('link', { name: 'Exam Planning' }));
-    expect(closeDrawer).toHaveBeenCalledOnce();
-    rerender(<AppSidebar {...sidebarProps} />);
-    expect(screen.getAllByRole('link')).toHaveLength(8);
+  it('keeps all routes available when the sidebar is collapsed', () => {
+    render(<AppSidebar {...sidebarProps} collapsed />);
+    const nav = screen.getByRole('navigation', { name: 'Workspace modules' });
+    expect(within(nav).getAllByRole('link')).toHaveLength(config.navGroups.flatMap((group) => group.items).length);
   });
 
   it('leaves other portals as full visible navigation lists', () => {

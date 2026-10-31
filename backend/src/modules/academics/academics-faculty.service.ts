@@ -542,6 +542,19 @@ export class AcademicsFacultyService {
        ORDER BY date, start_time, timetable_id`,
       [tenantId, facultyUserId, deptId ?? null, start],
     );
+    const cancellationRows = rows.length ? await this.dataSource.query<Array<{
+      course_id: string; session_date: string; start_time: string;
+    }>>(
+      `SELECT DISTINCT course_id,
+              (new_date AT TIME ZONE 'Asia/Kolkata')::date::text AS session_date,
+              to_char(new_date AT TIME ZONE 'Asia/Kolkata', 'HH24:MI') AS start_time
+       FROM class_adjustments
+       WHERE tenant_id=$1 AND course_id=ANY($2::uuid[])
+         AND adjustment_type='CANCEL' AND status IN ('APPROVED','NOTIFIED')
+         AND (new_date AT TIME ZONE 'Asia/Kolkata')::date BETWEEN $3::date AND ($3::date + 6)`,
+      [tenantId, [...new Set(rows.map(row => row.course_id).filter(Boolean))], start],
+    ) : [];
+    const cancelledWeekSessions = new Set(cancellationRows.map(row => `${row.session_date}|${row.course_id}|${row.start_time}`));
     return Array.from({ length: 7 }, (_, index) => {
       const date = new Date(parsed);
       date.setUTCDate(date.getUTCDate() + index);
@@ -726,6 +739,19 @@ export class AcademicsFacultyService {
        ORDER BY start_time`,
       [tenantId, facultyUserId, deptId ?? null, isoDay, date],
     );
+
+    const cancellations = rows.length ? await this.dataSource.query<Array<{
+      course_id: string; start_time: string;
+    }>>(
+      `SELECT DISTINCT course_id,
+              to_char(new_date AT TIME ZONE 'Asia/Kolkata', 'HH24:MI') AS start_time
+       FROM class_adjustments
+       WHERE tenant_id=$1 AND course_id=ANY($2::uuid[])
+         AND adjustment_type='CANCEL' AND status IN ('APPROVED','NOTIFIED')
+         AND (new_date AT TIME ZONE 'Asia/Kolkata')::date=$3::date`,
+      [tenantId, [...new Set(rows.map(row => row.course_id))], date],
+    ) : [];
+    const cancelledSessions = new Set(cancellations.map(row => `${row.course_id}|${row.start_time}`));
 
     return Promise.all(
       rows
@@ -2517,8 +2543,24 @@ export class AcademicsFacultyService {
              AND t.deleted_at IS NULL LIMIT 1`,
           [tenantId,timetableId,dto.course_id,date],
         );
-        if (!effective)
-          throw new ForbiddenException('Selected class is no longer scheduled');
+        if (!effective) throw new ForbiddenException('Selected class is no longer scheduled');
+        const [cancellation] = await manager.query<Array<{ cancelled: boolean }>>(
+          `SELECT EXISTS (
+             SELECT 1 FROM class_adjustments a
+             JOIN academic_timetables t ON t.tenant_id=a.tenant_id AND t.course_id=a.course_id
+             LEFT JOIN academic_class_moves m ON m.tenant_id=t.tenant_id
+               AND m.source_timetable_id=t.timetable_id AND m.target_date=$4::date
+               AND m.status='APPROVED'
+             WHERE a.tenant_id=$1 AND t.timetable_id=$2::uuid AND a.course_id=$3
+               AND a.adjustment_type='CANCEL' AND a.status IN ('APPROVED','NOTIFIED')
+               AND (a.new_date AT TIME ZONE 'Asia/Kolkata')::date=$4::date
+               AND (a.new_date AT TIME ZONE 'Asia/Kolkata')::time=COALESCE(m.target_start_time,t.start_time)
+           ) AS cancelled`,
+          [tenantId, timetableId, dto.course_id, date],
+        );
+        if (cancellation?.cancelled) {
+          throw new ForbiddenException('This class was cancelled. Attendance cannot be recorded.');
+        }
         const isoDay = new Date(`${date}T00:00:00Z`).getUTCDay() || 7;
         if (effective.source_date === date && effective.target_date !== date) {
           throw new ForbiddenException('This class was moved to another date');

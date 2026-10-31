@@ -2,6 +2,7 @@
 
 import { Select } from '@/components/ui/select';
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { PublishedTimetableGrid, type PublishedSlot } from '@/components/faculty/PublishedTimetableGrid';
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -164,6 +165,7 @@ function formatTermStart(value: string | null) {
 }
 
 export default function FacultyTimetablePage() {
+  const teachingPrefix = usePathname()?.startsWith('/hod/my-teaching/') ? '/hod/my-teaching' : '/faculty';
   const api = useAuthedApi();
   const { user } = useAuth();
   const isObserver = Boolean(user?.read_only_academic_view);
@@ -478,9 +480,12 @@ export default function FacultyTimetablePage() {
   return (
     <FacultyPageShell>
       <FacultyPageHeader
-        title="Timetable"
-        description="Your classes, substitute offers, and approved changes."
-        actions={<Button asChild variant="outline" size="sm"><Link href="/faculty/workload">View my workload</Link></Button>}
+        title={teachingPrefix === '/hod/my-teaching' ? 'My Teaching Timetable' : 'Timetable'}
+        description="Your own teaching sessions, substitute offers, and approved changes."
+        actions={<>
+          {teachingPrefix === '/hod/my-teaching' && <Button asChild variant="outline" size="sm"><Link href="/hod/department-timetable">Department timetable</Link></Button>}
+          <Button asChild variant="outline" size="sm"><Link href={`${teachingPrefix}/workload`}>View my workload</Link></Button>
+        </>}
       />
 
       <FacultyPanel
@@ -587,7 +592,7 @@ export default function FacultyTimetablePage() {
               <Button size="sm" disabled={offerBusy === offer.proxy_id} onClick={() => void answerProxyOffer(offer.proxy_id, 'ACCEPT')}>Accept class</Button>
               <Button size="sm" variant="outline" disabled={offerBusy === offer.proxy_id} onClick={() => void answerProxyOffer(offer.proxy_id, 'DECLINE')}>Decline</Button>
             </div>}
-            {offer.status === 'APPROVED' && <Link href="/faculty/attendance" className="rounded-lg bg-sgvu-navy px-3 py-2 text-sm font-semibold text-white">Mark attendance</Link>}
+            {offer.status === 'APPROVED' && <Link href={`${teachingPrefix}/attendance`} className="rounded-lg bg-sgvu-navy px-3 py-2 text-sm font-semibold text-white">Mark attendance</Link>}
           </div>)}
           <p className="text-xs text-muted-foreground">Request sent → Substitute accepts → HOD approves → Attendance access opens for that dated class.</p>
         </div>

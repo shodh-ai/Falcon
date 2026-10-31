@@ -37,7 +37,25 @@ DECLARE
   schema_oid oid;
   role_row record;
   relation_row record;
+  column_row record;
+  table_policy jsonb;
+  update_columns text[];
+  update_column_sql text;
   view_name text;
+  -- Exact companion matrix to LIMITED_BUSINESS_TABLES in runtime-start.cjs.
+  -- Absence is permitted before the separate expand-only schema deployment.
+  limited_business_tables constant jsonb := '{
+    "department_leadership": {"insert": true, "update_columns": ["structure", "higher_officer_id", "revision", "dean_enabled", "dean_user_id"]},
+    "department_offices": {"insert": true, "update_columns": ["login_alias"]},
+    "department_office_appointments": {"insert": true, "update_columns": ["valid_to"]},
+    "department_office_session_revisions": {"insert": true, "update_columns": ["revision"]},
+    "department_leadership_events": {"insert": true, "update_columns": []},
+    "student_identity_email_changes": {"insert": false, "update_columns": []},
+    "hr_department_request_routes": {"insert": true, "update_columns": ["approver_ids", "current_index", "leadership_revision", "updated_at"]},
+    "department_leadership_changes": {"insert": true, "update_columns": []},
+    "hr_staff_request_appeals": {"insert": true, "update_columns": ["rejecting_user_id", "reviewer_user_id", "status", "reconsideration_count", "revision", "updated_at"]},
+    "hr_staff_request_appeal_events": {"insert": true, "update_columns": []}
+  }'::jsonb;
   refresh_views constant text[] := ARRAY[
     'iqac_mv_placement_stats', 'iqac_mv_faculty_metrics',
     'iqac_mv_student_counts', 'iqac_mv_repository_health',
@@ -94,6 +112,10 @@ BEGIN
        (c.relrowsecurity OR c.relforcerowsecurity OR c.relkind = 'f')) THEN
     RAISE EXCEPTION 'RLS or foreign-table compatibility requires separate review';
   END IF;
+  IF EXISTS (SELECT 1 FROM pg_class c WHERE c.relnamespace = schema_oid
+       AND limited_business_tables ? c.relname AND c.relkind <> 'r') THEN
+    RAISE EXCEPTION 'A limited business relation has an unexpected relation kind';
+  END IF;
   IF EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
        WHERE p.prosecdef AND n.nspname !~ '^pg_' AND n.nspname <> 'information_schema'
          AND has_function_privilege(runtime_oid, p.oid, 'EXECUTE')) OR
@@ -123,7 +145,54 @@ BEGIN
        WHERE c.relnamespace = schema_oid AND c.relkind IN ('r','p','v','m') LOOP
     EXECUTE format('REVOKE ALL PRIVILEGES ON TABLE %I.%I FROM %I',
                    schema_name, relation_row.relname, role_name);
-    IF relation_row.relname = 'schema_migrations' OR relation_row.relkind = 'm' THEN
+    table_policy := limited_business_tables -> relation_row.relname;
+    IF table_policy IS NOT NULL THEN
+      -- Table REVOKE does not remove separate column ACLs. Normalize only this
+      -- role's exact limited-table columns; never revoke PUBLIC or another role.
+      FOR column_row IN SELECT a.attname FROM pg_attribute a
+           WHERE a.attrelid=relation_row.oid AND a.attnum>0 AND NOT a.attisdropped LOOP
+        EXECUTE format('REVOKE ALL PRIVILEGES (%I) ON TABLE %I.%I FROM %I',
+                       column_row.attname, schema_name, relation_row.relname, role_name);
+      END LOOP;
+      SELECT coalesce(array_agg(value), ARRAY[]::text[]) INTO update_columns
+        FROM jsonb_array_elements_text(table_policy -> 'update_columns');
+      IF EXISTS (SELECT 1 FROM unnest(update_columns) wanted(column_name)
+           WHERE NOT EXISTS (SELECT 1 FROM pg_attribute a
+             WHERE a.attrelid=relation_row.oid AND a.attnum>0 AND NOT a.attisdropped
+               AND a.attname=wanted.column_name)) THEN
+        RAISE EXCEPTION 'A required limited business update column is missing';
+      END IF;
+      EXECUTE format('GRANT SELECT ON TABLE %I.%I TO %I',
+                     schema_name, relation_row.relname, role_name);
+      IF (table_policy ->> 'insert')::boolean THEN
+        EXECUTE format('GRANT INSERT ON TABLE %I.%I TO %I',
+                       schema_name, relation_row.relname, role_name);
+      END IF;
+      IF cardinality(update_columns)>0 THEN
+        SELECT string_agg(quote_ident(value), ',') INTO update_column_sql
+          FROM unnest(update_columns) value;
+        EXECUTE format('GRANT UPDATE (%s) ON TABLE %I.%I TO %I',
+                       update_column_sql, schema_name, relation_row.relname, role_name);
+      END IF;
+      -- Effective checks also see PUBLIC/inherited and column-level grants.
+      -- A conflicting external grant refuses and rolls back this transaction.
+      IF NOT has_table_privilege(runtime_oid, relation_row.oid, 'SELECT') OR
+         has_table_privilege(runtime_oid, relation_row.oid, 'INSERT') <>
+           (table_policy ->> 'insert')::boolean OR
+         (NOT (table_policy ->> 'insert')::boolean AND
+           has_any_column_privilege(runtime_oid, relation_row.oid, 'INSERT')) OR
+         has_table_privilege(runtime_oid, relation_row.oid, 'UPDATE,DELETE') OR
+         EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid=relation_row.oid
+           AND a.attnum>0 AND NOT a.attisdropped AND NOT (a.attname=ANY(update_columns))
+           AND has_column_privilege(runtime_oid, relation_row.oid, a.attnum, 'UPDATE')) OR
+         EXISTS (SELECT 1 FROM unnest(update_columns) wanted(column_name)
+           WHERE NOT EXISTS (SELECT 1 FROM pg_attribute a
+             WHERE a.attrelid=relation_row.oid AND a.attnum>0 AND NOT a.attisdropped
+               AND a.attname=wanted.column_name
+               AND has_column_privilege(runtime_oid, relation_row.oid, a.attnum, 'UPDATE'))) THEN
+        RAISE EXCEPTION 'Unexpected effective limited business privileges';
+      END IF;
+    ELSIF relation_row.relname = 'schema_migrations' OR relation_row.relkind = 'm' THEN
       EXECUTE format('GRANT SELECT ON TABLE %I.%I TO %I',
                      schema_name, relation_row.relname, role_name);
     ELSE

@@ -61,12 +61,15 @@ function fixture(
   logs: ReturnType<typeof record>[] = [],
   base = [regular],
   moves: (typeof sundayMove)[] = [],
+  cancellations: Array<{ course_id: string; session_date: string; start_time: string }> = [],
 ) {
   const query = jest.fn((sql: string) => {
     if (sql.includes('FROM academic_class_moves'))
       return Promise.resolve(moves);
     if (sql.includes('FROM class_adjustments a'))
       return Promise.resolve(extras);
+    if (sql.includes('FROM class_adjustments') && sql.includes("adjustment_type='CANCEL'"))
+      return Promise.resolve(cancellations);
     if (sql.includes('FROM course_attendance_logs cal'))
       return Promise.resolve(logs);
     return Promise.resolve([]);
@@ -122,6 +125,14 @@ describe('Student dated timetable and extra-class attendance', () => {
         attendance_status: 'PRESENT',
       }),
     ]);
+  });
+
+  it('shows a cancelled class without inventing an absent or pending attendance mark', async () => {
+    const { service } = fixture([], [], [regular], [], [{
+      course_id: course, session_date: '2026-10-27', start_time: '11:00',
+    }]);
+    const week = await service.getWeeklyTimetableCalendar(student, '2026-10-26');
+    expect(week.slots[0]).toMatchObject({ cancelled: true, attendance_status: null });
   });
 
   it('does not use an extra-class record to invent attendance for an unmarked regular session', async () => {

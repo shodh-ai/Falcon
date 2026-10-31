@@ -6,6 +6,7 @@ FALCON_RUN_ISOLATED_SQL_TESTS=1 FALCON_TEST_DOCKER_SOCKET=/var/run/docker.sock
 FALCON_TEST_PG_IMAGE=sha256:<approved existing image> python3 -B -m unittest ...
 No image pulls, published ports, host data mounts or production credentials.
 """
+from contextlib import contextmanager
 import importlib.util
 import json
 import os
@@ -20,9 +21,22 @@ import uuid
 
 SQL = Path(__file__).resolve().parents[1] / 'runtime-role.sql'
 RUNTIME = SQL.parents[2] / 'backend' / 'scripts' / 'runtime-start.cjs'
+SCOPED_SQL = SQL.parent / 'department-leadership-grants.sql'
 HOST_SPEC = importlib.util.spec_from_file_location('fixture_host_preflight', SQL.parent / 'host-preflight.py')
 HOST = importlib.util.module_from_spec(HOST_SPEC)
 HOST_SPEC.loader.exec_module(HOST)
+LIMITED_TABLES = {
+    'department_leadership': {'insert': True, 'updateColumns': ['structure', 'higher_officer_id', 'revision', 'dean_enabled', 'dean_user_id']},
+    'department_offices': {'insert': True, 'updateColumns': ['login_alias']},
+    'department_office_appointments': {'insert': True, 'updateColumns': ['valid_to']},
+    'department_office_session_revisions': {'insert': True, 'updateColumns': ['revision']},
+    'department_leadership_events': {'insert': True, 'updateColumns': []},
+    'student_identity_email_changes': {'insert': False, 'updateColumns': []},
+    'hr_department_request_routes': {'insert': True, 'updateColumns': ['approver_ids', 'current_index', 'leadership_revision', 'updated_at']},
+    'department_leadership_changes': {'insert': True, 'updateColumns': []},
+    'hr_staff_request_appeals': {'insert': True, 'updateColumns': ['rejecting_user_id', 'reviewer_user_id', 'status', 'reconsideration_count', 'revision', 'updated_at']},
+    'hr_staff_request_appeal_events': {'insert': True, 'updateColumns': []},
+}
 VIEWS = ('iqac_mv_placement_stats', 'iqac_mv_faculty_metrics',
          'iqac_mv_student_counts', 'iqac_mv_repository_health',
          'exec_daily_university_health', 'exec_mv_finance_summary',
@@ -308,6 +322,273 @@ INSERT INTO public.business_records(value) VALUES ('synthetic baseline');
         result = self.psql('SET ROLE ' + role + '; ' + command, check=False)
         self.assertNotEqual(result.returncode, 0, 'runtime unexpectedly performed forbidden SQL')
         self.assertRegex(result.stderr, b'permission denied|must be owner')
+
+    def startup_metadata(self, role):
+        query = subprocess.run(['node', '-e',
+            'process.stdout.write(require(process.argv[1]).ROLE_QUERY)', str(RUNTIME)],
+            capture_output=True, check=True, timeout=10).stdout.decode()
+        return json.loads(self.psql('SET ROLE ' + role + '; SELECT row_to_json(boundary) '
+            'FROM (' + query + ') boundary;').stdout.decode().splitlines()[-1])
+
+    def assert_startup_accepts(self, role):
+        metadata = self.startup_metadata(role)
+        self.assertEqual(metadata.pop('database_name'), 'postgres')
+        self.assertEqual(metadata.pop('role_name'), role)
+        self.assertTrue(all(value is False for value in metadata.values()), metadata)
+
+    @contextmanager
+    def leadership_tables(self):
+        # This database exists only in the generated no-network PG18 fixture.
+        # These are deliberately reduced synthetic relations for ACL validation;
+        # production migration contents and business behavior are separate tests.
+        self.psql("""
+CREATE TABLE public.department_leadership (
+ tenant_id uuid NOT NULL, dept_id integer NOT NULL,
+ structure text NOT NULL, higher_officer_id uuid, revision integer NOT NULL DEFAULT 1,
+ dean_enabled boolean NOT NULL DEFAULT false, dean_user_id uuid,
+ PRIMARY KEY (tenant_id,dept_id));
+CREATE TABLE public.department_offices (
+ office_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),tenant_id uuid NOT NULL,
+ dept_id integer NOT NULL,kind text NOT NULL,login_alias text NOT NULL);
+CREATE TABLE public.department_office_appointments (
+ appointment_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),office_id uuid NOT NULL,
+ user_id uuid NOT NULL,valid_from timestamptz NOT NULL DEFAULT now(),valid_to timestamptz,
+ assigned_by uuid NOT NULL);
+CREATE TABLE public.department_office_session_revisions (
+ tenant_id uuid NOT NULL,user_id uuid NOT NULL,revision integer NOT NULL DEFAULT 0,
+ PRIMARY KEY (tenant_id,user_id));
+CREATE TABLE public.department_leadership_events (
+ event_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),tenant_id uuid NOT NULL,
+ dept_id integer NOT NULL,actor_user_id uuid NOT NULL,action text NOT NULL,
+ details jsonb NOT NULL,created_at timestamptz NOT NULL DEFAULT now());
+CREATE TABLE public.student_identity_email_changes (
+ tenant_id uuid NOT NULL,user_id uuid NOT NULL,student_login_id text NOT NULL,
+ old_email text,new_email text NOT NULL,mailbox_provisioned boolean NOT NULL DEFAULT false,
+ changed_at timestamptz NOT NULL DEFAULT now(),PRIMARY KEY (tenant_id,user_id));
+CREATE TABLE public.hr_department_request_routes (
+ leave_id uuid PRIMARY KEY,tenant_id uuid NOT NULL,dept_id integer NOT NULL,
+ approver_ids uuid[] NOT NULL,current_index integer NOT NULL DEFAULT 0,
+ leadership_revision integer NOT NULL,updated_at timestamptz NOT NULL DEFAULT now());
+CREATE TABLE public.department_leadership_changes (
+ change_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),tenant_id uuid NOT NULL,
+ dept_id integer NOT NULL,idempotency_key text NOT NULL,request_hash text NOT NULL,
+ applied_revision integer NOT NULL,created_at timestamptz NOT NULL DEFAULT now());
+CREATE TABLE public.hr_staff_request_appeals (
+ appeal_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),tenant_id uuid NOT NULL,
+ leave_id uuid NOT NULL,requester_user_id uuid NOT NULL,rejecting_user_id uuid NOT NULL,
+ rejecting_level text,reviewer_user_id uuid NOT NULL,idempotency_key text NOT NULL,
+ reason text NOT NULL,status text NOT NULL,reconsideration_count integer NOT NULL DEFAULT 0,
+ revision integer NOT NULL DEFAULT 1,created_at timestamptz NOT NULL DEFAULT now(),
+ updated_at timestamptz NOT NULL DEFAULT now());
+CREATE TABLE public.hr_staff_request_appeal_events (
+ event_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),appeal_id uuid NOT NULL,
+ tenant_id uuid NOT NULL,actor_user_id uuid NOT NULL,action text NOT NULL,
+ idempotency_key text NOT NULL,reason text,details jsonb NOT NULL DEFAULT '{}',
+ created_at timestamptz NOT NULL DEFAULT now());
+INSERT INTO public.student_identity_email_changes
+ (tenant_id,user_id,student_login_id,old_email,new_email)
+ VALUES ('10000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000002',
+ 'synthetic-student','synthetic-old@example.invalid','synthetic-new@example.invalid');
+""")
+        try:
+            yield
+        finally:
+            self.psql('DROP TABLE ' + ','.join('public.' + table for table in LIMITED_TABLES) + ';')
+
+    def limited_acl_snapshot(self, role):
+        return self.psql("SELECT c.relname,c.relacl::text,coalesce(string_agg(a.attname||':'||"
+            "coalesce(a.attacl::text,''),'|' ORDER BY a.attnum),'') "
+            "FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
+            "JOIN pg_attribute a ON a.attrelid=c.oid AND a.attnum>0 AND NOT a.attisdropped "
+            "WHERE n.nspname='public' AND c.relname=ANY(ARRAY[" +
+            ','.join("'" + table + "'" for table in LIMITED_TABLES) +
+            "]) GROUP BY c.oid,c.relname,c.relacl ORDER BY c.relname;").stdout
+
+    def test_leadership_exact_column_grants_are_usable_idempotent_and_preserve_business(self):
+        with self.leadership_tables():
+            role = self.new_role()
+            before = self.psql('TABLE public.business_records;').stdout
+            self.apply(role)
+            first_acl = self.limited_acl_snapshot(role)
+            self.apply(role)
+            self.assertEqual(self.limited_acl_snapshot(role), first_acl)
+            self.assert_startup_accepts(role)
+            tenant = "'10000000-0000-4000-8000-000000000001'"
+            user = "'10000000-0000-4000-8000-000000000002'"
+            office = "'10000000-0000-4000-8000-000000000003'"
+            self.psql('SET ROLE ' + role + ';' + f"""
+INSERT INTO public.department_leadership(tenant_id,dept_id,structure)
+ VALUES ({tenant},43,'PRINCIPAL_HOD');
+INSERT INTO public.department_leadership(tenant_id,dept_id,structure)
+ VALUES ({tenant},43,'HOD_ONLY') ON CONFLICT (tenant_id,dept_id)
+ DO UPDATE SET structure=EXCLUDED.structure,revision=department_leadership.revision+1;
+UPDATE public.department_leadership SET higher_officer_id={user};
+INSERT INTO public.department_offices(office_id,tenant_id,dept_id,kind,login_alias)
+ VALUES ({office},{tenant},43,'HOD','synthetic@example.invalid');
+UPDATE public.department_offices SET login_alias='synthetic-updated@example.invalid';
+INSERT INTO public.department_office_appointments(office_id,user_id,assigned_by)
+ VALUES ({office},{user},{user});
+UPDATE public.department_office_appointments SET valid_to=now();
+INSERT INTO public.department_office_session_revisions(tenant_id,user_id,revision)
+ VALUES ({tenant},{user},1) ON CONFLICT (tenant_id,user_id)
+ DO UPDATE SET revision=department_office_session_revisions.revision+1;
+UPDATE public.department_office_session_revisions SET revision=revision+1;
+INSERT INTO public.department_leadership_events(tenant_id,dept_id,actor_user_id,action,details)
+ VALUES ({tenant},43,{user},'SYNTHETIC','{{}}');
+""" + '\n'.join('SELECT * FROM public.' + table + ';' for table in LIMITED_TABLES))
+            for table, matrix in LIMITED_TABLES.items():
+                self.assertEqual(self.psql("SELECT has_table_privilege('" + role +
+                    "','public." + table + "','UPDATE');").stdout.decode().strip(), 'f')
+                self.assertEqual(self.psql("SELECT has_table_privilege('" + role +
+                    "','public." + table + "','INSERT');").stdout.decode().strip(),
+                    't' if matrix['insert'] else 'f')
+                # Appointments inherit tenant scope through their office FK;
+                # exercise an existing protected column instead of a SQL typo.
+                protected_column = 'user_id' if table == 'department_office_appointments' else 'tenant_id'
+                for forbidden in ['DELETE FROM public.' + table, 'TRUNCATE public.' + table,
+                                  'UPDATE public.' + table + ' SET ' + protected_column + '=' + protected_column]:
+                    self.denied(role, forbidden)
+            for forbidden in [
+                "UPDATE public.department_leadership_events SET action='forbidden'",
+                "UPDATE public.student_identity_email_changes SET mailbox_provisioned=true",
+                "INSERT INTO public.student_identity_email_changes(tenant_id,user_id,student_login_id,new_email) "
+                    "VALUES (gen_random_uuid(),gen_random_uuid(),'forbidden','forbidden@example.invalid')"]:
+                self.denied(role, forbidden)
+            # Existing business objects keep the same CRUD boundary and bytes.
+            self.psql('SET ROLE ' + role + "; BEGIN; INSERT INTO public.business_records(value) "
+                "VALUES ('synthetic rollback'); UPDATE public.business_records SET value=value; "
+                "DELETE FROM public.business_records WHERE value='synthetic rollback'; ROLLBACK;")
+            self.assertEqual(self.psql('TABLE public.business_records;').stdout, before)
+
+    def test_leadership_public_extra_authority_is_refused_atomically_and_guard_denies(self):
+        with self.leadership_tables():
+            role = self.new_role()
+            self.apply(role)
+            for grant, revoke in [
+                ('GRANT UPDATE ON public.department_leadership_events TO PUBLIC',
+                 'REVOKE UPDATE ON public.department_leadership_events FROM PUBLIC'),
+                ('GRANT UPDATE(action) ON public.department_leadership_events TO PUBLIC',
+                 'REVOKE UPDATE(action) ON public.department_leadership_events FROM PUBLIC'),
+                ('GRANT UPDATE(tenant_id) ON public.department_leadership TO PUBLIC',
+                 'REVOKE UPDATE(tenant_id) ON public.department_leadership FROM PUBLIC'),
+                ('GRANT INSERT ON public.student_identity_email_changes TO PUBLIC',
+                 'REVOKE INSERT ON public.student_identity_email_changes FROM PUBLIC'),
+                ('GRANT INSERT(new_email) ON public.student_identity_email_changes TO PUBLIC',
+                 'REVOKE INSERT(new_email) ON public.student_identity_email_changes FROM PUBLIC'),
+                ('GRANT DELETE ON public.department_offices TO PUBLIC',
+                 'REVOKE DELETE ON public.department_offices FROM PUBLIC'),
+            ]:
+                with self.subTest(grant=grant):
+                    self.psql(grant + ';')
+                    try:
+                        before = self.limited_acl_snapshot(role)
+                        self.assertTrue(self.startup_metadata(role)['missing_business_access'])
+                        self.assertNotEqual(self.apply(role, check=False).returncode, 0)
+                        self.assertEqual(self.limited_acl_snapshot(role), before)
+                    finally:
+                        self.psql(revoke + ';')
+                    self.assert_startup_accepts(role)
+
+    def test_leadership_wrong_relation_kind_and_missing_allowed_columns_fail_closed(self):
+        with self.leadership_tables():
+            role = self.new_role()
+            self.apply(role)
+            self.psql('ALTER TABLE public.department_leadership_events RENAME TO fixture_saved_events; '
+                'CREATE VIEW public.department_leadership_events AS SELECT * FROM public.fixture_saved_events;')
+            try:
+                self.assertTrue(self.startup_metadata(role)['missing_business_access'])
+                self.assertNotEqual(self.apply(role, check=False).returncode, 0)
+            finally:
+                self.psql('DROP VIEW public.department_leadership_events; '
+                    'ALTER TABLE public.fixture_saved_events RENAME TO department_leadership_events;')
+            self.assert_startup_accepts(role)
+            self.psql('ALTER TABLE public.department_offices RENAME COLUMN login_alias TO fixture_login_alias;')
+            try:
+                self.assertTrue(self.startup_metadata(role)['missing_business_access'])
+                self.assertNotEqual(self.apply(role, check=False).returncode, 0)
+            finally:
+                self.psql('ALTER TABLE public.department_offices RENAME COLUMN fixture_login_alias TO login_alias;')
+            self.assert_startup_accepts(role)
+
+    def test_leadership_direct_extra_columns_normalize_but_membership_never_bypasses(self):
+        with self.leadership_tables():
+            role = self.new_role()
+            self.psql('GRANT UPDATE(action) ON public.department_leadership_events TO ' + role +
+                '; GRANT INSERT(new_email) ON public.student_identity_email_changes TO ' + role + ';')
+            self.apply(role)
+            self.assertEqual(self.psql("SELECT has_any_column_privilege('" + role +
+                "','public.department_leadership_events','UPDATE');").stdout.decode().strip(), 'f')
+            self.assertEqual(self.psql("SELECT has_any_column_privilege('" + role +
+                "','public.student_identity_email_changes','INSERT,UPDATE');").stdout.decode().strip(), 'f')
+            self.assert_startup_accepts(role)
+            group = 'fixture_limited_group_' + str(type(self).sequence)
+            self.psql('CREATE ROLE ' + group + '; GRANT UPDATE(action) ON '
+                'public.department_leadership_events TO ' + group + '; GRANT ' + group + ' TO ' + role + ';')
+            try:
+                self.assertNotEqual(self.apply(role, check=False).returncode, 0)
+                self.assertTrue(self.startup_metadata(role)['memberships'])
+            finally:
+                self.psql('REVOKE ' + group + ' FROM ' + role + '; REVOKE UPDATE(action) ON '
+                    'public.department_leadership_events FROM ' + group + '; DROP ROLE ' + group + ';')
+
+    def nonlimited_acl_snapshot(self):
+        return self.psql("SELECT c.relname,c.relacl::text,coalesce(string_agg(a.attname||':'||"
+            "coalesce(a.attacl::text,''),'|' ORDER BY a.attnum),'') "
+            "FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
+            "LEFT JOIN pg_attribute a ON a.attrelid=c.oid AND a.attnum>0 AND NOT a.attisdropped "
+            "WHERE n.nspname='public' AND NOT c.relname=ANY(ARRAY[" +
+            ','.join("'" + table + "'" for table in LIMITED_TABLES) +
+            "]) GROUP BY c.oid,c.relname,c.relacl ORDER BY c.relname;").stdout
+
+    def test_scoped_leadership_job_changes_only_reviewed_objects_and_refuses_incomplete_schema(self):
+        # The production helper pins the existing role name. It is created only
+        # within this generated synthetic database, with no real credentials.
+        role = 'falcon_runtime'
+        self.psql('CREATE ROLE falcon_runtime LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE '
+            'NOREPLICATION NOBYPASSRLS NOINHERIT;')
+        try:
+            self.psql(SQL.read_text(), role=role)
+            with self.leadership_tables():
+                before = self.nonlimited_acl_snapshot()
+                self.psql(SCOPED_SQL.read_text(), role=role)
+                self.assertEqual(self.nonlimited_acl_snapshot(), before)
+                first_acl = self.limited_acl_snapshot(role)
+                self.psql(SCOPED_SQL.read_text(), role=role)
+                self.assertEqual(self.limited_acl_snapshot(role), first_acl)
+                self.assertEqual(self.nonlimited_acl_snapshot(), before)
+                self.assert_startup_accepts(role)
+                self.denied(role, "UPDATE public.department_leadership_events SET action='forbidden'")
+                self.denied(role, 'DELETE FROM public.department_office_appointments')
+                self.denied(role, 'INSERT INTO public.student_identity_email_changes '
+                    "(tenant_id,user_id,student_login_id,new_email) VALUES "
+                    "(gen_random_uuid(),gen_random_uuid(),'forbidden','forbidden@example.invalid')")
+                for grant, revoke in [
+                    ('GRANT UPDATE(action) ON public.department_leadership_events TO PUBLIC',
+                     'REVOKE UPDATE(action) ON public.department_leadership_events FROM PUBLIC'),
+                    ('GRANT INSERT(new_email) ON public.student_identity_email_changes TO PUBLIC',
+                     'REVOKE INSERT(new_email) ON public.student_identity_email_changes FROM PUBLIC')]:
+                    self.psql(grant + ';')
+                    try:
+                        current = self.limited_acl_snapshot(role)
+                        result = self.psql(SCOPED_SQL.read_text(), role=role, check=False)
+                        self.assertNotEqual(result.returncode, 0)
+                        self.assertEqual(self.limited_acl_snapshot(role), current)
+                        self.assertEqual(self.nonlimited_acl_snapshot(), before)
+                    finally:
+                        self.psql(revoke + ';')
+                self.psql('ALTER TABLE public.student_identity_email_changes RENAME TO fixture_saved_email_ledger;')
+                try:
+                    before_incomplete = self.nonlimited_acl_snapshot()
+                    limited_before = self.limited_acl_snapshot(role)
+                    result = self.psql(SCOPED_SQL.read_text(), role=role, check=False)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertEqual(self.nonlimited_acl_snapshot(), before_incomplete)
+                    self.assertEqual(self.limited_acl_snapshot(role), limited_before)
+                finally:
+                    self.psql('ALTER TABLE public.fixture_saved_email_ledger RENAME TO student_identity_email_changes;')
+                self.assert_startup_accepts(role)
+        finally:
+            self.psql('DROP OWNED BY falcon_runtime; DROP ROLE falcon_runtime;')
 
     def test_docker_go_projection_formats_handle_missing_labels_and_health(self):
         # Execute the actual Go templates in Docker, not FakeDocker. The official

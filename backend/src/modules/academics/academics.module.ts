@@ -1,3 +1,5 @@
+import { PrincipalOversightService } from './principal-oversight.service';
+import { PrincipalOversightController } from './principal-oversight.controller';
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Subject } from '../../entities/subject.entity';
@@ -109,6 +111,7 @@ import { AttendanceDeadlineReminderService } from './attendance-deadline-reminde
   ],
   controllers: [
     AcademicsController,
+    PrincipalOversightController,
     AcademicSessionChangesController,
     ProctorController,
     CertificatesController,
@@ -119,6 +122,7 @@ import { AttendanceDeadlineReminderService } from './attendance-deadline-reminde
   ],
   providers: [
     AcademicsService,
+    PrincipalOversightService,
     AcademicsFacultyService,
     ProctorService,
     MentorshipChatService,

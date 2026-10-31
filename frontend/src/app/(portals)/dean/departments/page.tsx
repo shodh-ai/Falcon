@@ -28,10 +28,13 @@ type DeptRow = {
   attendance_risk_count: number;
   result_risk_count: number;
 };
+type AssignedDepartment = { dept_id: number; dept_name: string; school_name: string;
+  hod_name: string | null; principal_name: string | null };
 
 export default function DeanDepartmentsPage() {
   const api = useAuthedApi();
   const [rows, setRows] = useState<DeptRow[]>([]);
+  const [assigned, setAssigned] = useState<AssignedDepartment[]>([]);
   const [total, setTotal] = useState(0);
   const [offset, setOffset] = useState(0);
   const [search, setSearch] = useState('');
@@ -59,9 +62,23 @@ export default function DeanDepartmentsPage() {
   useEffect(() => {
     void load();
   }, [load]);
+  useEffect(() => {
+    void api.get<AssignedDepartment[]>('/api/academics/dean/leadership/departments')
+      .then(setAssigned).catch(() => setAssigned([]));
+  }, [api]);
 
   return (
     <HodPageFrame>
+      {assigned.length > 0 && <section className="rounded-xl border bg-white p-4">
+        <h2 className="mb-2 text-lg font-semibold text-sgvu-navy">Assigned leadership oversight</h2>
+        <div className="grid gap-2 md:grid-cols-2">
+          {assigned.map((department) => <div key={department.dept_id} className="rounded-lg border p-3 text-sm">
+            <p className="font-semibold">{department.dept_name} · {department.school_name}</p>
+            <p>HOD: {department.hod_name || 'Office not enabled'}</p>
+            <p>Principal: {department.principal_name || 'Office not enabled'}</p>
+          </div>)}
+        </div>
+      </section>}
       <HodPageHeader
         title="Departments"
         description="Overview of all departments under your school."

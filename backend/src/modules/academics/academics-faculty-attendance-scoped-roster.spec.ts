@@ -89,6 +89,20 @@ describe('Faculty attendance uses the same scoped roster for reading and saving'
     );
   });
 
+  it('rejects attendance for an approved cancelled dated class before writing a log', async () => {
+    const { service, manager, date } = setup();
+    const originalQuery = manager.query.getMockImplementation()!;
+    manager.query.mockImplementation(async (sql: string) =>
+      sql.includes('AS cancelled') ? [{ cancelled: true }] : originalQuery(sql));
+    await expect(service.saveCourseAttendanceLog('faculty-1', 'tenant-1', {
+      course_id: 'course-1', timetable_id: 'slot-1', date,
+      attendance_data: [{ student_id: qaStudent, status: 'PRESENT' }],
+    })).rejects.toThrow('This class was cancelled');
+    expect(manager.query).not.toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO course_attendance_logs'), expect.anything(),
+    );
+  });
+
   it('saves approved extra-class attendance under its own session and reads it back', async () => {
     const { service, manager, dataSource, date } = setup();
     const originalQuery = dataSource.query.getMockImplementation()!;

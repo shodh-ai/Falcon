@@ -5,7 +5,7 @@ import { useAuthedApi } from '@/lib/api';
 import { withTeachingDeptId } from '@/lib/faculty/teaching-departments';
 import { cn } from '@/lib/utils';
 
-type SessionState = { has_saved_attendance?: boolean; attendance_locked?: boolean; awaiting_confirmation?: boolean };
+type SessionState = { has_saved_attendance?: boolean; attendance_locked?: boolean; awaiting_confirmation?: boolean; cancelled?: boolean };
 type Day = { date: string; sessions: SessionState[] | null; failed?: boolean };
 
 export function shiftAttendanceDate(date: string, days: number) {
@@ -23,7 +23,11 @@ export function attendanceDayStatus(sessions: SessionState[] | null) {
   if (!sessions) return { label: 'Loading…', detail: '', tone: 'neutral' };
   if (!sessions.length) return { label: 'No class', detail: '', tone: 'neutral' };
   const held = sessions.filter(session => session.awaiting_confirmation).length;
-  const confirmed = sessions.filter(session => !session.awaiting_confirmation);
+  const cancelled = sessions.filter(session => session.cancelled).length;
+  const confirmed = sessions.filter(session => !session.awaiting_confirmation && !session.cancelled);
+  if (!confirmed.length && cancelled) return {
+    label: 'Cancelled', detail: `${cancelled} cancelled session${cancelled === 1 ? '' : 's'}${held ? ` · ${held} awaiting confirmation` : ''}`, tone: 'neutral',
+  };
   if (!confirmed.length) return { label: 'Awaiting confirmation', detail: `${held} held session${held === 1 ? '' : 's'}`, tone: 'pending' };
   if (sessions.some(session => typeof session.has_saved_attendance !== 'boolean')) {
     return { label: 'Status unavailable', detail: '', tone: 'neutral' };
@@ -33,7 +37,7 @@ export function attendanceDayStatus(sessions: SessionState[] | null) {
   const locked = missing.filter(session => session.attendance_locked).length;
   return {
     label: `${recorded}/${confirmed.length} recorded`,
-    detail: (!missing.length ? 'Complete' : locked === missing.length ? `${locked} not recorded · locked` : `${missing.length} pending`) + (held ? ` · ${held} awaiting confirmation` : ''),
+    detail: (!missing.length ? 'Complete' : locked === missing.length ? `${locked} not recorded · locked` : `${missing.length} pending`) + (held ? ` · ${held} awaiting confirmation` : '') + (cancelled ? ` · ${cancelled} cancelled` : ''),
     tone: !missing.length && !held ? 'complete' : 'pending',
   };
 }
@@ -62,7 +66,7 @@ export function AttendanceWeekNavigator({ selectedDate, today, deptId, scopeLoad
 
   const resolved = !scopeLoading && result?.start === start && result.deptId === deptId && result.revision === revision;
   const days = resolved ? result.days : Array.from({ length: 7 }, (_, index) => ({ date: shiftAttendanceDate(start, index), sessions: null } as Day));
-  const knownSessions = days.flatMap(day => day.sessions || []).filter(session => !session.awaiting_confirmation);
+  const knownSessions = days.flatMap(day => day.sessions || []).filter(session => !session.awaiting_confirmation && !session.cancelled);
   const recorded = knownSessions.filter(session => session.has_saved_attendance).length;
   return <section aria-label="Attendance week status" className="space-y-3 rounded-xl border bg-card p-4">
     <div className="flex flex-wrap items-center justify-between gap-2">
@@ -91,6 +95,6 @@ export function AttendanceWeekNavigator({ selectedDate, today, deptId, scopeLoad
         </button>;
       })}
     </div>
-    <p className="text-xs text-muted-foreground">Green: all sessions recorded. Amber: attendance outstanding. Click a day to review each class. A missing record never means the students were absent.</p>
+    <p className="text-xs text-muted-foreground">Green: all sessions recorded. Amber: attendance outstanding. Cancelled sessions need no attendance. Click a day to review each class. A missing record never means the students were absent.</p>
   </section>;
 }

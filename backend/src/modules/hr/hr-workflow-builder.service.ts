@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, Injectable, NotFoundException }
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager } from 'typeorm';
 import { HrAccessControlService } from './hr-access-control.service';
+import { configuredReportingOfficer } from '../department-leadership/reporting-officer';
 
 @Injectable()
 export class HrWorkflowBuilderService {
@@ -345,6 +346,8 @@ export class HrWorkflowBuilderService {
     requesterUserId: string,
     manager?: EntityManager,
   ): Promise<string | null> {
+    const configured=await configuredReportingOfficer((sql,args)=>(manager ?? this.dataSource).query(sql,args),tenantId,requesterUserId);
+    if(configured.configured)return configured.officer;
     const managerOrHod = await (manager ?? this.dataSource).query(
       `SELECT COALESCE(
           NULLIF(u.reporting_officer_id, $2::uuid),
@@ -397,6 +400,10 @@ export class HrWorkflowBuilderService {
     manager?: EntityManager,
   ): Promise<string | null> {
     const querySource = manager ?? this.dataSource;
+    if(step.approver_type==='REPORTING_MANAGER' || step.approver_type==='DEPT_HEAD'){
+      const configured=await configuredReportingOfficer((sql,args)=>querySource.query(sql,args),tenantId,requesterUserId);
+      if(configured.configured)return configured.officer;
+    }
     if (step.approver_type === 'REPORTING_MANAGER') {
       const rows = await querySource.query(
         `SELECT COALESCE(

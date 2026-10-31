@@ -11,6 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 
 import { useAuthedApi } from '@/lib/api';
+import { FlexibleLeadershipEditor } from '@/components/campus-admin/FlexibleLeadershipEditor';
 
 
 
@@ -449,6 +450,7 @@ export default function SuperAdminHierarchyPage() {
 
 
   return (
+    <><FlexibleLeadershipEditor/>
 
     <div className="space-y-6 p-6">
 
@@ -858,6 +860,7 @@ export default function SuperAdminHierarchyPage() {
 
     </div>
 
+    </>
   );
 
 }

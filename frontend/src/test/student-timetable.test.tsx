@@ -11,6 +11,21 @@ vi.mock('@/components/student/StudentPageShell', () => ({
 }));
 
 describe('published student timetable', () => {
+  it('clearly identifies a cancelled session and says attendance is not expected', async () => {
+    api.get.mockResolvedValue({
+      week_start: '2026-10-26', week_dates: [{ day_of_week: 2, label: 'Tue', date: '2026-10-27' }],
+      slots: [{ timetable_id: 'cancelled-slot', course_id: 'course', course_code: 'TEST101',
+        course_name: 'Cancelled class', faculty_name: 'Faculty', room: 'Room 1',
+        day_of_week: 2, start_time: '11:00', end_time: '12:00', is_virtual: false,
+        live_join_url: null, session_date: '2026-10-27', section: 'A', cancelled: true,
+        attendance_status: null }], pending_practical_batches: [], conflict_count: 0,
+    });
+    render(<TimetablePage />);
+    const slot = await screen.findByRole('button', { name: /Cancelled class/ });
+    expect(within(slot).getByText('Cancelled')).toBeInTheDocument();
+    fireEvent.click(slot);
+    expect(screen.getByText('This class was cancelled. No attendance is expected for this session.')).toBeInTheDocument();
+  });
   it('labels an approved dated extra and opens its own attendance record alongside the regular class', async () => {
     const base = {
       course_id: 'course-from-environment', course_code: 'TEST101', course_name: 'Enrolled subject',

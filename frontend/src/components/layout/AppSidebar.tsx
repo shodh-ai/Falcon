@@ -30,7 +30,6 @@ export function AppSidebar({
   const pathname = usePathname();
   const allHrefs = collectNavHrefs(navGroups);
   const isExecutivePortal = personaLabel === 'President / VC';
-  const isExamCellPortal = personaLabel === 'Falcon Exam OS';
   const navRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
@@ -111,33 +110,8 @@ export function AppSidebar({
           isExecutivePortal && 'pb-6',
         )}
       >
-        <div className={cn('space-y-4 pb-8', isExecutivePortal && 'space-y-5', isExamCellPortal && 'space-y-1.5')}>
+        <div className={cn('space-y-4 pb-8', isExecutivePortal && 'space-y-5')}>
           {navGroups.map((group, groupIndex) => {
-            const groupActive = group.items.some((item) => isNavHrefActive(pathname, item.href, allHrefs));
-            if (isExamCellPortal) {
-              // Specialist workflows live in the section tabs and search. The
-              // landing must remain in the permission-filtered group.
-              const landing = group.items.find((item) => item.href === group.homeHref) ?? group.items[0];
-              if (!landing) return null;
-              const Icon = group.icon ?? landing.icon;
-              return (
-                <div key={group.title}>
-                  <Link
-                    href={landing.href}
-                    title={collapsed ? group.title : undefined}
-                    aria-current={groupActive ? 'location' : undefined}
-                    className={cn(
-                      'flex min-h-11 items-center gap-3 rounded-lg px-3 py-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sgvu-gold focus-visible:ring-offset-2 focus-visible:ring-offset-sgvu-navy',
-                      groupActive ? 'bg-sgvu-gold text-sgvu-navy shadow-sm' : 'text-blue-100 hover:bg-white/10 hover:text-white',
-                      collapsed && 'justify-center px-2',
-                    )}
-                  >
-                    <Icon className="h-5 w-5 shrink-0" aria-hidden />
-                    <span className={collapsed ? 'sr-only' : 'min-w-0 leading-snug'}>{group.title}</span>
-                  </Link>
-                </div>
-              );
-            }
             const itemList = (
               <ul className={cn('space-y-1', isExecutivePortal && 'space-y-1.5')}>
                 {group.items.map((item) => {

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useAuthedApi } from '@/lib/api';
+import { usePathname } from 'next/navigation';
 import { useOptionalTeachingDepartment } from '@/components/faculty/TeachingDepartmentContext';
 import { withTeachingDeptId } from '@/lib/faculty/teaching-departments';
 
@@ -14,6 +15,8 @@ export type FacultyCourse = {
   program_name?: string | null;
   semester?: string | null;
   academic_year?: string | null;
+  faculty_user_id?: string | null;
+  faculty_name?: string | null;
 };
 
 export function uniqueFacultyCoursesByCourseId(courses: FacultyCourse[]): FacultyCourse[] {
@@ -27,6 +30,7 @@ export function uniqueFacultyCoursesByCourseId(courses: FacultyCourse[]): Facult
 
 export function useFacultyCourses() {
   const api = useAuthedApi();
+  const pathname = usePathname();
   const teachingDept = useOptionalTeachingDepartment();
   const activeDeptId = teachingDept?.activeDeptId ?? null;
   const deptLoading = teachingDept?.loading ?? false;
@@ -41,7 +45,9 @@ export function useFacultyCourses() {
       try {
         setLoading(true);
         const data = await api.get<FacultyCourse[]>(
-          withTeachingDeptId('/api/academics/faculty/workspaces/courses', activeDeptId),
+          withTeachingDeptId(pathname?.startsWith('/hod/my-teaching/')
+            ? '/api/academics/faculty/workspaces/courses?scope=mine'
+            : '/api/academics/faculty/workspaces/courses', activeDeptId),
         );
         if (!cancelled) {
           if (!Array.isArray(data)) {
@@ -69,7 +75,7 @@ export function useFacultyCourses() {
     return () => {
       cancelled = true;
     };
-  }, [api, activeDeptId, deptLoading]);
+  }, [api, activeDeptId, deptLoading, pathname]);
 
   return { courses, loading, error };
 }

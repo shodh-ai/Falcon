@@ -117,6 +117,7 @@ export class AuthController {
             user.tenant_id,
           )
         : null;
+    if(syncedUser)await this.authService.applyLeadershipClaims(syncedUser,(user as AuthProfileUser & {office_context?: import('../modules/department-leadership/leadership.types').OfficeContext}).office_context);
     const roleClaims = syncedUser
       ? this.authService.getRoleClaims(syncedUser)
       : {

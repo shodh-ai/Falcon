@@ -7,7 +7,9 @@ import { MyCalendarPanel } from '@/components/self-service/MyCalendarPanel';
 import { MyLeavesPanel } from '@/components/self-service/MyLeavesPanel';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
-function WorkforceHubContent({ embedded }: { embedded?: boolean }) {
+type WorkforceHubProps = { embedded?: boolean; allowDemoFallback?: boolean; enableTeachingProxy?: boolean };
+
+function WorkforceHubContent({ embedded, allowDemoFallback = true, enableTeachingProxy = true }: WorkforceHubProps) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -43,10 +45,10 @@ function WorkforceHubContent({ embedded }: { embedded?: boolean }) {
           </TabsTrigger>
         </TabsList>
         <TabsContent value="leave">
-          <MyLeavesPanel />
+          <MyLeavesPanel allowDemoFallback={allowDemoFallback} enableTeachingProxy={enableTeachingProxy} />
         </TabsContent>
         <TabsContent value="calendar">
-          <MyCalendarPanel />
+          <MyCalendarPanel allowDemoFallback={allowDemoFallback} />
         </TabsContent>
       </Tabs>
     </>
@@ -59,10 +61,10 @@ function WorkforceHubContent({ embedded }: { embedded?: boolean }) {
   return <div className="mx-auto w-full max-w-6xl space-y-6">{body}</div>;
 }
 
-export function WorkforceHubPage({ embedded }: { embedded?: boolean } = {}) {
+export function WorkforceHubPage(props: WorkforceHubProps = {}) {
   return (
     <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">Loading…</div>}>
-      <WorkforceHubContent embedded={embedded} />
+      <WorkforceHubContent {...props} />
     </Suspense>
   );
 }

@@ -32,6 +32,8 @@ import { ZimyoEmployeeOverview } from '@/components/zimyo/ZimyoEmployeeOverview'
 import { ZimyoPoliciesPanel } from '@/components/zimyo/ZimyoPoliciesPanel';
 import { ZimyoComingSoon } from '@/components/zimyo/ZimyoComingSoon';
 import { TeamRequestsPanel } from '@/components/self-service/TeamRequestsPanel';
+import { DepartmentHrApprovalsPanel } from '@/components/self-service/DepartmentHrApprovalsPanel';
+import { HrAppealsPanel } from '@/components/self-service/HrAppealsPanel';
 import { TeamAttendancePanel } from '@/components/self-service/TeamAttendancePanel';
 import { useTeamScope, useTeamScopeCounts, scopeTabLabel, type TeamScope } from '@/components/self-service/TeamScopeBar';
 
@@ -427,6 +429,8 @@ return (
             . Use the tabs above to switch between request types.
           </p>
           <TeamRequestsPanel defaultScope={HOD_DEFAULT_SCOPE} />
+          <DepartmentHrApprovalsPanel />
+          <HrAppealsPanel />
         </div>
       )}
 

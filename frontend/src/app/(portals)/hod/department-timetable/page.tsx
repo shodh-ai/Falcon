@@ -2,312 +2,77 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { toast } from '@/lib/notifications/falcon-toast';
-import {
-  HodActionButton,
-  HodDataTable,
-  HodDayTabs,
-  HodMetricChip,
-  HodPageFrame,
-  HodPageHeader,
-} from '@/components/hod/HodPagePrimitives';
+import { Clock3, MapPin, UserRound } from 'lucide-react';
+import { HodActionButton, HodDayTabs, HodMetricChip, HodPageFrame, HodPageHeader, HodPanel } from '@/components/hod/HodPagePrimitives';
 import { useAuthedApi } from '@/lib/api';
 
-type Row = {
-  timetable_id: string;
-  faculty_user_id: string;
-  day_of_week: number;
-  start_time: string;
-  end_time: string;
-  room: string | null;
-  course_code: string;
-  course_name: string;
-  faculty_name: string;
-  program_name?: string | null;
-  semester?: string | null;
+type Slot = {
+  timetable_id: string; faculty_user_id: string; day_of_week: number; start_time: string; end_time: string;
+  room: string | null; course_code: string; course_name: string; faculty_name: string;
+  program_name?: string | null; semester?: string | null;
 };
-
-type UnscheduledRow = {
-  allocation_id: string;
-  faculty_user_id: string;
-  program_name: string | null;
-  semester: string | null;
-  course_code: string;
-  course_name: string;
-  faculty_name: string;
-};
-
-const DAYS = [
-  { id: 1, label: 'Mon' },
-  { id: 2, label: 'Tue' },
-  { id: 3, label: 'Wed' },
-  { id: 4, label: 'Thu' },
-  { id: 5, label: 'Fri' },
-  { id: 6, label: 'Sat' },
-];
-
-const DOW: Record<number, string> = Object.fromEntries(DAYS.map((d) => [d.id, d.label]));
-
-function formatTime(t: string) {
-  return `${String(t).slice(0, 5)}`;
+type Unscheduled = { allocation_id: string; program_name: string | null; semester: string | null; course_code: string; course_name: string; faculty_name: string; faculty_user_id: string };
+const DAYS = [{ id: 1, label: 'Monday' }, { id: 2, label: 'Tuesday' }, { id: 3, label: 'Wednesday' }, { id: 4, label: 'Thursday' }, { id: 5, label: 'Friday' }, { id: 6, label: 'Saturday' }];
+function clock(value: string) { const [hour, minute] = String(value).split(':').map(Number); return `${hour % 12 || 12}:${String(minute).padStart(2, '0')} ${hour >= 12 ? 'PM' : 'AM'}`; }
+function tone(slot: Slot) {
+  if (/practical|lab/i.test(slot.course_name)) return 'border-amber-200 bg-amber-50 text-amber-950';
+  if (/tutorial/i.test(slot.course_name)) return 'border-emerald-200 bg-emerald-50 text-emerald-950';
+  return 'border-blue-200 bg-blue-50 text-sgvu-navy';
 }
 
 export default function HodDepartmentTimetablePage() {
   const api = useAuthedApi();
-  const [rows, setRows] = useState<Row[]>([]);
-  const [unscheduled, setUnscheduled] = useState<UnscheduledRow[]>([]);
+  const [slots, setSlots] = useState<Slot[]>([]);
+  const [unscheduled, setUnscheduled] = useState<Unscheduled[]>([]);
   const [loading, setLoading] = useState(true);
-  const [dayFilter, setDayFilter] = useState<number | 'all'>('all');
-  const [facultyFilter, setFacultyFilter] = useState('all');
+  const [error, setError] = useState('');
+  const [day, setDay] = useState<number | 'all'>(1);
+  const [facultyId, setFacultyId] = useState('all');
+  const [semester, setSemester] = useState('all');
 
+  useEffect(() => { setFacultyId(new URLSearchParams(window.location.search).get('faculty') || 'all'); }, []);
   useEffect(() => {
-    setFacultyFilter(new URLSearchParams(window.location.search).get('faculty') || 'all');
-  }, []);
-
-  useEffect(() => {
-    void (async () => {
-      setLoading(true);
-      try {
-        const data = await api.get<{ slots: Row[]; unscheduled: UnscheduledRow[] }>(
-          '/api/academics/hod/department-timetable',
-        );
-        setRows(data.slots ?? []);
-        setUnscheduled(data.unscheduled ?? []);
-      } catch (e) {
-        toast.error(e instanceof Error ? e.message : 'Failed to load timetable');
-        setRows([]);
-        setUnscheduled([]);
-      } finally {
-        setLoading(false);
-      }
-    })();
+    let active = true;
+    setLoading(true);
+    void api.get<{ slots: Slot[]; unscheduled: Unscheduled[] }>('/api/academics/hod/department-timetable')
+      .then((data) => { if (active) { setSlots(data.slots || []); setUnscheduled(data.unscheduled || []); } })
+      .catch((reason) => { if (active) setError(reason instanceof Error ? reason.message : 'Could not load timetable'); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
   }, [api]);
 
-  const facultyOptions = useMemo(() => {
-    const options = new Map<string, string>();
-    for (const row of [...rows, ...unscheduled]) options.set(row.faculty_user_id, row.faculty_name);
-    return [...options.entries()].sort((a, b) => a[1].localeCompare(b[1]));
-  }, [rows, unscheduled]);
+  const faculty = useMemo(() => [...new Map([...slots, ...unscheduled].map((row) => [row.faculty_user_id, row.faculty_name])).entries()].sort((a, b) => a[1].localeCompare(b[1])), [slots, unscheduled]);
+  const semesters = useMemo(() => [...new Set(slots.map((slot) => slot.semester).filter(Boolean))].sort() as string[], [slots]);
+  const filtered = useMemo(() => slots.filter((slot) => (facultyId === 'all' || slot.faculty_user_id === facultyId) && (semester === 'all' || slot.semester === semester)), [slots, facultyId, semester]);
+  const visibleDays = DAYS.filter((entry) => day === 'all' || day === entry.id);
+  const counts = Object.fromEntries(DAYS.map((entry) => [entry.id, filtered.filter((slot) => slot.day_of_week === entry.id).length]));
+  const unscheduledVisible = unscheduled.filter((row) => (facultyId === 'all' || row.faculty_user_id === facultyId) && (semester === 'all' || row.semester === semester));
 
-  const facultyRows = useMemo(
-    () => facultyFilter === 'all' ? rows : rows.filter((r) => r.faculty_user_id === facultyFilter),
-    [rows, facultyFilter],
-  );
-
-  const facultyUnscheduled = useMemo(
-    () => facultyFilter === 'all' ? unscheduled : unscheduled.filter((r) => r.faculty_user_id === facultyFilter),
-    [unscheduled, facultyFilter],
-  );
-
-  const dayCounts = useMemo(() => {
-    const c: Record<number, number> = {};
-    for (const row of facultyRows) c[row.day_of_week] = (c[row.day_of_week] ?? 0) + 1;
-    return c;
-  }, [facultyRows]);
-
-  const filtered = useMemo(
-    () => (dayFilter === 'all' ? facultyRows : facultyRows.filter((r) => r.day_of_week === dayFilter)),
-    [facultyRows, dayFilter],
-  );
-
-  const stats = useMemo(() => {
-    const courses = new Set(facultyRows.map((r) => r.course_code));
-    return { slots: facultyRows.length, courses: courses.size, faculty: facultyOptions.length };
-  }, [facultyRows, facultyOptions]);
-
-  const weekGrid = useMemo(() => {
-    const byDay: Record<number, Row[]> = {};
-    for (const d of DAYS) byDay[d.id] = [];
-    for (const row of facultyRows) {
-      if (byDay[row.day_of_week]) byDay[row.day_of_week].push(row);
-    }
-    for (const d of DAYS) {
-      byDay[d.id].sort((a, b) => String(a.start_time).localeCompare(String(b.start_time)));
-    }
-    return byDay;
-  }, [facultyRows]);
-
-  return (
-    <HodPageFrame>
-      <HodPageHeader
-        title="Department Timetable"
-        description="View each faculty member's weekly teaching calendar or the full department timetable."
-        meta={
-          <>
-            <HodMetricChip label="Slots" value={stats.slots} emphasis />
-            <HodMetricChip label="Courses" value={stats.courses} />
-            <HodMetricChip label="Faculty" value={stats.faculty} />
-          </>
-        }
-        actions={
-          <>
-            <HodActionButton href="/hod/academics/course-allocation" variant="primary">
-              Course Allocation
-            </HodActionButton>
-            <HodActionButton href="/hod/dashboard" variant="outline">
-              Command Center
-            </HodActionButton>
-          </>
-        }
-      />
-
-      <label className="mb-5 block max-w-sm text-sm font-medium text-sgvu-navy">
-        Faculty calendar
-        <select className="mt-1 w-full rounded-lg border border-gray-200 bg-white px-3 py-2"
-          value={facultyFilter} onChange={(event) => { setFacultyFilter(event.target.value); setDayFilter('all'); }}>
-          <option value="all">All department faculty</option>
-          {facultyOptions.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
-        </select>
-      </label>
-
-      {!loading && facultyRows.length > 0 ? (
-        <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
-          <div className="space-y-3">
-            <HodDayTabs days={DAYS} active={dayFilter} onChange={setDayFilter} counts={dayCounts} />
-            <HodDataTable
-              loading={loading}
-              rows={filtered}
-              rowKey={(r) => r.timetable_id}
-              empty="No slots for this day."
-              columns={[
-                {
-                  key: 'day',
-                  label: 'Day',
-                  className: 'w-14',
-                  render: (r) => <span className="font-semibold">{DOW[r.day_of_week]}</span>,
-                },
-                {
-                  key: 'time',
-                  label: 'Time',
-                  className: 'whitespace-nowrap w-24',
-                  render: (r) => (
-                    <span className="tabular-nums">
-                      {formatTime(r.start_time)}–{formatTime(r.end_time)}
-                    </span>
-                  ),
-                },
-                {
-                  key: 'course',
-                  label: 'Course',
-                  render: (r) => (
-                    <div>
-                      <span className="font-semibold">{r.course_code}</span>
-                      <span className="text-muted-foreground"> · {r.course_name}</span>
-                    </div>
-                  ),
-                },
-                {
-                  key: 'faculty',
-                  label: 'Faculty',
-                  render: (r) => r.faculty_name,
-                },
-                {
-                  key: 'semester',
-                  label: 'Programme / sem',
-                  className: 'w-36',
-                  render: (r) => `${r.program_name ?? '—'} · ${r.semester ?? '—'}`,
-                },
-                {
-                  key: 'room',
-                  label: 'Room',
-                  className: 'w-28',
-                  render: (r) => r.room ?? '—',
-                },
-              ]}
-            />
-          </div>
-
-          <aside className="hidden xl:block">
-            <div className="sticky top-4 overflow-hidden rounded-xl border border-gray-100 bg-white shadow-sm">
-              <div className="border-b border-gray-100 bg-slate-50/60 px-4 py-3">
-                <p className="text-sm font-bold text-sgvu-navy">Week at a glance</p>
-              </div>
-              <div className="max-h-[calc(100vh-12rem)] space-y-3 overflow-y-auto p-4">
-                {DAYS.map((d) => (
-                  <div key={d.id} className="rounded-lg border border-gray-100 bg-slate-50/40 p-3">
-                    <div className="mb-2 flex items-center justify-between">
-                      <span className="text-sm font-semibold text-sgvu-navy">{d.label}</span>
-                      <span className="text-sm tabular-nums text-muted-foreground">
-                        {weekGrid[d.id].length} slot{weekGrid[d.id].length === 1 ? '' : 's'}
-                      </span>
-                    </div>
-                    {weekGrid[d.id].length === 0 ? (
-                      <p className="text-sm text-muted-foreground">No classes</p>
-                    ) : (
-                      <ul className="space-y-2">
-                        {weekGrid[d.id].map((slot) => (
-                          <li
-                            key={slot.timetable_id}
-                            className="rounded-lg border border-gray-100 bg-white px-3 py-2 text-sm"
-                          >
-                            <p className="font-semibold text-sgvu-navy">
-                              {formatTime(slot.start_time)} · {slot.course_code}
-                            </p>
-                            <p className="truncate text-muted-foreground">{slot.faculty_name}</p>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          </aside>
-        </div>
-      ) : (
-        <HodDataTable
-          loading={loading}
-          rows={[]}
-          rowKey={() => ''}
-          empty={facultyFilter === 'all' ? 'No timetable slots configured for your department.' : 'No scheduled classes for this faculty member.'}
-          columns={[]}
-        />
-      )}
-
-      {!loading && facultyRows.length > 0 ? (
-        <p className="text-sm text-muted-foreground">
-          Need to reassign a slot?{' '}
-          <Link href="/hod/academics/course-allocation" className="font-medium text-sgvu-navy underline">
-            Open Course Allocation
-          </Link>
-        </p>
-      ) : null}
-
-      {!loading && facultyUnscheduled.length > 0 ? (
-        <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-4">
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <div>
-              <h2 className="text-sm font-bold text-amber-950">Assigned classes without timetable slots</h2>
-              <p className="text-xs text-amber-800">
-                These official allocations are included in workload but need a day, time and room before they appear in the weekly grid.
-              </p>
-            </div>
-            <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-900">
-              {facultyUnscheduled.length} pending
-            </span>
-          </div>
-          <div className="overflow-x-auto rounded-lg border border-amber-200 bg-white">
-            <table className="min-w-full text-left text-sm">
-              <thead className="bg-amber-50 text-xs uppercase tracking-wide text-amber-900">
-                <tr>
-                  <th className="px-3 py-2">Programme / sem</th>
-                  <th className="px-3 py-2">Course</th>
-                  <th className="px-3 py-2">Faculty</th>
-                </tr>
-              </thead>
-              <tbody>
-                {facultyUnscheduled.map((row) => (
-                  <tr key={row.allocation_id} className="border-t border-amber-100">
-                    <td className="px-3 py-2">{row.program_name ?? '—'} · {row.semester ?? '—'}</td>
-                    <td className="px-3 py-2 font-semibold">{row.course_code} <span className="font-normal text-muted-foreground">· {row.course_name}</span></td>
-                    <td className="px-3 py-2">{row.faculty_name}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      ) : null}
-    </HodPageFrame>
-  );
+  return <HodPageFrame>
+    <HodPageHeader title="Department timetable" workspaceLabel="Department oversight" description="A read-only view of classes taught by your department and classes taken by its students. Your personal schedule is under My Teaching."
+      meta={<><HodMetricChip label="Weekly classes" value={filtered.length} emphasis /><HodMetricChip label="Courses" value={new Set(filtered.map((slot) => slot.course_code)).size} /><HodMetricChip label="Faculty" value={faculty.length} /></>}
+      actions={<><HodActionButton href="/hod/my-teaching/timetable" variant="outline">My teaching timetable</HodActionButton><HodActionButton href="/hod/academics/course-allocation" variant="primary">Course allocation</HodActionButton></>} />
+    {error && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</p>}
+    <div className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
+      <div className="flex flex-wrap gap-4">
+        <label className="min-w-48 flex-1 text-sm font-semibold text-sgvu-navy">Faculty<select className="mt-1 block w-full rounded-lg border border-slate-200 bg-white p-2 font-normal" value={facultyId} onChange={(event) => setFacultyId(event.target.value)}><option value="all">All department faculty</option>{faculty.map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select></label>
+        <label className="min-w-36 text-sm font-semibold text-sgvu-navy">Semester<select className="mt-1 block w-full rounded-lg border border-slate-200 bg-white p-2 font-normal" value={semester} onChange={(event) => setSemester(event.target.value)}><option value="all">All semesters</option>{semesters.map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
+      </div>
+      <div className="mt-5"><HodDayTabs days={DAYS} active={day} onChange={setDay} counts={counts} /></div>
+      {loading ? <p className="py-8 text-sm text-slate-500">Loading department schedule…</p> : <div className="mt-5 grid gap-4 xl:grid-cols-2">{visibleDays.map((entry) => {
+        const daySlots = filtered.filter((slot) => slot.day_of_week === entry.id).sort((a, b) => a.start_time.localeCompare(b.start_time) || a.course_code.localeCompare(b.course_code));
+        return <section key={entry.id} className="rounded-xl border border-slate-200 bg-slate-50/40 p-4" aria-label={`${entry.label} schedule`}>
+          <div className="mb-4 flex items-center justify-between"><h2 className="text-base font-bold text-sgvu-navy">{entry.label}</h2><span className="rounded-full bg-white px-2 py-1 text-xs font-semibold text-slate-600">{daySlots.length} classes</span></div>
+          {daySlots.length ? <div className="space-y-4">{[false, true].map((afternoon) => {
+            const period = daySlots.filter((slot) => Number(slot.start_time.slice(0, 2)) >= 12 === afternoon);
+            return period.length ? <div key={String(afternoon)}><h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">{afternoon ? 'Afternoon' : 'Morning'}</h3><div className="space-y-2">{period.map((slot) => <div key={slot.timetable_id} className={`rounded-lg border p-3 ${tone(slot)}`}>
+              <div className="flex flex-wrap items-start justify-between gap-2"><p className="font-bold">{slot.course_code} · {slot.course_name}</p><span className="flex items-center gap-1 whitespace-nowrap text-xs font-semibold tabular-nums"><Clock3 className="h-3.5 w-3.5" />{clock(slot.start_time)}–{clock(slot.end_time)}</span></div>
+              <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs"><span className="flex items-center gap-1"><UserRound className="h-3.5 w-3.5" />{slot.faculty_name}</span><span>{slot.program_name || 'Programme unspecified'} · Semester {slot.semester || '—'}</span><span className="flex items-center gap-1"><MapPin className="h-3.5 w-3.5" />{slot.room || 'Room not set'}</span></div>
+            </div>)}</div></div> : null;
+          })}</div> : <p className="text-sm text-slate-500">No classes on this day.</p>}
+        </section>;
+      })}</div>}
+    </div>
+    {!loading && unscheduledVisible.length > 0 && <HodPanel title="Allocated courses without a scheduled class" count={unscheduledVisible.length}><p className="mb-3 text-sm text-slate-600">These courses have a faculty allocation but no published time. They do not appear in the calendar.</p><ul className="divide-y divide-slate-100">{unscheduledVisible.map((row) => <li key={row.allocation_id} className="flex flex-wrap justify-between gap-2 py-2 text-sm"><span className="font-semibold text-sgvu-navy">{row.course_code} · {row.course_name}</span><span className="text-slate-600">{row.faculty_name} · {row.program_name || 'Programme unspecified'} · Semester {row.semester || '—'}</span></li>)}</ul><Link href="/hod/academics/course-allocation" className="mt-3 inline-block text-sm font-semibold text-sgvu-navy underline">Open course allocation</Link></HodPanel>}
+  </HodPageFrame>;
 }

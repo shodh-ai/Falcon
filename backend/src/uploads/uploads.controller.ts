@@ -12,10 +12,9 @@ import {
   UseGuards,
   NotFoundException,
   Req,
+  Body,
 } from '@nestjs/common';
 import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
-import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
 import { memoryStorage } from 'multer';
 import { extname } from 'path';
 import { v4 as uuidv4 } from 'uuid';
@@ -23,7 +22,13 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { ObjectStorageService } from '../storage/object-storage.service';
-import { createReadStream, existsSync, mkdirSync, writeFileSync } from 'fs';
+import {
+  createReadStream,
+  existsSync,
+  mkdirSync,
+  realpathSync,
+  writeFileSync,
+} from 'fs';
 import { basename, relative, resolve, sep } from 'path';
 import type { Response } from 'express';
 import { UploadsService } from './uploads.service';
@@ -34,6 +39,13 @@ import {
   type UploadUser,
 } from './upload-file-access';
 import { requireTenantId } from '../common/utils/require-tenant-id';
+import { EXAM_CELL_SELF_SERVICE_ROLES } from '../modules/hr/hr-workforce.constants';
+import {
+  HR_DOCUMENT_UPLOAD_PURPOSE,
+  hrUploadOwner,
+  isPrivateHrUploadKey,
+  ownedHrUploadName,
+} from './hr-document-upload.util';
 
 /** Authenticated campus roles that may upload files through the shared endpoint. */
 const UPLOAD_ROLES = SHARED_UPLOAD_ROLES;
@@ -82,15 +94,17 @@ export class UploadsController {
   ) {}
 
   @Post('single')
+  @Roles(...UPLOAD_ROLES, ...EXAM_CELL_SELF_SERVICE_ROLES)
   @UseInterceptors(FileInterceptor('file', multerOptions))
   async uploadSingle(
     @UploadedFile() file: Express.Multer.File,
     @Req() req: AuthRequest,
+    @Body('purpose') purpose?: string,
   ) {
     if (!file) {
       throw new BadRequestException('No file uploaded');
     }
-    return this.persistFile(file, req.user);
+    return this.persistFile(file, req.user, purpose);
   }
 
   @Post('multiple')
@@ -106,7 +120,7 @@ export class UploadsController {
   }
 
   @Get('download')
-  @Roles(...UPLOAD_ROLES, 'Applicant')
+  @Roles(...UPLOAD_ROLES, ...EXAM_CELL_SELF_SERVICE_ROLES, 'Applicant')
   async downloadFile(
     @Query('path') filePath: string,
     @Query('key') objectKey: string,
@@ -135,7 +149,10 @@ export class UploadsController {
       }
       if (
         stored.hostname !== this.objectStorage.getBucketName() ||
-        stored.username || stored.password || stored.search || stored.hash
+        stored.username ||
+        stored.password ||
+        stored.search ||
+        stored.hash
       ) {
         throw new NotFoundException('File not found');
       }
@@ -145,6 +162,7 @@ export class UploadsController {
       if (!key) {
         throw new NotFoundException('File not found');
       }
+      this.assertPrivateHrUploadAccess(key, req.user);
       await this.uploads.assertStudentDownloadAccess(req.user, key);
       const stream = await this.objectStorage.getDownloadStream(key);
       this.setDownloadHeaders(res, key);
@@ -169,6 +187,16 @@ export class UploadsController {
     }
 
     await this.uploads.assertStudentDownloadAccess(req.user, key);
+    this.assertPrivateHrUploadAccess(key, req.user);
+    if (isPrivateHrUploadKey(key)) {
+      const actualRelative = relative(
+        realpathSync(uploadRoot),
+        realpathSync(resolvedPath),
+      )
+        .split(sep)
+        .join('/');
+      if (actualRelative !== key) throw new NotFoundException('File not found');
+    }
 
     this.setDownloadHeaders(res, resolvedPath);
     return createReadStream(resolvedPath).pipe(res);
@@ -194,19 +222,50 @@ export class UploadsController {
     res.setHeader('Cache-Control', 'private, no-store');
   }
 
-  private async persistFile(file: Express.Multer.File, user?: UploadUser) {
+  private assertPrivateHrUploadAccess(key: string, user: UploadUser): void {
+    if (!isPrivateHrUploadKey(key)) return;
+    const ownerId = hrUploadOwner(key);
+    if (
+      !ownerId ||
+      !user.user_id ||
+      ownerId !== user.user_id ||
+      !user.tenant_id ||
+      !key.startsWith(`${user.tenant_id}/`)
+    ) {
+      throw new NotFoundException('File not found');
+    }
+  }
+
+  private async persistFile(
+    file: Express.Multer.File,
+    user?: UploadUser,
+    purpose?: string,
+  ) {
     const tenantId = requireTenantId(user?.tenant_id);
+    const isPrivateHr = purpose === HR_DOCUMENT_UPLOAD_PURPOSE;
+    if (isPrivateHr && (!user?.user_id || needsStudentFileOwnership(user))) {
+      throw new UnauthorizedException(
+        'Authenticated employee and tenant required',
+      );
+    }
+    if (isPrivateHr && /[\\/\0\r\n?#]/.test(file.originalname)) {
+      throw new BadRequestException('Invalid upload filename');
+    }
     const studentOwner =
       user && needsStudentFileOwnership(user) ? user.user_id : undefined;
     if (user && needsStudentFileOwnership(user) && !studentOwner)
       throw new UnauthorizedException('Student identity required');
     const uniqueName = `${uuidv4()}${extname(file.originalname)}`;
+    const uploadName = isPrivateHr
+      ? ownedHrUploadName(user!.user_id!, uniqueName)
+      : uniqueName;
+    if (!uploadName) throw new BadRequestException('Invalid upload owner');
 
     if (this.objectStorage.isEnabled()) {
       // Keep Student ownership stable while retaining the existing staff layout.
       const key = studentOwner
         ? `${tenantId}/students/${studentOwner}/${uniqueName}`
-        : this.objectStorage.buildKey(tenantId, uniqueName);
+        : this.objectStorage.buildKey(tenantId, uploadName);
       const stored = await this.objectStorage.upload(
         tenantId,
         key,
@@ -230,7 +289,7 @@ export class UploadsController {
     const month = String(date.getMonth() + 1).padStart(2, '0');
     const folder = studentOwner
       ? `${tenantId}/students/${studentOwner}`
-      : `${tenantId}/${year}/${month}`;
+      : `${tenantId}/${year}/${month}${isPrivateHr ? `/hr-documents/${user!.user_id}` : ''}`;
     const relativePath = `${folder}/${uniqueName}`;
     const targetDir = resolve(uploadPath, folder);
     mkdirSync(targetDir, { recursive: true });
