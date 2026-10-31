@@ -1,19 +1,20 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Loader2, QrCode } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Badge } from '@/components/ui/badge';
 import { Select } from '@/components/ui/select';
 import { DataTable, type DataTableColumn } from '@/components/ui/DataTable';
 import { ExamCellPageHeader } from '@/components/exam-cell/ExamCellPageHeader';
 import { useAuthedApi } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import { canExamCellAction } from '@/lib/exam-cell-rbac';
+import { ExamDayOperationsPanel } from '@/components/exam-cell/ExamDayOperationsPanel';
 
 type TodayExam = {
   exam_schedule_id: string;
@@ -63,23 +64,24 @@ const STATUSES = ['PRESENT', 'ABSENT', 'MEDICAL', 'DEBARRED', 'LATE'] as const;
 export default function ExamCellExamDayPage() {
   const api = useAuthedApi();
   const { user } = useAuth();
-  const canMark = canExamCellAction([...(user?.roles ?? []), user?.primaryRole ?? '', user?.role ?? ''], 'manage_sessions');
-  const canVerify = canExamCellAction([...(user?.roles ?? []), user?.primaryRole ?? '', user?.role ?? ''], 'manage_seating');
-  const canRevoke = canExamCellAction([...(user?.roles ?? []), user?.primaryRole ?? '', user?.role ?? ''], 'publish_results');
-  const [chosenExam, setSelectedExam] = useState('');
-  const [examRevision, setExamRevision] = useState(0);
-  const [examResource, setExamResource] = useState<{ api: typeof api | null; revision: number; rows: TodayExam[]; error: string | null }>({ api: null, revision: -1, rows: [], error: null });
-  const loading = examResource.api !== api || examResource.revision !== examRevision;
-  const todayExams = loading ? [] : examResource.rows;
-  const examError = loading ? null : examResource.error;
-  const selectedExam = todayExams.some((exam) => exam.exam_schedule_id === chosenExam) ? chosenExam : (todayExams[0]?.exam_schedule_id ?? '');
-  const [attendanceRevision, setAttendanceRevision] = useState(0);
-  const attendanceKey = `${selectedExam}:${attendanceRevision}`;
-  const [attendanceResource, setAttendanceResource] = useState<{ api: typeof api | null; key: string; rows: AttendanceRow[]; roster: RosterRow[]; error: string | null }>({ api: null, key: '', rows: [], roster: [], error: null });
-  const attendanceLoading = attendanceResource.api !== api || attendanceResource.key !== attendanceKey;
-  const attendance = attendanceLoading ? [] : attendanceResource.rows;
-  const roster = attendanceLoading ? [] : attendanceResource.roster;
-  const attendanceError = attendanceLoading ? null : attendanceResource.error;
+  const roles = [...(user?.roles ?? []), user?.primaryRole ?? '', user?.role ?? ''];
+  const canMark = canExamCellAction(roles, 'manage_sessions');
+  const canVerify = canExamCellAction(roles, 'manage_seating');
+  const canRevoke = canExamCellAction(roles, 'publish_results');
+  const [examSnapshot, setExamSnapshot] = useState<{
+    api: typeof api; date: string; exams: TodayExam[]; error: string | null;
+  } | null>(null);
+  const [selectedExam, setSelectedExam] = useState('');
+  const [operationsBusy, setOperationsBusy] = useState(false);
+  const [examDate, setExamDate] = useState('');
+  const [detailsSnapshot, setDetailsSnapshot] = useState<{
+    api: typeof api; examId: string; attendance: AttendanceRow[]; roster: RosterRow[]; error: string | null;
+  } | null>(null);
+  const [refreshingExams, setRefreshingExams] = useState(false);
+  const [refreshingDetails, setRefreshingDetails] = useState(false);
+  const examsRequest = useRef(0);
+  const detailsRequest = useRef(0);
+  const markingInFlight = useRef(false);
   const [markingId, setMarkingId] = useState<string | null>(null);
   const [qrInput, setQrInput] = useState('');
   const [verification, setVerification] = useState<{ api: typeof api; result: VerifiedStudent } | null>(null);
@@ -94,31 +96,74 @@ export default function ExamCellExamDayPage() {
   const revokePending = useRef(false);
   const verificationScope = useRef(0);
   const verifyPending = useRef(false);
-  const markPending = useRef(false);
 
   useEffect(() => () => { verificationScope.current += 1; }, [api]);
 
-  useEffect(() => {
-    let cancelled = false;
-    api.get<TodayExam[]>('/api/exam-cell/exam-day/today').then(
-      (rows) => { if (!cancelled) setExamResource({ api, revision: examRevision, rows, error: null }); },
-      (cause) => { if (!cancelled) setExamResource({ api, revision: examRevision, rows: [], error: cause instanceof Error ? cause.message : "Failed to load today's exams" }); },
-    );
-    return () => { cancelled = true; };
-  }, [api, examRevision]);
+
+  const loadExams = useCallback(() => {
+    const requestId = ++examsRequest.current;
+    const dateQuery = examDate ? `?date=${encodeURIComponent(examDate)}` : '';
+    return api.get<TodayExam[]>(`/api/exam-cell/exam-day/today${dateQuery}`).then(
+      (exams) => {
+        if (requestId !== examsRequest.current) return;
+        setExamSnapshot({ api, date: examDate, exams, error: null });
+        setSelectedExam((current) => exams.some((exam) => exam.exam_schedule_id === current)
+          ? current : exams[0]?.exam_schedule_id ?? '');
+      },
+      (e: unknown) => {
+        if (requestId === examsRequest.current) setExamSnapshot({
+          api, date: examDate, exams: [], error: e instanceof Error ? e.message : 'Failed to load today\'s exams',
+        });
+      },
+    ).finally(() => {
+      if (requestId === examsRequest.current) setRefreshingExams(false);
+    });
+  }, [api, examDate]);
+
+  const loadAttendance = useCallback(() => {
+    if (!selectedExam) return Promise.resolve();
+    const requestId = ++detailsRequest.current;
+    return Promise.all([
+      api.get<AttendanceRow[]>(`/api/exam-cell/exam-day/attendance?exam_schedule_id=${selectedExam}`),
+      api.get<RosterRow[]>(`/api/exam-cell/exam-day/roster?exam_schedule_id=${selectedExam}`),
+    ]).then(
+      ([attendanceRows, rosterRows]) => {
+        if (requestId !== detailsRequest.current) return;
+        setDetailsSnapshot({ api, examId: selectedExam, attendance: attendanceRows, roster: rosterRows, error: null });
+      },
+      (e: unknown) => {
+        if (requestId !== detailsRequest.current) return;
+        setDetailsSnapshot({
+          api, examId: selectedExam, attendance: [], roster: [],
+          error: e instanceof Error ? e.message : 'Failed to load the examination roster',
+        });
+      },
+    ).finally(() => {
+      if (requestId === detailsRequest.current) setRefreshingDetails(false);
+    });
+  }, [api, selectedExam]);
 
   useEffect(() => {
-    if (!selectedExam) return;
-    let cancelled = false;
-    Promise.all([
-        api.get<AttendanceRow[]>(`/api/exam-cell/exam-day/attendance?exam_schedule_id=${selectedExam}`),
-        api.get<RosterRow[]>(`/api/exam-cell/exam-day/roster?exam_schedule_id=${selectedExam}`),
-    ]).then(
-      ([rows, rosterRows]) => { if (!cancelled) setAttendanceResource({ api, key: attendanceKey, rows, roster: rosterRows, error: null }); },
-      (cause) => { if (!cancelled) setAttendanceResource({ api, key: attendanceKey, rows: [], roster: [], error: cause instanceof Error ? cause.message : 'Failed to load attendance' }); },
-    );
-    return () => { cancelled = true; };
-  }, [api, selectedExam, attendanceKey]);
+    void loadExams();
+    return () => { examsRequest.current += 1; };
+  }, [loadExams]);
+  useEffect(() => {
+    void loadAttendance();
+    return () => { detailsRequest.current += 1; };
+  }, [loadAttendance]);
+
+  const currentExams = examSnapshot?.api === api && examSnapshot.date === examDate ? examSnapshot : null;
+  const loading = refreshingExams || !currentExams;
+  const todayExams = currentExams?.exams ?? [];
+  const loadError = !loading ? currentExams?.error : null;
+  const detailsMatch = detailsSnapshot?.api === api && detailsSnapshot.examId === selectedExam;
+  const detailsError = detailsMatch && !refreshingDetails ? detailsSnapshot.error : null;
+  const roster = detailsMatch ? detailsSnapshot.roster : [];
+  const attendance = detailsMatch ? detailsSnapshot.attendance : [];
+  const detailsReady = !!selectedExam && detailsMatch &&
+    !loading && !loadError && !refreshingDetails && !detailsError;
+  const identityOnRoster = detailsReady && !!verified &&
+    roster.some((row) => row.student_user_id === verified.student.user_id);
 
   async function verifyQr() {
     if (!canVerify || verifyPending.current) return;
@@ -183,8 +228,9 @@ export default function ExamCellExamDayPage() {
   }
 
   async function markAttendance(studentUserId: string, status: string) {
-    if (!canMark || !selectedExam || markPending.current || attendanceLoading || attendanceError) return;
-    markPending.current = true;
+    if (!canMark || !detailsReady || operationsBusy || markingInFlight.current ||
+      !roster.some((row) => row.student_user_id === studentUserId)) return;
+    markingInFlight.current = true;
     setMarkingId(studentUserId);
     try {
       await api.post('/api/exam-cell/exam-day/attendance', {
@@ -193,12 +239,14 @@ export default function ExamCellExamDayPage() {
         status,
       });
       toast.success(`Marked ${status.toLowerCase()}`);
-      setAttendanceRevision((value) => value + 1);
-      setExamRevision((value) => value + 1);
+      setRefreshingDetails(true);
+      await loadAttendance();
+      setRefreshingExams(true);
+      await loadExams();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to mark attendance');
     } finally {
-      markPending.current = false;
+      markingInFlight.current = false;
       setMarkingId(null);
     }
   }
@@ -231,7 +279,7 @@ export default function ExamCellExamDayPage() {
               key={s}
               size="sm"
               variant={r.attendance_status === s ? 'default' : 'outline'}
-              disabled={markingId !== null}
+              disabled={!!markingId || operationsBusy || !detailsReady}
               onClick={() => void markAttendance(r.student_user_id, s)}
             >
               {s}
@@ -284,6 +332,7 @@ export default function ExamCellExamDayPage() {
                 <p className="font-bold text-sgvu-navy">{verified.student.name}</p>
                 <p className="text-sm text-muted-foreground">{verified.student.enrollment_number ?? '—'} · {(verified.student as { branch_name?: string; branch?: string }).branch_name ?? verified.student.branch ?? 'Program'} · Sem {verified.student.semester ?? '—'}</p>
                 <Badge className="mt-2 bg-emerald-600">Identity verified</Badge>
+                {detailsReady && !identityOnRoster ? <p className="mt-2 text-sm text-muted-foreground">Not on the selected examination seating roster. Attendance cannot be recorded.</p> : null}
                 {verified.hall_ticket_verified ? <Badge className="ml-2 mt-2 bg-emerald-600">Current hall ticket verified</Badge> : <p className="mt-2 text-xs text-muted-foreground">Student identity checked. Scan the printed QR to verify a hall ticket.</p>}
                 {canRevoke && verified.hall_ticket_verified && verified.issue_id ? <Button className="mt-3 block" size="sm" variant="destructive" onClick={() => { setRevocationReason(''); setRevocationOpen(true); }}>Revoke this hall ticket</Button> : null}
               </div>
@@ -295,10 +344,10 @@ export default function ExamCellExamDayPage() {
                   ))}
                 </div>
               ) : null}
-              {canMark && selectedExam ? (
+              {canMark && identityOnRoster ? (
                 <div className="flex flex-wrap gap-1">
                   {STATUSES.map((s) => (
-                    <Button key={s} size="sm" variant="outline" disabled={markingId !== null || attendanceLoading || !!attendanceError} onClick={() => void markAttendance(verified.student.user_id, s)}>
+                    <Button key={s} size="sm" variant="outline" disabled={!!markingId || operationsBusy || !detailsReady} onClick={() => void markAttendance(verified.student.user_id, s)}>
                       Mark {s}
                     </Button>
                   ))}
@@ -320,18 +369,24 @@ export default function ExamCellExamDayPage() {
       </Dialog>
 
       <Card>
-        <CardHeader><CardTitle className="text-base">Today&apos;s examination sessions</CardTitle></CardHeader>
+        <CardHeader className="gap-3"><CardTitle className="text-base">{examDate ? 'Examinations on selected date' : "Today's examination sessions"}</CardTitle>
+          <div className="flex items-center gap-2"><label htmlFor="exam-day-date" className="text-sm">Examination date</label><Input id="exam-day-date" type="date" className="w-auto" disabled={!!markingId || operationsBusy} value={examDate} onChange={e => setExamDate(e.target.value)} /></div>
+        </CardHeader>
         <CardContent>
-          {loading ? <Loader2 aria-label="Loading examination sessions" className="h-6 w-6 animate-spin" /> : examError ? (
-            <div role="alert" className="space-y-3 text-sm text-destructive"><p>{examError}</p><Button variant="outline" onClick={() => setExamRevision((value) => value + 1)}>Retry</Button></div>
+          {loading ? <Loader2 aria-label="Loading today's exams" className="h-6 w-6 animate-spin" /> : loadError ? (
+            <div role="alert" className="space-y-2 text-sm text-red-700">
+              <p>{loadError}</p>
+              <Button variant="outline" onClick={() => { setRefreshingExams(true); void loadExams(); }}>Retry loading exams</Button>
+            </div>
           ) : todayExams.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No exams scheduled for today.</p>
+            <p className="text-sm text-muted-foreground">{examDate ? 'No exams scheduled for this date.' : 'No exams scheduled for today.'}</p>
           ) : (
             <div className="grid gap-2 sm:grid-cols-2">
               {todayExams.map((e) => (
                 <button
                   key={e.exam_schedule_id}
                   type="button"
+                  disabled={!!markingId || operationsBusy}
                   onClick={() => setSelectedExam(e.exam_schedule_id)}
                   className={`rounded-lg border p-3 text-left transition ${selectedExam === e.exam_schedule_id ? 'border-sgvu-gold bg-sgvu-gold/5' : 'hover:border-sgvu-navy/20'}`}
                 >
@@ -345,35 +400,43 @@ export default function ExamCellExamDayPage() {
         </CardContent>
       </Card>
 
-      {selectedExam && roster.length > 0 ? (
+      {selectedExam && !loadError ? (
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle className="text-base">Seating roster — mark attendance</CardTitle>
-            <Select className="rounded-md border px-2 py-1 text-sm" value={selectedExam} onChange={(e) => setSelectedExam(e.target.value)}>
+            <label className="sr-only" htmlFor="exam-day-roster-exam">Examination seating roster</label>
+            <Select id="exam-day-roster-exam" disabled={!!markingId || operationsBusy} className="rounded-md border px-2 py-1 text-sm" value={selectedExam} onChange={(e) => setSelectedExam(e.target.value)}>
               {todayExams.map((e) => <option key={e.exam_schedule_id} value={e.exam_schedule_id}>{e.subject_name ?? e.exam_type}</option>)}
             </Select>
           </CardHeader>
           <CardContent>
-            <DataTable columns={rosterColumns} rows={roster} rowKey={(r) => r.student_user_id} emptyMessage="No seating allocations for this session. Publish seating plan first." />
+            {detailsError ? (
+              <div role="alert" className="space-y-2 text-sm text-red-700">
+                <p>{detailsError}</p>
+                <Button variant="outline" onClick={() => { setRefreshingDetails(true); void loadAttendance(); }}>Retry attendance</Button>
+              </div>
+            ) : !detailsReady ? <p role="status" className="text-sm text-muted-foreground">Loading seating roster and attendance…</p> : (
+              <DataTable columns={rosterColumns} rows={roster} rowKey={(r) => r.student_user_id} emptyMessage="No seating allocations for this session. Check the seating plan before recording attendance." />
+            )}
           </CardContent>
         </Card>
       ) : null}
 
-      {selectedExam ? (
+      {detailsReady ? (
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle className="text-base">Attendance register</CardTitle>
-            <Select className="rounded-md border px-2 py-1 text-sm" value={selectedExam} onChange={(e) => setSelectedExam(e.target.value)}>
+            <label className="sr-only" htmlFor="exam-day-register-exam">Attendance register examination</label>
+            <Select id="exam-day-register-exam" disabled={!!markingId || operationsBusy} className="rounded-md border px-2 py-1 text-sm" value={selectedExam} onChange={(e) => setSelectedExam(e.target.value)}>
               {todayExams.map((e) => <option key={e.exam_schedule_id} value={e.exam_schedule_id}>{e.subject_name ?? e.exam_type}</option>)}
             </Select>
           </CardHeader>
           <CardContent>
-            {attendanceLoading ? <p role="status">Loading attendance…</p> : attendanceError ? (
-              <div role="alert" className="space-y-3 text-sm text-destructive"><p>{attendanceError}</p><Button variant="outline" onClick={() => setAttendanceRevision((value) => value + 1)}>Retry attendance</Button></div>
-            ) : <DataTable columns={columns} rows={attendance} rowKey={(r) => r.attendance_id} emptyMessage="No attendance marked yet for this session." />}
+            <DataTable columns={columns} rows={attendance} rowKey={(r) => r.attendance_id} emptyMessage="No attendance marked yet for this session." />
           </CardContent>
         </Card>
       ) : null}
+      {detailsReady ? <ExamDayOperationsPanel api={api} scheduleId={selectedExam} role={roles} onBusyChange={setOperationsBusy} /> : null}
     </div>
   );
 }

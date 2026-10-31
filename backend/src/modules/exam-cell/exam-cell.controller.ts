@@ -1,3 +1,9 @@
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
+import { ExamDayScriptsService } from './exam-day-scripts.service';
+import { QuestionPaperWorkflowService } from './question-paper-workflow.service';
+import { CreateQuestionPaperDto, UpdateQuestionPaperStatusDto, UploadQuestionPaperDto } from './dto/question-paper.dto';
+import { MarkExamDayAttendanceDto, ExamDayDateQueryDto, CreateAnswerSheetDto, UpdateAnswerSheetStatusDto, ReportMissingScriptDto, ResolveMissingScriptDto, ReportExamDayUfmDto, ReviewExamDayUfmDto, CorrectScriptReceiptDto } from './dto/exam-day.dto';
 import {
   Body,
   Controller,
@@ -13,6 +19,11 @@ import {
   ParseIntPipe,
   ParseUUIDPipe,
   StreamableFile,
+  Optional,
+  ServiceUnavailableException,
+  Header,
+  UseInterceptors,
+  UploadedFile,
 } from '@nestjs/common';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -45,6 +56,7 @@ import { requireTenantId } from '../../common/utils/require-tenant-id';
 import { EXAM_CELL_ACCESS_ROLES } from './exam-cell.constants';
 import {
   assertExamCellAction,
+  canExamCellAction,
   examCellRoleFromUser,
   examCellRolesFromUser,
   type ExamCellAction,
@@ -72,6 +84,8 @@ export class ExamCellController {
     private readonly enterprise: ExamCellEnterpriseService,
     private readonly dev: ExamCellDevService,
     private readonly officialTranscripts: OfficialTranscriptService,
+    @Optional() private readonly scripts?: ExamDayScriptsService,
+    @Optional() private readonly questionPapers?: QuestionPaperWorkflowService,
   ) {}
 
   @Get('dashboard')
@@ -1062,36 +1076,44 @@ export class ExamCellController {
   listAnswerSheets(
     @Req() req: { user: AuthUser },
     @Query('status') status?: string,
+    @Query('exam_schedule_id', new ParseUUIDPipe({ optional: true }))
+    scheduleId?: string,
   ) {
-    return this.enterprise.listAnswerSheets(this.tenant(req), status);
+    return this.enterprise.listAnswerSheets(
+      this.tenant(req),
+      status,
+      scheduleId,
+      this.actionRole(req, 'view_dashboard'),
+    );
   }
 
   @Post('answer-sheets')
   createAnswerSheet(
     @Req() req: { user: AuthUser },
-    @Body() dto: Record<string, unknown>,
+    @Body() dto: CreateAnswerSheetDto,
   ) {
     this.requireAction(req, 'manage_sessions');
     return this.enterprise.createAnswerSheet(
       this.tenant(req),
       req.user.user_id,
-      dto as never,
+      dto,
+      this.actionRole(req, 'manage_sessions'),
     );
   }
 
   @Post('answer-sheets/:sheetId/status')
   updateAnswerSheetStatus(
     @Req() req: { user: AuthUser },
-    @Param('sheetId', new ParseUUIDPipe()) sheetId: string,
-    @Body() dto: { status: string; evaluator_user_id?: string },
+    @Param('sheetId', ParseUUIDPipe) sheetId: string,
+    @Body() dto: UpdateAnswerSheetStatusDto,
   ) {
     this.requireAction(req, 'manage_sessions');
     return this.enterprise.updateAnswerSheetStatus(
       this.tenant(req),
       sheetId,
       req.user.user_id,
-      dto.status,
-      dto.evaluator_user_id,
+      dto,
+      this.actionRole(req, 'manage_sessions'),
     );
   }
 
@@ -1388,13 +1410,14 @@ export class ExamCellController {
   @Post('question-papers')
   createQuestionPaper(
     @Req() req: { user: AuthUser },
-    @Body() dto: Record<string, unknown>,
+    @Body() dto: CreateQuestionPaperDto,
   ) {
     this.requireAction(req, 'manage_qp');
     return this.operations.createQuestionPaperRecord(
       this.tenant(req),
       req.user.user_id,
       dto,
+      this.actionRole(req, 'manage_qp'),
     );
   }
 
@@ -1402,7 +1425,7 @@ export class ExamCellController {
   updateQuestionPaperStatus(
     @Req() req: { user: AuthUser },
     @Param('qpId', new ParseUUIDPipe()) qpId: string,
-    @Body() dto: { status: string },
+    @Body() dto: UpdateQuestionPaperStatusDto,
   ) {
     this.requireAction(req, 'manage_qp');
     return this.operations.updateQuestionPaperStatus(
@@ -1410,18 +1433,223 @@ export class ExamCellController {
       qpId,
       req.user.user_id,
       dto.status,
+      this.actionRole(req, 'manage_qp'),
+      dto.reason,
     );
   }
 
+  @Post('question-papers/:qpId/file')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 25 * 1024 * 1024, files: 1 },
+    }),
+  )
+  uploadQuestionPaper(
+    @Req() req: { user: AuthUser },
+    @Param('qpId', new ParseUUIDPipe()) id: string,
+    @UploadedFile() file: Express.Multer.File | undefined,
+    @Body() dto: UploadQuestionPaperDto,
+  ) {
+    this.requireAction(req, 'manage_qp');
+    return this.paperFiles().upload(
+      this.tenant(req),
+      id,
+      req.user.user_id,
+      this.actionRole(req, 'manage_qp'),
+      file,
+      dto,
+    );
+  }
+
+  @Get('question-papers/:qpId/versions')
+  questionPaperVersions(
+    @Req() req: { user: AuthUser },
+    @Param('qpId', new ParseUUIDPipe()) id: string,
+  ) {
+    this.requireAction(req, 'manage_qp');
+    return this.paperFiles().versions(
+      this.tenant(req),
+      id,
+      req.user.user_id,
+      this.actionRole(req, 'manage_qp'),
+    );
+  }
+
+  @Get('question-papers/:qpId/versions/:versionId/review-file')
+  @Header('Cache-Control', 'private, no-store')
+  @Header('X-Content-Type-Options', 'nosniff')
+  async reviewQuestionPaper(
+    @Req() req: { user: AuthUser },
+    @Param('qpId', new ParseUUIDPipe()) id: string,
+    @Param('versionId', new ParseUUIDPipe()) version: string,
+  ) {
+    this.requireAction(req, 'manage_qp');
+    const file = await this.paperFiles().download(
+      this.tenant(req),
+      id,
+      req.user.user_id,
+      this.actionRole(req, 'manage_qp'),
+      version,
+    );
+    return this.paperFile(file);
+  }
+
+  @Get('question-papers/:qpId/file')
+  @Header('Cache-Control', 'private, no-store')
+  @Header('X-Content-Type-Options', 'nosniff')
+  async releasedQuestionPaper(
+    @Req() req: { user: AuthUser },
+    @Param('qpId', new ParseUUIDPipe()) id: string,
+  ) {
+    this.requireAction(req, 'manage_qp');
+    const file = await this.paperFiles().download(
+      this.tenant(req),
+      id,
+      req.user.user_id,
+      this.actionRole(req, 'manage_qp'),
+    );
+    return this.paperFile(file);
+  }
+
+  private actionRole(req: { user: AuthUser }, action: ExamCellAction): string {
+    const role = examCellRolesFromUser(req.user).find(value => canExamCellAction(value, action));
+    assertExamCellAction(role, action);
+    return role!;
+  }
+
+  private scriptService() {
+    if (!this.scripts) throw new ServiceUnavailableException('Exam-day script tracking is unavailable');
+    return this.scripts;
+  }
+
+  private paperFiles(): QuestionPaperWorkflowService {
+    if (!this.questionPapers)
+      throw new ServiceUnavailableException(
+        'Question-paper file workflow unavailable',
+      );
+    return this.questionPapers;
+  }
+
+  private paperFile(file: { buffer: Buffer; filename: string }) {
+    return new StreamableFile(file.buffer, {
+      type: 'application/pdf',
+      disposition: `attachment; filename="${file.filename}"`,
+    });
+  }
+
   @Get('exam-day/today')
-  todayExams(@Req() req: { user: AuthUser }) {
-    return this.operations.listTodayExams(this.tenant(req));
+  todayExams(
+    @Req() req: { user: AuthUser },
+    @Query() query: ExamDayDateQueryDto,
+  ) {
+    return this.operations.listTodayExams(this.tenant(req), query.date);
+  }
+
+  @Get('exam-day/scripts')
+  reconcileScripts(
+    @Req() req: { user: AuthUser },
+    @Query('exam_schedule_id', ParseUUIDPipe) scheduleId: string,
+  ) {
+    return this.scriptService().reconciliation(
+      this.tenant(req),
+      scheduleId,
+      this.actionRole(req, 'view_dashboard'),
+    );
+  }
+
+  @Post('answer-sheets/:sheetId/correct-receipt')
+  correctScriptReceipt(
+    @Req() req: { user: AuthUser },
+    @Param('sheetId', ParseUUIDPipe) sheetId: string,
+    @Body() dto: CorrectScriptReceiptDto,
+  ) {
+    this.requireAction(req, 'manage_sessions');
+    return this.scriptService().correctReceipt(
+      this.tenant(req),
+      sheetId,
+      req.user.user_id,
+      dto,
+      this.actionRole(req, 'manage_sessions'),
+    );
+  }
+
+  @Post('exam-day/scripts/missing')
+  reportMissingScript(
+    @Req() req: { user: AuthUser },
+    @Body() dto: ReportMissingScriptDto,
+  ) {
+    this.requireAction(req, 'manage_sessions');
+    return this.scriptService().reportMissing(
+      this.tenant(req),
+      req.user.user_id,
+      dto,
+      this.actionRole(req, 'manage_sessions'),
+    );
+  }
+
+  @Post('exam-day/scripts/:discrepancyId/resolve')
+  resolveMissingScript(
+    @Req() req: { user: AuthUser },
+    @Param('discrepancyId', ParseUUIDPipe) discrepancyId: string,
+    @Body() dto: ResolveMissingScriptDto,
+  ) {
+    this.requireAction(req, 'manage_sessions');
+    return this.scriptService().resolveMissing(
+      this.tenant(req),
+      discrepancyId,
+      req.user.user_id,
+      dto,
+      this.actionRole(req, 'manage_sessions'),
+    );
+  }
+
+  @Get('exam-day/ufm')
+  examDayIncidents(
+    @Req() req: { user: AuthUser },
+    @Query('exam_schedule_id', ParseUUIDPipe) scheduleId: string,
+  ) {
+    return this.scriptService().listIncidents(
+      this.tenant(req),
+      scheduleId,
+      this.actionRole(req, 'view_dashboard'),
+    );
+  }
+
+  @Post('exam-day/ufm')
+  reportExamDayIncident(
+    @Req() req: { user: AuthUser },
+    @Body() dto: ReportExamDayUfmDto,
+  ) {
+    this.requireAction(req, 'approve_ufm');
+    return this.scriptService().reportIncident(
+      this.tenant(req),
+      req.user.user_id,
+      dto,
+      this.actionRole(req, 'approve_ufm'),
+    );
+  }
+
+  @Post('exam-day/ufm/:caseId/status')
+  reviewExamDayIncident(
+    @Req() req: { user: AuthUser },
+    @Param('caseId', ParseUUIDPipe) caseId: string,
+    @Body() dto: ReviewExamDayUfmDto,
+  ) {
+    this.requireAction(req, 'approve_ufm');
+    return this.scriptService().reviewIncident(
+      this.tenant(req),
+      caseId,
+      req.user.user_id,
+      dto,
+      this.actionRole(req, 'approve_ufm'),
+    );
   }
 
   @Get('exam-day/roster')
   examDayRoster(
     @Req() req: { user: AuthUser },
-    @Query('exam_schedule_id') examScheduleId: string,
+    @Query('exam_schedule_id', ParseUUIDPipe) examScheduleId: string,
   ) {
     return this.operations.listExamDayRoster(this.tenant(req), examScheduleId);
   }
@@ -1429,7 +1657,7 @@ export class ExamCellController {
   @Get('exam-day/attendance')
   examDayAttendance(
     @Req() req: { user: AuthUser },
-    @Query('exam_schedule_id') examScheduleId: string,
+    @Query('exam_schedule_id', ParseUUIDPipe) examScheduleId: string,
   ) {
     return this.operations.listExamDayAttendance(
       this.tenant(req),
@@ -1441,7 +1669,7 @@ export class ExamCellController {
   markExamDayAttendance(
     @Req() req: { user: AuthUser },
     @Body()
-    dto: { exam_schedule_id: string; student_user_id: string; status: string },
+    dto: MarkExamDayAttendanceDto,
   ) {
     this.requireAction(req, 'manage_sessions');
     return this.operations.markExamDayAttendance(

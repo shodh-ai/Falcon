@@ -41,9 +41,9 @@ type EligibilityRow = {
   program_name?: string;
   department_name?: string;
   batch?: string;
-  credits_required: number;
-  credits_earned: number;
-  cgpa_required: number;
+  credits_required: number | null;
+  credits_earned: number | null;
+  cgpa_required: number | null;
   cgpa_earned?: number | null;
   pending_backlogs: number;
   library_clearance: boolean;
@@ -56,6 +56,8 @@ type EligibilityRow = {
   registrar_decided_at?: string;
   registrar_decided_by_name?: string;
   checked_at?: string;
+  clearance_statuses?: Partial<Record<'credits' | 'cgpa' | 'backlogs' | 'finance' | 'library' | 'hostel', string>>;
+  requirements_policy_status?: 'UNCONFIRMED' | 'CONFIRMED';
 };
 
 type HistoryRow = {
@@ -68,8 +70,10 @@ type HistoryRow = {
 
 const PAGE = 10;
 
-function clearanceLabel(ok: boolean) {
-  return ok ? 'Y' : '—';
+function clearanceLabel(status?: string) {
+  if (status === 'CLEARED') return 'Clear';
+  if (status === 'NOT_CLEARED') return 'Not clear';
+  return 'Not verified';
 }
 
 function statusClass(status: string) {
@@ -101,7 +105,6 @@ export function DegreeEligibilityWorkspace() {
   const [historyLoading, setHistoryLoading] = useState(false);
 
   const load = useCallback(async () => {
-    setLoading(true);
     try {
       const params = new URLSearchParams();
       if (q.trim()) params.set('q', q.trim());
@@ -119,7 +122,8 @@ export function DegreeEligibilityWorkspace() {
   }, [api, q]);
 
   useEffect(() => {
-    void load();
+    const timer = window.setTimeout(() => void load(), 0);
+    return () => window.clearTimeout(timer);
   }, [load]);
 
   const pageRows = useMemo(() => rows.slice(offset, offset + PAGE), [rows, offset]);
@@ -152,10 +156,10 @@ export function DegreeEligibilityWorkspace() {
         r.cgpa_earned ?? '',
         r.cgpa_required,
         r.pending_backlogs,
-        r.library_clearance ? 'Yes' : 'No',
-        r.finance_clearance ? 'Yes' : 'No',
-        r.hostel_clearance ? 'Yes' : 'No',
-        r.examination_clearance ? 'Yes' : 'No',
+        clearanceLabel(r.clearance_statuses?.library),
+        clearanceLabel(r.clearance_statuses?.finance),
+        clearanceLabel(r.clearance_statuses?.hostel),
+        clearanceLabel(r.clearance_statuses?.backlogs),
         r.final_status,
         r.registrar_decision ?? 'PENDING',
         r.checked_at ?? '',
@@ -215,6 +219,7 @@ export function DegreeEligibilityWorkspace() {
       });
       toast.success(decision === 'APPROVED' ? 'Degree approved' : 'Degree approval rejected');
       setDecideTarget(null);
+      setLoading(true);
       await load();
     } catch (e) {
       toast.error('Decision failed', {
@@ -324,17 +329,31 @@ export function DegreeEligibilityWorkspace() {
                             </p>
                           </TableCell>
                           <TableCell className="text-sm tabular-nums">
-                            {r.credits_earned}/{r.credits_required}
+                            {!['CLEARED', 'NOT_CLEARED'].includes(r.clearance_statuses?.credits ?? '')
+                              ? 'Not verified'
+                              : `${r.credits_earned ?? '—'}/${r.credits_required ?? '—'}`}
+                            {r.requirements_policy_status !== 'CONFIRMED' ? (
+                              <p className="text-[11px] text-amber-700">Provisional threshold; policy unconfirmed</p>
+                            ) : null}
                           </TableCell>
                           <TableCell className="text-sm tabular-nums">
-                            {r.cgpa_earned != null ? r.cgpa_earned : '—'}/{r.cgpa_required}
+                            {!['CLEARED', 'NOT_CLEARED'].includes(r.clearance_statuses?.cgpa ?? '')
+                              ? 'Not verified'
+                              : `${r.cgpa_earned != null ? r.cgpa_earned : '—'}/${r.cgpa_required}`}
+                            {r.requirements_policy_status !== 'CONFIRMED' ? (
+                              <p className="text-[11px] text-amber-700">Provisional threshold; policy unconfirmed</p>
+                            ) : null}
                           </TableCell>
-                          <TableCell className="tabular-nums">{r.pending_backlogs}</TableCell>
+                          <TableCell className="tabular-nums">
+                            {!['CLEARED', 'NOT_CLEARED'].includes(r.clearance_statuses?.backlogs ?? '')
+                              ? 'Not verified'
+                              : r.pending_backlogs}
+                          </TableCell>
                           <TableCell className="text-xs text-muted-foreground">
-                            Lib {clearanceLabel(r.library_clearance)} · Fin{' '}
-                            {clearanceLabel(r.finance_clearance)} · Hos{' '}
-                            {clearanceLabel(r.hostel_clearance)} · Exm{' '}
-                            {clearanceLabel(r.examination_clearance)}
+                            Lib {clearanceLabel(r.clearance_statuses?.library)} · Fin{' '}
+                            {clearanceLabel(r.clearance_statuses?.finance)} · Hos{' '}
+                            {clearanceLabel(r.clearance_statuses?.hostel)} · Exm{' '}
+                            {clearanceLabel(r.clearance_statuses?.backlogs)}
                           </TableCell>
                           <TableCell>
                             <Badge

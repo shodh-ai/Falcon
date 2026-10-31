@@ -2,6 +2,7 @@ import { NotFoundException } from '@nestjs/common';
 import { ExamCellOperationsService } from './exam-cell-operations.service';
 import { ExamCellEnterpriseService } from './exam-cell-enterprise.service';
 
+// Answer-sheet receipts/status now use the real PostgreSQL regression in exam-day.postgres.integration.spec.ts.
 // TypeORM Postgres raw UPDATE returns [rows, affected]; a SELECT CTE returns rows.
 const cases = [
   {
@@ -27,19 +28,7 @@ const cases = [
         '2026-11-16',
       ),
   },
-  {
-    name: 'answer-sheet status',
-    run: (
-      _ops: ExamCellOperationsService,
-      enterprise: ExamCellEnterpriseService,
-    ) =>
-      enterprise.updateAnswerSheetStatus(
-        'tenant',
-        'record',
-        'actor',
-        'COLLECTED',
-      ),
-  },
+
 ];
 
 describe.each(cases)('$name persistence response', ({ run }) => {

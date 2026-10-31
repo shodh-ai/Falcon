@@ -16,7 +16,7 @@ vi.mock('@/components/ui/select', () => ({
 }));
 
 const paper = {
-  qp_id: 'synthetic-paper', subject_name: 'Synthetic subject', subject_code: 'SYN101', exam_date: null,
+  qp_id: 'synthetic-paper', has_file: true, version_number: 1, subject_name: 'Synthetic subject', subject_code: 'SYN101', exam_date: null,
   exam_type: null, setter_name: null, status: 'UPLOADED', notes: null, created_at: '2026-10-19T00:00:00Z',
 };
 
@@ -24,7 +24,7 @@ beforeEach(() => {
   api.get.mockReset().mockImplementation((path: string) => Promise.resolve(
     path === '/api/exam-cell/subjects'
       ? [{ subject_id: 1, subject_code: 'SYN101', subject_name: 'Synthetic subject', semester: 4 }]
-      : path === '/api/exam-cell/question-papers' ? [paper] : [],
+      : path === '/api/exam-cell/question-papers' ? [paper] : path === '/api/exam-cell/schedules' ? [{ exam_schedule_id: 'synthetic-exam', subject_name: 'Synthetic subject', exam_date: '2026-11-01', exam_type: 'END_TERM' }] : [],
   ));
   api.post.mockReset();
   toast.error.mockReset();
@@ -53,24 +53,25 @@ describe('Examination planning actions', () => {
     let finishUpdate!: (value: object) => void;
     api.post.mockImplementationOnce(() => new Promise((resolve) => { finishUpdate = resolve; }));
     render(<ExamCellQuestionPapersPage />);
-    const advance = await screen.findByRole('button', { name: 'Advance' });
+    const advance = await screen.findByRole('button', { name: 'Send to moderation' });
     act(() => { fireEvent.click(advance); fireEvent.click(advance); });
     expect(api.post).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole('button', { name: 'Updating…' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Send to moderation' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Add record' })).toBeDisabled();
     expect(toast.success).not.toHaveBeenCalled();
     await act(async () => { finishUpdate({}); });
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Advance' })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Send to moderation' })).toBeEnabled());
     expect(api.post).toHaveBeenCalledWith('/api/exam-cell/question-papers/synthetic-paper/status', { status: 'UNDER_MODERATION' });
-    expect(toast.success).toHaveBeenCalledWith('Status updated to UNDER MODERATION');
+    expect(toast.success).toHaveBeenCalledWith('Workflow stage saved');
   });
 
   it('restores question paper actions on failure without a success message', async () => {
     api.post.mockRejectedValueOnce(new Error('Status update unavailable'));
     render(<ExamCellQuestionPapersPage />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Advance' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Send to moderation' }));
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Status update unavailable'));
-    expect(screen.getByRole('button', { name: 'Advance' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Send to moderation' })).toBeEnabled();
+    fireEvent.change(screen.getByLabelText('Examination schedule'), { target: { value: 'synthetic-exam' } });
     expect(screen.getByRole('button', { name: 'Add record' })).toBeEnabled();
     expect(toast.success).not.toHaveBeenCalled();
   });

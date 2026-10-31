@@ -1,3 +1,5 @@
+// Question-paper schedule/setter ownership, moderation and audit rollback are
+// covered by question-paper.postgres.integration.spec.ts with real PostgreSQL.
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { ExamCellAuditService } from './exam-cell-audit.service';
 import { ExamCellEnterpriseService } from './exam-cell-enterprise.service';
@@ -136,54 +138,11 @@ describe('Tenant-owned operational references', () => {
     expect(committed).toEqual(['insert', 'audit']);
   });
 
-  it.each([{ exam_schedule_id: SCHEDULE_ID }, { setter_user_id: SETTER_ID }])(
-    'rejects a foreign or missing question-paper reference: %j',
-    async (dto) => {
-      const { operations, query, committed } = setup({
-        missingReference: true,
-      });
-      await expect(
-        operations.createQuestionPaperRecord('tenant', 'actor', dto),
-      ).rejects.toBeInstanceOf(NotFoundException);
-      expect(query).toHaveBeenCalledTimes(1);
-      expect(query.mock.calls[0]?.[0]).toContain('WHERE tenant_id = $1 AND');
-      expect(query.mock.calls[0]?.[1]).toEqual([
-        'tenant',
-        Object.values(dto)[0],
-      ]);
-      expect(committed).toEqual([]);
-    },
-  );
-
-  it('validates both owned question-paper references before insertion', async () => {
-    const { operations, query, committed, record } = setup();
-    await expect(
-      operations.createQuestionPaperRecord('tenant', 'actor', {
-        exam_schedule_id: SCHEDULE_ID,
-        setter_user_id: SETTER_ID,
-      }),
-    ).resolves.toEqual(record);
-    expect(query.mock.calls[0]?.[0]).toContain('FROM exam_schedules');
-    expect(query.mock.calls[1]?.[0]).toContain('FROM users');
-    expect(query.mock.calls[2]?.[0]).toContain(
-      'INSERT INTO public.exam_question_papers',
-    );
-    expect(committed).toEqual(['insert', 'audit']);
-  });
-
-  it.each(['session_id', 'exam_schedule_id', 'setter_user_id'] as const)(
+  it.each(['session_id'] as const)(
     'rejects malformed %s before starting a transaction',
     async (field) => {
       const { operations, transaction } = setup();
-      const action =
-        field === 'session_id'
-          ? operations.createFormWindow('tenant', 'actor', {
-              ...windowDto,
-              session_id: 'invalid',
-            })
-          : operations.createQuestionPaperRecord('tenant', 'actor', {
-              [field]: 'invalid',
-            });
+      const action = operations.createFormWindow('tenant', 'actor', { ...windowDto, session_id: 'invalid' });
       await expect(action).rejects.toBeInstanceOf(BadRequestException);
       expect(transaction).not.toHaveBeenCalled();
     },
@@ -203,15 +162,10 @@ describe('Tenant-owned operational references', () => {
       {} as never,
     );
     await operations.listFormWindows('tenant');
-    await operations.listQuestionPapers('tenant');
     await operations.listRegistrations('tenant', {});
     expect(query.mock.calls[0]?.[0]).toContain('s.tenant_id = w.tenant_id');
-    expect(query.mock.calls[1]?.[0]).toContain('es.tenant_id = qp.tenant_id');
-    expect(query.mock.calls[1]?.[0]).toContain(
-      'setter.tenant_id = qp.tenant_id',
-    );
-    expect(query.mock.calls[2]?.[0]).toContain('u.tenant_id = r.tenant_id');
-    expect(query.mock.calls[2]?.[0]).toContain('w.tenant_id = r.tenant_id');
+    expect(query.mock.calls[1]?.[0]).toContain('u.tenant_id = r.tenant_id');
+    expect(query.mock.calls[1]?.[0]).toContain('w.tenant_id = r.tenant_id');
   });
 });
 
@@ -231,25 +185,7 @@ const writes = [
       s.operations.createFormWindow('tenant', 'actor', windowDto),
     kind: 'insert',
   },
-  {
-    name: 'question-paper creation without optional references',
-    run: (s: ReturnType<typeof setup>) =>
-      s.operations.createQuestionPaperRecord('tenant', 'actor', {
-        subject_id: 1,
-      }),
-    kind: 'insert',
-  },
-  {
-    name: 'question-paper status update',
-    run: (s: ReturnType<typeof setup>) =>
-      s.operations.updateQuestionPaperStatus(
-        'tenant',
-        'paper',
-        'actor',
-        'COE_APPROVED',
-      ),
-    kind: 'update',
-  },
+
 ];
 
 describe.each(writes)('$name atomic audit boundary', ({ run, kind }) => {
@@ -279,16 +215,5 @@ describe.each(writes)('$name atomic audit boundary', ({ run, kind }) => {
   });
 });
 
-it('returns 404 for a missing or foreign question paper without writing an audit', async () => {
-  const state = setup({ missingPaper: true });
-  await expect(
-    state.operations.updateQuestionPaperStatus(
-      'tenant',
-      'paper',
-      'actor',
-      'COE_APPROVED',
-    ),
-  ).rejects.toBeInstanceOf(NotFoundException);
-  expect(state.auditLog).not.toHaveBeenCalled();
-  expect(state.committed).toEqual([]);
-});
+// Missing/foreign question-paper writes and audit rollback are exercised by the
+// real PostgreSQL question-paper workflow suite.

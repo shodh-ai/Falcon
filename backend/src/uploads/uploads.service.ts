@@ -48,6 +48,8 @@ export class UploadsService {
     user: UploadUser,
     key: string,
   ): Promise<void> {
+    if (/^[^/]+\/exam-cell\/question-papers\//i.test(key))
+      throw new NotFoundException('Use the authorized question-paper endpoint');
     // Official transcripts have stricter, revision-aware access than ordinary
     // student uploads. Check everyone (including exam staff) before the
     // general staff exemption can apply.

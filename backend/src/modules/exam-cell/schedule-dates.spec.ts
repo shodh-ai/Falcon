@@ -35,10 +35,10 @@ describe('Schedule date-only API contract', () => {
 
       {} as never,
     );
-    await service.listTodayExams('tenant');
+    await service.listTodayExams('11111111-1111-4111-8111-111111111111');
     expect(query).toHaveBeenCalledWith(
       expect.stringContaining('es.exam_date::text AS exam_date'),
-      expect.arrayContaining(['tenant']),
+      expect.arrayContaining(['11111111-1111-4111-8111-111111111111']),
     );
   });
 });

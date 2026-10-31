@@ -1,3 +1,5 @@
+import { ExamDayScriptsService } from './exam-day-scripts.service';
+import { QuestionPaperWorkflowService } from './question-paper-workflow.service';
 import { Module } from '@nestjs/common';
 import { FinanceModule } from '../finance/finance.module';
 import { ExamsModule } from '../exams/exams.module';
@@ -43,6 +45,8 @@ import { HodEndTermController } from './hod-endterm.controller';
     HodEndTermController,
   ],
   providers: [
+    ExamDayScriptsService,
+    QuestionPaperWorkflowService,
     ExamCellService,
     ResultControlService,
     SemesterResultsService,
