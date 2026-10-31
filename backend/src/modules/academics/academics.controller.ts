@@ -277,6 +277,68 @@ export class AcademicsController {
     );
   }
 
+  @Get('faculty/event-classes/events')
+  @Roles('Faculty', 'HOD', 'Dean')
+  classEvents(@Req() req: { user: AuthUser }) { return this.facultyAcademics.approvedEventsForClasses(this.resolveTenantId(req.user)); }
+
+  @Get('faculty/event-classes')
+  @Roles('Faculty', 'HOD', 'Dean')
+  myEventClasses(@Req() req: { user: AuthUser }) { return this.facultyAcademics.listEventClasses(this.resolveTenantId(req.user),req.user.user_id); }
+
+  @Post('faculty/event-classes')
+  @Roles('Faculty', 'HOD', 'Dean')
+  requestEventClass(@Req() req: {user:AuthUser}, @Body() body: {event_id:string;course_id:string;timetable_id:string;date:string;reason:string}, @Headers('idempotency-key') key:string) {
+    return this.facultyAcademics.requestEventClass(this.resolveTenantId(req.user),req.user.user_id,body,key);
+  }
+
+  @Get('hod/event-classes')
+  @Roles('HOD', 'SuperAdmin')
+  hodEventClasses(@Req() req: {user:AuthUser}) { return this.facultyAcademics.listEventClasses(this.resolveTenantId(req.user),req.user.user_id,true); }
+
+  @Post('hod/event-classes/:id/decision')
+  @Roles('HOD', 'SuperAdmin')
+  decideEventClass(@Req() req:{user:AuthUser},@Param('id',ParseUUIDPipe) id:string,@Headers('if-match') revision:string,@Body() body:{action:string;reason:string}) {
+    return this.facultyAcademics.decideEventClass(this.resolveTenantId(req.user),req.user.user_id,id,Number(revision),body.action,body.reason);
+  }
+
+  @Get('faculty/event-classes/:id/roster')
+  @Roles('Faculty', 'HOD', 'Dean')
+  eventRoster(@Req() req:{user:AuthUser},@Param('id',ParseUUIDPipe) id:string) { return this.facultyAcademics.eventClassRoster(this.resolveTenantId(req.user),req.user.user_id,id); }
+
+  @Post('faculty/event-classes/:id/attendance')
+  @Roles('Faculty', 'HOD', 'Dean')
+  eventAttendance(@Req() req:{user:AuthUser},@Param('id',ParseUUIDPipe) id:string,@Headers('if-match') revision:string,@Body() body:{attendance_data:Array<{student_id:string;status:string}>}) {
+    return this.facultyAcademics.saveEventClassAttendance(this.resolveTenantId(req.user),req.user.user_id,id,Number(revision),body.attendance_data);
+  }
+
+  @Post('faculty/attendance-reopening')
+  @Roles('Faculty', 'HOD', 'Dean')
+  requestAttendanceReopening(@Req() req: { user: AuthUser }, @Body() body: {
+    course_id?: string; session_key?: string; class_date?: string; reason?: string;
+  }, @Headers('idempotency-key') key?: string) {
+    return this.facultyAcademics.requestAttendanceReopening(this.resolveTenantId(req.user), req.user.user_id, body, key);
+  }
+
+  @Get('faculty/attendance-reopening')
+  @Roles('Faculty', 'HOD', 'Dean')
+  myAttendanceReopening(@Req() req: { user: AuthUser }) {
+    return this.facultyAcademics.listAttendanceReopenings(this.resolveTenantId(req.user), req.user.user_id);
+  }
+
+  @Get('hod/attendance-reopening')
+  @Roles('HOD', 'SuperAdmin')
+  pendingAttendanceReopening(@Req() req: { user: AuthUser }) {
+    return this.facultyAcademics.listAttendanceReopenings(this.resolveTenantId(req.user), req.user.user_id, true);
+  }
+
+  @Post('hod/attendance-reopening/:id/decision')
+  @Roles('HOD', 'SuperAdmin')
+  decideAttendanceReopening(@Req() req: { user: AuthUser }, @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: { action: string; reason: string }, @Headers('if-match') revision: string) {
+    return this.facultyAcademics.decideAttendanceReopening(this.resolveTenantId(req.user), req.user.user_id,
+      id, body.action, body.reason, Number(revision));
+  }
+
   @Get('faculty/course/:courseId/attendance')
   @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
   getFacultyCourseAttendance(

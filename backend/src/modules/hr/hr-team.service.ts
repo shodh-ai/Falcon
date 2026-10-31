@@ -734,7 +734,7 @@ export class HrTeamService {
       2,
     );
     const rows = await this.dataSource.query(
-      `SELECT a.appraisal_record_id, a.appraisal_year, a.auto_api_score, a.hod_rating, a.hr_final_status,
+      `SELECT a.appraisal_record_id, a.appraisal_year, a.auto_api_score, a.hod_rating, a.hr_final_status,a.submitted_at,
               u.name AS employee_name, u.official_email AS employee_email, p.employee_id
        FROM hr_employee_appraisals a
        JOIN users u ON u.user_id = a.user_id
@@ -756,7 +756,7 @@ export class HrTeamService {
         request_type: 'APPRAISAL',
         leave_type: `Appraisal ${r.appraisal_year}`,
         applied_date: String(r.appraisal_year),
-        raised_on: null,
+        raised_on: r.submitted_at ?? null,
         reason: `API score: ${r.auto_api_score ?? '—'}`,
         status: r.hr_final_status,
         employee: {

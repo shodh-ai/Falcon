@@ -1,6 +1,13 @@
 /** An HR queue item must be at the last configured HR step, not merely assigned to an HR user. */
 export function finalHrReviewSql(requestAlias: string, stepAlias: string) {
   return `(
+    EXISTS (SELECT 1 FROM hr_department_request_routes regularization_route
+      WHERE regularization_route.tenant_id=${requestAlias}.tenant_id
+        AND regularization_route.leave_id=${requestAlias}.leave_id
+        AND regularization_route.policy='REGULARIZATION_HOD_HR'
+        AND regularization_route.current_index=cardinality(regularization_route.approver_ids)-1
+        AND ${requestAlias}.request_type='REGULARIZATION')
+    OR
     (
       ${stepAlias}.step_id IS NOT NULL
       AND (

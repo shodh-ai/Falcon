@@ -2,8 +2,8 @@ jest.mock('uuid', () => ({ v4: jest.fn() }));
 import { FacultyProfileService } from './faculty-profile.service';
 
 describe('Faculty weekly workload', () => {
-  const makeService = (scheduled: unknown[], changes: unknown[]) => {
-    const query = jest.fn().mockResolvedValueOnce(scheduled).mockResolvedValueOnce(changes);
+  const makeService = (scheduled: unknown[], changes: unknown[], events: unknown[] = []) => {
+    const query = jest.fn().mockResolvedValueOnce(scheduled).mockResolvedValueOnce(changes).mockResolvedValueOnce(events);
     const service = new FacultyProfileService({ query } as any, {} as any, {} as any, {} as any);
     return { service, query };
   };
@@ -36,6 +36,14 @@ describe('Faculty weekly workload', () => {
     ]);
     await expect(service.getWeeklyWorkload('tenant-1', 'faculty-1', '2026-10-26')).resolves.toMatchObject({
       effective_minutes: 120, unmatched_cancellations: 1,
+    });
+  });
+
+  it('keeps an event-exempted class in weekly workload', async()=>{
+    const {service}=makeService([{timetable_id:'slot-1',course_id:'course-1',class_date:'2026-10-26',start_time:'09:00:00',minutes:60}],[],
+      [{timetable_id:'slot-1',class_date:'2026-10-26'}]);
+    await expect(service.getWeeklyWorkload('tenant-1','faculty-1','2026-10-26')).resolves.toMatchObject({
+      event_exempted_sessions:1,event_exempted_minutes:60,effective_sessions:1,effective_minutes:60,
     });
   });
 

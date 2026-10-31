@@ -163,6 +163,7 @@ export default function FacultyTimetablePage() {
   const isObserver = Boolean(user?.read_only_academic_view);
   const { activeDeptId, loading: deptLoading } = useTeachingDepartment();
   const { courses, loading: coursesLoading, error: coursesError } = useFacultyCourses();
+  const [eventClasses,setEventClasses]=useState<Array<{timetable_id:string;class_date:string;status:string;event_approved:boolean;event_title:string}>>([]);
   const [schedule, setSchedule] = useState<TimetableRow[]>([]);
   const [courseFilter, setCourseFilter] = useState('');
   const [weekOffset, setWeekOffset] = useState(0);
@@ -212,12 +213,14 @@ export default function FacultyTimetablePage() {
 
   const loadPageData = useCallback(async () => {
     try {
-      const [scheduleData, statsData, adjustmentData, movesData] = await Promise.all([
+      const [scheduleData, statsData, adjustmentData, movesData, eventData] = await Promise.all([
         api.get<TimetableRow[]>(withTeachingDeptId('/api/academics/faculty/workspaces/timetable', activeDeptId)),
         api.get<TimetableStats>(withTeachingDeptId('/api/academics/faculty/workspaces/timetable/stats', activeDeptId)),
         isObserver ? Promise.resolve([] as Adjustment[]) : api.get<Adjustment[]>('/api/academics/faculty/workspaces/adjustments'),
         isObserver ? Promise.resolve([] as DatedMove[]) : api.get<DatedMove[]>('/api/academics/session-changes/mine').catch(() => [] as DatedMove[]),
+        isObserver ? Promise.resolve([]) : api.get<Array<{timetable_id:string;class_date:string;status:string;event_approved:boolean;event_title:string}>>('/api/academics/faculty/event-classes'),
       ]);
+      setEventClasses(eventData);
       setSchedule(withFacultyDemoFallback(scheduleData, facultyDemoTimetable(), isEmptyArray));
       setScheduleError(null);
       setStats(withFacultyDemoFallback(statsData, facultyDemoTimetableStats()));
@@ -225,6 +228,7 @@ export default function FacultyTimetablePage() {
       setDatedMoves(Array.isArray(movesData) ? movesData : []);
     } catch {
       setScheduleError('Could not load the published timetable. Please retry; this does not mean there are no classes.');
+      setEventClasses([]);
       setSchedule(withFacultyDemoFallback([], facultyDemoTimetable(), isEmptyArray));
       setStats(withFacultyDemoFallback(null, facultyDemoTimetableStats()));
       setAdjustments(withFacultyDemoFallback([], facultyDemoAdjustments(), isEmptyArray));
@@ -301,7 +305,8 @@ export default function FacultyTimetablePage() {
       const cancellation = approved.find(row => row.adjustment_type === 'CANCEL' && row.course_code === slot.course_code &&
         new Date(row.new_date!).getDay() === slot.day_of_week % 7 &&
         new Date(row.new_date!).getHours() === Number(slot.start_time.slice(0,2)));
-      return { ...slot, display_status: cancellation ? 'CANCELLED' as const : undefined };
+      const eventClass=eventClasses.find(e=>e.timetable_id===slot.timetable_id && e.status==='APPROVED' && e.event_approved && inWeek(e.class_date));
+      return { ...slot, display_status: eventClass ? 'EVENT_EXEMPTED' as const : cancellation ? 'CANCELLED' as const : undefined };
     });
     for (const row of approved.filter(item => item.adjustment_type === 'EXTRA_CLASS')) {
       if (courseFilter && row.course_code !== courseFilter) continue;
@@ -321,7 +326,7 @@ export default function FacultyTimetablePage() {
         section: null, display_status: 'RESCHEDULED' });
     }
     return updated;
-  }, [visibleSchedule, adjustments, datedMoves, weekStart, courseFilter]);
+  }, [visibleSchedule, adjustments, datedMoves, weekStart, courseFilter, eventClasses]);
   const selectedSlot = gridSlots.find((slot) => slot.timetable_id === selectedSlotId) ?? null;
 
   useEffect(() => {
@@ -532,9 +537,9 @@ export default function FacultyTimetablePage() {
                     <dt className="text-muted-foreground">Time</dt><dd>{formatSlotTime(selectedSlot.start_time)}–{formatSlotTime(selectedSlot.end_time)}</dd>
                     <dt className="text-muted-foreground">Section</dt><dd>{selectedSlot.section || 'Whole course'}</dd>
                     <dt className="text-muted-foreground">Room</dt><dd>{selectedSlot.room || 'Not specified'}</dd>
-                    <dt className="text-muted-foreground">Status</dt><dd>{selectedSlot.display_status === 'CANCELLED' ? 'Cancelled for this date' : selectedSlot.display_status === 'EXTRA_CLASS' ? 'Approved extra class' : selectedSlot.display_status === 'RESCHEDULED' ? 'Approved moved class' : selectedSlot.awaiting_confirmation ? 'Awaiting department confirmation' : 'Published'}</dd>
+                    <dt className="text-muted-foreground">Status</dt><dd>{selectedSlot.display_status === 'EVENT_EXEMPTED' ? 'Exempted for approved event · workload counted' : selectedSlot.display_status === 'CANCELLED' ? 'Cancelled for this date' : selectedSlot.display_status === 'EXTRA_CLASS' ? 'Approved extra class' : selectedSlot.display_status === 'RESCHEDULED' ? 'Approved moved class' : selectedSlot.awaiting_confirmation ? 'Awaiting department confirmation' : 'Published'}</dd>
                   </dl>
-                  {!isObserver && selectedSlot.display_status !== 'CANCELLED' && <div className="flex flex-wrap gap-2 border-t pt-3">
+                  {!isObserver && selectedSlot.display_status !== 'CANCELLED' && selectedSlot.display_status !== 'EVENT_EXEMPTED' && <div className="flex flex-wrap gap-2 border-t pt-3">
                     <p className="text-xs text-muted-foreground">Class changes require HOD approval. Selecting a class does not reserve a new slot.</p>
                     <Button size="sm" onClick={() => { setManageAction('substitute'); document.getElementById('faculty-manage-classes')?.scrollIntoView({ behavior: 'smooth' }); }}>Arrange substitute</Button>
                     <Button size="sm" variant="outline" onClick={() => { setManageAction('swap'); document.getElementById('faculty-manage-classes')?.scrollIntoView({ behavior: 'smooth' }); }}>Swap classes</Button>

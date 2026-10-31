@@ -8,6 +8,7 @@ import { useAuthedApi } from '@/lib/api';
 
 type GatePassRow = {
   pass_id: string;
+  created_at?: string | null;
   date: string;
   out_time_display: string;
   expected_in_display: string;
@@ -84,6 +85,7 @@ export function HodGatePassApprovalsPanel({ onUpdated }: Props) {
             <p className="text-xs text-muted-foreground">
               {row.date} · Out {row.out_time_display} · Expected in {row.expected_in_display}
             </p>
+            <p className="text-xs text-muted-foreground">Raised on {row.created_at ? new Date(row.created_at).toLocaleString('en-IN',{timeZone:'Asia/Kolkata'}) : 'Not recorded'}</p>
             {row.reason ? (
               <p className="text-xs text-slate-500 mt-1">{row.reason}</p>
             ) : null}

@@ -1,3 +1,4 @@
+import { approvedEventSql, eventExemptions, assertNoEventExemption, validateEventAttendance } from './event-class-cohorts';
 import {
   BadRequestException,
   ConflictException,
@@ -19,6 +20,7 @@ import { ObjectStorageService } from '../../storage/object-storage.service';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 import { BulkAttendanceDto } from './dto/bulk-attendance.dto';
 import { FacultyTeachingDepartmentsService } from './faculty-teaching-departments.service';
+import { attendanceReopening, departmentHodPredicate } from './attendance-reopening';
 import {
   allocationMatchesStudentSlot,
   parseAllocationSemester,
@@ -544,10 +546,12 @@ export class AcademicsFacultyService {
          AND (new_date AT TIME ZONE 'Asia/Kolkata')::date=$3::date`,
       [tenantId, [...new Set(rows.map(row => row.course_id))], date],
     ) : [];
+    const eventClasses = await eventExemptions((sql,args)=>this.dataSource.query(sql,args), tenantId, date);
     const cancelledSessions = new Set(cancellations.map(row => `${row.course_id}|${row.start_time}`));
 
     return Promise.all(
       rows.map(async (row) => ({
+        event_exemption: eventClasses.find(x=>x.timetable_id===row.timetable_id) ?? null,
         timetable_id: row.timetable_id,
         course_id: row.course_id,
         course_code: row.course_code,
@@ -973,6 +977,216 @@ export class AcademicsFacultyService {
     });
   }
 
+  async requestAttendanceReopening(tenantId: string, facultyId: string,
+    body: { course_id?: string; session_key?: string; class_date?: string; reason?: string }, key?: string) {
+    const { course_id: course, session_key: session, class_date: date } = body;
+    const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!course || !uuid.test(course) || !session || !uuid.test(session.replace(/^extra:/, '')) ||
+        !date || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(Date.parse(`${date}T00:00:00Z`)) ||
+        new Date(`${date}T00:00:00Z`).toISOString().slice(0,10) !== date)
+      throw new BadRequestException('Select a valid course, dated class and session');
+    if (!body.reason?.trim() || body.reason.trim().length < 10 || body.reason.length > 2000)
+      throw new BadRequestException('Give a reopening reason of 10–2000 characters');
+    if (!key || key.length > 128) throw new BadRequestException('Idempotency-Key is required');
+    if (!this.isAttendanceLocked(date)) throw new BadRequestException('This attendance date is still open');
+    // The existing dated-session authorization also handles approved substitutes and extra classes.
+    await this.getCourseAttendanceState(course, facultyId, tenantId, date, session);
+    const [row] = await this.dataSource.query(`INSERT INTO academic_attendance_reopen_requests
+      (tenant_id,faculty_user_id,course_id,session_key,class_date,reason,idempotency_key)
+      VALUES($1,$2,$3,$4,$5,$6,$7)
+      ON CONFLICT DO NOTHING RETURNING *`, [tenantId, facultyId, course, session, date, body.reason.trim(), key]);
+    if (row) return row;
+    const [existing] = await this.dataSource.query(`SELECT * FROM academic_attendance_reopen_requests
+      WHERE tenant_id=$1 AND faculty_user_id=$2 AND course_id=$3 AND session_key=$4
+        AND class_date=$5::date AND (idempotency_key=$6 OR status='PENDING') ORDER BY created_at DESC LIMIT 1`,
+    [tenantId, facultyId, course, session, date, key]);
+    if (!existing) throw new ConflictException('Idempotency key belongs to another request');
+    return existing;
+  }
+
+  listAttendanceReopenings(tenant: string, actor: string, hod = false) {
+    return this.dataSource.query(`SELECT r.*,r.class_date::text,u.name AS faculty_name,c.course_code,c.course_name
+      FROM academic_attendance_reopen_requests r JOIN users u ON u.user_id=r.faculty_user_id AND u.tenant_id=r.tenant_id
+      JOIN academic_courses c ON c.course_id=r.course_id AND c.tenant_id=r.tenant_id
+      WHERE r.tenant_id=$1 AND ${hod ? departmentHodPredicate('u', '$2') : 'r.faculty_user_id=$2'}
+      ORDER BY r.created_at DESC LIMIT 200`, [tenant, actor]);
+  }
+
+  async decideAttendanceReopening(tenant: string, actor: string, id: string,
+    action: string, reason: string, revision: number) {
+    if (!['APPROVE','REJECT'].includes(action) || !reason?.trim() || reason.trim().length < 10)
+      throw new BadRequestException('Choose approve/reject and give a reason of at least 10 characters');
+    return this.dataSource.transaction(async manager => {
+      const [request] = await manager.query(`SELECT r.* FROM academic_attendance_reopen_requests r
+        JOIN users u ON u.user_id=r.faculty_user_id AND u.tenant_id=r.tenant_id
+        WHERE r.tenant_id=$1 AND r.request_id=$3 AND ${departmentHodPredicate('u', '$2')} FOR UPDATE OF r`,
+      [tenant, actor, id]);
+      if (!request) throw new NotFoundException('Request is outside your HOD approval queue');
+      if (request.faculty_user_id === actor) throw new ForbiddenException('You cannot reopen your own attendance');
+      if (request.status !== 'PENDING' || request.revision !== revision)
+        throw new ConflictException('Request changed; refresh the approval queue');
+      const [saved] = await manager.query(`UPDATE academic_attendance_reopen_requests
+        SET status=$3,decided_by=$4,decided_at=now(),decision_reason=$5,revision=revision+1,
+          expires_at=CASE WHEN $3='APPROVED' THEN now()+interval '24 hours' ELSE NULL END
+        WHERE tenant_id=$1 AND request_id=$2 RETURNING *`,
+      [tenant, id, action === 'APPROVE' ? 'APPROVED' : 'REJECTED', actor, reason.trim()]);
+      return saved;
+    });
+  }
+
+  async approvedEventsForClasses(tenant: string) {
+    return this.dataSource.query(`SELECT e.event_id,e.title,e.event_date,c.faculty_advisor_id AS coordinator_user_id,
+      u.name AS coordinator_name FROM campus_events e JOIN campus_clubs c ON c.club_id=e.club_id AND c.tenant_id=e.tenant_id
+      JOIN users u ON u.user_id=c.faculty_advisor_id AND u.tenant_id=e.tenant_id AND u.is_active=true AND u.deleted_at IS NULL
+      WHERE e.tenant_id=$1 AND ${approvedEventSql()} AND e.event_date>=now()-interval '7 days'
+      ORDER BY e.event_date LIMIT 200`, [tenant]);
+  }
+
+  private async eventClassSnapshot(manager: EntityManager, tenant: string, faculty: string, course: string, session: string, date: string) {
+    // This first release supports exact recurring sessions only. Moved, substituted,
+    // cancelled or already marked classes must be resolved through their own workflow.
+    const [slot] = await manager.query(`SELECT t.timetable_id,t.start_time::text,t.end_time::text,t.section,t.room,
+      t.faculty_user_id,t.course_id FROM academic_timetables t WHERE t.tenant_id=$1 AND t.timetable_id=$2
+      AND t.course_id=$3 AND t.faculty_user_id=$4 AND t.deleted_at IS NULL
+      AND t.day_of_week=extract(isodow FROM $5::date)::int
+      AND (t.valid_from IS NULL OR t.valid_from<=$5::date) AND (t.valid_to IS NULL OR t.valid_to>=$5::date)
+      AND NOT EXISTS(SELECT 1 FROM academic_class_moves m WHERE m.tenant_id=t.tenant_id AND m.source_timetable_id=t.timetable_id
+        AND (m.source_date=$5::date OR m.target_date=$5::date) AND m.status='APPROVED')
+      AND NOT EXISTS(SELECT 1 FROM academic_proxy_requests p WHERE p.tenant_id=t.tenant_id AND p.timetable_id=t.timetable_id
+        AND p.date_of_proxy=$5::date AND p.status='APPROVED')
+      AND NOT EXISTS(SELECT 1 FROM class_adjustments a WHERE a.tenant_id=t.tenant_id AND a.course_id=t.course_id
+        AND a.adjustment_type='CANCEL' AND a.status IN ('APPROVED','NOTIFIED')
+        AND (a.new_date AT TIME ZONE 'Asia/Kolkata')::date=$5::date
+        AND (a.new_date AT TIME ZONE 'Asia/Kolkata')::time=t.start_time)
+      AND NOT EXISTS(SELECT 1 FROM course_attendance_logs l WHERE l.tenant_id=t.tenant_id AND l.timetable_id=t.timetable_id AND l.date=$5::date)
+      FOR SHARE OF t`, [tenant,session,course,faculty,date]);
+    if (!slot) throw new ConflictException('Choose an unchanged scheduled class with no recorded attendance, cancellation, substitution or move');
+    const students = await this.getCourseStudents(course,faculty,tenant,session,date,manager);
+    const ids = students.map(s=>s.student_id).sort();
+    if (!ids.length) throw new ConflictException('The class has no verified enrolled student cohort');
+    return {slot,ids};
+  }
+
+  async requestEventClass(tenant: string, faculty: string, body: {event_id:string;course_id:string;timetable_id:string;date:string;reason:string}, key: string) {
+    if (!key || key.length>128 || !body.reason?.trim() || body.reason.trim().length<10 || body.reason.length>2000 ||
+        ![body.event_id,body.course_id,body.timetable_id].every(x=>/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(x)) || !/^\d{4}-\d{2}-\d{2}$/.test(body.date) || !Number.isFinite(Date.parse(`${body.date}T00:00:00Z`)) || new Date(`${body.date}T00:00:00Z`).toISOString().slice(0,10)!==body.date)
+      throw new BadRequestException('Select an event, dated class and a reason of 10–2000 characters');
+    return this.dataSource.transaction(async manager=>{
+      const [prior] = await manager.query(`SELECT *,class_date::text FROM academic_event_class_cohorts WHERE tenant_id=$1 AND faculty_user_id=$2 AND idempotency_key=$3`,[tenant,faculty,key]);
+      if (prior) {
+        if(prior.event_id!==body.event_id||prior.course_id!==body.course_id||prior.timetable_id!==body.timetable_id||prior.class_date!==body.date||prior.reason!==body.reason.trim())
+          throw new ConflictException('Idempotency key belongs to a different event cohort request');
+        return prior;
+      }
+      await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))',[`class-move:${tenant}:${body.date}`]);
+      await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))',[`proxy:${tenant}:${body.timetable_id}:${body.date}`]);
+      await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))',[`practical:${tenant}:${body.course_id}`]);
+      await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))',[`${tenant}:${body.course_id}:${faculty}:${body.date}:${body.timetable_id}`]);
+      const [event] = await manager.query(`SELECT e.event_id,c.faculty_advisor_id FROM campus_events e
+        JOIN campus_clubs c ON c.club_id=e.club_id AND c.tenant_id=e.tenant_id
+        JOIN users u ON u.user_id=c.faculty_advisor_id AND u.tenant_id=e.tenant_id AND u.is_active=true AND u.deleted_at IS NULL
+        WHERE e.tenant_id=$1 AND e.event_id=$2 AND ${approvedEventSql()}
+          AND (e.event_date AT TIME ZONE 'Asia/Kolkata')::date=$3::date
+          AND $3::date>=timezone('Asia/Kolkata',now())::date FOR SHARE OF e,c`,[tenant,body.event_id,body.date]);
+      if (!event) throw new ConflictException('The event must be fully approved, have an active faculty coordinator and take place on this class date');
+      const {slot,ids}=await this.eventClassSnapshot(manager,tenant,faculty,body.course_id,body.timetable_id,body.date);
+      const [row]=await manager.query(`INSERT INTO academic_event_class_cohorts
+        (tenant_id,event_id,timetable_id,course_id,faculty_user_id,class_date,coordinator_user_id,student_ids,session_snapshot,reason,idempotency_key)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,$11) ON CONFLICT DO NOTHING RETURNING *`,
+      [tenant,body.event_id,body.timetable_id,body.course_id,faculty,body.date,event.faculty_advisor_id,ids,JSON.stringify(slot),body.reason.trim(),key]);
+      if (!row) throw new ConflictException('This dated class already has an event cohort request');
+      await manager.query(`INSERT INTO academic_event_class_audit(tenant_id,cohort_id,actor_user_id,action,after_data)
+        VALUES($1,$2,$3,'REQUEST',$4::jsonb)`,[tenant,row.cohort_id,faculty,JSON.stringify(row)]);
+      return row;
+    });
+  }
+
+  async listEventClasses(tenant:string,actor:string,hod=false) {
+    return this.dataSource.query(`SELECT x.*,x.class_date::text,e.title AS event_title,c.course_code,c.course_name,
+      u.name AS faculty_name,co.name AS coordinator_name,(${approvedEventSql()}) AS event_approved
+      FROM academic_event_class_cohorts x JOIN campus_events e ON e.event_id=x.event_id AND e.tenant_id=x.tenant_id
+      JOIN users u ON u.user_id=x.faculty_user_id AND u.tenant_id=x.tenant_id
+      JOIN users co ON co.user_id=x.coordinator_user_id AND co.tenant_id=x.tenant_id
+      JOIN academic_courses c ON c.course_id=x.course_id AND c.tenant_id=x.tenant_id
+      WHERE x.tenant_id=$1 AND ${hod ? departmentHodPredicate() : '(x.faculty_user_id=$2 OR x.coordinator_user_id=$2)'}
+      ORDER BY x.created_at DESC LIMIT 200`,[tenant,actor]);
+  }
+
+  async decideEventClass(tenant:string,actor:string,id:string,revision:number,action:string,reason:string) {
+    if (!['APPROVE','REJECT'].includes(action) || !reason?.trim() || reason.length>2000) throw new BadRequestException('A decision and reason are required');
+    return this.dataSource.transaction(async manager=>{
+      const [x]=await manager.query(`SELECT x.*,x.class_date::text FROM academic_event_class_cohorts x
+        JOIN users u ON u.user_id=x.faculty_user_id AND u.tenant_id=x.tenant_id
+        WHERE x.tenant_id=$1 AND x.cohort_id=$3 AND ${departmentHodPredicate()} FOR UPDATE OF x`,[tenant,actor,id]);
+      if (!x) throw new NotFoundException('Event cohort request not found in your department');
+      if (x.faculty_user_id===actor || x.coordinator_user_id===actor) throw new ForbiddenException('An independent HOD must review this event cohort');
+      if (x.status!=='PENDING' || x.revision!==revision) throw new ConflictException('Request changed; refresh before deciding');
+      if (action==='APPROVE') {
+        await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))',[`class-move:${tenant}:${x.class_date}`]);
+        await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))',[`proxy:${tenant}:${x.timetable_id}:${x.class_date}`]);
+        await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))',[`practical:${tenant}:${x.course_id}`]);
+        await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))',[`${tenant}:${x.course_id}:${x.faculty_user_id}:${x.class_date}:${x.timetable_id}`]);
+        const [event]=await manager.query(`SELECT e.event_id FROM campus_events e JOIN campus_clubs c ON c.club_id=e.club_id AND c.tenant_id=e.tenant_id
+          WHERE e.tenant_id=$1 AND e.event_id=$2 AND ${approvedEventSql()} AND c.faculty_advisor_id=$3
+          AND (e.event_date AT TIME ZONE 'Asia/Kolkata')::date=$4::date AND $4::date>=timezone('Asia/Kolkata',now())::date
+          FOR SHARE OF e,c`,[tenant,x.event_id,x.coordinator_user_id,x.class_date]);
+        if (!event) throw new ConflictException('The event approval, date or coordinator changed');
+        const {slot,ids}=await this.eventClassSnapshot(manager,tenant,x.faculty_user_id,x.course_id,x.timetable_id,x.class_date);
+        if (JSON.stringify(ids)!==JSON.stringify([...x.student_ids].sort()) ||
+          Object.keys(slot).some(k=>JSON.stringify(slot[k])!==JSON.stringify(x.session_snapshot[k])))
+          throw new ConflictException('The class or enrolled cohort changed. Reject this request and submit the current cohort again.');
+      }
+      const [result]=await manager.query(`UPDATE academic_event_class_cohorts SET status=$3,decided_by=$4,decided_at=now(),decision_reason=$5,revision=revision+1
+        WHERE tenant_id=$1 AND cohort_id=$2 RETURNING *`,[tenant,id,action==='APPROVE'?'APPROVED':'REJECTED',actor,reason.trim()]);
+      await manager.query(`INSERT INTO academic_event_class_audit(tenant_id,cohort_id,actor_user_id,action,before_data,after_data)
+        VALUES($1,$2,$3,$4,$5::jsonb,$6::jsonb)`,[tenant,id,actor,action,JSON.stringify(x),JSON.stringify(result)]);
+      return result;
+    });
+  }
+
+  async eventClassRoster(tenant:string,actor:string,id:string) {
+    return this.dataSource.query(`SELECT u.user_id AS student_id,u.name,${ROLL_NUMBER_SQL} AS roll_number
+      FROM academic_event_class_cohorts x JOIN campus_events e ON e.event_id=x.event_id AND e.tenant_id=x.tenant_id
+      JOIN campus_clubs club ON club.club_id=e.club_id AND club.tenant_id=e.tenant_id AND club.faculty_advisor_id=x.coordinator_user_id
+      JOIN users active_coordinator ON active_coordinator.user_id=x.coordinator_user_id AND active_coordinator.tenant_id=x.tenant_id AND active_coordinator.is_active=true AND active_coordinator.deleted_at IS NULL
+      JOIN users u ON u.tenant_id=x.tenant_id AND u.user_id=ANY(x.student_ids)
+      LEFT JOIN student_profiles sp ON sp.user_id=u.user_id
+      WHERE x.tenant_id=$1 AND x.cohort_id=$3 AND x.coordinator_user_id=$2 AND x.status='APPROVED' AND ${approvedEventSql()}
+      ORDER BY u.name,u.user_id`,[tenant,actor,id]);
+  }
+
+  async saveEventClassAttendance(tenant:string,actor:string,id:string,revision:number,data:Array<{student_id:string;status:string}>) {
+    return this.dataSource.transaction(async manager=>{
+      const [x]=await manager.query(`SELECT x.*,x.class_date::text FROM academic_event_class_cohorts x JOIN campus_events e
+        ON e.event_id=x.event_id AND e.tenant_id=x.tenant_id JOIN campus_clubs c ON c.club_id=e.club_id AND c.tenant_id=e.tenant_id
+        JOIN users coordinator ON coordinator.user_id=x.coordinator_user_id AND coordinator.tenant_id=x.tenant_id
+        WHERE x.tenant_id=$1 AND x.cohort_id=$3 AND x.coordinator_user_id=$2 AND c.faculty_advisor_id=$2
+        AND coordinator.is_active=true AND coordinator.deleted_at IS NULL
+        AND x.status='APPROVED' AND ${approvedEventSql()} AND x.class_date<=timezone('Asia/Kolkata',now())::date
+        AND x.class_date>=timezone('Asia/Kolkata',now())::date-3 FOR UPDATE OF x FOR SHARE OF e,c`,[tenant,actor,id]);
+      if (!x) throw new ForbiddenException('Only the approved event coordinator can mark this cohort, on the event date or within three days');
+      if (x.revision!==revision) throw new ConflictException('Event attendance changed; reload before saving');
+      await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))',[`${tenant}:${x.course_id}:${x.faculty_user_id}:${String(x.class_date).slice(0,10)}:${x.timetable_id}`]);
+      const [otherLog]=await manager.query(`SELECT timetable_id FROM course_attendance_logs WHERE tenant_id=$1 AND timetable_id=$2
+        AND date=$3 AND event_cohort_id IS DISTINCT FROM $4::uuid`,[tenant,x.timetable_id,x.class_date,id]);
+      if (otherLog) throw new ConflictException('Class attendance already exists outside this event; resolve it before recording event attendance');
+      validateEventAttendance(x.student_ids,data);
+      const clean=data.map(s=>({student_id:s.student_id,status:s.status}));
+      await manager.query(`INSERT INTO academic_event_class_audit(tenant_id,cohort_id,actor_user_id,action,before_data,after_data)
+        VALUES($1,$2,$3,'ATTENDANCE',$4::jsonb,$5::jsonb)`,[tenant,id,actor,JSON.stringify(x.attendance_data),JSON.stringify(clean)]);
+      const [result]=await manager.query(`UPDATE academic_event_class_cohorts SET attendance_data=$3::jsonb,attendance_marked_at=now(),
+        attendance_marked_by=$4,revision=revision+1 WHERE tenant_id=$1 AND cohort_id=$2 RETURNING revision`,[tenant,id,JSON.stringify(clean),actor]);
+      await manager.query(`INSERT INTO course_attendance_logs
+        (tenant_id,course_id,faculty_user_id,date,timetable_id,attendance_data,marked_by_user_id,event_cohort_id)
+        VALUES($1,$2,$3,$4,$5,$6::jsonb,$7,$8)
+        ON CONFLICT(event_cohort_id) WHERE event_cohort_id IS NOT NULL DO UPDATE SET
+          attendance_data=EXCLUDED.attendance_data,marked_by_user_id=EXCLUDED.marked_by_user_id`,
+        [tenant,x.course_id,x.faculty_user_id,x.class_date,x.timetable_id,JSON.stringify(clean),actor,id]);
+      await this.recalculateCourseAttendancePercents(tenant,x.course_id,manager);
+      return {...result,recorded:clean.length};
+    });
+  }
+
   async getCourseAttendanceState(
     courseId: string,
     facultyUserId: string,
@@ -980,6 +1194,9 @@ export class AcademicsFacultyService {
     date = localDateString(),
     timetableId?: string,
   ) {
+    const reopen = this.isAttendanceLocked(date)
+      ? await attendanceReopening((sql, args) => this.dataSource.query(sql, args), tenantId, facultyUserId, courseId, timetableId, date) : null;
+    const locked = this.isAttendanceLocked(date) && !reopen;
     const adjustmentId = extraClassId(timetableId);
     if (adjustmentId) {
       await this.assertApprovedExtraClass(this.dataSource, tenantId, courseId, facultyUserId, date, adjustmentId);
@@ -991,9 +1208,9 @@ export class AcademicsFacultyService {
         [tenantId, courseId, facultyUserId, date, adjustmentId],
       );
       return { course_id: courseId, date, timetable_id: timetableId,
-        locked: this.isAttendanceLocked(date), attendance_data: saved?.attendance_data ?? null };
+        locked, reopened_until: reopen?.expires_at, attendance_data: saved?.attendance_data ?? null };
     }
-    if (timetableId && this.isAttendanceLocked(date)) {
+    if (timetableId && locked) {
       const [saved] = await this.dataSource.query(`SELECT cal.attendance_data FROM course_attendance_logs cal
         JOIN academic_timetables t ON t.timetable_id=cal.timetable_id AND t.tenant_id=cal.tenant_id
         WHERE cal.tenant_id=$1 AND cal.course_id=$2 AND cal.faculty_user_id=$3
@@ -1028,7 +1245,8 @@ export class AcademicsFacultyService {
       course_id: courseId,
       date,
       timetable_id: timetableId ?? null,
-      locked: this.isAttendanceLocked(date),
+      locked,
+      reopened_until: reopen?.expires_at,
       attendance_data: log[0]?.attendance_data ?? null,
     };
   }
@@ -1409,9 +1627,11 @@ export class AcademicsFacultyService {
       date,
       timetableId ?? undefined,
     );
-    if (this.isAttendanceLocked(date)) {
+    if (this.isAttendanceLocked(date) && !await attendanceReopening(
+      (sql, args) => this.dataSource.query(sql, args), tenantId, facultyUserId,
+      dto.course_id, dto.timetable_id, date)) {
       throw new ForbiddenException(
-        'Attendance locked. Contact Admin to modify records older than 3 days.',
+        'Attendance is locked. Request reopening from your HOD for this class and date.',
       );
     }
     if (!dto.attendance_data?.length) {
@@ -1541,6 +1761,19 @@ export class AcademicsFacultyService {
         `SELECT pg_advisory_xact_lock(hashtext($1))`,
         [`${tenantId}:${dto.course_id}:${effectiveFacultyId}:${date}:${adjustmentId ?? timetableId ?? 'none'}`],
       );
+      await assertNoEventExemption((sql,args)=>manager.query(sql,args),tenantId,dto.timetable_id,date,dto.course_id);
+      if (this.isAttendanceLocked(date)) {
+        const grant = await attendanceReopening((sql, args) => manager.query(sql, args),
+          tenantId, facultyUserId, dto.course_id, dto.timetable_id, date, true);
+        if (!grant) throw new ForbiddenException('Attendance reopening has expired; request HOD approval again');
+        const before = await manager.query(`SELECT attendance_data FROM course_attendance_logs
+          WHERE tenant_id=$1 AND course_id=$2 AND faculty_user_id=$3 AND date=$4::date
+          AND (timetable_id=$5::uuid OR class_adjustment_id=$6::uuid)`,
+        [tenantId, dto.course_id, effectiveFacultyId, date, timetableId, adjustmentId]);
+        await manager.query(`INSERT INTO academic_attendance_correction_audit
+          (request_id,tenant_id,actor_user_id,before_data,after_data) VALUES($1,$2,$3,$4::jsonb,$5::jsonb)`,
+        [grant.request_id, tenantId, facultyUserId, JSON.stringify(before), JSON.stringify(dto.attendance_data)]);
+      }
       await manager.query(
         `DELETE FROM course_attendance_logs
          WHERE tenant_id = $1 AND course_id = $2 AND faculty_user_id = $3
@@ -1589,8 +1822,9 @@ export class AcademicsFacultyService {
   private async recalculateCourseAttendancePercents(
     tenantId: string,
     courseId: string,
+    manager?: EntityManager,
   ) {
-    const rows = await this.dataSource.query<
+    const rows = await (manager ?? this.dataSource).query<
       Array<{ student_user_id: string; attendance_percent: string }>
     >(
       `WITH session_data AS (

@@ -1,3 +1,4 @@
+import { eventExemptions } from './event-class-cohorts';
 import {
   BadRequestException,
   Injectable,
@@ -646,6 +647,9 @@ export class FacultyProfileService {
       [tenantId, userId, weekStart],
     );
 
+    const endDate=new Date(`${weekStart}T00:00:00Z`);endDate.setUTCDate(endDate.getUTCDate()+6);
+    const eventClasses=await eventExemptions((sql,args)=>this.dataSource.query(sql,args),tenantId,weekStart,endDate.toISOString().slice(0,10));
+    const eventSlots=scheduled.filter(slot=>eventClasses.some(x=>x.timetable_id===slot.timetable_id && x.class_date===slot.class_date));
     const cancelled = new Set<string>();
     let unmatchedCancellations = 0;
     for (const change of changes.filter(row => row.adjustment_type === 'CANCEL')) {
@@ -661,6 +665,8 @@ export class FacultyProfileService {
     const extraMinutes = approvedExtras.length * 60;
     return {
       week_start: weekStart,
+      event_exempted_sessions: eventSlots.length,
+      event_exempted_minutes: eventSlots.reduce((sum,slot)=>sum+Number(slot.minutes),0),
       scheduled_sessions: scheduled.length,
       scheduled_minutes: scheduledMinutes,
       cancelled_sessions: cancelledSlots.length,

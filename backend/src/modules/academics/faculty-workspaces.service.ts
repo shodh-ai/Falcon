@@ -1,3 +1,4 @@
+import { eventExemptions } from './event-class-cohorts';
 import { allocationDepartmentScope, enrolledDepartmentScope } from './department-course-scope';
 import {
   BadRequestException,
@@ -1924,10 +1925,15 @@ export class FacultyWorkspacesService {
         await manager.query(`UPDATE class_adjustments SET status='APPROVED' WHERE tenant_id=$1 AND adjustment_id=$2`, [tenantId,adjustmentId]);
       });
     } else {
-      await this.dataSource.query(
-        `UPDATE class_adjustments SET status = 'APPROVED' WHERE adjustment_id = $1 AND tenant_id = $2`,
-        [adjustmentId, tenantId],
-      );
+      await this.dataSource.transaction(async manager=>{
+        const [pending]=await manager.query(`SELECT course_id,status,to_char(new_date AT TIME ZONE 'Asia/Kolkata','YYYY-MM-DD') AS class_date
+          FROM class_adjustments WHERE adjustment_id=$1 AND tenant_id=$2 FOR UPDATE`,[adjustmentId,tenantId]);
+        if(pending?.status!=='PENDING_HOD_APPROVAL') throw new BadRequestException('Adjustment has already been processed');
+        await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))',[`class-move:${tenantId}:${pending.class_date}`]);
+        const events=await eventExemptions((sql,args)=>manager.query(sql,args),tenantId,pending.class_date);
+        if(events.some(x=>x.course_id===pending.course_id)) throw new BadRequestException('This course has an approved event exemption on that date. Resolve the event arrangement before changing the class.');
+        await manager.query(`UPDATE class_adjustments SET status='APPROVED' WHERE adjustment_id=$1 AND tenant_id=$2`,[adjustmentId,tenantId]);
+      });
     }
 
     const faculty = await this.dataSource.query<

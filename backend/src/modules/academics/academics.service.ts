@@ -1,3 +1,4 @@
+import { eventExemptions } from './event-class-cohorts';
 import {
   academicYearAt,
   listDepartmentFacultyWorkload,
@@ -626,6 +627,7 @@ export class AcademicsService {
       );
     }
 
+    const eventClasses = await eventExemptions((sql,args)=>this.courseEnrollments.manager.query(sql,args),tenantId,weekStart,weekEnd);
     const slots = datedSlots.map((slot) => {
       const sessionDate = slot.session_date;
       const cancelled = cancelledSessions.has(
@@ -665,6 +667,7 @@ export class AcademicsService {
         substitute_faculty_name:
           coverNames.get(`${slot.timetable_id}|${sessionDate}`) ?? null,
         session_date: sessionDate,
+        event_exemption: eventClasses.filter(x=>x.timetable_id===slot.timetable_id && x.class_date===sessionDate && x.student_ids.includes(studentUserId)).map(x=>({event_id:x.event_id,event_title:x.event_title}))[0] ?? null,
         cancelled,
         attendance_status,
       };
@@ -4091,10 +4094,17 @@ export class AcademicsService {
     if (!student || student.role?.role_name !== 'Student') {
       throw new NotFoundException('Student not found');
     }
-    if (deptIds.length && !deptIds.includes(student.dept_id)) {
+    if (!deptIds.length || !deptIds.includes(student.dept_id)) {
       throw new NotFoundException('Student is not in your department scope');
     }
 
+    const currentCourses = await this.users.manager.query(
+      `SELECT c.course_code,c.course_name,e.semester,e.status,e.attendance_percent
+       FROM student_course_enrollments e JOIN academic_courses c
+         ON c.course_id=e.course_id AND c.tenant_id=e.tenant_id
+       WHERE e.tenant_id=$1 AND e.student_user_id=$2 ORDER BY e.semester DESC,c.course_code`,
+      [tenantId, studentUserId],
+    );
     const historyRows = await this.users.manager.query(
       `SELECT semester,
               AVG(attendance_percent)::numeric(5,2) AS attendance,
@@ -4130,10 +4140,11 @@ export class AcademicsService {
       student_name: student.name,
       student_email: student.email,
       department: student.department?.dept_name,
+      current_courses: currentCourses,
       semester_history: historyRows.map((r: Record<string, unknown>) => ({
         semester: Number(r.semester),
-        cgpa: r.cgpa ? Number(Number(r.cgpa).toFixed(2)) : 0,
-        attendance: r.attendance ? Number(Number(r.attendance).toFixed(2)) : 0,
+        cgpa: r.cgpa != null ? Number(Number(r.cgpa).toFixed(2)) : null,
+        attendance: r.attendance != null ? Number(Number(r.attendance).toFixed(2)) : null,
       })),
       active_backlogs: Number(backlogsRes[0]?.count ?? 0),
       placement: placementRes[0]
@@ -4178,6 +4189,7 @@ export class AcademicsService {
       return {
         ...pass,
         date: outDate.toISOString().slice(0, 10),
+        created_at: pass.created_at ?? null,
         out_time_display: outDate.toLocaleTimeString('en-IN', {
           hour: '2-digit',
           minute: '2-digit',

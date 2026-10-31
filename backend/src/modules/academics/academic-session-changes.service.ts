@@ -1,3 +1,4 @@
+import { assertNoEventExemption } from './event-class-cohorts';
 import { requireDepartmentOffice } from '../department-leadership/office-scope';
 import {
   BadRequestException,
@@ -815,6 +816,7 @@ export class AcademicSessionChangesService {
         legs.flatMap((row) => [row.source_date, row.target_date]),
       );
       for (const row of rows) {
+        await assertNoEventExemption((sql,args)=>manager.query(sql,args),tenantId,row.timetable_id,row.source_date_text);
         const attendance = await manager.query(
           `SELECT 1 FROM course_attendance_logs WHERE tenant_id=$1 AND timetable_id=$2::uuid
                AND date=$3::date LIMIT 1`,

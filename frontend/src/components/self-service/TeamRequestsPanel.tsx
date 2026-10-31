@@ -475,6 +475,9 @@ function RequestsContent({ defaultScope }: Props) {
         )}
       </div>
 
+      {tab === 'DOCUMENT' && <p className="rounded-lg bg-blue-50 p-3 text-sm text-blue-900">Review employee documents uploaded to their HR document vault. Attachments on leave or other requests are supporting evidence for that specific request.</p>}
+      {tab === 'TIMETABLE_CHANGE' && <p className="rounded-lg bg-blue-50 p-3 text-sm text-blue-900">Review dated class changes, such as swaps. Approval applies only the requested sessions after clash checks; it does not replace the recurring timetable.</p>}
+      {tab === 'REGULARIZATION' && <p className="rounded-lg bg-blue-50 p-3 text-sm text-blue-900">New regularization requests require HOD approval, then final HR approval. Each employee may have three finally approved requests per submission month; pending and rejected requests do not count.</p>}
       {tab === 'GATE_PASS' ? (
         <HodGatePassApprovalsPanel onUpdated={() => void loadCounts()} />
       ) : (
@@ -557,7 +560,7 @@ function RequestsContent({ defaultScope }: Props) {
                   </td>
                   <td className="px-3 py-3">{row.applied_date ?? '—'}</td>
                   <td className="px-3 py-3">
-                    {row.raised_on ? new Date(row.raised_on).toLocaleDateString('en-IN') : '—'}
+                    {row.raised_on ? new Date(row.raised_on).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' }) : 'Not recorded'}
                   </td>
                   <td className="px-3 py-3">
                     <Badge variant="outline">{row.status}</Badge>

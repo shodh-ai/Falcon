@@ -1,3 +1,4 @@
+import { assertNoEventExemption } from './event-class-cohorts';
 import {
   BadRequestException,
   ConflictException,
@@ -533,6 +534,7 @@ export class AcademicProxyService {
           [`class-move:${tenantId}:${current.proxy_date}`]);
         await manager.query(`SELECT pg_advisory_xact_lock(hashtext($1))`,
           [`proxy:${tenantId}:${current.timetable_id}:${current.proxy_date}`]);
+        await assertNoEventExemption((sql,args)=>manager.query(sql,args),tenantId,current.timetable_id,current.proxy_date);
         const moved = await manager.query(
           `SELECT 1 FROM academic_class_moves WHERE tenant_id=$1 AND source_timetable_id=$2::uuid
              AND source_date=$3::date AND status IN ('PENDING_HOD_APPROVAL','APPROVED') LIMIT 1`,

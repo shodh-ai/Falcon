@@ -170,7 +170,7 @@ export const MODULE_CATALOGUE: readonly ModuleDefinition[] = [
   definition(
     'hrms_ess',
     'HRMS & Employee Self-Service',
-    ['/hr', '/employee', '/staff'],
+    ['/hr', '/employee', '/staff', '/gate-pass-check'],
     [
       '/api/hr',
       '/api/staff/onboarding',

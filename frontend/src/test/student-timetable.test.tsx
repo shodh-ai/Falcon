@@ -11,6 +11,14 @@ vi.mock('@/components/student/StudentPageShell', () => ({
 }));
 
 describe('published student timetable', () => {
+  it('identifies an event exemption and its source without marking the student present',async()=>{
+    api.get.mockResolvedValue({week_start:'2026-10-26',week_dates:[{day_of_week:2,label:'Tue',date:'2026-10-27'}],
+      slots:[{timetable_id:'event-slot',course_id:'course',course_code:'BP101',course_name:'Event class',faculty_name:'Faculty',room:'R1',day_of_week:2,start_time:'11:00',end_time:'12:00',is_virtual:false,live_join_url:null,session_date:'2026-10-27',section:'A',attendance_status:null,event_exemption:{event_id:'event',event_title:'Approved science event'}}],pending_practical_batches:[],conflict_count:0});
+    render(<TimetablePage/>);const slot=await screen.findByRole('button',{name:/Event class/});
+    expect(within(slot).getByText('Event exempted')).toBeInTheDocument();fireEvent.click(slot);
+    expect(screen.getByText(/Exempted for event: Approved science event/)).toBeInTheDocument();
+    expect(screen.queryByText('Present')).not.toBeInTheDocument();
+  });
   it('clearly identifies a cancelled session and says attendance is not expected', async () => {
     api.get.mockResolvedValue({
       week_start: '2026-10-26', week_dates: [{ day_of_week: 2, label: 'Tue', date: '2026-10-27' }],

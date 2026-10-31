@@ -42,6 +42,7 @@ function tenantHeaders(): Record<string, string> {
 
 import { extractApiErrorMessage } from '@/lib/notifications/parse-api-error';
 
+import { normalizeDepartmentLabels } from './department-display';
 type Method = 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
 
 async function request<T>(
@@ -90,7 +91,8 @@ async function request<T>(
   if (!text.trim()) return null as T;
 
   try {
-    return JSON.parse(text) as T;
+    const result = JSON.parse(text) as T;
+    return method === 'GET' && getSubdomainFromClient() === 'sgvu' && !/audit|history/.test(path) ? normalizeDepartmentLabels(result) : result;
   } catch {
     throw new Error('Invalid JSON response from server');
   }

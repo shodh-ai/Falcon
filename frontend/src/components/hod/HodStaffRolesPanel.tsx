@@ -102,10 +102,11 @@ export function HodStaffRolesPanel() {
         {data.roles.map((role) => (
           <div
             key={role.role_type}
-            className="flex flex-col gap-2 rounded-lg border border-slate-100 bg-slate-50/60 p-3 sm:flex-row sm:items-center sm:justify-between"
+            className={`flex flex-col gap-2 rounded-lg border p-3 sm:flex-row sm:items-center sm:justify-between ${saving === role.role_type ? 'border-blue-200 bg-blue-50' : (pending[role.role_type] || '') !== (role.faculty_user_id || '') ? 'border-amber-200 bg-amber-50' : role.faculty_user_id ? 'border-emerald-200 bg-emerald-50' : 'border-slate-200 bg-slate-50'}`}
           >
             <div className="min-w-0">
               <p className="text-sm font-semibold text-sgvu-navy">{role.label}</p>
+              <p className="my-1 text-xs font-semibold">{saving === role.role_type ? 'Saving…' : (pending[role.role_type] || '') !== (role.faculty_user_id || '') ? 'Unsaved change' : role.faculty_user_id ? 'Assignment saved' : 'Not assigned'}</p>
               <p className="text-xs text-muted-foreground truncate">
                 {role.faculty_name ? `Current: ${role.faculty_name}` : 'Not assigned'}
               </p>
@@ -132,7 +133,7 @@ export function HodStaffRolesPanel() {
                 size="sm"
                 variant="outline"
                 className="h-9 text-xs"
-                disabled={saving === role.role_type}
+                disabled={saving === role.role_type || !pending[role.role_type] || pending[role.role_type] === role.faculty_user_id}
                 onClick={() => void saveRole(role.role_type)}
               >
                 {saving === role.role_type ? '…' : 'Save'}

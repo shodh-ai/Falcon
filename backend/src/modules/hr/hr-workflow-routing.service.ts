@@ -8,6 +8,7 @@ import { DataSource, EntityManager } from 'typeorm';
 import type { StaffRequestType } from '../../entities/staff-leave-request.entity';
 import { HrWorkflowBuilderService } from './hr-workflow-builder.service';
 import { resolveLeadershipChain, LeadershipChain } from '../department-leadership/approval-chain';
+import { regularizationRoute } from './regularization-route';
 
 export type WorkflowInitResult = {
   workflow_id: string | null;
@@ -61,10 +62,11 @@ export class HrWorkflowRoutingService {
         if (!leaveId) throw new BadRequestException('Request ID was not persisted');
         await manager.query(
           `INSERT INTO hr_department_request_routes
-            (leave_id,tenant_id,dept_id,approver_ids,leadership_revision)
-           VALUES($1,$2,$3,$4::uuid[],$5)`,
+            (leave_id,tenant_id,dept_id,approver_ids,leadership_revision,policy)
+           VALUES($1,$2,$3,$4::uuid[],$5,$6)`,
           [leaveId, tenantId, routing.leadership_route.deptId,
-            routing.leadership_route.approverIds, routing.leadership_route.revision],
+            routing.leadership_route.approverIds, routing.leadership_route.revision,
+            requestType === 'REGULARIZATION' ? 'REGULARIZATION_HOD_HR' : 'DEPARTMENT'],
         );
       }
       return saved;
@@ -80,6 +82,11 @@ export class HrWorkflowRoutingService {
   ): Promise<WorkflowInitResult> {
     const actionType = this.actionTypeForRequest(requestType);
     const querySource = manager ?? this.dataSource;
+    if (requestType === 'REGULARIZATION') {
+      const route = await regularizationRoute((sql, args) => querySource.query(sql, args), tenantId, requesterUserId);
+      return { workflow_id: null, step_order: 1, approver_user_id: route.approverIds[0],
+        approver_type: 'DEPT_HEAD', is_final: false, leadership_route: route };
+    }
     const leadership = await resolveLeadershipChain(
       (sql, args) => querySource.query(sql, args), tenantId, requesterUserId,
       !!manager,
