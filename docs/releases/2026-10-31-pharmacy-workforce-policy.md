@@ -58,3 +58,7 @@ Build backend and frontend locally, run tests, publish images off the production
 3. Fully approve a QA event. Request a class exemption with an existing QA roster. Before HOD approval nothing changes. After approval check faculty/student labels, unchanged workload and dedicated coordinator access. Mark each student, save, reload and check percentages. Test a stale second tab.
 4. Security checks a QA staff gate pass before and after final approval, outside its valid time and from another campus. Only authorized current approval should be usable.
 5. Check Pharmacy HOD header, saved/unsaved duty colors, Raised on and Student Monitor navigation/error recovery without modifying real records.
+
+## Runtime compatibility follow-up
+
+The guarded launcher must recognize the six new examination/attendance tables before deploying this schema. Its exact permission matrix now grants immutable question-paper versions and correction/event audit tables SELECT/INSERT only, and permits updates only to decision/attendance columns on request/cohort/discrepancy tables. Neither table DELETE nor identity-column UPDATE is required. Apply the reviewed scoped grants together with the migrations; do not restart a legacy launcher after creating these restricted tables. The previous running process remains healthy during the additive migration.

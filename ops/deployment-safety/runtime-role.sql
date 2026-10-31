@@ -54,7 +54,13 @@ DECLARE
     "hr_department_request_routes": {"insert": true, "update_columns": ["approver_ids", "current_index", "leadership_revision", "updated_at"]},
     "department_leadership_changes": {"insert": true, "update_columns": []},
     "hr_staff_request_appeals": {"insert": true, "update_columns": ["rejecting_user_id", "reviewer_user_id", "status", "reconsideration_count", "revision", "updated_at"]},
-    "hr_staff_request_appeal_events": {"insert": true, "update_columns": []}
+    "hr_staff_request_appeal_events": {"insert": true, "update_columns": []},
+    "academic_attendance_reopen_requests": {"insert": true, "update_columns": ["status", "decided_by", "decided_at", "decision_reason", "revision", "expires_at"]},
+    "academic_attendance_correction_audit": {"insert": true, "update_columns": []},
+    "academic_event_class_cohorts": {"insert": true, "update_columns": ["status", "decided_by", "decided_at", "decision_reason", "revision", "attendance_data", "attendance_marked_at", "attendance_marked_by"]},
+    "academic_event_class_audit": {"insert": true, "update_columns": []},
+    "exam_question_paper_versions": {"insert": true, "update_columns": []},
+    "exam_script_discrepancies": {"insert": true, "update_columns": ["status", "reason", "reported_by", "reported_at", "resolution", "resolution_reason", "resolved_by", "resolved_at"]}
   }'::jsonb;
   refresh_views constant text[] := ARRAY[
     'iqac_mv_placement_stats', 'iqac_mv_faculty_metrics',

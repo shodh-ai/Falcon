@@ -36,6 +36,12 @@ LIMITED_TABLES = {
     'department_leadership_changes': {'insert': True, 'updateColumns': []},
     'hr_staff_request_appeals': {'insert': True, 'updateColumns': ['rejecting_user_id', 'reviewer_user_id', 'status', 'reconsideration_count', 'revision', 'updated_at']},
     'hr_staff_request_appeal_events': {'insert': True, 'updateColumns': []},
+    'academic_attendance_reopen_requests': {'insert': True, 'updateColumns': ['status', 'decided_by', 'decided_at', 'decision_reason', 'revision', 'expires_at']},
+    'academic_attendance_correction_audit': {'insert': True, 'updateColumns': []},
+    'academic_event_class_cohorts': {'insert': True, 'updateColumns': ['status', 'decided_by', 'decided_at', 'decision_reason', 'revision', 'attendance_data', 'attendance_marked_at', 'attendance_marked_by']},
+    'academic_event_class_audit': {'insert': True, 'updateColumns': []},
+    'exam_question_paper_versions': {'insert': True, 'updateColumns': []},
+    'exam_script_discrepancies': {'insert': True, 'updateColumns': ['status', 'reason', 'reported_by', 'reported_at', 'resolution', 'resolution_reason', 'resolved_by', 'resolved_at']},
 }
 VIEWS = ('iqac_mv_placement_stats', 'iqac_mv_faculty_metrics',
          'iqac_mv_student_counts', 'iqac_mv_repository_health',
@@ -385,6 +391,19 @@ CREATE TABLE public.hr_staff_request_appeal_events (
  tenant_id uuid NOT NULL,actor_user_id uuid NOT NULL,action text NOT NULL,
  idempotency_key text NOT NULL,reason text,details jsonb NOT NULL DEFAULT '{}',
  created_at timestamptz NOT NULL DEFAULT now());
+CREATE TABLE public.academic_attendance_reopen_requests (
+ tenant_id uuid, status text, decided_by uuid, decided_at timestamptz,
+ decision_reason text, revision integer, expires_at timestamptz);
+CREATE TABLE public.academic_attendance_correction_audit (tenant_id uuid, before_data jsonb, after_data jsonb);
+CREATE TABLE public.academic_event_class_cohorts (
+ tenant_id uuid, status text, decided_by uuid, decided_at timestamptz,
+ decision_reason text, revision integer, attendance_data jsonb,
+ attendance_marked_at timestamptz, attendance_marked_by uuid);
+CREATE TABLE public.academic_event_class_audit (tenant_id uuid, action text);
+CREATE TABLE public.exam_question_paper_versions (tenant_id uuid, storage_key text);
+CREATE TABLE public.exam_script_discrepancies (
+ tenant_id uuid, status text, reason text, reported_by uuid, reported_at timestamptz, resolution text, resolution_reason text,
+ resolved_by uuid, resolved_at timestamptz);
 INSERT INTO public.student_identity_email_changes
  (tenant_id,user_id,student_login_id,old_email,new_email)
  VALUES ('10000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000002',
@@ -454,6 +473,20 @@ INSERT INTO public.department_leadership_events(tenant_id,dept_id,actor_user_id,
                 "INSERT INTO public.student_identity_email_changes(tenant_id,user_id,student_login_id,new_email) "
                     "VALUES (gen_random_uuid(),gen_random_uuid(),'forbidden','forbidden@example.invalid')"]:
                 self.denied(role, forbidden)
+            for table in ['academic_attendance_correction_audit', 'academic_event_class_audit',
+                          'exam_question_paper_versions']:
+                self.psql('SET ROLE ' + role + '; INSERT INTO public.' + table +
+                          '(tenant_id) VALUES (' + tenant + ');')
+                self.denied(role, 'UPDATE public.' + table + ' SET tenant_id=tenant_id')
+            for table in ['academic_attendance_reopen_requests', 'academic_event_class_cohorts',
+                          'exam_script_discrepancies']:
+                self.psql('SET ROLE ' + role + '; INSERT INTO public.' + table +
+                          "(tenant_id,status) VALUES (" + tenant + ",'PENDING'); UPDATE public." +
+                          table + " SET status='APPROVED';")
+            self.psql('SET ROLE ' + role + "; UPDATE public.exam_script_discrepancies "
+                      "SET status='MISSING',reason='Reopened synthetic discrepancy',"
+                      "reported_by=gen_random_uuid(),reported_at=now(),resolution=NULL,"
+                      "resolution_reason=NULL,resolved_by=NULL,resolved_at=NULL;")
             # Existing business objects keep the same CRUD boundary and bytes.
             self.psql('SET ROLE ' + role + "; BEGIN; INSERT INTO public.business_records(value) "
                 "VALUES ('synthetic rollback'); UPDATE public.business_records SET value=value; "
