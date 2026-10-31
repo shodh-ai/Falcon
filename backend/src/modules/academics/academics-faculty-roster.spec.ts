@@ -79,7 +79,7 @@ describe('AcademicsFacultyService course roster', () => {
     ]) };
     const dataSource = { query: jest.fn((sql: string) => {
       if (sql.includes('FROM academic_course_allocations')) {
-        return Promise.resolve([{ program_name: 'BTECH CSE', semester: 'III-A', academic_year: '2026-2027' }]);
+        return Promise.resolve([{ program_name: 'BTECH CSE', semester: 'III-A', academic_year: '2026-27' }]);
       }
       if (sql.includes('FROM student_profiles')) {
         return Promise.resolve([
@@ -108,8 +108,8 @@ describe('AcademicsFacultyService course roster', () => {
     const dataSource = { query: jest.fn((sql: string) => {
       if (sql.includes('SELECT t.section')) return Promise.resolve([{ section: 'B', is_practical: false }]);
       if (sql.includes('FROM academic_course_allocations')) return Promise.resolve([
-        { program_name: 'BTECH CSE', semester: 'III-A', academic_year: '2026-2027' },
-        { program_name: 'BTECH CSE', semester: 'III-B', academic_year: '2026-2027' },
+        { program_name: 'BTECH CSE', semester: 'III-A', academic_year: '2026-27' },
+        { program_name: 'BTECH CSE', semester: 'III-B', academic_year: '2026-27' },
       ]);
       if (sql.includes('FROM student_profiles')) return Promise.resolve([
         { user_id: 'student-a', program: 'BTECH CSE', status: 'ACTIVE' },

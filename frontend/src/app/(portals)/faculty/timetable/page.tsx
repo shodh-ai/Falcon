@@ -103,6 +103,15 @@ type Adjustment = {
 
 type DatedMove = { move_id: string; source_timetable_id: string; source_date: string; target_date: string; target_start_time: string; target_end_time: string; target_room: string | null; course_code: string; course_name: string; status: string; requested_by_user_id: string; original_faculty_id: string };
 
+function campusDateTime(value: string) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  }).formatToParts(new Date(value));
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find(item => item.type === type)?.value ?? '';
+  return { date: `${part('year')}-${part('month')}-${part('day')}`, time: `${part('hour')}:${part('minute')}` };
+}
+
 type ExtraClassSlot = { date: string; start_time: string; end_time: string; status: 'AVAILABLE' | 'CONFLICT' | 'REQUIRES_REVIEW'; reasons: string[]; room: string | null };
 
 type ProxyOffer = {
@@ -289,31 +298,33 @@ export default function FacultyTimetablePage() {
     return monday;
   }, [weekOffset]);
   const gridSlots = useMemo<PublishedSlot[]>(() => {
+    const isoDate = (date: Date) => `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
     const weekEnd = new Date(weekStart.getFullYear(),weekStart.getMonth(),weekStart.getDate() + 6);
     const inWeek = (value: string | null) => {
       if (!value) return false;
-      const date = new Date(value);
-      return date >= weekStart && date < new Date(weekEnd.getFullYear(),weekEnd.getMonth(),weekEnd.getDate() + 1);
+      const date = campusDateTime(value).date;
+      return date >= isoDate(weekStart) && date <= isoDate(weekEnd);
     };
-    const approved = adjustments.filter(row => row.status === 'APPROVED' && inWeek(row.new_date));
-    const isoDate = (date: Date) => `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
+    const approved = adjustments.filter(row => ['APPROVED', 'NOTIFIED'].includes(row.status) && inWeek(row.new_date));
     const moved = datedMoves.filter(move => move.status === 'APPROVED');
     const updated: PublishedSlot[] = visibleSchedule.filter(slot => {
       const occurrence = isoDate(new Date(weekStart.getFullYear(),weekStart.getMonth(),weekStart.getDate() + slot.day_of_week - 1));
       return !moved.some(move => move.source_timetable_id === slot.timetable_id && String(move.source_date).slice(0,10) === occurrence);
     }).map(slot => {
+      const occurrence = isoDate(new Date(weekStart.getFullYear(),weekStart.getMonth(),weekStart.getDate() + slot.day_of_week - 1));
       const cancellation = approved.find(row => row.adjustment_type === 'CANCEL' && row.course_code === slot.course_code &&
-        new Date(row.new_date!).getDay() === slot.day_of_week % 7 &&
-        new Date(row.new_date!).getHours() === Number(slot.start_time.slice(0,2)));
+        campusDateTime(row.new_date!).date === occurrence &&
+        campusDateTime(row.new_date!).time === slot.start_time.slice(0,5));
       const eventClass=eventClasses.find(e=>e.timetable_id===slot.timetable_id && e.status==='APPROVED' && e.event_approved && inWeek(e.class_date));
       return { ...slot, display_status: eventClass ? 'EVENT_EXEMPTED' as const : cancellation ? 'CANCELLED' as const : undefined };
     });
     for (const row of approved.filter(item => item.adjustment_type === 'EXTRA_CLASS')) {
       if (courseFilter && row.course_code !== courseFilter) continue;
-      const date = new Date(row.new_date!);
-      updated.push({ timetable_id: `extra-${row.adjustment_id}`, day_of_week: date.getDay() || 7,
-        start_time: `${String(date.getHours()).padStart(2,'0')}:${String(date.getMinutes()).padStart(2,'0')}`,
-        end_time: `${String(date.getHours() + 1).padStart(2,'0')}:${String(date.getMinutes()).padStart(2,'0')}`,
+      const campus = campusDateTime(row.new_date!);
+      const date = new Date(`${campus.date}T12:00:00Z`);
+      updated.push({ timetable_id: `extra-${row.adjustment_id}`, day_of_week: date.getUTCDay() || 7,
+        start_time: campus.time,
+        end_time: `${String(Number(campus.time.slice(0,2)) + 1).padStart(2,'0')}:${campus.time.slice(3,5)}`,
         course_code: row.course_code, course_name: row.course_name, room: row.proposed_room ?? null,
         section: null, display_status: 'EXTRA_CLASS' });
     }

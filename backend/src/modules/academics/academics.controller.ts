@@ -390,6 +390,33 @@ export class AcademicsController {
     );
   }
 
+  @Get('faculty/course/:courseId/attendance/average-export')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  async exportFacultyCourseAverageAttendance(
+    @Param('courseId') courseId: string,
+    @Query('date') date: string,
+    @Query('timetableId') timetableId: string,
+    @Req() req: { user: AuthUser },
+    @Res() res: Response,
+  ) {
+    const result = await this.facultyAcademics.exportAverageAttendance(
+      courseId,
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      date,
+      timetableId,
+    );
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${result.filename}"`,
+    );
+    res.send(result.buffer);
+  }
+
   @Post('faculty/course/:courseId/attendance/warnings')
   @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
   sendFacultyCourseAttendanceWarnings(
