@@ -33,6 +33,7 @@ import {
 import { canAccessTeamApprovals } from './utils/reporting-officer.util';
 import { workforceStatusPathForRoles } from './utils/workforce-portal-links.util';
 import { finalHrReviewSql, hrRequestScopeSql } from './hr-final-review.sql';
+import { assertWorkforceMonthlyApprovalLimit } from './workforce-monthly-limits';
 
 export type ApplyWorkforceRequestDto = {
   request_type: StaffRequestType;
@@ -1384,6 +1385,11 @@ export class HrWorkforceService {
     idempotencyKey?: string,
     decisionReason?: string,
   ): Promise<StaffLeaveRequest> {
+    if (action === 'APPROVE' && row.status === 'HR_APPROVED' &&
+        (row.request_type === 'REGULARIZATION' || row.request_type === 'LEAVE')) {
+      await assertWorkforceMonthlyApprovalLimit(manager, row.tenant_id,
+        row.staff_user_id, row.leave_id);
+    }
     const updated = await manager.query<StaffLeaveRequest[]>(
       `UPDATE staff_leave_requests
        SET status = $1, current_step_order = $2,

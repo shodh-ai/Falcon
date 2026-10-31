@@ -48,7 +48,7 @@ jobs:
         working-directory: backend
         run: >-
           npm test -- --runInBand
-          --testPathPatterns='exam-day.postgres.integration|question-paper.postgres.integration|degree-eligibility.postgres.integration'
+          --testPathPatterns='exam-day.postgres.integration|question-paper.postgres.integration|degree-eligibility.postgres.integration|workforce-monthly-limits.postgres'
 
   deployment-boundaries:
     name: Storage and database deployment boundaries

@@ -1,4 +1,9 @@
 import { HrWorkforceService } from './hr-workforce.service';
+import { assertWorkforceMonthlyApprovalLimit } from './workforce-monthly-limits';
+
+jest.mock('./workforce-monthly-limits', () => ({
+  assertWorkforceMonthlyApprovalLimit: jest.fn().mockResolvedValue(undefined),
+}));
 
 describe('HR final review queue and approval routing', () => {
   const tenantId = '10000000-0000-4000-8000-000000000001';
@@ -293,6 +298,9 @@ describe('HR final review queue and approval routing', () => {
     )).rejects.toThrow('Request changed while approval was in progress');
     expect(sideEffects).not.toHaveBeenCalled();
     expect(query.mock.calls[4][0]).toContain('current_approver_user_id IS NOT DISTINCT FROM');
+    expect(assertWorkforceMonthlyApprovalLimit).toHaveBeenCalledWith(
+      expect.anything(), tenantId, 'staff-id', 'leave-id',
+    );
   });
 
   it('keeps final approval and leave-balance deduction inside one transaction', async () => {
