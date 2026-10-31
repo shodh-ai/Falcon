@@ -41,7 +41,7 @@ LIMITED_TABLES = {
     'academic_event_class_cohorts': {'insert': True, 'updateColumns': ['status', 'decided_by', 'decided_at', 'decision_reason', 'revision', 'attendance_data', 'attendance_marked_at', 'attendance_marked_by']},
     'academic_event_class_audit': {'insert': True, 'updateColumns': []},
     'exam_question_paper_versions': {'insert': True, 'updateColumns': []},
-    'exam_script_discrepancies': {'insert': True, 'updateColumns': ['status', 'resolution', 'resolution_reason', 'resolved_by', 'resolved_at']},
+    'exam_script_discrepancies': {'insert': True, 'updateColumns': ['status', 'reason', 'reported_by', 'reported_at', 'resolution', 'resolution_reason', 'resolved_by', 'resolved_at']},
 }
 VIEWS = ('iqac_mv_placement_stats', 'iqac_mv_faculty_metrics',
          'iqac_mv_student_counts', 'iqac_mv_repository_health',
@@ -402,7 +402,7 @@ CREATE TABLE public.academic_event_class_cohorts (
 CREATE TABLE public.academic_event_class_audit (tenant_id uuid, action text);
 CREATE TABLE public.exam_question_paper_versions (tenant_id uuid, storage_key text);
 CREATE TABLE public.exam_script_discrepancies (
- tenant_id uuid, status text, resolution text, resolution_reason text,
+ tenant_id uuid, status text, reason text, reported_by uuid, reported_at timestamptz, resolution text, resolution_reason text,
  resolved_by uuid, resolved_at timestamptz);
 INSERT INTO public.student_identity_email_changes
  (tenant_id,user_id,student_login_id,old_email,new_email)
@@ -483,6 +483,10 @@ INSERT INTO public.department_leadership_events(tenant_id,dept_id,actor_user_id,
                 self.psql('SET ROLE ' + role + '; INSERT INTO public.' + table +
                           "(tenant_id,status) VALUES (" + tenant + ",'PENDING'); UPDATE public." +
                           table + " SET status='APPROVED';")
+            self.psql('SET ROLE ' + role + "; UPDATE public.exam_script_discrepancies "
+                      "SET status='MISSING',reason='Reopened synthetic discrepancy',"
+                      "reported_by=gen_random_uuid(),reported_at=now(),resolution=NULL,"
+                      "resolution_reason=NULL,resolved_by=NULL,resolved_at=NULL;")
             # Existing business objects keep the same CRUD boundary and bytes.
             self.psql('SET ROLE ' + role + "; BEGIN; INSERT INTO public.business_records(value) "
                 "VALUES ('synthetic rollback'); UPDATE public.business_records SET value=value; "

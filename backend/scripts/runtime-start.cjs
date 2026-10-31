@@ -29,7 +29,7 @@ const LIMITED_BUSINESS_TABLES = Object.freeze(Object.fromEntries([
   ['academic_event_class_cohorts', true, ['status', 'decided_by', 'decided_at', 'decision_reason', 'revision', 'attendance_data', 'attendance_marked_at', 'attendance_marked_by']],
   ['academic_event_class_audit', true, []],
   ['exam_question_paper_versions', true, []],
-  ['exam_script_discrepancies', true, ['status', 'resolution', 'resolution_reason', 'resolved_by', 'resolved_at']],
+  ['exam_script_discrepancies', true, ['status', 'reason', 'reported_by', 'reported_at', 'resolution', 'resolution_reason', 'resolved_by', 'resolved_at']],
 ].map(([name, insert, updateColumns]) => [name, Object.freeze({
   insert, updateColumns: Object.freeze(updateColumns),
 })])));

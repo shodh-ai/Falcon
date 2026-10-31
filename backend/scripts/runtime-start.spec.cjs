@@ -181,7 +181,7 @@ const limitedPolicy={
   academic_event_class_cohorts:{insert:true,updateColumns:['status', 'decided_by', 'decided_at', 'decision_reason', 'revision', 'attendance_data', 'attendance_marked_at', 'attendance_marked_by']},
   academic_event_class_audit:{insert:true,updateColumns:[]},
   exam_question_paper_versions:{insert:true,updateColumns:[]},
-  exam_script_discrepancies:{insert:true,updateColumns:['status', 'resolution', 'resolution_reason', 'resolved_by', 'resolved_at']},
+  exam_script_discrepancies:{insert:true,updateColumns:['status', 'reason', 'reported_by', 'reported_at', 'resolution', 'resolution_reason', 'resolved_by', 'resolved_at']},
 };
 test('leadership boundary lists only reviewed exact immutable object policies',()=>{
   assert.deepEqual(LIMITED_BUSINESS_TABLES,limitedPolicy);

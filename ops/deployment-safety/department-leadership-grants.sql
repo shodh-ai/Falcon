@@ -61,7 +61,7 @@ DECLARE
     "academic_event_class_cohorts": {"insert": true, "update_columns": ["status", "decided_by", "decided_at", "decision_reason", "revision", "attendance_data", "attendance_marked_at", "attendance_marked_by"]},
     "academic_event_class_audit": {"insert": true, "update_columns": []},
     "exam_question_paper_versions": {"insert": true, "update_columns": []},
-    "exam_script_discrepancies": {"insert": true, "update_columns": ["status", "resolution", "resolution_reason", "resolved_by", "resolved_at"]}
+    "exam_script_discrepancies": {"insert": true, "update_columns": ["status", "reason", "reported_by", "reported_at", "resolution", "resolution_reason", "resolved_by", "resolved_at"]}
   }'::jsonb;
 BEGIN
   IF role_name <> 'falcon_runtime' THEN
