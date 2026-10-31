@@ -56,7 +56,7 @@ function statusTone(status: string) {
 export default function ExamCellAnswerSheetsPage() {
   const api = useAuthedApi();
   const { user } = useAuth();
-  const canManage = canExamCellAction(user?.primaryRole ?? user?.role, 'manage_sessions');
+  const canManage = canExamCellAction([...(user?.roles ?? []), user?.primaryRole ?? '', user?.role ?? ''], 'manage_sessions');
   const [context, setContext] = useState<{
     api: typeof api; schedules: Array<{ exam_schedule_id: string; subject_name: string; exam_date: string }>;
     faculty: Array<{ user_id: string; name: string }>;
@@ -70,6 +70,7 @@ export default function ExamCellAnswerSheetsPage() {
   const [refreshing, setRefreshing] = useState(false);
   const recordsRequest = useRef(0);
   const [busy, setBusy] = useState(false);
+  const mutationInFlight = useRef(false);
   const [sheetNumber, setSheetNumber] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
 
@@ -119,10 +120,11 @@ export default function ExamCellAnswerSheetsPage() {
   }, [load]);
 
   async function issueSheet() {
-    if (!canManage || busy || !sheetNumber.trim() || !source?.schedules.some(s => s.exam_schedule_id === scheduleId) || !candidates.some(c => c.student_user_id === studentId)) {
+    if (!canManage || mutationInFlight.current || !sheetNumber.trim() || !source?.schedules.some(s => s.exam_schedule_id === scheduleId) || !candidates.some(c => c.student_user_id === studentId)) {
       toast.error('Select the examination, roster student and actual booklet number');
       return;
     }
+    mutationInFlight.current = true;
     setBusy(true);
     try {
       const row = await api.post<AnswerSheet>('/api/exam-cell/answer-sheets', {
@@ -137,6 +139,7 @@ export default function ExamCellAnswerSheetsPage() {
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Issue failed');
     } finally {
+      mutationInFlight.current = false;
       setBusy(false);
     }
   }
@@ -144,8 +147,9 @@ export default function ExamCellAnswerSheetsPage() {
   async function advanceStatus(sheetId: string, current: string) {
     const idx = STATUS_FLOW.indexOf(current as (typeof STATUS_FLOW)[number]);
     const next = STATUS_FLOW[idx + 1];
-    if (!next || !canManage || busy) return;
+    if (!next || !canManage || mutationInFlight.current) return;
     if (next === 'EVALUATOR_ASSIGNED' && !evaluatorId) { toast.error('Select an evaluator first'); return; }
+    mutationInFlight.current = true;
     setBusy(true);
     try {
       await api.post(`/api/exam-cell/answer-sheets/${sheetId}/status`, { status: next, ...(next === 'EVALUATOR_ASSIGNED' ? { evaluator_user_id: evaluatorId } : {}) });
@@ -155,6 +159,7 @@ export default function ExamCellAnswerSheetsPage() {
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Update failed');
     } finally {
+      mutationInFlight.current = false;
       setBusy(false);
     }
   }
@@ -265,7 +270,7 @@ export default function ExamCellAnswerSheetsPage() {
             <Button
               variant="outline"
               className={btnPrimary}
-              disabled={busy || !studentId || !sheetNumber.trim()}
+              disabled={busy || !!sourceError || !source?.schedules.some(s => s.exam_schedule_id === scheduleId) || !candidates.some(c => c.student_user_id === studentId) || !sheetNumber.trim()}
               onClick={() => void issueSheet()}
             >
               {busy ? 'Issuing…' : 'Issue & generate QR'}
@@ -305,7 +310,7 @@ export default function ExamCellAnswerSheetsPage() {
             <div className="flex justify-center py-12">
               <Loader2 className="h-7 w-7 animate-spin text-sgvu-navy" />
             </div>
-          ) : error ? <p role="alert" className="text-sm text-red-700">Answer-sheet records are unavailable. Reload to retry.</p> : rows.length === 0 ? (
+          ) : error ? <p role="alert" className="text-sm text-red-700">{error}</p> : rows.length === 0 ? (
             <div className="rounded-xl border border-dashed border-sgvu-navy/20 px-6 py-12 text-center">
               <p className="text-sm font-semibold text-sgvu-navy">No answer sheets tracked yet</p>
               <p className="mt-1 text-sm text-muted-foreground">

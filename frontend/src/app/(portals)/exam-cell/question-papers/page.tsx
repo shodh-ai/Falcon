@@ -31,7 +31,7 @@ const base = '/api/exam-cell/question-papers';
 export default function ExamCellQuestionPapersPage() {
   const api = useAuthedApi();
   const { user } = useAuth();
-  const canManage = canExamCellAction(user?.primaryRole ?? user?.role, 'manage_qp');
+  const canManage = canExamCellAction([...(user?.roles ?? []), user?.primaryRole ?? '', user?.role ?? ''], 'manage_qp');
   const [snapshot, setSnapshot] = useState<{
     api: typeof api; papers: Paper[]; schedules: Schedule[]; error: string | null;
   } | null>(null);

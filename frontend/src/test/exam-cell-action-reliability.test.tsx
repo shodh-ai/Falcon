@@ -15,16 +15,29 @@ vi.mock('@/lib/api', () => ({ useAuthedApi: () => api }));
 vi.mock('@/lib/notifications/falcon-toast', () => ({ toast }));
 vi.mock('@/context/AuthContext', () => ({ useAuth: () => ({ user: role.user ?? { roles: [role.value] } }) }));
 vi.mock('@/components/ui/select', () => ({ Select: (props: SelectHTMLAttributes<HTMLSelectElement>) => <select {...props} /> }));
+vi.mock('@/components/exam-cell/ExamDayOperationsPanel', () => ({ ExamDayOperationsPanel: () => null }));
 vi.mock('@/components/exam-cell/ExamCalendar', () => ({ ExamCalendar: () => <div>Calendar events</div> }));
 
 beforeEach(() => {
-  api.get.mockReset().mockResolvedValue([]);
+  api.get.mockReset().mockImplementation(async (path: string) => {
+    if (path === '/api/exam-cell/schedules') return [{ exam_schedule_id: 'synthetic-exam', subject_name: 'Synthetic subject', exam_date: '2026-11-01' }];
+    if (path.includes('/roster?')) return [{ student_user_id: 'synthetic-student', student_name: 'Synthetic Student' }];
+    return [];
+  });
   api.post.mockReset();
   toast.error.mockReset();
   toast.success.mockReset();
   role.value = 'examcell';
   role.user = null;
 });
+
+async function selectBookletContext() {
+  await screen.findByRole('option', { name: 'Synthetic subject · 2026-11-01' });
+  fireEvent.change(screen.getByLabelText('Booklet examination'), { target: { value: 'synthetic-exam' } });
+  await screen.findByRole('option', { name: 'Synthetic Student' });
+  fireEvent.change(screen.getByLabelText('Booklet student'), { target: { value: 'synthetic-student' } });
+  fireEvent.change(screen.getByPlaceholderText('e.g. AS-2026-001'), { target: { value: 'SYN-20261021' } });
+}
 
 describe('Examination action reliability', () => {
   it.each([
@@ -37,6 +50,7 @@ describe('Examination action reliability', () => {
     const { rerender } = render(<Page />);
     const button = await screen.findByRole('button', { name: buttonName, exact: true });
     if (buttonName === 'Verify') fireEvent.change(screen.getByLabelText('Hall ticket QR or enrollment number'), { target: { value: 'SYNTHETIC-01' } });
+    if (buttonName === 'Issue & generate QR') await selectBookletContext();
     expect(button).toBeEnabled();
     role.user = { role: 'Faculty', roles: [], primaryRole: 'Faculty' };
     rerender(<Page />);
@@ -92,7 +106,7 @@ describe('Examination action reliability', () => {
   });
 
   it('does not describe an answer-sheet API failure as no tracked sheets', async () => {
-    api.get.mockRejectedValueOnce(new Error('Booklet service unavailable'));
+    api.get.mockImplementation(async (path: string) => { if (path.includes('/answer-sheets')) throw new Error('Booklet service unavailable'); return []; });
     render(<AnswerSheetsPage />);
     expect(await screen.findByRole('alert')).toHaveTextContent('Booklet service unavailable');
     expect(screen.queryByText('No answer sheets tracked yet')).toBeNull();
@@ -103,6 +117,7 @@ describe('Examination action reliability', () => {
     api.post.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
     render(<AnswerSheetsPage />);
     await screen.findByText('No answer sheets tracked yet');
+    await selectBookletContext();
     const field = screen.getByPlaceholderText('e.g. AS-2026-001');
     fireEvent.change(field, { target: { value: 'SYN-20261021' } });
     act(() => { fireEvent.keyDown(field, { key: 'Enter' }); fireEvent.keyDown(field, { key: 'Enter' }); });
@@ -153,14 +168,14 @@ describe('Examination action reliability', () => {
   });
 
   it('does not issue a new booklet while a lifecycle update is pending', async () => {
-    api.get.mockResolvedValue([{ sheet_id: 'synthetic-sheet', sheet_number: 'SYN-001', status: 'ISSUED', qr_payload: 'synthetic-qr' }]);
+    api.get.mockImplementation(async (path: string) => path.includes('/answer-sheets') ? [{ sheet_id: 'synthetic-sheet', sheet_number: 'SYN-001', status: 'ISSUED', qr_payload: 'synthetic-qr', exam_schedule_id: 'synthetic-exam', student_user_id: 'synthetic-student' }] : []);
     let finish!: (value: object) => void;
     api.post.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
     render(<AnswerSheetsPage />);
     const next = await screen.findByRole('button', { name: 'Next stage' });
     act(() => { fireEvent.click(next); fireEvent.click(next); });
     expect(api.post).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole('button', { name: 'Issue & generate QR' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Issuing…' })).toBeDisabled();
     await act(async () => { finish({}); });
     await waitFor(() => expect(toast.success).toHaveBeenCalledOnce());
   });

@@ -5,7 +5,7 @@ import AnswerSheetsPage from '@/app/(portals)/exam-cell/answer-sheets/page';
 
 const mocks = vi.hoisted(() => ({ api: { get: vi.fn(), post: vi.fn() }, role: 'ExamCell', success: vi.fn(), error: vi.fn() }));
 vi.mock('@/lib/api', () => ({ useAuthedApi: () => mocks.api }));
-vi.mock('@/context/AuthContext', () => ({ useAuth: () => ({ user: { primaryRole: mocks.role, role: 'ExamCell' } }) }));
+vi.mock('@/context/AuthContext', () => ({ useAuth: () => ({ user: { primaryRole: mocks.role, role: mocks.role } }) }));
 vi.mock('@/lib/notifications/falcon-toast', () => ({ toast: { success: mocks.success, error: mocks.error } }));
 vi.mock('@/components/ui/select', () => ({ Select: ({ children, ...props }: ComponentProps<'select'>) => <select {...props}>{children}</select> }));
 const sheet = { sheet_id: 'sheet-a', sheet_number: 'BOOK-1', status: 'ISSUED', qr_payload: 'AS|actual-scope', student_name: 'Seated Student', subject_name: 'Subject A', exam_date: '2026-10-23', exam_schedule_id: 'schedule-a', student_user_id: 'student-a', collected_at: null };

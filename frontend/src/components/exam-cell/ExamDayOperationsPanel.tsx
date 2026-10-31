@@ -39,7 +39,7 @@ type Incident = {
 type Props = {
   api: ReturnType<typeof useAuthedApi>;
   scheduleId: string;
-  role?: string;
+  role?: string | string[];
   onBusyChange: (busy: boolean) => void;
 };
 

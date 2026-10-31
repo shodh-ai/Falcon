@@ -31,6 +31,8 @@ const attendance = {
 beforeEach(() => {
   vi.resetAllMocks();
   mocks.user.primaryRole = 'ExamCell';
+  mocks.user.role = 'ExamCell';
+  mocks.user.roles = ['ExamCell'];
   mocks.api.get.mockImplementation(async (path: string) => {
     if (path === `${prefix}/today`) return [exam];
     if (path.startsWith(`${prefix}/roster?`)) return [student];
@@ -60,8 +62,10 @@ describe('Exam Day real request and state flow', () => {
     expect(mocks.success).toHaveBeenCalledWith('Marked present');
   });
 
-  it('does not offer marking controls to an ExamOperator with an extra assigned role', async () => {
+  it('does not offer marking controls to an ExamOperator without a managing role', async () => {
     mocks.user.primaryRole = 'ExamOperator';
+    mocks.user.role = 'ExamOperator';
+    mocks.user.roles = ['ExamOperator'];
     render(<ExamDayPage />);
     await screen.findByText('Test Student');
     expect(screen.queryByRole('button', { name: 'PRESENT', exact: true })).not.toBeInTheDocument();
@@ -98,7 +102,7 @@ describe('Exam Day real request and state flow', () => {
     expect(screen.queryByText('No attendance marked yet for this session.')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'PRESENT', exact: true })).not.toBeInTheDocument();
     failed = false;
-    fireEvent.click(screen.getByRole('button', { name: 'Retry loading roster' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Retry attendance' }));
     expect(await screen.findByRole('button', { name: 'PRESENT', exact: true })).toBeEnabled();
   });
 

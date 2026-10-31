@@ -5,7 +5,7 @@ import Page from '@/app/(portals)/exam-cell/question-papers/page';
 
 const mock = vi.hoisted(() => ({ api: { get: vi.fn(), post: vi.fn(), getBlob: vi.fn() }, role: 'ExamCell', success: vi.fn(), error: vi.fn() }));
 vi.mock('@/lib/api', () => ({ useAuthedApi: () => mock.api }));
-vi.mock('@/context/AuthContext', () => ({ useAuth: () => ({ user: { primaryRole: mock.role, role: 'ExamCell', roles: ['ExamCell'] } }) }));
+vi.mock('@/context/AuthContext', () => ({ useAuth: () => ({ user: { primaryRole: mock.role, role: mock.role, roles: [mock.role] } }) }));
 vi.mock('@/lib/notifications/falcon-toast', () => ({ toast: { success: mock.success, error: mock.error } }));
 vi.mock('@/components/ui/select', () => ({ Select: ({ children, ...props }: ComponentProps<'select'>) => <select {...props}>{children}</select> }));
 const base = '/api/exam-cell/question-papers';
@@ -68,7 +68,7 @@ describe('existing question-paper page is connected to secure file and stage API
     fireEvent.click(screen.getByRole('button', { name: 'Upload PDF version' }));
     await waitFor(() => expect(mock.api.post).toHaveBeenCalledWith(base + '/paper-a/file', expect.any(FormData)));
   });
-  it('honors the active role, not a more privileged role elsewhere in the profile', async () => {
+  it('keeps paper operations unavailable to an operator without a managing role', async () => {
     mock.role = 'ExamOperator'; render(<Page />); await screen.findByText('Verified Subject');
     expect(screen.getByText('Metadata only')).toBeVisible(); expect(screen.queryByRole('button', { name: 'Add record' })).not.toBeInTheDocument(); expect(screen.queryByRole('button', { name: 'Manage files' })).not.toBeInTheDocument();
   });

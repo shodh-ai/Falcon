@@ -6,6 +6,7 @@ import { toast } from '@/lib/notifications/falcon-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { Select } from '@/components/ui/select';
 import { DataTable, type DataTableColumn } from '@/components/ui/DataTable';
@@ -53,6 +54,9 @@ type VerifiedStudent = {
     semester: number | null;
   };
   seating: Array<{ room: string; seat_number: string; subject_name: string; exam_date: string }>;
+  verified: boolean;
+  hall_ticket_verified?: boolean;
+  issue_id?: string;
 };
 
 const STATUSES = ['PRESENT', 'ABSENT', 'MEDICAL', 'DEBARRED', 'LATE'] as const;
@@ -60,7 +64,10 @@ const STATUSES = ['PRESENT', 'ABSENT', 'MEDICAL', 'DEBARRED', 'LATE'] as const;
 export default function ExamCellExamDayPage() {
   const api = useAuthedApi();
   const { user } = useAuth();
-  const canMark = canExamCellAction(user?.primaryRole ?? user?.role, 'manage_sessions');
+  const roles = [...(user?.roles ?? []), user?.primaryRole ?? '', user?.role ?? ''];
+  const canMark = canExamCellAction(roles, 'manage_sessions');
+  const canVerify = canExamCellAction(roles, 'manage_seating');
+  const canRevoke = canExamCellAction(roles, 'publish_results');
   const [examSnapshot, setExamSnapshot] = useState<{
     api: typeof api; date: string; exams: TodayExam[]; error: string | null;
   } | null>(null);
@@ -77,8 +84,21 @@ export default function ExamCellExamDayPage() {
   const markingInFlight = useRef(false);
   const [markingId, setMarkingId] = useState<string | null>(null);
   const [qrInput, setQrInput] = useState('');
-  const [verified, setVerified] = useState<VerifiedStudent | null>(null);
+  const [verification, setVerification] = useState<{ api: typeof api; result: VerifiedStudent } | null>(null);
+  const verified = verification?.api === api ? verification.result : null;
+  function setVerified(result: VerifiedStudent | null) {
+    setVerification(result ? { api, result } : null);
+  }
   const [verifying, setVerifying] = useState(false);
+  const [revocationOpen, setRevocationOpen] = useState(false);
+  const [revocationReason, setRevocationReason] = useState('');
+  const [revoking, setRevoking] = useState(false);
+  const revokePending = useRef(false);
+  const verificationScope = useRef(0);
+  const verifyPending = useRef(false);
+
+  useEffect(() => () => { verificationScope.current += 1; }, [api]);
+
 
   const loadExams = useCallback(() => {
     const requestId = ++examsRequest.current;
@@ -146,18 +166,22 @@ export default function ExamCellExamDayPage() {
     roster.some((row) => row.student_user_id === verified.student.user_id);
 
   async function verifyQr() {
-    if (verifying) return;
+    if (!canVerify || verifyPending.current) return;
     const payload = qrInput.trim();
     if (!payload) {
       toast.error('Enter an enrollment number or scan a hall ticket QR');
       return;
     }
+    verifyPending.current = true;
     setVerifying(true);
     setVerified(null);
+    const scope = verificationScope.current;
     try {
       const res = await api.post<VerifiedStudent>('/api/exam-cell/identity/verify', {
         qr_payload: payload,
       });
+      if (scope !== verificationScope.current) return;
+      if (res.verified !== true || !res.student?.user_id) throw new Error('Student identity could not be verified');
       const student = {
         ...res.student,
         branch:
@@ -169,13 +193,37 @@ export default function ExamCellExamDayPage() {
         ...res,
         student,
         seating: Array.isArray(res.seating) ? res.seating : [],
+        verified: true,
       });
-      toast.success(`Student record found: ${student.name}`);
+      toast.success(`${student.name} verified`);
     } catch (e) {
+      if (scope !== verificationScope.current) return;
       toast.error(e instanceof Error ? e.message : 'Verification failed');
       setVerified(null);
     } finally {
+      verifyPending.current = false;
       setVerifying(false);
+    }
+  }
+
+  async function revokeTicket() {
+    if (!canRevoke || !verified?.issue_id || !verified.hall_ticket_verified || revokePending.current || !revocationReason.trim()) return;
+    revokePending.current = true;
+    setRevoking(true);
+    const scope = verificationScope.current;
+    try {
+      const result = await api.post<{ revoked: boolean }>(`/api/exam-cell/hall-ticket-issues/${verified.issue_id}/revoke`, { reason: revocationReason.trim() });
+      if (scope !== verificationScope.current) return;
+      if (result.revoked !== true) throw new Error('The server did not confirm hall-ticket revocation');
+      setVerified(null);
+      setRevocationOpen(false);
+      setRevocationReason('');
+      toast.success('This hall-ticket record was revoked');
+    } catch (error) {
+      if (scope === verificationScope.current) toast.error(error instanceof Error ? error.message : 'Could not revoke this hall ticket');
+    } finally {
+      revokePending.current = false;
+      setRevoking(false);
     }
   }
 
@@ -253,12 +301,15 @@ export default function ExamCellExamDayPage() {
       <Card className="border-sgvu-gold/30">
         <CardHeader><CardTitle className="flex items-center gap-2 text-base"><QrCode className="h-4 w-4" />Student identity verification</CardTitle></CardHeader>
         <CardContent className="space-y-4">
+          <label htmlFor="exam-identity" className="block text-sm font-medium text-sgvu-navy">Hall ticket QR or enrollment number</label>
           <div className="flex flex-col gap-2 sm:flex-row">
             <Input
+              id="exam-identity"
               className="h-10 flex-1 rounded-lg border-sgvu-navy/20"
               placeholder="Scan hall ticket QR or enter enrollment number"
               value={qrInput}
-              onChange={(e) => setQrInput(e.target.value)}
+              disabled={verifying || !canVerify}
+              onChange={(e) => { setQrInput(e.target.value); setVerified(null); }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
                   e.preventDefault();
@@ -270,7 +321,7 @@ export default function ExamCellExamDayPage() {
               variant="outline"
               className="h-10 shrink-0 border border-[#0B2447] bg-[#0B2447] px-5 font-semibold text-white transition-colors hover:bg-[#123A6D] hover:text-white active:border-sgvu-gold active:bg-sgvu-gold active:text-sgvu-navy disabled:opacity-60"
               onClick={() => void verifyQr()}
-              disabled={verifying}
+              disabled={!canVerify || verifying || !qrInput.trim()}
             >
               {verifying ? 'Verifying…' : 'Verify'}
             </Button>
@@ -280,10 +331,10 @@ export default function ExamCellExamDayPage() {
               <div>
                 <p className="font-bold text-sgvu-navy">{verified.student.name}</p>
                 <p className="text-sm text-muted-foreground">{verified.student.enrollment_number ?? '—'} · {(verified.student as { branch_name?: string; branch?: string }).branch_name ?? verified.student.branch ?? 'Program'} · Sem {verified.student.semester ?? '—'}</p>
-                <Badge className="mt-2" variant="outline">Student record found — not an entry clearance</Badge>
-                {detailsReady ? <p className="mt-2 text-sm text-muted-foreground">{identityOnRoster
-                  ? 'Listed on the selected examination seating roster.'
-                  : 'Not on the selected examination seating roster. Attendance cannot be recorded.'}</p> : null}
+                <Badge className="mt-2 bg-emerald-600">Identity verified</Badge>
+                {detailsReady && !identityOnRoster ? <p className="mt-2 text-sm text-muted-foreground">Not on the selected examination seating roster. Attendance cannot be recorded.</p> : null}
+                {verified.hall_ticket_verified ? <Badge className="ml-2 mt-2 bg-emerald-600">Current hall ticket verified</Badge> : <p className="mt-2 text-xs text-muted-foreground">Student identity checked. Scan the printed QR to verify a hall ticket.</p>}
+                {canRevoke && verified.hall_ticket_verified && verified.issue_id ? <Button className="mt-3 block" size="sm" variant="destructive" onClick={() => { setRevocationReason(''); setRevocationOpen(true); }}>Revoke this hall ticket</Button> : null}
               </div>
               {verified.seating.length > 0 ? (
                 <div className="text-sm">
@@ -296,7 +347,7 @@ export default function ExamCellExamDayPage() {
               {canMark && identityOnRoster ? (
                 <div className="flex flex-wrap gap-1">
                   {STATUSES.map((s) => (
-                    <Button key={s} size="sm" variant="outline" disabled={!!markingId || operationsBusy} onClick={() => void markAttendance(verified.student.user_id, s)}>
+                    <Button key={s} size="sm" variant="outline" disabled={!!markingId || operationsBusy || !detailsReady} onClick={() => void markAttendance(verified.student.user_id, s)}>
                       Mark {s}
                     </Button>
                   ))}
@@ -306,6 +357,16 @@ export default function ExamCellExamDayPage() {
           ) : null}
         </CardContent>
       </Card>
+
+      <Dialog open={revocationOpen && !!verified} onOpenChange={(open) => { if (!revoking) setRevocationOpen(open); }}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Revoke this printed hall ticket</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">Its QR will stop verifying. This action preserves the record and audit history.</p>
+          <label htmlFor="hall-ticket-revocation-reason" className="text-sm font-medium">Reason</label>
+          <Input id="hall-ticket-revocation-reason" value={revocationReason} onChange={(event) => setRevocationReason(event.target.value)} maxLength={500} disabled={revoking} />
+          <DialogFooter><Button variant="outline" disabled={revoking} onClick={() => setRevocationOpen(false)}>Cancel</Button><Button variant="destructive" disabled={revoking || !revocationReason.trim()} onClick={() => void revokeTicket()}>{revoking ? 'Revoking…' : 'Confirm revocation'}</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Card>
         <CardHeader className="gap-3"><CardTitle className="text-base">{examDate ? 'Examinations on selected date' : "Today's examination sessions"}</CardTitle>
@@ -352,7 +413,7 @@ export default function ExamCellExamDayPage() {
             {detailsError ? (
               <div role="alert" className="space-y-2 text-sm text-red-700">
                 <p>{detailsError}</p>
-                <Button variant="outline" onClick={() => { setRefreshingDetails(true); void loadAttendance(); }}>Retry loading roster</Button>
+                <Button variant="outline" onClick={() => { setRefreshingDetails(true); void loadAttendance(); }}>Retry attendance</Button>
               </div>
             ) : !detailsReady ? <p role="status" className="text-sm text-muted-foreground">Loading seating roster and attendance…</p> : (
               <DataTable columns={rosterColumns} rows={roster} rowKey={(r) => r.student_user_id} emptyMessage="No seating allocations for this session. Check the seating plan before recording attendance." />
@@ -375,7 +436,7 @@ export default function ExamCellExamDayPage() {
           </CardContent>
         </Card>
       ) : null}
-      {detailsReady ? <ExamDayOperationsPanel api={api} scheduleId={selectedExam} role={user?.primaryRole ?? user?.role} onBusyChange={setOperationsBusy} /> : null}
+      {detailsReady ? <ExamDayOperationsPanel api={api} scheduleId={selectedExam} role={roles} onBusyChange={setOperationsBusy} /> : null}
     </div>
   );
 }
