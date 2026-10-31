@@ -400,7 +400,7 @@ export class AcademicProxyService {
     }
 
     return this.dataSource.query(
-      `SELECT p.proxy_id, p.date_of_proxy, p.status, p.reason,
+      `SELECT p.proxy_id, p.date_of_proxy, p.status, p.reason, p.created_at,
               c.course_code, c.course_name,
               af.name AS absent_faculty_name, pf.name AS proxy_faculty_name,
               t.start_time, t.end_time, t.room

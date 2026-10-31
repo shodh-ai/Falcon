@@ -10,6 +10,7 @@ import { useAuthedApi } from '@/lib/api';
 
 type Row = {
   proxy_id: string;
+  created_at?: string;
   date_of_proxy: string;
   status: 'PENDING_SUBSTITUTE_ACCEPTANCE' | 'PENDING_HOD_APPROVAL' | 'APPROVED';
   course_code: string;
@@ -24,6 +25,7 @@ type Faculty = { user_id: string; name: string; email: string };
 type Lecture = { timetable_id: string; course_code: string; course_name: string;
   lecture_date: string; start_time: string; end_time: string };
 type MoveGroup = {
+  created_at?: string;
   change_group_id: string; move_type: string; reason: string; legs: number;
   requested_by_user_id: string;
   sessions: Array<{ course_code: string; source_date: string; target_date: string;
@@ -170,6 +172,7 @@ export default function HodProxyApprovalsPage() {
           columns={[
             { key: 'course', label: 'Class', render: (r) => `${r.course_code} — ${r.course_name}` },
             { key: 'date', label: 'Date and time', render: (r) => `${String(r.date_of_proxy).slice(0, 10)} · ${String(r.start_time).slice(0, 5)}–${String(r.end_time).slice(0, 5)}` },
+            { key: 'raised', label: 'Raised on', render: (r) => r.created_at ? new Date(r.created_at).toLocaleString('en-IN',{timeZone:'Asia/Kolkata'}) : 'Not recorded' },
             { key: 'absent', label: 'Original faculty', render: (r) => r.absent_faculty_name },
             { key: 'proxy', label: 'Substitute', render: (r) => r.proxy_faculty_name },
             { key: 'actions', label: 'Decision', render: (r) => <div className="flex gap-2">
@@ -199,7 +202,7 @@ export default function HodProxyApprovalsPage() {
         {loading ? <p className="mt-3 text-sm text-muted-foreground">Loading offers…</p> : awaitingAcceptance.length === 0 ?
           <p className="mt-3 text-sm text-muted-foreground">No offers are waiting for a response.</p> :
           <div className="mt-3 divide-y rounded-lg border">{awaitingAcceptance.map((row) => <div key={row.proxy_id} className="flex flex-wrap items-center justify-between gap-2 p-3 text-sm">
-            <span><strong>{row.course_code}</strong> · {String(row.date_of_proxy).slice(0, 10)} · {row.absent_faculty_name} → {row.proxy_faculty_name}</span>
+            <span><small className="block text-muted-foreground">Raised on {row.created_at ? new Date(row.created_at).toLocaleString('en-IN',{timeZone:'Asia/Kolkata'}) : 'Not recorded'}</small><strong>{row.course_code}</strong> · {String(row.date_of_proxy).slice(0, 10)} · {row.absent_faculty_name} → {row.proxy_faculty_name}</span>
             <div className="flex items-center gap-2"><span className="rounded-full bg-amber-50 px-2 py-1 text-xs font-medium text-amber-800">Awaiting response</span>
               {withdrawingId === row.proxy_id ? <div className="flex flex-wrap gap-2">
                 <Input aria-label="Cancellation reason" placeholder="Reason for cancellation" value={withdrawReason} onChange={(event) => setWithdrawReason(event.target.value)} />
@@ -241,6 +244,7 @@ export default function HodProxyApprovalsPage() {
           <p className="text-sm text-muted-foreground">Each group is decided together. Approval checks faculty, room and student availability and recorded attendance. The proposer cannot approve their own request.</p>
         </div>
         {moves.length === 0 ? <p className="text-sm text-muted-foreground">No class changes awaiting approval.</p> : moves.map((move) => <div key={move.change_group_id} className="rounded-lg border p-3 space-y-2 text-sm">
+          <p className="text-xs text-muted-foreground">Raised on {move.created_at ? new Date(move.created_at).toLocaleString('en-IN',{timeZone:'Asia/Kolkata'}) : 'Not recorded'}</p>
           <p className="font-semibold">{move.move_type} · {move.legs} {move.legs === 1 ? 'class' : 'classes'}</p>
           <p>{move.reason}</p>
           {move.sessions.map((session, index) => <p key={index} className="text-muted-foreground">
