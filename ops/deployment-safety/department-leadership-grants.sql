@@ -141,8 +141,9 @@ BEGIN
     RAISE EXCEPTION 'SECURITY DEFINER access or triggers require separate review';
   END IF;
   IF (SELECT count(*) FROM pg_class c WHERE c.relnamespace=schema_oid
-        AND limited_business_tables ? c.relname AND c.relkind='r') <> 10 THEN
-    RAISE EXCEPTION 'All ten exact limited tables must exist before scoped grants';
+        AND limited_business_tables ? c.relname AND c.relkind='r') <>
+       (SELECT count(*) FROM jsonb_object_keys(limited_business_tables)) THEN
+    RAISE EXCEPTION 'All exact limited tables must exist before scoped grants';
   END IF;
 
   FOR relation_row IN SELECT c.oid,c.relname,c.relkind FROM pg_class c
