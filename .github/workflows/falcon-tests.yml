@@ -227,7 +227,8 @@ jobs:
         env:
           # Specs create TEMP tables and roll back; no live HR data is used.
           HR_QA_PG_URL: postgresql://postgres:postgres@localhost:5432/falcon_test
-        run: npm test -- --runInBand --testPathPatterns='modules/hr/.*spec.ts'
+        # PostgreSQL isolation tests run in the dedicated disposable-database job above.
+        run: npm test -- --runInBand --testPathPatterns='modules/hr/.*spec.ts' --testPathIgnorePatterns='workforce-monthly-limits.postgres.spec.ts'
 
       - name: HR QA frontend regressions
         working-directory: frontend

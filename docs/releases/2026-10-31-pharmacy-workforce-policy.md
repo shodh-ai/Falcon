@@ -45,7 +45,7 @@ Build backend and frontend locally, run tests, publish images off the production
 ## Verification
 
 - Clean local backend TypeScript build and frontend Next.js production build passed (692 generated pages/routes).
-- Existing frontend suite: 155 files / 1,017 tests passed; added event UI and student exemption tests passed (8 targeted tests).
+- Full frontend suite including event UI and student exemption tests: 156 files / 1,021 tests passed.
 - Backend HR/academics/leadership/module-control regression: 78 suites / 583 tests passed, 26 tests intentionally skipped without dedicated integration configuration.
 - Local disposable PostgreSQL: monthly quota tests (5), event/reopening/gate/routing/timestamp tests (11) passed, including last-slot concurrency, actual SQL, scope denials, revision checks and audited event attendance correction.
 - Weekly workload tests include retained credit for event-exempted classes.
