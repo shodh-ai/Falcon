@@ -24,6 +24,12 @@ const LIMITED_BUSINESS_TABLES = Object.freeze(Object.fromEntries([
   ['department_leadership_changes', true, []],
   ['hr_staff_request_appeals', true, ['rejecting_user_id', 'reviewer_user_id', 'status', 'reconsideration_count', 'revision', 'updated_at']],
   ['hr_staff_request_appeal_events', true, []],
+  ['academic_attendance_reopen_requests', true, ['status', 'decided_by', 'decided_at', 'decision_reason', 'revision', 'expires_at']],
+  ['academic_attendance_correction_audit', true, []],
+  ['academic_event_class_cohorts', true, ['status', 'decided_by', 'decided_at', 'decision_reason', 'revision', 'attendance_data', 'attendance_marked_at', 'attendance_marked_by']],
+  ['academic_event_class_audit', true, []],
+  ['exam_question_paper_versions', true, []],
+  ['exam_script_discrepancies', true, ['status', 'resolution', 'resolution_reason', 'resolved_by', 'resolved_at']],
 ].map(([name, insert, updateColumns]) => [name, Object.freeze({
   insert, updateColumns: Object.freeze(updateColumns),
 })])));
