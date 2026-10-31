@@ -7,12 +7,13 @@ const course = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 const student = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
 const room = 'Main - 101';
 
-function setup(options: { timetable?: unknown[]; changes?: unknown[]; exams?: unknown[]; calendar?: string | null; memberships?: unknown[]; missingRoom?: boolean } = {}) {
+function setup(options: { timetable?: unknown[]; changes?: unknown[]; exams?: unknown[]; calendar?: string | null; memberships?: unknown[]; missingRoom?: boolean; publishedDay?: boolean; holidays?: unknown[] } = {}) {
   const query = jest.fn(async (sql: string) => {
     if (sql.includes('SELECT course_name FROM academic_courses')) return [{ course_name: 'Organic Chemistry' }];
     if (sql.includes('count(DISTINCT student_user_id)::int AS count FROM student_course_enrollments')) return [{ count: 1 }];
-    if (sql.includes('FROM admin_academic_calendar_events')) return [];
+    if (sql.includes('FROM admin_academic_calendar_events')) return options.holidays ?? [];
     if (sql.includes('FROM academic_calendar_days')) return [{ kind_of_day: options.calendar === undefined ? 'ACADEMIC_DAY' : options.calendar }];
+    if (sql.includes('SELECT 1 AS present FROM academic_timetables')) return options.publishedDay ? [{ present: 1 }] : [];
     if (sql.includes('FROM academic_timetables WHERE tenant_id')) return options.timetable ?? [];
     if (sql.includes('FROM class_adjustments WHERE tenant_id=$1 AND status')) return options.changes ?? [];
     if (sql.includes('SELECT source_timetable_id FROM academic_class_moves')) return [];
@@ -49,6 +50,20 @@ describe('extra class availability', () => {
   });
   it('never confirms missing calendar and room data', async () => {
     await expect(setup({ calendar: null, missingRoom: true }).check()).resolves.toMatchObject({ status: 'REQUIRES_REVIEW' });
+  });
+  it('uses an active published timetable as the academic-day fallback when the calendar import is incomplete', async () => {
+    await expect(setup({ calendar: null, publishedDay: true }).check()).resolves.toMatchObject({
+      status: 'AVAILABLE',
+      reasons: [],
+    });
+  });
+  it('does not use the published-timetable fallback on an explicit holiday', async () => {
+    await expect(setup({ calendar: null, publishedDay: true, holidays: [{ title: 'University holiday' }] }).check())
+      .resolves.toMatchObject({ status: 'CONFLICT', reasons: expect.arrayContaining(['Holiday: University holiday']) });
+  });
+  it('preserves an explicit non-academic day classification even when timetable rows exist', async () => {
+    await expect(setup({ calendar: 'EXAM_DAY', publishedDay: true }).check())
+      .resolves.toMatchObject({ status: 'CONFLICT', reasons: expect.arrayContaining(['Academic calendar marks this day exam day']) });
   });
   it('blocks an affected student exam', async () => {
     await expect(setup({ exams: [{ exam_schedule_id: '1', affected_count: 1, seated_count: 1 }] }).check())

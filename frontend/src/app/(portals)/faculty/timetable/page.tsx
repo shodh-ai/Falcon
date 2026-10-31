@@ -11,7 +11,6 @@ import {
   Clock,
   Eye,
   Loader2,
-  MapPin,
   Timer,
 } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
@@ -101,6 +100,15 @@ type Adjustment = {
 };
 
 type DatedMove = { move_id: string; source_timetable_id: string; source_date: string; target_date: string; target_start_time: string; target_end_time: string; target_room: string | null; course_code: string; course_name: string; status: string; requested_by_user_id: string; original_faculty_id: string };
+
+function campusDateTime(value: string) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  }).formatToParts(new Date(value));
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find(item => item.type === type)?.value ?? '';
+  return { date: `${part('year')}-${part('month')}-${part('day')}`, time: `${part('hour')}:${part('minute')}` };
+}
 
 type ExtraClassSlot = { date: string; start_time: string; end_time: string; status: 'AVAILABLE' | 'CONFLICT' | 'REQUIRES_REVIEW'; reasons: string[]; room: string | null };
 
@@ -283,22 +291,23 @@ export default function FacultyTimetablePage() {
     return monday;
   }, [weekOffset]);
   const gridSlots = useMemo<PublishedSlot[]>(() => {
+    const isoDate = (date: Date) => `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
     const weekEnd = new Date(weekStart.getFullYear(),weekStart.getMonth(),weekStart.getDate() + 6);
     const inWeek = (value: string | null) => {
       if (!value) return false;
-      const date = new Date(value);
-      return date >= weekStart && date < new Date(weekEnd.getFullYear(),weekEnd.getMonth(),weekEnd.getDate() + 1);
+      const date = campusDateTime(value).date;
+      return date >= isoDate(weekStart) && date <= isoDate(weekEnd);
     };
-    const approved = adjustments.filter(row => row.status === 'APPROVED' && inWeek(row.new_date));
-    const isoDate = (date: Date) => `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
+    const approved = adjustments.filter(row => ['APPROVED', 'NOTIFIED'].includes(row.status) && inWeek(row.new_date));
     const moved = datedMoves.filter(move => move.status === 'APPROVED');
     const updated: PublishedSlot[] = visibleSchedule.filter(slot => {
       const occurrence = isoDate(new Date(weekStart.getFullYear(),weekStart.getMonth(),weekStart.getDate() + slot.day_of_week - 1));
       return !moved.some(move => move.source_timetable_id === slot.timetable_id && String(move.source_date).slice(0,10) === occurrence);
     }).map(slot => {
+      const occurrence = isoDate(new Date(weekStart.getFullYear(),weekStart.getMonth(),weekStart.getDate() + slot.day_of_week - 1));
       const cancellation = approved.find(row => row.adjustment_type === 'CANCEL' && row.course_code === slot.course_code &&
-        new Date(row.new_date!).getDay() === slot.day_of_week % 7 &&
-        new Date(row.new_date!).getHours() === Number(slot.start_time.slice(0,2)));
+        campusDateTime(row.new_date!).date === occurrence &&
+        campusDateTime(row.new_date!).time === slot.start_time.slice(0,5));
       return { ...slot, display_status: cancellation ? 'CANCELLED' as const : undefined };
     });
     for (const row of approved.filter(item => item.adjustment_type === 'EXTRA_CLASS')) {
@@ -323,15 +332,27 @@ export default function FacultyTimetablePage() {
   const selectedSlot = gridSlots.find((slot) => slot.timetable_id === selectedSlotId) ?? null;
 
   useEffect(() => {
-    if (form.adjustment_type !== 'EXTRA_CLASS' || !form.course_id || !form.date_part || isFacultyDemoSmokeId(form.course_id)) {
-      setSuggestions([]); setSuggestionsError(null); setSelectedRoom(null); return;
-    }
     let active = true;
-    setSuggestionsLoading(true); setSuggestionsError(null); setSuggestions([]); setSelectedRoom(null);
-    void api.get<ExtraClassSlot[]>(`/api/academics/faculty/workspaces/adjustments/extra-class-slots?courseId=${encodeURIComponent(form.course_id)}&date=${encodeURIComponent(form.date_part)}`)
-      .then(rows => { if (active) setSuggestions(Array.isArray(rows) ? rows : []); })
-      .catch(reason => { if (active) setSuggestionsError(reason instanceof Error ? reason.message : String(reason)); })
-      .finally(() => { if (active) setSuggestionsLoading(false); });
+    const canLoad = form.adjustment_type === 'EXTRA_CLASS' && Boolean(form.course_id) &&
+      Boolean(form.date_part) && !isFacultyDemoSmokeId(form.course_id);
+    void Promise.resolve().then(async () => {
+      if (!active) return;
+      setSuggestions([]);
+      setSuggestionsError(null);
+      setSelectedRoom(null);
+      setSuggestionsLoading(canLoad);
+      if (!canLoad) return;
+      try {
+        const rows = await api.get<ExtraClassSlot[]>(
+          `/api/academics/faculty/workspaces/adjustments/extra-class-slots?courseId=${encodeURIComponent(form.course_id)}&date=${encodeURIComponent(form.date_part)}`,
+        );
+        if (active) setSuggestions(Array.isArray(rows) ? rows : []);
+      } catch (reason) {
+        if (active) setSuggestionsError(reason instanceof Error ? reason.message : String(reason));
+      } finally {
+        if (active) setSuggestionsLoading(false);
+      }
+    });
     return () => { active = false; };
   }, [api, form.adjustment_type, form.course_id, form.date_part]);
 

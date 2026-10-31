@@ -4,12 +4,14 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, In, Repository } from 'typeorm';
 import { mkdirSync, writeFileSync } from 'fs';
 import { extname } from 'path';
 import { v4 as uuidv4 } from 'uuid';
+import * as ExcelJS from 'exceljs';
 import { AttendanceRecord } from '../../entities/attendance-record.entity';
 import { AcademicTimetable } from '../../entities/academic-timetable.entity';
 import { StudentCourseEnrollment } from '../../entities/student-course-enrollment.entity';
@@ -17,6 +19,7 @@ import { CourseAttendanceLog } from '../../entities/course-attendance-log.entity
 import { CourseMaterial } from '../../entities/course-material.entity';
 import { ObjectStorageService } from '../../storage/object-storage.service';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
+import { FalconNotificationsService } from '../../core/notifications/falcon-notifications.service';
 import { BulkAttendanceDto } from './dto/bulk-attendance.dto';
 import { FacultyTeachingDepartmentsService } from './faculty-teaching-departments.service';
 import {
@@ -78,10 +81,23 @@ function academicYearForDate(value?: string): string {
   return `${start}-${start + 1}`;
 }
 
+function academicYearKey(value: string): string {
+  const match = /^(\d{4})\s*[-/]\s*(\d{2}|\d{4})$/.exec(value.trim());
+  if (!match) return value.trim().toUpperCase();
+  const start = Number(match[1]);
+  const end =
+    match[2].length === 2
+      ? Number(`${String(start).slice(0, 2)}${match[2]}`)
+      : Number(match[2]);
+  return `${start}-${end}`;
+}
+
 function extraClassId(timetableId?: string): string | null {
   if (!timetableId?.startsWith('extra:')) return null;
   const id = timetableId.slice('extra:'.length);
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+  if (
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
+  ) {
     throw new BadRequestException('Invalid extra class session');
   }
   return id;
@@ -104,7 +120,138 @@ export class AcademicsFacultyService {
     private readonly objectStorage: ObjectStorageService,
     private readonly notificationEmitter: NotificationEmitterService,
     private readonly teachingDepartments: FacultyTeachingDepartmentsService,
+    @Optional()
+    private readonly falconNotifications?: FalconNotificationsService,
   ) {}
+
+  private attendanceUnlockMinutes() {
+    const configured = Number(
+      process.env.ATTENDANCE_UNLOCK_WINDOW_MINUTES ?? 30,
+    );
+    return Number.isFinite(configured) && configured >= 5 && configured <= 1440
+      ? Math.floor(configured)
+      : 30;
+  }
+
+  private attendanceLockDays() {
+    const configured = Number(process.env.ATTENDANCE_LOCK_AFTER_DAYS ?? 3);
+    return Number.isFinite(configured) && configured >= 0 && configured <= 30
+      ? Math.floor(configured)
+      : 3;
+  }
+
+  private attendanceMarkingDeadline(date: string) {
+    // Preserve the existing three-full-days policy: a class dated Monday locks
+    // at 00:00 on Friday in the campus timezone.
+    const deadline = new Date(`${date}T23:59:59.999+05:30`);
+    deadline.setUTCDate(deadline.getUTCDate() + this.attendanceLockDays());
+    return deadline;
+  }
+
+  private async activeAttendanceUnlock(
+    db: DataSource | EntityManager,
+    tenantId: string,
+    facultyUserId: string,
+    courseId: string,
+    date: string,
+    timetableId?: string,
+  ) {
+    const adjustmentId = extraClassId(timetableId);
+    const regularId = adjustmentId ? null : (timetableId ?? null);
+    const [row] = await db.query<
+      Array<{
+        request_id: string;
+        status: string;
+        unlocked_until: Date | string | null;
+      }>
+    >(
+      `SELECT request_id,status,unlocked_until
+       FROM academic_attendance_unlock_requests
+       WHERE tenant_id=$1 AND faculty_user_id=$2 AND course_id=$3
+         AND class_date=$4::date
+         AND (($5::uuid IS NOT NULL AND timetable_id=$5::uuid AND class_adjustment_id IS NULL)
+           OR ($6::uuid IS NOT NULL AND class_adjustment_id=$6::uuid AND timetable_id IS NULL))
+         AND status IN ('PENDING','APPROVED')
+       ORDER BY requested_at DESC LIMIT 1`,
+      [tenantId, facultyUserId, courseId, date, regularId, adjustmentId],
+    );
+    if (!row) return null;
+    const active =
+      row.status === 'APPROVED' &&
+      row.unlocked_until != null &&
+      new Date(row.unlocked_until).getTime() > Date.now();
+    return { ...row, active };
+  }
+
+  private async attendanceAccessState(
+    tenantId: string,
+    facultyUserId: string,
+    courseId: string,
+    date: string,
+    timetableId?: string,
+  ) {
+    const dateLocked = this.isAttendanceLocked(date);
+    const adjustmentId = extraClassId(timetableId);
+    const regularId = adjustmentId ? null : (timetableId ?? null);
+    const request = dateLocked
+      ? await this.activeAttendanceUnlock(
+          this.dataSource,
+          tenantId,
+          facultyUserId,
+          courseId,
+          date,
+          timetableId,
+        )
+      : null;
+    const history = await this.dataSource.query<
+      Array<{
+        request_id: string;
+        status: string;
+        reason: string;
+        requested_at: Date | string;
+        decided_at: Date | string | null;
+        decision_remarks: string | null;
+        unlocked_until: Date | string | null;
+        applied_at: Date | string | null;
+      }>
+    >(
+      `SELECT request_id,status,reason,requested_at,decided_at,decision_remarks,
+              unlocked_until,applied_at
+       FROM academic_attendance_unlock_requests
+       WHERE tenant_id=$1 AND faculty_user_id=$2 AND course_id=$3 AND class_date=$4::date
+         AND (($5::uuid IS NOT NULL AND timetable_id=$5::uuid)
+           OR ($6::uuid IS NOT NULL AND class_adjustment_id=$6::uuid))
+       ORDER BY requested_at DESC LIMIT 20`,
+      [tenantId, facultyUserId, courseId, date, regularId, adjustmentId],
+    );
+    return {
+      locked: dateLocked && !request?.active,
+      marking_deadline: this.attendanceMarkingDeadline(date).toISOString(),
+      unlock_request_id: request?.request_id ?? null,
+      unlock_status: request?.active
+        ? 'APPROVED'
+        : request?.status === 'APPROVED'
+          ? 'EXPIRED'
+          : (request?.status ?? history[0]?.status ?? null),
+      unlocked_until:
+        request?.active && request.unlocked_until
+          ? new Date(request.unlocked_until).toISOString()
+          : null,
+      unlock_history: history.map((row) => ({
+        ...row,
+        requested_at: new Date(row.requested_at).toISOString(),
+        decided_at: row.decided_at
+          ? new Date(row.decided_at).toISOString()
+          : null,
+        unlocked_until: row.unlocked_until
+          ? new Date(row.unlocked_until).toISOString()
+          : null,
+        applied_at: row.applied_at
+          ? new Date(row.applied_at).toISOString()
+          : null,
+      })),
+    };
+  }
 
   private async assertApprovedExtraClass(
     db: DataSource | EntityManager,
@@ -122,7 +269,10 @@ export class AcademicsFacultyService {
          AND (new_date AT TIME ZONE 'Asia/Kolkata')::date=$5::date`,
       [tenantId, courseId, facultyUserId, adjustmentId, date],
     );
-    if (!row) throw new ForbiddenException('Extra class is not approved for this faculty, course and date');
+    if (!row)
+      throw new ForbiddenException(
+        'Extra class is not approved for this faculty, course and date',
+      );
   }
 
   async getFacultyTodayClasses(
@@ -277,7 +427,11 @@ export class AcademicsFacultyService {
   /** Seven bounded days, one query; deliberately does not fetch student rosters. */
   async getFacultyAttendanceWeek(facultyUserId: string, tenantId: string, deptId?: number | null, start = localDateString()) {
     const parsed = new Date(`${start}T00:00:00Z`);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== start) {
+    if (
+      !/^\d{4}-\d{2}-\d{2}$/.test(start) ||
+      Number.isNaN(parsed.getTime()) ||
+      parsed.toISOString().slice(0, 10) !== start
+    ) {
       throw new BadRequestException('start must be a valid YYYY-MM-DD value');
     }
     const rows = await this.dataSource.query(
@@ -288,7 +442,13 @@ export class AcademicsFacultyService {
          EXISTS (SELECT 1 FROM course_attendance_logs cal
            WHERE cal.tenant_id = t.tenant_id AND cal.course_id = t.course_id
              AND cal.faculty_user_id = t.faculty_user_id
-             AND cal.timetable_id = t.timetable_id AND cal.date = days.date) AS has_saved_attendance
+             AND cal.timetable_id = t.timetable_id AND cal.date = days.date) AS has_saved_attendance,
+         EXISTS (SELECT 1 FROM class_adjustments a
+           WHERE a.tenant_id=t.tenant_id AND a.course_id=t.course_id
+             AND a.faculty_user_id=t.faculty_user_id AND a.adjustment_type='CANCEL'
+             AND a.status IN ('APPROVED','NOTIFIED')
+             AND (a.new_date AT TIME ZONE 'Asia/Kolkata')::date=days.date
+             AND (a.new_date AT TIME ZONE 'Asia/Kolkata')::time=t.start_time) AS cancelled
        FROM days
        LEFT JOIN academic_timetables t ON t.tenant_id = $1 AND t.faculty_user_id = $2
          AND t.deleted_at IS NULL AND (t.valid_to IS NULL OR t.valid_to >= days.date)
@@ -313,7 +473,13 @@ export class AcademicsFacultyService {
          EXISTS (SELECT 1 FROM course_attendance_logs cal
            WHERE cal.tenant_id=t.tenant_id AND cal.course_id=t.course_id
              AND cal.faculty_user_id=t.faculty_user_id AND cal.timetable_id=t.timetable_id
-             AND cal.date=days.date)
+             AND cal.date=days.date),
+         EXISTS (SELECT 1 FROM class_adjustments a
+           WHERE a.tenant_id=t.tenant_id AND a.course_id=t.course_id
+             AND a.faculty_user_id=t.faculty_user_id AND a.adjustment_type='CANCEL'
+             AND a.status IN ('APPROVED','NOTIFIED')
+             AND (a.new_date AT TIME ZONE 'Asia/Kolkata')::date=days.date
+             AND (a.new_date AT TIME ZONE 'Asia/Kolkata')::time=COALESCE(m.target_start_time,t.start_time))
        FROM days
        JOIN academic_proxy_requests p ON p.tenant_id=$1 AND p.proxy_faculty_id=$2
          AND p.date_of_proxy=days.date AND p.status='APPROVED'
@@ -332,7 +498,13 @@ export class AcademicsFacultyService {
          EXISTS (SELECT 1 FROM course_attendance_logs cal
            WHERE cal.tenant_id=m.tenant_id AND cal.course_id=m.course_id
              AND cal.faculty_user_id=m.original_faculty_id
-             AND cal.timetable_id=m.source_timetable_id AND cal.date=m.target_date)
+             AND cal.timetable_id=m.source_timetable_id AND cal.date=m.target_date),
+         EXISTS (SELECT 1 FROM class_adjustments a
+           WHERE a.tenant_id=m.tenant_id AND a.course_id=m.course_id
+             AND a.faculty_user_id=m.original_faculty_id AND a.adjustment_type='CANCEL'
+             AND a.status IN ('APPROVED','NOTIFIED')
+             AND (a.new_date AT TIME ZONE 'Asia/Kolkata')::date=m.target_date
+             AND (a.new_date AT TIME ZONE 'Asia/Kolkata')::time=m.target_start_time)
        FROM academic_class_moves m
        JOIN academic_timetables t ON t.timetable_id=m.source_timetable_id AND t.tenant_id=m.tenant_id
        JOIN academic_courses c ON c.course_id=m.course_id AND c.tenant_id=m.tenant_id
@@ -352,7 +524,7 @@ export class AcademicsFacultyService {
          EXISTS (SELECT 1 FROM course_attendance_logs cal
            WHERE cal.tenant_id=a.tenant_id AND cal.course_id=a.course_id
              AND cal.faculty_user_id=a.faculty_user_id
-             AND cal.class_adjustment_id=a.adjustment_id)
+             AND cal.class_adjustment_id=a.adjustment_id), false
        FROM class_adjustments a
        JOIN academic_courses c ON c.course_id=a.course_id AND c.tenant_id=a.tenant_id
        WHERE a.tenant_id=$1 AND a.faculty_user_id=$2
@@ -361,7 +533,7 @@ export class AcademicsFacultyService {
          AND a.course_id IN (SELECT course_id FROM faculty_courses)
        UNION ALL
        SELECT days.date::text, 'held:' || e.source_key, e.course_id, c.course_code, c.course_name,
-         (e.entry->>'start')::time, (e.entry->>'end')::time, e.entry->>'room', e.entry->>'batch', false
+         (e.entry->>'start')::time, (e.entry->>'end')::time, e.entry->>'room', e.entry->>'batch', false, false
        FROM days JOIN academic_timetable_source_entries e ON e.tenant_id=$1 AND e.state='HELD'
        JOIN academic_timetable_publications p ON p.publication_id=e.publication_id AND p.state='ACTIVE' AND p.activated_on<=days.date
        JOIN academic_courses c ON c.course_id=e.course_id AND c.tenant_id=e.tenant_id
@@ -374,10 +546,24 @@ export class AcademicsFacultyService {
       const date = new Date(parsed);
       date.setUTCDate(date.getUTCDate() + index);
       const key = date.toISOString().slice(0, 10);
-      return { date: key, sessions: rows.filter(row => row.date === key && row.timetable_id).map(row => ({
-        ...row, has_saved_attendance: Boolean(row.has_saved_attendance), attendance_locked: this.isAttendanceLocked(key),
-        awaiting_confirmation: String(row.timetable_id).startsWith('held:'),
-      })) };
+      return {
+        date: key,
+        sessions: rows
+          .filter(
+            (row) =>
+              row.date === key &&
+              row.timetable_id &&
+              (!row.cancelled || row.has_saved_attendance),
+          )
+          .map((row) => ({
+            ...row,
+            has_saved_attendance: Boolean(row.has_saved_attendance),
+            cancelled: Boolean(row.cancelled),
+            attendance_locked:
+              this.isAttendanceLocked(key) || Boolean(row.cancelled),
+            awaiting_confirmation: String(row.timetable_id).startsWith('held:'),
+          })),
+      };
     });
   }
 
@@ -388,9 +574,11 @@ export class AcademicsFacultyService {
     date = localDateString(),
   ) {
     const requestedDay = new Date(`${date}T00:00:00Z`);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) ||
-        Number.isNaN(requestedDay.getTime()) ||
-        requestedDay.toISOString().slice(0, 10) !== date) {
+    if (
+      !/^\d{4}-\d{2}-\d{2}$/.test(date) ||
+      Number.isNaN(requestedDay.getTime()) ||
+      requestedDay.toISOString().slice(0, 10) !== date
+    ) {
       throw new BadRequestException('date must be a valid YYYY-MM-DD value');
     }
     const day = requestedDay.getUTCDay();
@@ -407,6 +595,7 @@ export class AcademicsFacultyService {
         section: string | null;
         is_practical: boolean;
         has_saved_attendance: boolean;
+        cancelled: boolean;
       }>
     >(
       `WITH ${this.teachingDepartments.facultyCoursesCte(3)}
@@ -431,7 +620,13 @@ export class AcademicsFacultyService {
              AND cal.faculty_user_id = t.faculty_user_id
              AND cal.timetable_id = t.timetable_id
              AND cal.date = $5::date
-         ) AS has_saved_attendance
+         ) AS has_saved_attendance,
+         EXISTS (SELECT 1 FROM class_adjustments a
+           WHERE a.tenant_id=t.tenant_id AND a.course_id=t.course_id
+             AND a.faculty_user_id=t.faculty_user_id AND a.adjustment_type='CANCEL'
+             AND a.status IN ('APPROVED','NOTIFIED')
+             AND (a.new_date AT TIME ZONE 'Asia/Kolkata')::date=$5::date
+             AND (a.new_date AT TIME ZONE 'Asia/Kolkata')::time=t.start_time) AS cancelled
        FROM academic_timetables t
        INNER JOIN faculty_courses fc ON fc.course_id = t.course_id
        INNER JOIN academic_courses c ON c.course_id = t.course_id AND c.tenant_id = t.tenant_id
@@ -459,7 +654,13 @@ export class AcademicsFacultyService {
          EXISTS (SELECT 1 FROM course_attendance_logs cal
            WHERE cal.tenant_id=t.tenant_id AND cal.course_id=t.course_id
              AND cal.faculty_user_id=t.faculty_user_id AND cal.timetable_id=t.timetable_id
-             AND cal.date=$5::date) AS has_saved_attendance
+             AND cal.date=$5::date) AS has_saved_attendance,
+         EXISTS (SELECT 1 FROM class_adjustments a
+           WHERE a.tenant_id=t.tenant_id AND a.course_id=t.course_id
+             AND a.faculty_user_id=t.faculty_user_id AND a.adjustment_type='CANCEL'
+             AND a.status IN ('APPROVED','NOTIFIED')
+             AND (a.new_date AT TIME ZONE 'Asia/Kolkata')::date=$5::date
+             AND (a.new_date AT TIME ZONE 'Asia/Kolkata')::time=COALESCE(m.target_start_time,t.start_time)) AS cancelled
        FROM academic_proxy_requests p
        JOIN academic_timetables t ON t.timetable_id=p.timetable_id AND t.tenant_id=p.tenant_id
          AND t.course_id=p.course_id AND t.faculty_user_id=p.absent_faculty_id
@@ -480,7 +681,13 @@ export class AcademicsFacultyService {
          EXISTS (SELECT 1 FROM course_attendance_logs cal
            WHERE cal.tenant_id=m.tenant_id AND cal.course_id=m.course_id
              AND cal.faculty_user_id=m.original_faculty_id
-             AND cal.timetable_id=m.source_timetable_id AND cal.date=m.target_date) AS has_saved_attendance
+             AND cal.timetable_id=m.source_timetable_id AND cal.date=m.target_date) AS has_saved_attendance,
+         EXISTS (SELECT 1 FROM class_adjustments a
+           WHERE a.tenant_id=m.tenant_id AND a.course_id=m.course_id
+             AND a.faculty_user_id=m.original_faculty_id AND a.adjustment_type='CANCEL'
+             AND a.status IN ('APPROVED','NOTIFIED')
+             AND (a.new_date AT TIME ZONE 'Asia/Kolkata')::date=m.target_date
+             AND (a.new_date AT TIME ZONE 'Asia/Kolkata')::time=m.target_start_time) AS cancelled
        FROM academic_class_moves m
        JOIN academic_timetables t ON t.timetable_id=m.source_timetable_id AND t.tenant_id=m.tenant_id
        JOIN academic_courses c ON c.course_id=m.course_id AND c.tenant_id=m.tenant_id
@@ -500,7 +707,8 @@ export class AcademicsFacultyService {
          EXISTS (SELECT 1 FROM course_attendance_logs cal
            WHERE cal.tenant_id=a.tenant_id AND cal.course_id=a.course_id
              AND cal.faculty_user_id=a.faculty_user_id
-             AND cal.class_adjustment_id=a.adjustment_id) AS has_saved_attendance
+             AND cal.class_adjustment_id=a.adjustment_id) AS has_saved_attendance,
+         false AS cancelled
        FROM class_adjustments a
        JOIN academic_courses c ON c.course_id=a.course_id AND c.tenant_id=a.tenant_id
        WHERE a.tenant_id=$1 AND a.faculty_user_id=$2
@@ -509,7 +717,7 @@ export class AcademicsFacultyService {
          AND a.course_id IN (SELECT course_id FROM faculty_courses)
        UNION ALL
        SELECT 'held:' || e.source_key, e.course_id, c.course_code,c.course_name,e.entry->>'room',
-         (e.entry->>'start')::time,(e.entry->>'end')::time,e.entry->>'batch',e.entry->>'session_type'='LAB',false
+         (e.entry->>'start')::time,(e.entry->>'end')::time,e.entry->>'batch',e.entry->>'session_type'='LAB',false,false
        FROM academic_timetable_source_entries e
        JOIN academic_timetable_publications p ON p.publication_id=e.publication_id AND p.state='ACTIVE' AND p.activated_on<=$5::date
        JOIN academic_courses c ON c.course_id=e.course_id AND c.tenant_id=e.tenant_id
@@ -520,29 +728,37 @@ export class AcademicsFacultyService {
     );
 
     return Promise.all(
-      rows.map(async (row) => ({
-        timetable_id: row.timetable_id,
-        course_id: row.course_id,
-        course_code: row.course_code,
-        course_name: row.course_name,
-        room: row.room,
-        start_time: row.start_time,
-        end_time: row.end_time,
-        section: row.section,
-        is_practical: Boolean(row.is_practical),
-        has_saved_attendance: Boolean(row.has_saved_attendance),
-        attendance_locked: this.isAttendanceLocked(date),
-        awaiting_confirmation: row.timetable_id.startsWith('held:'),
-        student_count: row.timetable_id.startsWith('held:') || row.is_practical && !row.section
-          ? 0
-          : (await this.getCourseStudents(
-              row.course_id,
-              facultyUserId,
-              tenantId,
-              row.timetable_id,
-              date,
-            )).length,
-      })),
+      rows
+        .filter((row) => !row.cancelled || row.has_saved_attendance)
+        .map(async (row) => ({
+          timetable_id: row.timetable_id,
+          course_id: row.course_id,
+          course_code: row.course_code,
+          course_name: row.course_name,
+          room: row.room,
+          start_time: row.start_time,
+          end_time: row.end_time,
+          section: row.section,
+          is_practical: Boolean(row.is_practical),
+          has_saved_attendance: Boolean(row.has_saved_attendance),
+          cancelled: Boolean(row.cancelled),
+          attendance_locked:
+            this.isAttendanceLocked(date) || Boolean(row.cancelled),
+          awaiting_confirmation: row.timetable_id.startsWith('held:'),
+          student_count:
+            row.timetable_id.startsWith('held:') ||
+            (row.is_practical && !row.section)
+              ? 0
+              : (
+                  await this.getCourseStudents(
+                    row.course_id,
+                    facultyUserId,
+                    tenantId,
+                    row.timetable_id,
+                    date,
+                  )
+                ).length,
+        })),
     );
   }
 
@@ -587,8 +803,18 @@ export class AcademicsFacultyService {
     const enrollmentRepo = manager?.getRepository(StudentCourseEnrollment) ?? this.enrollmentRepo;
     const adjustmentId = extraClassId(timetableId);
     if (adjustmentId) {
-      if (!date) throw new BadRequestException('Date is required for an extra class roster');
-      await this.assertApprovedExtraClass(db, tenantId, courseId, facultyUserId, date, adjustmentId);
+      if (!date)
+        throw new BadRequestException(
+          'Date is required for an extra class roster',
+        );
+      await this.assertApprovedExtraClass(
+        db,
+        tenantId,
+        courseId,
+        facultyUserId,
+        date,
+        adjustmentId,
+      );
       timetableId = undefined;
     }
     const [approvedCover] = date && timetableId
@@ -681,8 +907,10 @@ export class AcademicsFacultyService {
          AND status = 'ACTIVE'`,
       [tenantId, courseId, rosterFacultyId],
     );
+    const requestedAcademicYear = academicYearKey(academicYearForDate(date));
     const currentAllocations = allocations.filter(
-      (allocation) => allocation.academic_year === academicYearForDate(date),
+      (allocation) =>
+        academicYearKey(allocation.academic_year) === requestedAcademicYear,
     );
     let scopedRows = rows;
     if (allocations.length) {
@@ -703,7 +931,10 @@ export class AcademicsFacultyService {
       const profiles = new Map(profileRows.map((profile) => [profile.user_id, profile]));
       scopedRows = rows.filter((row) => {
         const profile = profiles.get(row.student_user_id);
-        if (!profile?.program || (row.status === 'ENROLLED' && profile.status !== 'ACTIVE')) {
+        if (
+          !profile?.program ||
+          (row.status === 'ENROLLED' && profile.status !== 'ACTIVE')
+        ) {
           return false;
         }
         return currentAllocations.some((allocation) =>
@@ -801,7 +1032,9 @@ export class AcademicsFacultyService {
       [tenantId, timetableId, courseId, facultyUserId],
     );
     if (!slot?.is_practical || !slot.section?.trim()) {
-      throw new ForbiddenException('This is not an assigned, named practical batch');
+      throw new ForbiddenException(
+        'This is not an assigned, named practical batch',
+      );
     }
     return slot.section.trim();
   }
@@ -838,14 +1071,34 @@ export class AcademicsFacultyService {
     courseId: string, timetableId: string, facultyUserId: string, tenantId: string,
     expectedRevision: number, studentIds: string[],
   ) {
-    const sectionCode = await this.facultyPracticalSlot(courseId, timetableId, facultyUserId, tenantId);
-    if (!Number.isInteger(expectedRevision) || expectedRevision < 0 || !Array.isArray(studentIds)) {
-      throw new BadRequestException('If-Match revision and student_ids array are required');
+    const sectionCode = await this.facultyPracticalSlot(
+      courseId,
+      timetableId,
+      facultyUserId,
+      tenantId,
+    );
+    if (
+      !Number.isInteger(expectedRevision) ||
+      expectedRevision < 0 ||
+      !Array.isArray(studentIds)
+    ) {
+      throw new BadRequestException(
+        'If-Match revision and student_ids array are required',
+      );
     }
-    if (studentIds.some((id) => typeof id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id))) {
+    if (
+      studentIds.some(
+        (id) =>
+          typeof id !== 'string' ||
+          !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+            id,
+          ),
+      )
+    ) {
       throw new BadRequestException('Each student ID must be a UUID');
     }
-    if (studentIds.length !== new Set(studentIds).size) throw new BadRequestException('Duplicate students in batch');
+    if (studentIds.length !== new Set(studentIds).size)
+      throw new BadRequestException('Duplicate students in batch');
     return this.dataSource.transaction(async (manager) => {
       await manager.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`practical:${tenantId}:${courseId}`]);
       const [batch] = await manager.query<Array<{ batch_id: string; revision: number }>>(
@@ -853,14 +1106,18 @@ export class AcademicsFacultyService {
          WHERE tenant_id = $1 AND course_id = $2 AND section_code = $3 FOR UPDATE`,
         [tenantId, courseId, sectionCode],
       );
-      if ((batch?.revision ?? 0) !== expectedRevision) throw new ConflictException('Batch changed; refresh before saving');
+      if ((batch?.revision ?? 0) !== expectedRevision)
+        throw new ConflictException('Batch changed; refresh before saving');
       const enrolled = await manager.query<Array<{ student_user_id: string }>>(
         `SELECT student_user_id FROM student_course_enrollments
          WHERE tenant_id = $1 AND course_id = $2 AND status IN ('ENROLLED', 'COMPLETED', 'FAILED')`,
         [tenantId, courseId],
       );
       const valid = new Set(enrolled.map((row) => row.student_user_id));
-      if (studentIds.some((id) => !valid.has(id))) throw new BadRequestException('Batch contains a student outside this course');
+      if (studentIds.some((id) => !valid.has(id)))
+        throw new BadRequestException(
+          'Batch contains a student outside this course',
+        );
       const occupied = await manager.query<Array<{ student_user_id: string }>>(
         `SELECT m.student_user_id FROM academic_practical_batch_members m
          JOIN academic_practical_batches b ON b.batch_id = m.batch_id
@@ -868,7 +1125,10 @@ export class AcademicsFacultyService {
            AND b.section_code <> $3 AND m.student_user_id = ANY($4::uuid[])`,
         [tenantId, courseId, sectionCode, studentIds],
       );
-      if (occupied.length) throw new ConflictException('A student is already assigned to another practical batch');
+      if (occupied.length)
+        throw new ConflictException(
+          'A student is already assigned to another practical batch',
+        );
       // A course lock prevents two editors changing the same roster. Student
       // locks also serialize assignments across *different* practical courses,
       // so both editors cannot independently approve overlapping labs.
@@ -914,7 +1174,9 @@ export class AcademicsFacultyService {
           [tenantId, courseId, studentIds, sectionCode],
         );
         if (overlapping.length) {
-          throw new ConflictException('Batch overlaps another confirmed class for a selected student');
+          throw new ConflictException(
+            'Batch overlaps another confirmed class for a selected student',
+          );
         }
       }
       const [savedBatch] = batch ? [batch] : await manager.query<Array<{ batch_id: string; revision: number }>>(
@@ -956,22 +1218,52 @@ export class AcademicsFacultyService {
     if (adjustmentId) {
       await this.assertApprovedExtraClass(this.dataSource, tenantId, courseId, facultyUserId, date, adjustmentId);
       await this.assertCanMarkAttendance(courseId, facultyUserId, tenantId);
-      const [saved] = await this.dataSource.query<Array<{ attendance_data: unknown }>>(
+      const access = await this.attendanceAccessState(
+        tenantId,
+        facultyUserId,
+        courseId,
+        date,
+        timetableId,
+      );
+      const [saved] = await this.dataSource.query<
+        Array<{ attendance_data: unknown }>
+      >(
         `SELECT attendance_data FROM course_attendance_logs
          WHERE tenant_id=$1 AND course_id=$2 AND faculty_user_id=$3
            AND date=$4::date AND class_adjustment_id=$5::uuid`,
         [tenantId, courseId, facultyUserId, date, adjustmentId],
       );
-      return { course_id: courseId, date, timetable_id: timetableId,
-        locked: this.isAttendanceLocked(date), attendance_data: saved?.attendance_data ?? null };
+      return {
+        course_id: courseId,
+        date,
+        timetable_id: timetableId,
+        ...access,
+        attendance_data: saved?.attendance_data ?? null,
+      };
     }
     if (timetableId && this.isAttendanceLocked(date)) {
       const [saved] = await this.dataSource.query(`SELECT cal.attendance_data FROM course_attendance_logs cal
         JOIN academic_timetables t ON t.timetable_id=cal.timetable_id AND t.tenant_id=cal.tenant_id
         WHERE cal.tenant_id=$1 AND cal.course_id=$2 AND cal.faculty_user_id=$3
           AND cal.timetable_id=$4::uuid AND cal.date=$5::date AND t.faculty_user_id=$3`,
-        [tenantId,courseId,facultyUserId,timetableId,date]);
-      if (Array.isArray(saved?.attendance_data)) return {course_id:courseId,date,timetable_id:timetableId,locked:true,attendance_data:saved.attendance_data};
+        [tenantId, courseId, facultyUserId, timetableId, date],
+      );
+      if (Array.isArray(saved?.attendance_data)) {
+        const access = await this.attendanceAccessState(
+          tenantId,
+          facultyUserId,
+          courseId,
+          date,
+          timetableId,
+        );
+        return {
+          course_id: courseId,
+          date,
+          timetable_id: timetableId,
+          ...access,
+          attendance_data: saved.attendance_data,
+        };
+      }
     }
     await this.assertCanMarkAttendance(courseId, facultyUserId, tenantId, date, timetableId);
     const effectiveFacultyId = await this.resolveAttendanceFacultyId(
@@ -996,11 +1288,18 @@ export class AcademicsFacultyService {
           [tenantId, courseId, effectiveFacultyId, date],
         );
 
+    const access = await this.attendanceAccessState(
+      tenantId,
+      facultyUserId,
+      courseId,
+      date,
+      timetableId,
+    );
     return {
       course_id: courseId,
       date,
       timetable_id: timetableId ?? null,
-      locked: this.isAttendanceLocked(date),
+      ...access,
       attendance_data: log[0]?.attendance_data ?? null,
     };
   }
@@ -1094,6 +1393,12 @@ export class AcademicsFacultyService {
           AND t.faculty_user_id = ec.log_faculty_id
           AND t.deleted_at IS NULL
          WHERE t.end_time < CURRENT_TIME
+           AND NOT EXISTS (SELECT 1 FROM class_adjustments a
+             WHERE a.tenant_id=t.tenant_id AND a.course_id=t.course_id
+               AND a.faculty_user_id=t.faculty_user_id AND a.adjustment_type='CANCEL'
+               AND a.status IN ('APPROVED','NOTIFIED')
+               AND (a.new_date AT TIME ZONE 'Asia/Kolkata')::date=CURRENT_DATE
+               AND (a.new_date AT TIME ZONE 'Asia/Kolkata')::time=t.start_time)
        )
        SELECT
          ts.timetable_id,
@@ -1122,6 +1427,491 @@ export class AcademicsFacultyService {
        ORDER BY ts.start_time ASC`,
       [tenantId, facultyUserId, deptId ?? null, isoDay],
     );
+  }
+
+  async requestAttendanceUnlock(
+    facultyUserId: string,
+    tenantId: string,
+    dto: {
+      course_id?: string;
+      date?: string;
+      timetable_id?: string;
+      reason?: string;
+    },
+  ) {
+    const courseId = dto.course_id?.trim();
+    const date = dto.date?.trim();
+    const timetableId = dto.timetable_id?.trim();
+    const reason = dto.reason?.trim();
+    if (!courseId || !date || !timetableId || !reason || reason.length < 5) {
+      throw new BadRequestException(
+        'Course, class, date and a reason of at least 5 characters are required',
+      );
+    }
+    const parsed = new Date(`${date}T00:00:00Z`);
+    if (
+      !/^\d{4}-\d{2}-\d{2}$/.test(date) ||
+      Number.isNaN(parsed.getTime()) ||
+      parsed.toISOString().slice(0, 10) !== date
+    ) {
+      throw new BadRequestException('date must be a valid YYYY-MM-DD value');
+    }
+    if (!this.isAttendanceLocked(date)) {
+      throw new BadRequestException(
+        'Attendance is still inside the normal marking window',
+      );
+    }
+    if (timetableId.startsWith('held:')) {
+      throw new BadRequestException(
+        'Attendance cannot be unlocked for an unconfirmed class',
+      );
+    }
+
+    const adjustmentId = extraClassId(timetableId);
+    const regularId = adjustmentId ? null : timetableId;
+    if (
+      regularId &&
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        regularId,
+      )
+    ) {
+      throw new BadRequestException('Choose a valid scheduled class');
+    }
+    if (adjustmentId) {
+      await this.assertApprovedExtraClass(
+        this.dataSource,
+        tenantId,
+        courseId,
+        facultyUserId,
+        date,
+        adjustmentId,
+      );
+    }
+    await this.assertCanMarkAttendance(
+      courseId,
+      facultyUserId,
+      tenantId,
+      date,
+      regularId ?? undefined,
+    );
+    const effectiveFacultyId = await this.resolveAttendanceFacultyId(
+      courseId,
+      facultyUserId,
+      tenantId,
+      date,
+      regularId ?? undefined,
+    );
+
+    const result = await this.dataSource.transaction(async (manager) => {
+      await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+        `attendance-unlock:${tenantId}:${facultyUserId}:${date}:${timetableId}`,
+      ]);
+      if (regularId) {
+        const [eligible] = await manager.query<Array<{ timetable_id: string }>>(
+          `SELECT t.timetable_id FROM academic_timetables t
+           LEFT JOIN academic_class_moves m ON m.tenant_id=t.tenant_id
+             AND m.source_timetable_id=t.timetable_id AND m.status='APPROVED'
+             AND (m.source_date=$4::date OR m.target_date=$4::date)
+           WHERE t.tenant_id=$1 AND t.timetable_id=$2::uuid AND t.course_id=$3
+             AND t.deleted_at IS NULL
+             AND (t.valid_from IS NULL OR t.valid_from<=$4::date)
+             AND (t.valid_to IS NULL OR t.valid_to>=$4::date)
+             AND (t.faculty_user_id=$5::uuid OR EXISTS (
+               SELECT 1 FROM academic_proxy_requests p
+               WHERE p.tenant_id=t.tenant_id AND p.timetable_id=t.timetable_id
+                 AND p.course_id=t.course_id AND p.proxy_faculty_id=$5::uuid
+                 AND p.date_of_proxy=$4::date AND p.status='APPROVED'
+             ))
+             AND (m.target_date=$4::date OR (
+               EXTRACT(ISODOW FROM $4::date)=t.day_of_week
+               AND (m.move_id IS NULL OR NOT (
+                 m.source_date=$4::date AND m.target_date<>$4::date
+               ))
+             ))
+             AND NOT EXISTS (SELECT 1 FROM class_adjustments a
+               WHERE a.tenant_id=t.tenant_id AND a.course_id=t.course_id
+                 AND a.faculty_user_id=t.faculty_user_id
+                 AND a.adjustment_type='CANCEL' AND a.status IN ('APPROVED','NOTIFIED')
+                 AND (a.new_date AT TIME ZONE 'Asia/Kolkata')::date=$4::date
+                 AND (a.new_date AT TIME ZONE 'Asia/Kolkata')::time=
+                   COALESCE(CASE WHEN m.target_date=$4::date THEN m.target_start_time END,t.start_time))`,
+          [tenantId, regularId, courseId, date, facultyUserId],
+        );
+        if (!eligible)
+          throw new ForbiddenException(
+            'This class is cancelled or is no longer scheduled',
+          );
+      }
+      const [saved] = await manager.query<Array<{ log_id: string }>>(
+        `SELECT log_id FROM course_attendance_logs
+         WHERE tenant_id=$1 AND course_id=$2 AND faculty_user_id=$3 AND date=$4::date
+           AND (($5::uuid IS NOT NULL AND timetable_id=$5::uuid)
+             OR ($6::uuid IS NOT NULL AND class_adjustment_id=$6::uuid)) LIMIT 1`,
+        [tenantId, courseId, effectiveFacultyId, date, regularId, adjustmentId],
+      );
+      if (saved)
+        throw new BadRequestException(
+          'Attendance already exists; this workflow only unlocks a missed session',
+        );
+      const [existing] = await manager.query<
+        Array<{ request_id: string; status: string }>
+      >(
+        `SELECT request_id,status FROM academic_attendance_unlock_requests
+         WHERE tenant_id=$1 AND faculty_user_id=$2 AND course_id=$3 AND class_date=$4::date
+           AND (($5::uuid IS NOT NULL AND timetable_id=$5::uuid)
+             OR ($6::uuid IS NOT NULL AND class_adjustment_id=$6::uuid))
+            AND (status='PENDING' OR (status='APPROVED' AND unlocked_until>NOW()))
+          ORDER BY requested_at DESC LIMIT 1`,
+        [tenantId, facultyUserId, courseId, date, regularId, adjustmentId],
+      );
+      if (existing?.status === 'PENDING')
+        return {
+          request_id: existing.request_id,
+          status: existing.status,
+          created: false,
+        };
+      if (existing?.status === 'APPROVED') {
+        throw new BadRequestException(
+          'This class already has an approved attendance window',
+        );
+      }
+      const [created] = await manager.query<
+        Array<{ request_id: string; status: string }>
+      >(
+        `INSERT INTO academic_attendance_unlock_requests
+          (tenant_id,faculty_user_id,course_id,timetable_id,class_adjustment_id,class_date,reason)
+         VALUES ($1,$2,$3,$4::uuid,$5::uuid,$6::date,$7)
+         RETURNING request_id,status`,
+        [
+          tenantId,
+          facultyUserId,
+          courseId,
+          regularId,
+          adjustmentId,
+          date,
+          reason,
+        ],
+      );
+      await manager.query(
+        `INSERT INTO academic_attendance_workflow_events
+          (tenant_id,request_id,faculty_user_id,course_id,timetable_id,class_adjustment_id,
+           class_date,event_type,actor_user_id,details)
+         VALUES ($1,$2,$3,$4,$5::uuid,$6::uuid,$7::date,'REQUESTED',$3,$8::jsonb)`,
+        [
+          tenantId,
+          created.request_id,
+          facultyUserId,
+          courseId,
+          regularId,
+          adjustmentId,
+          date,
+          JSON.stringify({ reason }),
+        ],
+      );
+      return { ...created, created: true };
+    });
+
+    if (result.created && this.falconNotifications) {
+      const [recipient] = await this.dataSource.query<
+        Array<{ hod_user_id: string | null; course_code: string }>
+      >(
+        `SELECT d.hod_user_id,c.course_code FROM users f
+         JOIN academic_courses c ON c.tenant_id=f.tenant_id AND c.course_id=$3
+         LEFT JOIN departments d ON d.dept_id=f.dept_id
+         WHERE f.tenant_id=$1 AND f.user_id=$2`,
+        [tenantId, facultyUserId, courseId],
+      );
+      if (recipient?.hod_user_id) {
+        await this.falconNotifications.create({
+          tenantId,
+          userId: recipient.hod_user_id,
+          category: 'ACADEMICS',
+          title: 'Attendance unlock approval needed',
+          message: `${recipient.course_code} attendance for ${date} was missed and requires your decision.`,
+          actionLink: '/hod/approvals/attendance-unlocks',
+          actionLabel: 'Review request',
+          severity: 'warning',
+          intent: 'action_required',
+          metadata: {
+            request_id: result.request_id,
+            course_id: courseId,
+            class_date: date,
+          },
+        });
+      }
+    }
+    return result;
+  }
+
+  async listHodAttendanceUnlockRequests(hodUserId: string, tenantId: string) {
+    const [actor] = await this.dataSource.query<
+      Array<{ dept_id: number | null; role_name: string }>
+    >(
+      `SELECT u.dept_id,r.role_name FROM users u JOIN roles r ON r.role_id=u.role_id
+       WHERE u.tenant_id=$1 AND u.user_id=$2 AND u.is_active=true`,
+      [tenantId, hodUserId],
+    );
+    if (!actor || !['HOD', 'SuperAdmin'].includes(actor.role_name)) {
+      throw new ForbiddenException('HOD approval required');
+    }
+    return this.dataSource.query(
+      `SELECT r.request_id,r.course_id,r.timetable_id,r.class_adjustment_id,
+              r.class_date::text,r.reason,r.status,r.requested_at,
+              c.course_code,c.course_name,f.name AS faculty_name,f.official_email AS faculty_email,
+              COALESCE(t.section,'Whole course') AS section,
+              COALESCE(t.start_time::text,(a.new_date AT TIME ZONE 'Asia/Kolkata')::time::text) AS start_time,
+              COALESCE(t.end_time::text,((a.new_date AT TIME ZONE 'Asia/Kolkata')+INTERVAL '1 hour')::time::text) AS end_time
+       FROM academic_attendance_unlock_requests r
+       JOIN users f ON f.user_id=r.faculty_user_id AND f.tenant_id=r.tenant_id
+       JOIN academic_courses c ON c.course_id=r.course_id AND c.tenant_id=r.tenant_id
+       LEFT JOIN academic_timetables t ON t.timetable_id=r.timetable_id AND t.tenant_id=r.tenant_id
+       LEFT JOIN class_adjustments a ON a.adjustment_id=r.class_adjustment_id AND a.tenant_id=r.tenant_id
+       WHERE r.tenant_id=$1 AND r.status='PENDING'
+         AND ($3::boolean OR f.dept_id=$2::int)
+       ORDER BY r.requested_at ASC`,
+      [tenantId, actor.dept_id, actor.role_name === 'SuperAdmin'],
+    );
+  }
+
+  async decideAttendanceUnlock(
+    hodUserId: string,
+    tenantId: string,
+    requestId: string,
+    action: 'APPROVE' | 'REJECT',
+    remarks?: string,
+  ) {
+    if (
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        requestId,
+      ) ||
+      !['APPROVE', 'REJECT'].includes(action)
+    ) {
+      throw new BadRequestException('Invalid attendance unlock decision');
+    }
+    if (action === 'REJECT' && (remarks?.trim().length ?? 0) < 3) {
+      throw new BadRequestException(
+        'A rejection reason of at least 3 characters is required',
+      );
+    }
+    const minutes = this.attendanceUnlockMinutes();
+    const decided = await this.dataSource.transaction(async (manager) => {
+      const [actor] = await manager.query<
+        Array<{ dept_id: number | null; role_name: string }>
+      >(
+        `SELECT u.dept_id,r.role_name FROM users u JOIN roles r ON r.role_id=u.role_id
+         WHERE u.tenant_id=$1 AND u.user_id=$2 AND u.is_active=true`,
+        [tenantId, hodUserId],
+      );
+      if (!actor || !['HOD', 'SuperAdmin'].includes(actor.role_name)) {
+        throw new ForbiddenException('HOD approval required');
+      }
+      const [row] = await manager.query<
+        Array<{
+          request_id: string;
+          faculty_user_id: string;
+          faculty_dept_id: number | null;
+          course_id: string;
+          timetable_id: string | null;
+          class_adjustment_id: string | null;
+          course_code: string;
+          class_date: string;
+          status: string;
+        }>
+      >(
+        `SELECT r.request_id,r.faculty_user_id,f.dept_id AS faculty_dept_id,
+                r.course_id,r.timetable_id,r.class_adjustment_id,
+                c.course_code,r.class_date::text,r.status
+         FROM academic_attendance_unlock_requests r
+         JOIN users f ON f.user_id=r.faculty_user_id AND f.tenant_id=r.tenant_id
+         JOIN academic_courses c ON c.course_id=r.course_id AND c.tenant_id=r.tenant_id
+         WHERE r.tenant_id=$1 AND r.request_id=$2::uuid FOR UPDATE OF r`,
+        [tenantId, requestId],
+      );
+      if (!row)
+        throw new NotFoundException('Attendance unlock request not found');
+      if (row.status !== 'PENDING')
+        throw new BadRequestException(
+          'Attendance unlock request was already decided',
+        );
+      if (row.faculty_user_id === hodUserId)
+        throw new ForbiddenException(
+          'The requester cannot approve their own attendance unlock',
+        );
+      if (
+        actor.role_name === 'HOD' &&
+        Number(row.faculty_dept_id) !== Number(actor.dept_id)
+      ) {
+        throw new ForbiddenException(
+          'HOD can decide only their department attendance requests',
+        );
+      }
+      if (action === 'APPROVE') {
+        const [saved] = await manager.query<Array<{ log_id: string }>>(
+          `SELECT log_id FROM course_attendance_logs
+           WHERE tenant_id=$1 AND course_id=$2 AND date=$3::date
+             AND (($4::uuid IS NOT NULL AND timetable_id=$4::uuid)
+               OR ($5::uuid IS NOT NULL AND class_adjustment_id=$5::uuid))
+           LIMIT 1`,
+          [
+            tenantId,
+            row.course_id,
+            row.class_date,
+            row.timetable_id,
+            row.class_adjustment_id,
+          ],
+        );
+        if (saved) {
+          throw new BadRequestException(
+            'Attendance was already submitted; the session cannot be unlocked',
+          );
+        }
+        if (row.class_adjustment_id) {
+          const [extra] = await manager.query<Array<{ adjustment_id: string }>>(
+            `SELECT adjustment_id FROM class_adjustments
+             WHERE tenant_id=$1 AND adjustment_id=$2::uuid AND course_id=$3
+               AND faculty_user_id=$4 AND adjustment_type='EXTRA_CLASS'
+               AND status IN ('APPROVED','NOTIFIED')
+               AND (new_date AT TIME ZONE 'Asia/Kolkata')::date=$5::date`,
+            [
+              tenantId,
+              row.class_adjustment_id,
+              row.course_id,
+              row.faculty_user_id,
+              row.class_date,
+            ],
+          );
+          if (!extra) {
+            throw new BadRequestException(
+              'The approved extra class is no longer eligible for attendance',
+            );
+          }
+        } else if (row.timetable_id) {
+          const [scheduled] = await manager.query<
+            Array<{ timetable_id: string }>
+          >(
+            `SELECT t.timetable_id
+             FROM academic_timetables t
+             LEFT JOIN academic_class_moves m ON m.tenant_id=t.tenant_id
+               AND m.source_timetable_id=t.timetable_id AND m.status='APPROVED'
+               AND (m.source_date=$4::date OR m.target_date=$4::date)
+             WHERE t.tenant_id=$1 AND t.timetable_id=$2::uuid AND t.course_id=$3
+               AND t.deleted_at IS NULL
+               AND (t.valid_from IS NULL OR t.valid_from<=$4::date)
+               AND (t.valid_to IS NULL OR t.valid_to>=$4::date)
+               AND (m.target_date=$4::date OR (
+                 EXTRACT(ISODOW FROM $4::date)=t.day_of_week
+                 AND (m.move_id IS NULL OR NOT (
+                   m.source_date=$4::date AND m.target_date<>$4::date
+                 ))
+               ))
+               AND NOT EXISTS (
+                 SELECT 1 FROM class_adjustments a
+                 WHERE a.tenant_id=t.tenant_id AND a.course_id=t.course_id
+                   AND a.faculty_user_id=t.faculty_user_id
+                   AND a.adjustment_type='CANCEL' AND a.status IN ('APPROVED','NOTIFIED')
+                   AND (a.new_date AT TIME ZONE 'Asia/Kolkata')::date=$4::date
+                   AND (a.new_date AT TIME ZONE 'Asia/Kolkata')::time=
+                     COALESCE(CASE WHEN m.target_date=$4::date THEN m.target_start_time END,t.start_time)
+               )
+             LIMIT 1`,
+            [tenantId, row.timetable_id, row.course_id, row.class_date],
+          );
+          if (!scheduled) {
+            throw new BadRequestException(
+              'The class is cancelled or no longer scheduled and cannot be unlocked',
+            );
+          }
+        }
+      }
+      const [updated] = await manager.query<
+        Array<{ unlocked_until: Date | null }>
+      >(
+        `UPDATE academic_attendance_unlock_requests
+         SET status=$3::varchar,decided_at=NOW(),decided_by_user_id=$4,
+             decision_remarks=$5,
+             unlocked_until=CASE WHEN $3::varchar='APPROVED' THEN NOW()+($6::int*INTERVAL '1 minute') ELSE NULL END
+         WHERE tenant_id=$1 AND request_id=$2::uuid
+         RETURNING unlocked_until`,
+        [
+          tenantId,
+          requestId,
+          action === 'APPROVE' ? 'APPROVED' : 'REJECTED',
+          hodUserId,
+          remarks?.trim() || null,
+          minutes,
+        ],
+      );
+      await manager.query(
+        `INSERT INTO academic_attendance_workflow_events
+          (tenant_id,request_id,faculty_user_id,course_id,timetable_id,class_adjustment_id,
+           class_date,event_type,actor_user_id,details)
+         SELECT tenant_id,request_id,faculty_user_id,course_id,timetable_id,class_adjustment_id,
+                class_date,$3,$4,$5::jsonb
+         FROM academic_attendance_unlock_requests WHERE tenant_id=$1 AND request_id=$2::uuid`,
+        [
+          tenantId,
+          requestId,
+          action === 'APPROVE' ? 'APPROVED' : 'REJECTED',
+          hodUserId,
+          JSON.stringify({
+            remarks: remarks?.trim() || null,
+            unlock_minutes: action === 'APPROVE' ? minutes : null,
+          }),
+        ],
+      );
+      if (action === 'APPROVE') {
+        await manager.query(
+          `INSERT INTO academic_attendance_workflow_events
+            (tenant_id,request_id,faculty_user_id,course_id,timetable_id,class_adjustment_id,
+             class_date,event_type,actor_user_id,details)
+           SELECT tenant_id,request_id,faculty_user_id,course_id,timetable_id,class_adjustment_id,
+                  class_date,'UNLOCKED',$3,$4::jsonb
+           FROM academic_attendance_unlock_requests WHERE tenant_id=$1 AND request_id=$2::uuid`,
+          [
+            tenantId,
+            requestId,
+            hodUserId,
+            JSON.stringify({
+              unlock_minutes: minutes,
+              unlocked_until: updated?.unlocked_until ?? null,
+            }),
+          ],
+        );
+      }
+      return {
+        ...row,
+        action,
+        unlocked_until: updated?.unlocked_until ?? null,
+      };
+    });
+
+    if (this.falconNotifications) {
+      const approved = action === 'APPROVE';
+      await this.falconNotifications.create({
+        tenantId,
+        userId: decided.faculty_user_id,
+        category: 'ACADEMICS',
+        title: approved
+          ? 'Attendance marking temporarily unlocked'
+          : 'Attendance unlock request rejected',
+        message: approved
+          ? `${decided.course_code} attendance for ${decided.class_date} is open for ${minutes} minutes. Complete it before the window closes.`
+          : `${decided.course_code} attendance unlock was rejected${remarks?.trim() ? `: ${remarks.trim()}` : '.'}`,
+        actionLink: '/faculty/attendance',
+        actionLabel: approved ? 'Mark attendance now' : 'View attendance',
+        severity: approved ? 'warning' : 'info',
+        intent: approved ? 'action_required' : 'status_update',
+        metadata: {
+          request_id: requestId,
+          unlocked_until: decided.unlocked_until,
+        },
+      });
+    }
+    return {
+      request_id: requestId,
+      status: action === 'APPROVE' ? 'APPROVED' : 'REJECTED',
+      unlocked_until: decided.unlocked_until,
+    };
   }
 
   async getAttendanceAnalytics(
@@ -1249,6 +2039,238 @@ export class AcademicsFacultyService {
     };
   }
 
+  async exportAverageAttendance(
+    courseId: string,
+    facultyUserId: string,
+    tenantId: string,
+    date: string,
+    timetableId: string,
+  ) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date ?? '')) {
+      throw new BadRequestException('date must be a valid YYYY-MM-DD value');
+    }
+    if (!timetableId?.trim()) {
+      throw new BadRequestException(
+        'Choose a scheduled class before exporting attendance',
+      );
+    }
+
+    const roster = await this.getCourseStudents(
+      courseId,
+      facultyUserId,
+      tenantId,
+      timetableId,
+      date,
+    );
+    const effectiveFacultyId = await this.resolveAttendanceFacultyId(
+      courseId,
+      facultyUserId,
+      tenantId,
+      date,
+      extraClassId(timetableId) ? undefined : timetableId,
+    );
+    const [course] = await this.dataSource.query<
+      Array<{ course_code: string; course_name: string }>
+    >(
+      `SELECT course_code,course_name FROM academic_courses
+       WHERE tenant_id=$1 AND course_id=$2 LIMIT 1`,
+      [tenantId, courseId],
+    );
+    if (!course) throw new NotFoundException('Course not found');
+
+    const entries = await this.dataSource.query<
+      Array<{ student_user_id: string; status: string }>
+    >(
+      `SELECT entry.value->>'student_id' AS student_user_id,
+              UPPER(entry.value->>'status') AS status
+       FROM course_attendance_logs cal
+       CROSS JOIN LATERAL jsonb_array_elements(cal.attendance_data) entry(value)
+       WHERE cal.tenant_id=$1 AND cal.course_id=$2
+         AND cal.faculty_user_id=$3 AND cal.date<=$4::date
+         AND cal.deleted_at IS NULL
+       ORDER BY cal.date,cal.log_id`,
+      [tenantId, courseId, effectiveFacultyId, date],
+    );
+
+    const counts = new Map<
+      string,
+      {
+        recorded: number;
+        present: number;
+        absent: number;
+        excused: number;
+        late: number;
+      }
+    >();
+    for (const row of entries) {
+      const current = counts.get(row.student_user_id) ?? {
+        recorded: 0,
+        present: 0,
+        absent: 0,
+        excused: 0,
+        late: 0,
+      };
+      current.recorded += 1;
+      if (row.status === 'PRESENT') current.present += 1;
+      else if (row.status === 'ABSENT') current.absent += 1;
+      else if (row.status === 'EXCUSED') current.excused += 1;
+      else if (row.status === 'LATE') current.late += 1;
+      counts.set(row.student_user_id, current);
+    }
+
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'Falcon Campus OS';
+    workbook.created = new Date();
+    workbook.calcProperties.fullCalcOnLoad = true;
+    const sheet = workbook.addWorksheet('Average Attendance', {
+      views: [{ state: 'frozen', ySplit: 7 }],
+    });
+    sheet.columns = [
+      { key: 'serial', width: 8 },
+      { key: 'roll_number', width: 20 },
+      { key: 'name', width: 30 },
+      { key: 'recorded', width: 18 },
+      { key: 'present', width: 12 },
+      { key: 'absent', width: 12 },
+      { key: 'excused', width: 18 },
+      { key: 'late', width: 10 },
+      { key: 'average', width: 16 },
+      { key: 'status', width: 22 },
+    ];
+    sheet.mergeCells('A1:J1');
+    sheet.getCell('A1').value = 'Average Attendance Report';
+    sheet.getCell('A2').value = 'Course';
+    sheet.getCell('B2').value = `${course.course_code} — ${course.course_name}`;
+    sheet.getCell('A3').value = 'As of date';
+    sheet.getCell('B3').value = date;
+    sheet.getCell('A4').value = 'Students';
+    sheet.getCell('B4').value = roster.length;
+    sheet.getCell('D4').value = 'Course average';
+    sheet.getCell('A5').value = 'Attendance credit';
+    sheet.getCell('B5').value =
+      'Present, late and excused entries count as attended';
+
+    const headerRowNumber = 7;
+    const header = sheet.getRow(headerRowNumber);
+    header.values = [
+      'S.No.',
+      'Enrollment / Roll No.',
+      'Student Name',
+      'Recorded Sessions',
+      'Present',
+      'Absent',
+      'Leave / Excused',
+      'Late',
+      'Average Attendance %',
+      'Status',
+    ];
+
+    const firstDataRow = headerRowNumber + 1;
+    let creditedTotal = 0;
+    let recordedTotal = 0;
+    roster.forEach((student, index) => {
+      const count = counts.get(student.student_id) ?? {
+        recorded: 0,
+        present: 0,
+        absent: 0,
+        excused: 0,
+        late: 0,
+      };
+      const credited = count.present + count.excused + count.late;
+      const average = count.recorded ? (credited / count.recorded) * 100 : 0;
+      creditedTotal += credited;
+      recordedTotal += count.recorded;
+      const excelRow = firstDataRow + index;
+      const row = sheet.getRow(excelRow);
+      row.values = [
+        index + 1,
+        student.roll_number,
+        student.name,
+        count.recorded,
+        count.present,
+        count.absent,
+        count.excused,
+        count.late,
+        {
+          formula: `IF(D${excelRow}=0,0,(E${excelRow}+G${excelRow}+H${excelRow})/D${excelRow}*100)`,
+          result: average,
+        },
+        count.recorded === 0
+          ? 'No recorded sessions'
+          : average < 75
+            ? 'Below 75%'
+            : '75% or above',
+      ];
+      row.getCell(9).numFmt = '0.00"%"';
+    });
+
+    const lastDataRow = Math.max(
+      firstDataRow,
+      firstDataRow + roster.length - 1,
+    );
+    const courseAverage = recordedTotal
+      ? (creditedTotal / recordedTotal) * 100
+      : 0;
+    sheet.getCell('E4').value = roster.length
+      ? {
+          formula: `IF(SUM(D${firstDataRow}:D${lastDataRow})=0,0,(SUM(E${firstDataRow}:E${lastDataRow})+SUM(G${firstDataRow}:G${lastDataRow})+SUM(H${firstDataRow}:H${lastDataRow}))/SUM(D${firstDataRow}:D${lastDataRow})*100)`,
+          result: courseAverage,
+        }
+      : 0;
+    sheet.getCell('E4').numFmt = '0.00"%"';
+    sheet.autoFilter = {
+      from: { row: headerRowNumber, column: 1 },
+      to: {
+        row: Math.max(headerRowNumber, firstDataRow + roster.length - 1),
+        column: 10,
+      },
+    };
+
+    sheet.getCell('A1').font = {
+      bold: true,
+      size: 18,
+      color: { argb: 'FF082A55' },
+    };
+    sheet.getCell('A1').alignment = { horizontal: 'center' };
+    header.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    header.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FF082A55' },
+    };
+    header.alignment = {
+      vertical: 'middle',
+      horizontal: 'center',
+      wrapText: true,
+    };
+    header.height = 32;
+    sheet.getRows(2, 4)?.forEach((row) => {
+      row.getCell(1).font = { bold: true };
+      row.getCell(4).font = { bold: true };
+    });
+    for (
+      let rowNumber = firstDataRow;
+      rowNumber < firstDataRow + roster.length;
+      rowNumber += 1
+    ) {
+      const row = sheet.getRow(rowNumber);
+      row.alignment = { vertical: 'middle' };
+      if ((rowNumber - firstDataRow) % 2 === 1) {
+        row.fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: 'FFF4F7FB' },
+        };
+      }
+    }
+
+    const safeCode = course.course_code.replace(/[^A-Za-z0-9_-]+/g, '-');
+    return {
+      buffer: Buffer.from(await workbook.xlsx.writeBuffer()),
+      filename: `average-attendance-${safeCode}-${date}.xlsx`,
+    };
+  }
+
   async sendAttendanceWarnings(
     courseId: string,
     facultyUserId: string,
@@ -1257,13 +2279,22 @@ export class AcademicsFacultyService {
     date: string,
     timetableId: string,
   ) {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date ?? '') ||
-        Number.isNaN(Date.parse(`${date}T00:00:00Z`)) ||
-        new Date(`${date}T00:00:00Z`).toISOString().slice(0, 10) !== date) {
+    if (
+      !/^\d{4}-\d{2}-\d{2}$/.test(date ?? '') ||
+      Number.isNaN(Date.parse(`${date}T00:00:00Z`)) ||
+      new Date(`${date}T00:00:00Z`).toISOString().slice(0, 10) !== date
+    ) {
       throw new BadRequestException('Choose a valid class date');
     }
-    if (!timetableId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(timetableId)) {
-      throw new BadRequestException('Select a scheduled class before sending warnings');
+    if (
+      !timetableId ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        timetableId,
+      )
+    ) {
+      throw new BadRequestException(
+        'Select a scheduled class before sending warnings',
+      );
     }
     const scopedRoster = await this.getCourseStudents(courseId, facultyUserId, tenantId, timetableId, date);
     const allowed = new Set(scopedRoster.map((student) => student.student_id));
@@ -1271,7 +2302,9 @@ export class AcademicsFacultyService {
     if (!ids.length)
       throw new BadRequestException('Select at least one student');
     if (ids.some((id) => !allowed.has(id))) {
-      throw new ForbiddenException('Warnings can be sent only to students in this scheduled class');
+      throw new ForbiddenException(
+        'Warnings can be sent only to students in this scheduled class',
+      );
     }
 
     const rows = await this.dataSource.query<
@@ -1346,11 +2379,18 @@ export class AcademicsFacultyService {
   ) {
     const date = dto.date ?? localDateString();
     const parsedDate = new Date(`${date}T00:00:00Z`);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(parsedDate.getTime()) || parsedDate.getUTCFullYear()<1 || parsedDate.toISOString().slice(0,10)!==date) {
+    if (
+      !/^\d{4}-\d{2}-\d{2}$/.test(date) ||
+      Number.isNaN(parsedDate.getTime()) ||
+      parsedDate.getUTCFullYear() < 1 ||
+      parsedDate.toISOString().slice(0, 10) !== date
+    ) {
       throw new BadRequestException('date must be a valid YYYY-MM-DD value');
     }
     if (dto.timetable_id?.startsWith('held:')) {
-      throw new BadRequestException('This class is awaiting department confirmation. Attendance cannot be recorded.');
+      throw new BadRequestException(
+        'This class is awaiting department confirmation. Attendance cannot be recorded.',
+      );
     }
     const adjustmentId = extraClassId(dto.timetable_id);
     const timetableId = adjustmentId ? null : dto.timetable_id ?? null;
@@ -1364,7 +2404,9 @@ export class AcademicsFacultyService {
         WHERE e.tenant_id=$1 AND e.course_id=$2 AND $3::uuid=ANY(e.faculty_user_ids)
           AND e.state IN ('CONFIRMED','HELD')) AS requires_published_slot`, [tenantId,dto.course_id,facultyUserId,date]);
       if (publication?.requires_published_slot === true) {
-        throw new BadRequestException('Select a confirmed published timetable session to record attendance.');
+        throw new BadRequestException(
+          'Select a confirmed published timetable session to record attendance.',
+        );
       }
     }
     await this.assertCanMarkAttendance(
@@ -1381,9 +2423,19 @@ export class AcademicsFacultyService {
       date,
       timetableId ?? undefined,
     );
-    if (this.isAttendanceLocked(date)) {
+    const unlock = this.isAttendanceLocked(date)
+      ? await this.activeAttendanceUnlock(
+          this.dataSource,
+          tenantId,
+          facultyUserId,
+          dto.course_id,
+          date,
+          dto.timetable_id,
+        )
+      : null;
+    if (this.isAttendanceLocked(date) && !unlock?.active) {
       throw new ForbiddenException(
-        'Attendance locked. Contact Admin to modify records older than 3 days.',
+        'Attendance locked. Request HOD approval to open a limited marking window.',
       );
     }
     if (!dto.attendance_data?.length) {
@@ -1413,29 +2465,50 @@ export class AcademicsFacultyService {
         )
       : [];
     if (timetableId && !slotRows[0]) {
-      throw new ForbiddenException('Attendance slot is not assigned to this faculty/course');
+      throw new ForbiddenException(
+        'Attendance slot is not assigned to this faculty/course',
+      );
     }
     const section = slotRows[0]?.is_practical
       ? slotRows[0]?.section?.trim() || null
       : null;
     if (slotRows[0]?.is_practical && !section) {
-      throw new ForbiddenException('Practical batch is not mapped to a student section');
+      throw new ForbiddenException(
+        'Practical batch is not mapped to a student section',
+      );
     }
     await this.dataSource.transaction(async (manager) => {
       if (adjustmentId) {
-        await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))',
-          [`class-move:${tenantId}:${date}`]);
-        await this.assertApprovedExtraClass(manager, tenantId, dto.course_id, facultyUserId, date, adjustmentId);
+        await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+          `class-move:${tenantId}:${date}`,
+        ]);
+        await this.assertApprovedExtraClass(
+          manager,
+          tenantId,
+          dto.course_id,
+          facultyUserId,
+          date,
+          adjustmentId,
+        );
       }
       if (timetableId) {
-        await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))',
-          [`class-move:${tenantId}:${date}`]);
-        const [effective] = await manager.query<Array<{
-          day_of_week: number; valid_from: string | null; valid_to: string | null;
-          source_date: string | null; target_date: string | null;
-        }>>(
+        await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+          `class-move:${tenantId}:${date}`,
+        ]);
+        const [effective] = await manager.query<
+          Array<{
+            day_of_week: number;
+            valid_from: string | null;
+            valid_to: string | null;
+            source_date: string | null;
+            target_date: string | null;
+            occurrence_start_time: string;
+          }>
+        >(
           `SELECT t.day_of_week,t.valid_from::text AS valid_from,t.valid_to::text AS valid_to,
-                  m.source_date::text AS source_date,m.target_date::text AS target_date
+                  m.source_date::text AS source_date,m.target_date::text AS target_date,
+                  COALESCE(CASE WHEN m.target_date=$4::date THEN m.target_start_time END,
+                    t.start_time)::text AS occurrence_start_time
            FROM academic_timetables t
            LEFT JOIN academic_class_moves m ON m.tenant_id=t.tenant_id
              AND m.source_timetable_id=t.timetable_id AND m.status='APPROVED'
@@ -1444,17 +2517,45 @@ export class AcademicsFacultyService {
              AND t.deleted_at IS NULL LIMIT 1`,
           [tenantId,timetableId,dto.course_id,date],
         );
-        if (!effective) throw new ForbiddenException('Selected class is no longer scheduled');
+        if (!effective)
+          throw new ForbiddenException('Selected class is no longer scheduled');
         const isoDay = new Date(`${date}T00:00:00Z`).getUTCDay() || 7;
         if (effective.source_date === date && effective.target_date !== date) {
           throw new ForbiddenException('This class was moved to another date');
         }
-        if (effective.target_date !== date && (
-          Number(effective.day_of_week) !== isoDay ||
-          (effective.valid_from && String(effective.valid_from).slice(0,10) > date) ||
-          (effective.valid_to && String(effective.valid_to).slice(0,10) < date)
-        )) {
-          throw new ForbiddenException('Attendance must use the scheduled class date');
+        if (
+          effective.target_date !== date &&
+          (Number(effective.day_of_week) !== isoDay ||
+            (effective.valid_from &&
+              String(effective.valid_from).slice(0, 10) > date) ||
+            (effective.valid_to &&
+              String(effective.valid_to).slice(0, 10) < date))
+        ) {
+          throw new ForbiddenException(
+            'Attendance must use the scheduled class date',
+          );
+        }
+        const [cancelled] = await manager.query<
+          Array<{ adjustment_id: string }>
+        >(
+          `SELECT adjustment_id FROM class_adjustments
+           WHERE tenant_id=$1 AND course_id=$2 AND faculty_user_id=$3
+             AND adjustment_type='CANCEL' AND status IN ('APPROVED','NOTIFIED')
+             AND (new_date AT TIME ZONE 'Asia/Kolkata')::date=$4::date
+             AND (new_date AT TIME ZONE 'Asia/Kolkata')::time=$5::time
+           LIMIT 1`,
+          [
+            tenantId,
+            dto.course_id,
+            effectiveFacultyId,
+            date,
+            effective.occurrence_start_time,
+          ],
+        );
+        if (cancelled) {
+          throw new ForbiddenException(
+            'This class was cancelled. Existing attendance is retained as read-only history.',
+          );
         }
         await manager.query(
           `SELECT pg_advisory_xact_lock(hashtext($1))`,
@@ -1467,7 +2568,9 @@ export class AcademicsFacultyService {
           [tenantId, timetableId, date],
         );
         if (cover && cover.proxy_faculty_id !== facultyUserId) {
-          throw new ForbiddenException('This session is assigned to an approved substitute faculty');
+          throw new ForbiddenException(
+            'This session is assigned to an approved substitute faculty',
+          );
         }
       }
       // Batch edits and attendance saves share this lock; neither can validate
@@ -1486,16 +2589,24 @@ export class AcademicsFacultyService {
       );
       const roster = new Set<string>(rosterRows.map((row) => row.student_id));
       const submitted = dto.attendance_data.map((row) => row.student_id);
-      const duplicate = submitted.find((id, index) => submitted.indexOf(id) !== index);
-      if (duplicate) throw new BadRequestException('Attendance contains duplicate students');
-      if (submitted.some((id) => !roster.has(id))) throw new BadRequestException('Attendance contains students outside this scheduled batch');
-      if ([...roster].some((id) => !submitted.includes(id))) throw new BadRequestException('Attendance must include every student in this scheduled batch');
+      const duplicate = submitted.find(
+        (id, index) => submitted.indexOf(id) !== index,
+      );
+      if (duplicate)
+        throw new BadRequestException('Attendance contains duplicate students');
+      if (submitted.some((id) => !roster.has(id)))
+        throw new BadRequestException(
+          'Attendance contains students outside this scheduled batch',
+        );
+      if ([...roster].some((id) => !submitted.includes(id)))
+        throw new BadRequestException(
+          'Attendance must include every student in this scheduled batch',
+        );
       // Serialize the exact slot/day so two browser tabs cannot overwrite a
       // practical batch with a stale roster.
-      await manager.query(
-        `SELECT pg_advisory_xact_lock(hashtext($1))`,
-        [`${tenantId}:${dto.course_id}:${effectiveFacultyId}:${date}:${adjustmentId ?? timetableId ?? 'none'}`],
-      );
+      await manager.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [
+        `${tenantId}:${dto.course_id}:${effectiveFacultyId}:${date}:${adjustmentId ?? timetableId ?? 'none'}`,
+      ]);
       await manager.query(
         `DELETE FROM course_attendance_logs
          WHERE tenant_id = $1 AND course_id = $2 AND faculty_user_id = $3
@@ -1520,6 +2631,33 @@ export class AcademicsFacultyService {
           facultyUserId,
         ],
       );
+      await manager.query(
+        `INSERT INTO academic_attendance_workflow_events
+          (tenant_id,request_id,faculty_user_id,course_id,timetable_id,class_adjustment_id,
+           class_date,event_type,actor_user_id,details)
+         VALUES ($1,$2::uuid,$3,$4,$5::uuid,$6::uuid,$7::date,$8,$9,$10::jsonb)`,
+        [
+          tenantId,
+          unlock?.request_id ?? null,
+          effectiveFacultyId,
+          dto.course_id,
+          timetableId,
+          adjustmentId,
+          date,
+          unlock?.active ? 'ATTENDANCE_MODIFIED' : 'ATTENDANCE_SUBMITTED',
+          facultyUserId,
+          JSON.stringify({ student_count: dto.attendance_data.length }),
+        ],
+      );
+      if (unlock?.active) {
+        await manager.query(
+          `UPDATE academic_attendance_unlock_requests
+           SET status='APPLIED',applied_at=NOW()
+           WHERE tenant_id=$1 AND request_id=$2::uuid AND status='APPROVED'
+             AND unlocked_until>NOW()`,
+          [tenantId, unlock.request_id],
+        );
+      }
     });
 
     const updated = await this.recalculateCourseAttendancePercents(
@@ -1749,13 +2887,7 @@ export class AcademicsFacultyService {
   }
 
   private isAttendanceLocked(date: string) {
-    const selected = new Date(`${date}T00:00:00`);
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const diffDays = Math.floor(
-      (today.getTime() - selected.getTime()) / 86_400_000,
-    );
-    return diffDays > 3;
+    return Date.now() > this.attendanceMarkingDeadline(date).getTime();
   }
 
   private async persistMaterialFile(

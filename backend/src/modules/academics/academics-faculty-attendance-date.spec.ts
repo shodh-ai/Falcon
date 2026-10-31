@@ -75,6 +75,20 @@ describe('Faculty attendance date and practical batch safety', () => {
     expect(week[0].sessions[0]).toMatchObject({ timetable_id: `extra:${adjustment}`, has_saved_attendance: true });
     expect(dataSource.query.mock.calls[0][0]).toContain('cal.class_adjustment_id=a.adjustment_id');
   });
+  it('hides a cancelled unsaved session but preserves saved history as read only', async () => {
+    const { service, dataSource } = createService({ timetableRows: [
+      { date: '2026-10-29', timetable_id: 'cancelled-unsaved', cancelled: true, has_saved_attendance: false },
+      { date: '2026-10-29', timetable_id: 'cancelled-saved', cancelled: true, has_saved_attendance: true },
+      { date: '2026-10-29', timetable_id: 'scheduled', cancelled: false, has_saved_attendance: false },
+    ] });
+    const week = await service.getFacultyAttendanceWeek('faculty-1', 'tenant-1', null, '2026-10-29');
+    expect(week[0].sessions.map(session => session.timetable_id)).toEqual(['cancelled-saved', 'scheduled']);
+    expect(week[0].sessions[0]).toMatchObject({ cancelled: true, attendance_locked: true, has_saved_attendance: true });
+    const sql = dataSource.query.mock.calls[0][0];
+    expect(sql).toContain("a.adjustment_type='CANCEL'");
+    expect(sql).toContain("a.status IN ('APPROVED','NOTIFIED')");
+    expect(sql).toContain("(a.new_date AT TIME ZONE 'Asia/Kolkata')::time=t.start_time");
+  });
   it('rejects invalid week input before querying', async () => {
     const {service,dataSource}=createService();
     await expect(service.getFacultyAttendanceWeek('f','t',null,'2026-02-30')).rejects.toBeInstanceOf(BadRequestException);
@@ -115,6 +129,17 @@ describe('Faculty attendance date and practical batch safety', () => {
       ['tenant-1', 'faculty-1', null, 2, '2026-10-13'],
     );
     expect(rosterSpy).toHaveBeenCalledWith('course-1', 'faculty-1', 'tenant-1', 'slot-1', '2026-10-13');
+  });
+
+  it('does not return a cancelled session unless saved attendance must remain reviewable', async () => {
+    const { service } = createService({ timetableRows: [
+      { timetable_id: 'cancelled-unsaved', course_id: 'course-1', cancelled: true, has_saved_attendance: false },
+      { timetable_id: 'cancelled-saved', course_id: 'course-1', cancelled: true, has_saved_attendance: true },
+    ] });
+    jest.spyOn(service, 'getCourseStudents').mockResolvedValue([]);
+    const rows = await service.getFacultyAcademicTimetableToday('faculty-1', 'tenant-1', null, '2026-10-13');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ timetable_id: 'cancelled-saved', cancelled: true, attendance_locked: true });
   });
 
   it('rejects invalid dates instead of looking up an unrelated class day', async () => {

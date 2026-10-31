@@ -328,6 +328,33 @@ export class AcademicsController {
     );
   }
 
+  @Get('faculty/course/:courseId/attendance/average-export')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  async exportFacultyCourseAverageAttendance(
+    @Param('courseId') courseId: string,
+    @Query('date') date: string,
+    @Query('timetableId') timetableId: string,
+    @Req() req: { user: AuthUser },
+    @Res() res: Response,
+  ) {
+    const result = await this.facultyAcademics.exportAverageAttendance(
+      courseId,
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      date,
+      timetableId,
+    );
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${result.filename}"`,
+    );
+    res.send(result.buffer);
+  }
+
   @Post('faculty/course/:courseId/attendance/warnings')
   @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
   sendFacultyCourseAttendanceWarnings(
@@ -361,6 +388,25 @@ export class AcademicsController {
     },
   ) {
     return this.facultyAcademics.saveCourseAttendanceLog(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      dto,
+    );
+  }
+
+  @Post('faculty/attendance/unlock-requests')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  requestAttendanceUnlock(
+    @Req() req: { user: AuthUser },
+    @Body()
+    dto: {
+      course_id?: string;
+      date?: string;
+      timetable_id?: string;
+      reason?: string;
+    },
+  ) {
+    return this.facultyAcademics.requestAttendanceUnlock(
       req.user.user_id,
       this.resolveTenantId(req.user),
       dto,
@@ -1636,6 +1682,31 @@ export class AcademicsController {
     return this.facultyWorkspaces.listHodPendingAdjustments(
       req.user.user_id,
       this.resolveTenantId(req.user),
+    );
+  }
+
+  @Get('hod/approvals/attendance-unlocks')
+  @Roles('HOD', 'SuperAdmin')
+  hodAttendanceUnlockApprovals(@Req() req: { user: AuthUser }) {
+    return this.facultyAcademics.listHodAttendanceUnlockRequests(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+    );
+  }
+
+  @Patch('hod/approvals/attendance-unlocks/:requestId')
+  @Roles('HOD', 'SuperAdmin')
+  decideAttendanceUnlock(
+    @Param('requestId') requestId: string,
+    @Req() req: { user: AuthUser },
+    @Body() body: { action: 'APPROVE' | 'REJECT'; remarks?: string },
+  ) {
+    return this.facultyAcademics.decideAttendanceUnlock(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      requestId,
+      body.action,
+      body.remarks,
     );
   }
 

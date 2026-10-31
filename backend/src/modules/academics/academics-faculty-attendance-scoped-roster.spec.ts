@@ -1,6 +1,7 @@
 jest.mock('uuid', () => ({ v4: jest.fn(() => 'test-id') }));
 
 import { BadRequestException } from '@nestjs/common';
+import * as ExcelJS from 'exceljs';
 import { AcademicsFacultyService } from './academics-faculty.service';
 
 const qaStudent = '00000000-0000-4000-8000-000000000001';
@@ -155,6 +156,30 @@ describe('Faculty attendance uses the same scoped roster for reading and saving'
     );
   });
 
+  it('blocks a stale attendance save after the exact occurrence is cancelled', async () => {
+    const { service, manager, date } = setup();
+    const query = manager.query.getMockImplementation()!;
+    manager.query.mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT t.day_of_week')) return [{
+        day_of_week: new Date(`${date}T00:00:00Z`).getUTCDay() || 7,
+        valid_from: null, valid_to: null, source_date: null, target_date: null,
+        occurrence_start_time: '09:00:00',
+      }];
+      if (sql.includes("adjustment_type='CANCEL'")) return [{ adjustment_id: 'cancel-1' }];
+      return query(sql);
+    });
+    await expect(service.saveCourseAttendanceLog('faculty-1', 'tenant-1', {
+      course_id: 'course-1', timetable_id: 'slot-1', date,
+      attendance_data: [{ student_id: qaStudent, status: 'PRESENT' }],
+    })).rejects.toThrow('This class was cancelled');
+    expect(manager.query).not.toHaveBeenCalledWith(
+      expect.stringContaining('DELETE FROM course_attendance_logs'), expect.anything(),
+    );
+    expect(manager.query).not.toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO course_attendance_logs'), expect.anything(),
+    );
+  });
+
   it('records an approved substitute as actor while retaining the original timetable owner', async () => {
     const { service, manager, dataSource, date } = setup();
     const read = dataSource.query.getMockImplementation()!;
@@ -227,6 +252,52 @@ describe('Faculty attendance uses the same scoped roster for reading and saving'
     const result = await service.getAttendanceAnalytics('course-1', 'faculty-1', 'tenant-1', date, 'slot-1');
     expect(result.defaulters.map((row: { student_user_id: string }) => row.student_user_id)).toEqual([qaStudent]);
     expect(result.habitual_absentees.map((row: { student_user_id: string }) => row.student_user_id)).toEqual([qaStudent]);
+  });
+
+  it('exports a roster-scoped average attendance workbook with auditable counts', async () => {
+    const { service, dataSource, date } = setup(true);
+    jest.spyOn(service, 'getCourseStudents').mockResolvedValue([
+      { student_id: qaStudent, name: 'QA Student One', roll_number: 'QA-1', photo_url: null },
+      { student_id: secondVisibleStudent, name: 'Visible Two', roll_number: 'QA-2', photo_url: null },
+    ]);
+    jest.spyOn(service as never, 'resolveAttendanceFacultyId' as never).mockResolvedValue('faculty-1' as never);
+    const query = dataSource.query.getMockImplementation()!;
+    let attendanceExportSql = '';
+    dataSource.query.mockImplementation((sql: string) => {
+      if (sql.includes('SELECT course_code,course_name')) {
+        return Promise.resolve([{ course_code: 'DA101', course_name: 'Digital Assignment Studio' }]);
+      }
+      if (sql.includes('jsonb_array_elements(cal.attendance_data)')) {
+        attendanceExportSql = sql;
+        return Promise.resolve([
+          { student_user_id: qaStudent, status: 'PRESENT' },
+          { student_user_id: qaStudent, status: 'ABSENT' },
+          { student_user_id: secondVisibleStudent, status: 'EXCUSED' },
+          { student_user_id: unmappedStudent, status: 'PRESENT' },
+        ]);
+      }
+      return query(sql);
+    });
+
+    const exported = await service.exportAverageAttendance(
+      'course-1', 'faculty-1', 'tenant-1', date, 'slot-1',
+    );
+    expect(exported.filename).toBe(`average-attendance-DA101-${date}.xlsx`);
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(exported.buffer as unknown as ExcelJS.Buffer);
+    const sheet = workbook.getWorksheet('Average Attendance');
+    expect(sheet?.getCell('A1').value).toBe('Average Attendance Report');
+    expect(sheet?.getCell('C8').value).toBe('QA Student One');
+    expect(sheet?.getCell('D8').value).toBe(2);
+    expect(sheet?.getCell('I8').result).toBe(50);
+    expect(sheet?.getCell('J8').value).toBe('Below 75%');
+    expect(sheet?.getCell('C9').value).toBe('Visible Two');
+    expect(sheet?.getCell('I9').result).toBe(100);
+    expect(sheet?.getCell('C10').value).toBeNull();
+    expect(Number(sheet?.getCell('E4').result)).toBeCloseTo(66.67, 1);
+    expect(attendanceExportSql).toContain('cal.deleted_at IS NULL');
+    expect(attendanceExportSql).toContain('ORDER BY cal.date,cal.log_id');
+    expect(attendanceExportSql).not.toContain('cal.created_at');
   });
 
   it('cannot send a warning to another class roster', async () => {

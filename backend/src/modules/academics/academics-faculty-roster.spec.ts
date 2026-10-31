@@ -79,7 +79,7 @@ describe('AcademicsFacultyService course roster', () => {
     ]) };
     const dataSource = { query: jest.fn((sql: string) => {
       if (sql.includes('FROM academic_course_allocations')) {
-        return Promise.resolve([{ program_name: 'BTECH CSE', semester: 'III-A', academic_year: '2026-2027' }]);
+        return Promise.resolve([{ program_name: 'BTECH CSE', semester: 'III-A', academic_year: '2026-27' }]);
       }
       if (sql.includes('FROM student_profiles')) {
         return Promise.resolve([

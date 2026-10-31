@@ -1672,13 +1672,25 @@ export class FacultyWorkspacesService {
     if (!roster?.count) review.push('Course student roster is not mapped');
     const [calendar] = await db.query<Array<{ kind_of_day: string | null }>>(
       `SELECT kind_of_day FROM academic_calendar_days WHERE tenant_id=$1 AND calendar_date=$2::date`, [tenantId, date]);
-    if (!calendar?.kind_of_day || calendar.kind_of_day === 'UNCLASSIFIED') review.push('Academic calendar is not confirmed for this day');
-    else if (calendar.kind_of_day !== 'ACADEMIC_DAY') reasons.push(`Academic calendar marks this day ${calendar.kind_of_day.toLowerCase().replace(/_/g, ' ')}`);
+    const calendarKind = calendar?.kind_of_day;
+    const calendarUnconfirmed = !calendarKind || calendarKind === 'UNCLASSIFIED';
+    if (calendarKind && calendarKind !== 'UNCLASSIFIED' && calendarKind !== 'ACADEMIC_DAY')
+      reasons.push(`Academic calendar marks this day ${calendarKind.toLowerCase().replace(/_/g, ' ')}`);
     const holidays = await db.query<Array<{ title: string }>>(
       `SELECT title FROM admin_academic_calendar_events
        WHERE tenant_id=$1 AND deleted_at IS NULL AND starts_on<=$2::date AND COALESCE(ends_on,starts_on)>=$2::date
          AND (event_type ILIKE '%HOLIDAY%' OR COALESCE(kind_of_day,'') ILIKE '%HOLIDAY%')`, [tenantId,date]);
     if (holidays.length) reasons.push(`Holiday: ${holidays[0].title}`);
+    const publishedDay = calendarUnconfirmed
+      ? await db.query<Array<{ present: number }>>(
+          `SELECT 1 AS present FROM academic_timetables
+           WHERE tenant_id=$1 AND day_of_week=$2 AND deleted_at IS NULL
+             AND (valid_from IS NULL OR valid_from <= $3::date)
+             AND (valid_to IS NULL OR valid_to >= $3::date)
+           LIMIT 1`, [tenantId,day,date])
+      : [];
+    if (calendarUnconfirmed && !publishedDay.length)
+      review.push('Academic calendar is not confirmed for this day');
     const [hours, minutes] = startTime.split(':').map(Number);
     const endTime = `${String(hours + 1).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
     const timetable = await db.query<Array<{ timetable_id: string; course_id: string; faculty_user_id: string; room: string | null; start_time: string; end_time: string }>>(
@@ -1969,20 +1981,53 @@ export class FacultyWorkspacesService {
         [adjustmentId, tenantId, remarks.trim()],
       );
     } else if (row.adjustment_type === 'EXTRA_CLASS') {
-      await this.dataSource.transaction(async manager => {
-        const [pending] = await manager.query<Array<{ status: string; new_date: string; proposed_room: string | null; course_id: string; faculty_user_id: string }>>(
-          `SELECT status,to_char(new_date AT TIME ZONE 'Asia/Kolkata','YYYY-MM-DD\"T\"HH24:MI') AS new_date,proposed_room,course_id,faculty_user_id FROM class_adjustments
-           WHERE tenant_id=$1 AND adjustment_id=$2 FOR UPDATE`, [tenantId,adjustmentId]);
-        if (pending?.status !== 'PENDING_HOD_APPROVAL') throw new BadRequestException('Adjustment has already been processed');
-        const date = pending.new_date.slice(0,10);
-        const startTime = pending.new_date.slice(11,16);
-        if (date < campusDate()) throw new BadRequestException('Extra class date is now past due');
+      await this.dataSource.transaction(async (manager) => {
+        const [pending] = await manager.query<
+          Array<{
+            status: string;
+            new_date: string;
+            proposed_room: string | null;
+            course_id: string;
+            faculty_user_id: string;
+          }>
+        >(
+          `SELECT status,to_char(new_date AT TIME ZONE 'Asia/Kolkata','YYYY-MM-DD"T"HH24:MI') AS new_date,proposed_room,course_id,faculty_user_id FROM class_adjustments
+           WHERE tenant_id=$1 AND adjustment_id=$2 FOR UPDATE`,
+          [tenantId, adjustmentId],
+        );
+        if (pending?.status !== 'PENDING_HOD_APPROVAL') {
+          throw new BadRequestException(
+            'Adjustment has already been processed',
+          );
+        }
+        const date = pending.new_date.slice(0, 10);
+        const startTime = pending.new_date.slice(11, 16);
+        if (date < campusDate()) {
+          throw new BadRequestException('Extra class date is now past due');
+        }
         // Date-scoped advisory lock serializes competing approvals before checking resources.
-        await manager.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`class-move:${tenantId}:${date}`]);
-        const check = await this.evaluateExtraClassSlot(manager,tenantId,pending.faculty_user_id,pending.course_id,
-          date,startTime,pending.proposed_room,adjustmentId);
-        if (check.status !== 'AVAILABLE') throw new BadRequestException(`Slot changed or cannot be confirmed: ${check.reasons.join('; ')}`);
-        await manager.query(`UPDATE class_adjustments SET status='APPROVED' WHERE tenant_id=$1 AND adjustment_id=$2`, [tenantId,adjustmentId]);
+        await manager.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [
+          `class-move:${tenantId}:${date}`,
+        ]);
+        const check = await this.evaluateExtraClassSlot(
+          manager,
+          tenantId,
+          pending.faculty_user_id,
+          pending.course_id,
+          date,
+          startTime,
+          pending.proposed_room,
+          adjustmentId,
+        );
+        if (check.status !== 'AVAILABLE') {
+          throw new BadRequestException(
+            `Slot changed or cannot be confirmed: ${check.reasons.join('; ')}`,
+          );
+        }
+        await manager.query(
+          `UPDATE class_adjustments SET status='APPROVED' WHERE tenant_id=$1 AND adjustment_id=$2`,
+          [tenantId, adjustmentId],
+        );
       });
     } else {
       await this.dataSource.query(

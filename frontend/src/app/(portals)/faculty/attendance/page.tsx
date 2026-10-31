@@ -1,11 +1,11 @@
-'use client';
+"use client";
 
-import { Suspense, useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
-import Link from 'next/link';
-import { BookOpen, Check, Send, X } from 'lucide-react';
-import { toast } from '@/lib/notifications/falcon-toast';
-import { cn } from '@/lib/utils';
+import { Suspense, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import Link from "next/link";
+import { BookOpen, Check, Download, Loader2, Send, X } from "lucide-react";
+import { toast } from "@/lib/notifications/falcon-toast";
+import { cn } from "@/lib/utils";
 import {
   FacultyPageHeader,
   FacultyPageShell,
@@ -15,14 +15,16 @@ import {
   FacultyInlineLoading,
   FacultyMetricChip,
   FacultyErrorBanner,
-} from '@/components/faculty';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Badge } from '@/components/ui/badge';
-import { useAuthedApi } from '@/lib/api';
-import { useTeachingDepartment } from '@/components/faculty/TeachingDepartmentContext';
-import { withTeachingDeptId } from '@/lib/faculty/teaching-departments';
-import { AttendanceWeekNavigator } from '@/components/faculty/AttendanceWeekNavigator';
+} from "@/components/faculty";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { useAuthedApi } from "@/lib/api";
+import { useAuth } from "@/context/AuthContext";
+import { downloadAuthedFile } from "@/lib/hod-download";
+import { useTeachingDepartment } from "@/components/faculty/TeachingDepartmentContext";
+import { withTeachingDeptId } from "@/lib/faculty/teaching-departments";
+import { AttendanceWeekNavigator } from "@/components/faculty/AttendanceWeekNavigator";
 import {
   completeAttendancePayload,
   initializeAttendanceForm,
@@ -51,6 +53,7 @@ type FacultyClass = {
   has_saved_attendance?: boolean;
   attendance_locked?: boolean;
   awaiting_confirmation?: boolean;
+  cancelled?: boolean;
 };
 
 function isExtraClass(slotId: string | null | undefined) {
@@ -99,6 +102,31 @@ type AttendanceAnalytics = {
   }[];
 };
 
+type AttendanceState = {
+  locked: boolean;
+  attendance_data: { student_id: string; status: UiStatus }[] | null;
+  marking_deadline?: string | null;
+  unlock_request_id?: string | null;
+  unlock_status?:
+    | "PENDING"
+    | "APPROVED"
+    | "REJECTED"
+    | "APPLIED"
+    | "EXPIRED"
+    | null;
+  unlocked_until?: string | null;
+  unlock_history?: {
+    request_id: string;
+    status: "PENDING" | "APPROVED" | "REJECTED" | "APPLIED";
+    reason: string;
+    requested_at: string;
+    decided_at: string | null;
+    decision_remarks: string | null;
+    unlocked_until: string | null;
+    applied_at: string | null;
+  }[];
+};
+
 function todayIso() {
   const d = new Date();
   const y = d.getFullYear();
@@ -107,8 +135,23 @@ function todayIso() {
   return `${y}-${m}-${day}`;
 }
 
+function remainingTimeLabel(deadline: string | null, nowMs: number) {
+  if (!deadline) return null;
+  const remaining = new Date(deadline).getTime() - nowMs;
+  if (!Number.isFinite(remaining) || remaining <= 0) return null;
+  const totalSeconds = Math.ceil(remaining / 1000);
+  const days = Math.floor(totalSeconds / 86_400);
+  const hours = Math.floor((totalSeconds % 86_400) / 3_600);
+  const minutes = Math.floor((totalSeconds % 3_600) / 60);
+  const seconds = totalSeconds % 60;
+  if (days > 0) return `${days}d ${hours}h ${minutes}m`;
+  if (hours > 0) return `${hours}h ${minutes}m ${seconds}s`;
+  return `${minutes}m ${seconds}s`;
+}
+
 function MarkAttendanceContent() {
   const api = useAuthedApi();
+  const { token } = useAuth();
   const { activeDeptId, loading: deptLoading } = useTeachingDepartment();
   const params = useSearchParams();
   const initialCourseId = params.get('courseId');
@@ -123,10 +166,20 @@ function MarkAttendanceContent() {
   const [attendanceRevision, setAttendanceRevision] = useState(0);
   const [locked, setLocked] = useState(false);
   const [hasSavedAttendance, setHasSavedAttendance] = useState(false);
+  const [unlockStatus, setUnlockStatus] =
+    useState<AttendanceState["unlock_status"]>(null);
+  const [unlockedUntil, setUnlockedUntil] = useState<string | null>(null);
+  const [markingDeadline, setMarkingDeadline] = useState<string | null>(null);
+  const [unlockReason, setUnlockReason] = useState("");
+  const [requestingUnlock, setRequestingUnlock] = useState(false);
+  const [unlockHistory, setUnlockHistory] = useState<
+    NonNullable<AttendanceState["unlock_history"]>
+  >([]);
   const [loading, setLoading] = useState(true);
   const [rosterLoading, setRosterLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [exportingAverage, setExportingAverage] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
   const [classesError, setClassesError] = useState<string | null>(null);
   const [rosterError, setRosterError] = useState<string | null>(null);
   const [batchEditorOpen, setBatchEditorOpen] = useState(false);
@@ -138,6 +191,15 @@ function MarkAttendanceContent() {
   const [batchSaving, setBatchSaving] = useState(false);
   const [batchError, setBatchError] = useState<string | null>(null);
   const [rosterRefresh, setRosterRefresh] = useState(0);
+  const [clockNow, setClockNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setClockNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const normalWindowRemaining = remainingTimeLabel(markingDeadline, clockNow);
+  const approvedWindowRemaining = remainingTimeLabel(unlockedUntil, clockNow);
 
   useEffect(() => {
     if (deptLoading) return;
@@ -167,6 +229,20 @@ function MarkAttendanceContent() {
       null,
     [classes, selectedCourseId, selectedTimetableId],
   );
+  const approvedWindowExpired = Boolean(
+    unlockedUntil && new Date(unlockedUntil).getTime() <= clockNow,
+  );
+  const normalWindowExpired = Boolean(
+    !unlockedUntil &&
+    markingDeadline &&
+    new Date(markingDeadline).getTime() <= clockNow,
+  );
+  const attendanceLocked =
+    locked || approvedWindowExpired || normalWindowExpired;
+  const displayedUnlockStatus =
+    unlockStatus === "APPROVED" && approvedWindowExpired
+      ? "EXPIRED"
+      : unlockStatus;
 
   const filteredStudents = useMemo(
     () => {
@@ -244,7 +320,7 @@ function MarkAttendanceContent() {
 
     function applyRoster(
       rosterResolved: Student[],
-      stateResolved: { locked: boolean; attendance_data: { student_id: string; status: UiStatus }[] | null },
+      stateResolved: AttendanceState,
       analyticsResolved: AttendanceAnalytics | null,
       unmappedResolved: Student[],
     ) {
@@ -252,8 +328,12 @@ function MarkAttendanceContent() {
       setStudents(rosterResolved);
       setUnmappedCourseStudents(unmappedResolved);
       setAnalytics(analyticsResolved);
-      setLocked(Boolean(stateResolved.locked));
+      setLocked(Boolean(stateResolved.locked || selectedClass?.cancelled));
       setHasSavedAttendance(Boolean(stateResolved.attendance_data?.length));
+      setUnlockStatus(stateResolved.unlock_status ?? null);
+      setUnlockedUntil(stateResolved.unlocked_until ?? null);
+      setMarkingDeadline(stateResolved.marking_deadline ?? null);
+      setUnlockHistory(stateResolved.unlock_history ?? []);
       setAttendance(
         stateResolved.locked && !stateResolved.attendance_data?.length
           ? {}
@@ -272,7 +352,7 @@ function MarkAttendanceContent() {
           api.get<Student[]>(
             `/api/academics/faculty/course/${selectedCourseId}/students?date=${selectedDate}${timetableQuery}`,
           ),
-          api.get<{ locked: boolean; attendance_data: { student_id: string; status: UiStatus }[] | null }>(
+          api.get<AttendanceState>(
             `/api/academics/faculty/course/${selectedCourseId}/attendance?date=${selectedDate}${timetableQuery}`,
           ),
         ]);
@@ -300,7 +380,16 @@ function MarkAttendanceContent() {
     return () => {
       cancelled = true;
     };
-  }, [api, selectedCourseId, selectedDate, selectedTimetableId, selectedClass?.timetable_id, selectedClass?.is_practical, rosterRefresh]);
+  }, [
+    api,
+    selectedCourseId,
+    selectedDate,
+    selectedTimetableId,
+    selectedClass?.timetable_id,
+    selectedClass?.is_practical,
+    selectedClass?.cancelled,
+    rosterRefresh,
+  ]);
 
   async function openBatchEditor(target: PracticalBatchSlot) {
     setBatchTarget(target);
@@ -346,7 +435,7 @@ function MarkAttendanceContent() {
   }
 
   async function copyPreviousAttendance() {
-    if (!selectedCourseId || !selectedTimetableId || locked) return;
+    if (!selectedCourseId || !selectedTimetableId || attendanceLocked) return;
 
     try {
       const prev = await api.get<{ attendance_data: { student_id: string; status: UiStatus }[] | null }>(
@@ -364,7 +453,7 @@ function MarkAttendanceContent() {
   }
 
   function markAll(status: UiStatus) {
-    if (locked) return;
+    if (attendanceLocked) return;
     setAttendance((current) => {
       const next = { ...current };
       for (const s of filteredStudents) next[s.student_id] = status;
@@ -387,19 +476,21 @@ function MarkAttendanceContent() {
     try {
       const timetableId = selectedTimetableId ?? selectedClass?.timetable_id;
 
-      const result = await api.post<{ saved: number; attendance_updated?: { attendance_percent: string }[] }>(
-        '/api/academics/faculty/attendance',
-        {
-          course_id: selectedCourseId,
-          date: selectedDate,
-          timetable_id: timetableId,
-          attendance_data: payload,
-        },
-      );
-      const state = await api.get<{ locked: boolean }>(
-        `/api/academics/faculty/course/${selectedCourseId}/attendance?date=${selectedDate}${timetableId ? `&timetableId=${encodeURIComponent(timetableId)}` : ''}`,
+      const result = await api.post<{
+        saved: number;
+        attendance_updated?: { attendance_percent: string }[];
+      }>("/api/academics/faculty/attendance", {
+        course_id: selectedCourseId,
+        date: selectedDate,
+        timetable_id: timetableId,
+        attendance_data: payload,
+      });
+      const state = await api.get<AttendanceState>(
+        `/api/academics/faculty/course/${selectedCourseId}/attendance?date=${selectedDate}${timetableId ? `&timetableId=${encodeURIComponent(timetableId)}` : ""}`,
       );
       setLocked(state.locked);
+      setUnlockStatus(state.unlock_status ?? null);
+      setUnlockedUntil(state.unlocked_until ?? null);
       setHasSavedAttendance(true);
       setAttendanceRevision(value => value + 1);
       setClasses(rows => rows.map(row => row.timetable_id === timetableId && row.course_id === selectedCourseId
@@ -420,6 +511,67 @@ function MarkAttendanceContent() {
       toast.error(e instanceof Error ? e.message : 'Save failed');
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function requestUnlock() {
+    if (
+      !selectedCourseId ||
+      !selectedTimetableId ||
+      unlockReason.trim().length < 5
+    ) {
+      toast.error("Enter a reason of at least 5 characters.");
+      return;
+    }
+    setRequestingUnlock(true);
+    try {
+      await api.post("/api/academics/faculty/attendance/unlock-requests", {
+        course_id: selectedCourseId,
+        timetable_id: selectedTimetableId,
+        date: selectedDate,
+        reason: unlockReason.trim(),
+      });
+      setUnlockStatus("PENDING");
+      setUnlockReason("");
+      toast.success(
+        "Unlock request sent to your HOD. You will be notified after the decision.",
+      );
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Could not request attendance unlock",
+      );
+    } finally {
+      setRequestingUnlock(false);
+    }
+  }
+
+  async function downloadAverageAttendance() {
+    if (!token || !selectedCourseId || !selectedTimetableId || !selectedClass) {
+      toast.error("Select a class and sign in before downloading the report.");
+      return;
+    }
+    setExportingAverage(true);
+    try {
+      const safeCode = selectedClass.course_code.replace(
+        /[^A-Za-z0-9_-]+/g,
+        "-",
+      );
+      await downloadAuthedFile(
+        `/api/academics/faculty/course/${encodeURIComponent(selectedCourseId)}/attendance/average-export?date=${encodeURIComponent(selectedDate)}&timetableId=${encodeURIComponent(selectedTimetableId)}`,
+        token,
+        `average-attendance-${safeCode}-${selectedDate}.xlsx`,
+      );
+      toast.success("Average attendance Excel downloaded.");
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Could not download attendance Excel.",
+      );
+    } finally {
+      setExportingAverage(false);
     }
   }
 
@@ -580,16 +732,44 @@ function MarkAttendanceContent() {
                           : 'border-border/60 bg-background hover:border-sgvu-gold/30 hover:bg-muted/40',
                       )}
                     >
-                      <p className="font-semibold text-sgvu-navy">{c.course_code}</p>
-                      {isExtraClass(c.timetable_id) ? <span className="text-xs font-semibold text-amber-800">Approved extra class</span> : null}
-                      <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{c.course_name}</p>
+                      <p className="font-semibold text-sgvu-navy">
+                        {c.course_code}
+                      </p>
+                      {isExtraClass(c.timetable_id) ? (
+                        <span className="text-xs font-semibold text-amber-800">
+                          Approved extra class
+                        </span>
+                      ) : null}
+                      {c.cancelled ? (
+                        <span className="text-xs font-semibold text-rose-700">
+                          Cancelled · attendance history
+                        </span>
+                      ) : null}
+                      <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
+                        {c.course_name}
+                      </p>
                       <p className="mt-1 text-[11px] text-muted-foreground">
                         {String(c.start_time).slice(0, 5)}–{String(c.end_time).slice(0, 5)} · {c.student_count} students
                       </p>
-                      <p className={cn('mt-2 text-xs font-medium', c.has_saved_attendance ? 'text-emerald-700' : 'text-amber-800')}>
-                        {c.awaiting_confirmation ? 'Awaiting department confirmation' : c.has_saved_attendance === true ? 'Attendance recorded'
-                          : c.has_saved_attendance === false ? c.attendance_locked ? 'Not recorded · date locked' : 'Attendance pending'
-                          : 'Attendance status unavailable'}
+                      <p
+                        className={cn(
+                          "mt-2 text-xs font-medium",
+                          c.has_saved_attendance
+                            ? "text-emerald-700"
+                            : "text-amber-800",
+                        )}
+                      >
+                        {c.cancelled
+                          ? "Read only"
+                          : c.awaiting_confirmation
+                            ? "Awaiting department confirmation"
+                            : c.has_saved_attendance === true
+                              ? "Attendance recorded"
+                              : c.has_saved_attendance === false
+                                ? c.attendance_locked
+                                  ? "Not recorded · date locked"
+                                  : "Attendance pending"
+                                : "Attendance status unavailable"}
                       </p>
                     </button>
                   </li>
@@ -619,8 +799,28 @@ function MarkAttendanceContent() {
                     onChange={(e) => setSearchQuery(e.target.value)}
                   />
                   <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
-                    {locked ? <Badge variant="secondary">Locked · read-only</Badge> : null}
-                    <FacultyMetricChip label="Present" value={presentCount} emphasis />
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={exportingAverage || students.length === 0}
+                      onClick={() => void downloadAverageAttendance()}
+                    >
+                      {exportingAverage ? (
+                        <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Download className="mr-1.5 h-3.5 w-3.5" />
+                      )}
+                      Average Excel
+                    </Button>
+                    {attendanceLocked ? (
+                      <Badge variant="secondary">Locked · read-only</Badge>
+                    ) : null}
+                    <FacultyMetricChip
+                      label="Present"
+                      value={presentCount}
+                      emphasis
+                    />
                     <FacultyMetricChip label="Absent" value={absentCount} />
                     <FacultyMetricChip label="Leave" value={leaveCount} />
                   </div>
@@ -650,13 +850,132 @@ function MarkAttendanceContent() {
                   </div>
                 ) : null}
 
-                {locked && !hasSavedAttendance ? (
-                  <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-                    This date is locked and no attendance was recorded for this session. Students are not counted as absent.
-                  </p>
+                {attendanceLocked && !hasSavedAttendance ? (
+                  <div className="space-y-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-950">
+                    <div>
+                      <p className="font-semibold">Attendance window closed</p>
+                      <p className="mt-1">
+                        No attendance was recorded for this session. Students
+                        are not counted as absent.
+                        {markingDeadline
+                          ? ` The normal window closed ${new Date(markingDeadline).toLocaleString()}.`
+                          : ""}
+                      </p>
+                    </div>
+                    {displayedUnlockStatus === "PENDING" ? (
+                      <Badge variant="secondary">
+                        Waiting for HOD approval
+                      </Badge>
+                    ) : (
+                      <div className="space-y-2">
+                        {displayedUnlockStatus === "EXPIRED" ? (
+                          <p className="font-medium text-red-800">
+                            The previous approved marking window expired. Submit
+                            a new request if attendance is still missing.
+                          </p>
+                        ) : null}
+                        {displayedUnlockStatus === "REJECTED" ? (
+                          <p className="font-medium text-red-800">
+                            The previous request was rejected. Review the HOD
+                            comment in request history before submitting again.
+                          </p>
+                        ) : null}
+                        <textarea
+                          aria-label="Reason for attendance unlock"
+                          className="min-h-20 w-full rounded-md border border-amber-300 bg-white px-3 py-2"
+                          placeholder="Explain why attendance was not marked on time"
+                          value={unlockReason}
+                          onChange={(event) =>
+                            setUnlockReason(event.target.value)
+                          }
+                        />
+                        <Button
+                          type="button"
+                          size="sm"
+                          disabled={
+                            requestingUnlock ||
+                            unlockReason.trim().length < 5 ||
+                            selectedClass?.cancelled
+                          }
+                          onClick={() => void requestUnlock()}
+                        >
+                          {requestingUnlock
+                            ? "Sending request…"
+                            : "Request HOD unlock"}
+                        </Button>
+                      </div>
+                    )}
+                  </div>
                 ) : null}
 
-                {!locked && students.length > 0 && (
+                {!attendanceLocked &&
+                markingDeadline &&
+                !hasSavedAttendance &&
+                !unlockedUntil ? (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+                    <p className="font-semibold">Attendance marking deadline</p>
+                    <p>
+                      {normalWindowRemaining
+                        ? `${normalWindowRemaining} remaining — submit before ${new Date(markingDeadline).toLocaleString()}.`
+                        : `Submit before ${new Date(markingDeadline).toLocaleString()}.`}
+                    </p>
+                  </div>
+                ) : null}
+
+                {!attendanceLocked && unlockedUntil && !hasSavedAttendance ? (
+                  <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-950">
+                    <p className="font-semibold">
+                      HOD-approved marking window is open
+                    </p>
+                    <p>
+                      {approvedWindowRemaining
+                        ? `${approvedWindowRemaining} remaining. `
+                        : ""}
+                      Save attendance before{" "}
+                      {new Date(unlockedUntil).toLocaleString()}. The session
+                      locks automatically at that time.
+                    </p>
+                  </div>
+                ) : null}
+
+                {unlockHistory.length > 0 ? (
+                  <details className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-sm">
+                    <summary className="cursor-pointer font-semibold text-sgvu-navy">
+                      Unlock request history ({unlockHistory.length})
+                    </summary>
+                    <ul className="mt-3 space-y-2">
+                      {unlockHistory.map((entry) => (
+                        <li
+                          key={entry.request_id}
+                          className="rounded-md border bg-background px-3 py-2"
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <Badge
+                              variant={
+                                entry.status === "REJECTED"
+                                  ? "destructive"
+                                  : "secondary"
+                              }
+                            >
+                              {entry.status}
+                            </Badge>
+                            <span className="text-xs text-muted-foreground">
+                              {new Date(entry.requested_at).toLocaleString()}
+                            </span>
+                          </div>
+                          <p className="mt-1">{entry.reason}</p>
+                          {entry.decision_remarks ? (
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              HOD comment: {entry.decision_remarks}
+                            </p>
+                          ) : null}
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                ) : null}
+
+                {!attendanceLocked && students.length > 0 && (
                   <div className="flex flex-wrap gap-2">
                     <Button type="button" size="sm" variant="outline" onClick={() => markAll('PRESENT')}>
                       <Check className="mr-1 h-3.5 w-3.5" />
@@ -705,44 +1024,74 @@ function MarkAttendanceContent() {
                             <p className="font-medium text-sgvu-navy">{s.name}</p>
                             <p className="text-xs text-muted-foreground">{s.roll_number || 'No roll number'}</p>
                           </div>
-                          {locked ? (
-                            <Badge variant="secondary" className="self-start sm:self-auto">
-                              {attendance[s.student_id] === 'LEAVE'
-                                ? 'Leave'
+                          {attendanceLocked ? (
+                            <Badge
+                              variant="secondary"
+                              className="self-start sm:self-auto"
+                            >
+                              {attendance[s.student_id] === "LEAVE"
+                                ? "Leave"
                                 : attendance[s.student_id]
                                   ? attendance[s.student_id].toLowerCase()
                                   : 'Not recorded'}
                             </Badge>
                           ) : (
-                          <div className="flex shrink-0 gap-2">
-                            <Button
-                              size="sm"
-                              className="min-w-[5.5rem]"
-                              variant={attendance[s.student_id] === 'PRESENT' ? 'default' : 'outline'}
-                              disabled={locked}
-                              onClick={() => setAttendance((a) => ({ ...a, [s.student_id]: 'PRESENT' }))}
-                            >
-                              Present
-                            </Button>
-                            <Button
-                              size="sm"
-                              className="min-w-[5.5rem]"
-                              variant={attendance[s.student_id] === 'ABSENT' ? 'destructive' : 'outline'}
-                              disabled={locked}
-                              onClick={() => setAttendance((a) => ({ ...a, [s.student_id]: 'ABSENT' }))}
-                            >
-                              Absent
-                            </Button>
-                            <Button
-                              size="sm"
-                              className="min-w-[5.5rem]"
-                              variant={attendance[s.student_id] === 'LEAVE' ? 'secondary' : 'outline'}
-                              disabled={locked}
-                              onClick={() => setAttendance((a) => ({ ...a, [s.student_id]: 'LEAVE' }))}
-                            >
-                              Leave
-                            </Button>
-                          </div>
+                            <div className="flex shrink-0 gap-2">
+                              <Button
+                                size="sm"
+                                className="min-w-[5.5rem]"
+                                variant={
+                                  attendance[s.student_id] === "PRESENT"
+                                    ? "default"
+                                    : "outline"
+                                }
+                                disabled={attendanceLocked}
+                                onClick={() =>
+                                  setAttendance((a) => ({
+                                    ...a,
+                                    [s.student_id]: "PRESENT",
+                                  }))
+                                }
+                              >
+                                Present
+                              </Button>
+                              <Button
+                                size="sm"
+                                className="min-w-[5.5rem]"
+                                variant={
+                                  attendance[s.student_id] === "ABSENT"
+                                    ? "destructive"
+                                    : "outline"
+                                }
+                                disabled={attendanceLocked}
+                                onClick={() =>
+                                  setAttendance((a) => ({
+                                    ...a,
+                                    [s.student_id]: "ABSENT",
+                                  }))
+                                }
+                              >
+                                Absent
+                              </Button>
+                              <Button
+                                size="sm"
+                                className="min-w-[5.5rem]"
+                                variant={
+                                  attendance[s.student_id] === "LEAVE"
+                                    ? "secondary"
+                                    : "outline"
+                                }
+                                disabled={attendanceLocked}
+                                onClick={() =>
+                                  setAttendance((a) => ({
+                                    ...a,
+                                    [s.student_id]: "LEAVE",
+                                  }))
+                                }
+                              >
+                                Leave
+                              </Button>
+                            </div>
                           )}
                         </li>
                       ))}
@@ -752,15 +1101,22 @@ function MarkAttendanceContent() {
 
                 <div className="flex flex-col gap-2 border-t border-border/50 pt-4 sm:flex-row sm:items-center sm:justify-between">
                   <p className="text-xs text-muted-foreground">
-                    {locked && !hasSavedAttendance
-                      ? 'No saved attendance for this locked session.'
-                      : students.length > 0
-                      ? `${presentCount} present · ${absentCount} absent · ${leaveCount} leave · ${students.length} in scheduled roster (${filteredStudents.length} shown)`
-                      : 'Save syncs attendance to enrollment percentages.'}
+                    {selectedClass?.cancelled
+                      ? "This class was cancelled. Saved attendance is retained as read-only history."
+                      : attendanceLocked && !hasSavedAttendance
+                        ? "No saved attendance for this locked session."
+                        : students.length > 0
+                          ? `${presentCount} present · ${absentCount} absent · ${leaveCount} leave · ${students.length} in scheduled roster (${filteredStudents.length} shown)`
+                          : "Save syncs attendance to enrollment percentages."}
                   </p>
                   <Button
                     className="sm:min-w-[10rem]"
-                    disabled={locked || saving || rosterLoading || students.length === 0}
+                    disabled={
+                      attendanceLocked ||
+                      saving ||
+                      rosterLoading ||
+                      students.length === 0
+                    }
                     onClick={() => void save()}
                   >
                     {saving ? 'Saving…' : 'Save attendance'}

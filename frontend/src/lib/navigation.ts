@@ -905,6 +905,7 @@ export const hodPortal: PortalConfig = {
         { label: 'Profile Corrections', href: '/hod/approvals/profile-corrections', icon: ClipboardCheck, keywords: ['student profile', 'edit', 'correction'] },
         { label: 'Proxy Approvals', href: '/hod/approvals/proxy', icon: Users, keywords: ['substitute', 'alternate', 'leave', 'proxy'] },
         { label: 'Extra Class Approvals', href: '/hod/approvals/extra-classes', icon: CalendarClock, keywords: ['substitute', 'cancel', 'timetable'] },
+        { label: 'Attendance Unlocks', href: '/hod/approvals/attendance-unlocks', icon: ClipboardCheck, keywords: ['attendance', 'late', 'missed', 'unlock', 'approval'] },
         { label: 'Gate Pass Approvals', href: '/hod/approvals/gate-passes', icon: DoorOpen, keywords: ['gate pass', 'outpass', 'leave gate'] },
         { label: 'Event Approvals', href: '/hod/events', icon: PartyPopper, keywords: ['club', 'campus events'] },
         { label: 'Venue Booking Approvals', href: '/hod/venue-requests', icon: MapPin, keywords: ['room', 'booking', 'venue'] },

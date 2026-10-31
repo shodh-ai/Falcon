@@ -66,6 +66,7 @@ import { FacultyTeachingDepartmentsService } from './faculty-teaching-department
 import { DeanIntelligenceService } from './dean-intelligence.service';
 import { DeanIntelligenceController } from './dean-intelligence.controller';
 import { DeanAuditService } from './dean-audit.service';
+import { AttendanceDeadlineReminderService } from './attendance-deadline-reminder.service';
 
 @Module({
   imports: [
@@ -140,6 +141,7 @@ import { DeanAuditService } from './dean-audit.service';
     FacultyTeachingDepartmentsService,
     DeanIntelligenceService,
     DeanAuditService,
+    AttendanceDeadlineReminderService,
   ],
   exports: [
     AcademicsService,
