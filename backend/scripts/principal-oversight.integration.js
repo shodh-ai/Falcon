@@ -57,6 +57,10 @@ async function main() {
       CREATE TABLE course_modules(tenant_id uuid,course_id uuid,faculty_user_id uuid,status text,deleted_at timestamptz);
       CREATE TABLE academic_marks(tenant_id uuid,course_id uuid,student_user_id uuid,status text);
       CREATE TABLE task_assignments(tenant_id uuid,dept_id int,assigned_to uuid,status text,deleted_at timestamptz,assigned_at timestamptz);`);
+    await c.query(`CREATE TABLE campus_events(event_id uuid PRIMARY KEY,tenant_id uuid,title text,status text,
+      advisor_approval text,hod_approval text,dean_approval text,estate_approval text,funds_needed numeric,finance_approval text);`);
+    await c.query(fs.readFileSync(require('path').join(__dirname,
+      '../migrations/20261031152000_event_class_cohorts.sql'), 'utf8'));
     const tenant = randomUUID(),
       other = randomUUID(),
       principal = randomUUID(),
