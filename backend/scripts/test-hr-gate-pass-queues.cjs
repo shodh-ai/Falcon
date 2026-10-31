@@ -24,14 +24,14 @@ async function main() {
       CREATE TEMP TABLE hr_employee_profiles (user_id uuid, tenant_id uuid, entity_id int);
       CREATE TEMP TABLE departments (dept_id int, dept_name text);
       CREATE TEMP TABLE staff_gate_passes (pass_id uuid, tenant_id uuid, staff_user_id uuid, reporting_officer_id uuid,
-        out_time timestamp, expected_in_time timestamp, reason text, status text);
+        out_time timestamp, expected_in_time timestamp, reason text, status text, created_at timestamptz DEFAULT now());
       CREATE TEMP TABLE hr_access_controls (tenant_id uuid, user_id uuid, module_name text, can_view bool, can_approve bool,
         entity_scope int[], department_scope int[]);
     `);
     await qr.query(`INSERT INTO users VALUES ($1,$2,'Synthetic Faculty','test@example.invalid',43,7)`, [staff, tenant]);
     await qr.query('INSERT INTO hr_employee_profiles VALUES ($1,$2,7)', [staff, tenant]);
     await qr.query(`INSERT INTO departments VALUES (43,'Pharmacy')`);
-    await qr.query(`INSERT INTO staff_gate_passes VALUES
+    await qr.query(`INSERT INTO staff_gate_passes (pass_id,tenant_id,staff_user_id,reporting_officer_id,out_time,expected_in_time,reason,status) VALUES
       ('30000000-0000-4000-8000-000000000001',$1,$2,$3,now(),now(),'fixture','PENDING'),
       ('30000000-0000-4000-8000-000000000002',$1,$2,$3,now(),now(),'fixture','PENDING_HR')`, [tenant, staff, hod]);
     const service = Object.assign(Object.create(HrService.prototype), {
@@ -40,6 +40,7 @@ async function main() {
     });
     let rows = await service.listHrGatePassReviews(tenant, 7, actor);
     assert.equal(rows.length, 2);
+    assert.ok(rows.every(row => row.created_at instanceof Date && Number.isFinite(row.created_at.getTime())));
     assert.equal(rows.find(row => row.status === 'PENDING').can_review, false);
     assert.equal(rows.find(row => row.status === 'PENDING_HR').can_review, true);
     assert.equal((await service.listHrGatePassReviews(tenant, 8, actor)).length, 0);
