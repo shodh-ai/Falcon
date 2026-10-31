@@ -8,6 +8,7 @@ import {
 import { DataSource, EntityManager } from 'typeorm';
 import { createHash } from 'crypto';
 import { remainingLeadershipApprovers, resolveLeadershipChain } from './approval-chain';
+import { regularizationRoute } from '../hr/regularization-route';
 import {
   CampusScopeService,
   ScopedAuthUser,
@@ -254,16 +255,18 @@ export class DepartmentLeadershipService {
           WHERE tenant_id=$2 AND user_id=$3`,
           [chain.approverIds[0], actor.tenant_id, person.user_id]);
       }
-      const pending = await m.query<Array<{ leave_id: string; staff_user_id: string;
+      const pending = await m.query<Array<{ leave_id: string; staff_user_id: string; route_policy?: string;
         current_approver_user_id: string | null; current_step_order: number }>>(
-        `SELECT r.leave_id,r.staff_user_id,r.current_approver_user_id,r.current_step_order
+        `SELECT r.leave_id,r.staff_user_id,r.current_approver_user_id,r.current_step_order,
+          (SELECT policy FROM hr_department_request_routes route WHERE route.leave_id=r.leave_id AND route.tenant_id=r.tenant_id) AS route_policy
          FROM staff_leave_requests r JOIN users u ON u.user_id=r.staff_user_id
          WHERE r.tenant_id=$1 AND u.dept_id=$2 AND r.status IN ('PENDING','HOD_APPROVED')
          FOR UPDATE OF r`, [actor.tenant_id, deptId],
       );
       for (const request of pending) {
-        const chain = await resolveLeadershipChain((sql, args) => m.query(sql, args),
-          actor.tenant_id!, request.staff_user_id);
+        const chain = request.route_policy === 'REGULARIZATION_HOD_HR'
+          ? await regularizationRoute((sql, args) => m.query(sql, args), actor.tenant_id!, request.staff_user_id)
+          : await resolveLeadershipChain((sql, args) => m.query(sql, args), actor.tenant_id!, request.staff_user_id);
         if (!chain) continue;
         const approved = await m.query<Array<{ actor_user_id: string; step_order: number }>>(
           `SELECT actor_user_id,step_order FROM hr_staff_request_decisions

@@ -22,6 +22,9 @@ export class StaffGatePass extends BaseTenantEntity {
   @PrimaryGeneratedColumn('uuid')
   pass_id: string;
 
+  @Column({type: 'timestamptz', nullable:true, default: ()=>'now()'})
+  created_at: Date | null;
+
   @Column({ type: 'uuid' })
   staff_user_id: string;
 

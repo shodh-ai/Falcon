@@ -80,6 +80,7 @@ export function HrAppealsPanel({ rejectedRequests = [], onChanged }: {
 
   return <section className="space-y-3 rounded-xl border border-border bg-background p-4">
     <h3 className="font-semibold text-sgvu-navy">HR request appeals</h3>
+    <p className="text-sm text-muted-foreground">Up to three finally approved leave reconsiderations per appeal submission month. Pending and rejected appeals do not count. Each rejected request has one reconsideration cycle.</p>
     {eligible.map((request) => <div key={request.leave_id} className="space-y-2 border-t pt-3 text-sm">
       <p>Rejected {request.request_type || request.leave_type || 'request'}</p>
       <Input aria-label="Appeal reason" placeholder="Explain why this decision should be reconsidered"
@@ -90,9 +91,11 @@ export function HrAppealsPanel({ rejectedRequests = [], onChanged }: {
     </div>)}
     {myAppeals.map((appeal) => <p key={appeal.appeal_id} className="border-t pt-2 text-sm">
       Your appeal: {appeal.status.replaceAll('_', ' ').toLowerCase()} · {appeal.reason}
+      <span className="block text-xs text-muted-foreground">Raised on {new Date(appeal.created_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}</span>
     </p>)}
     {reviewQueue.map((appeal) => <div key={appeal.appeal_id} className="space-y-2 border-t pt-3 text-sm">
       <p><strong>{appeal.requester_name}</strong> appealed: {appeal.reason}</p>
+      <p className="text-xs text-muted-foreground">Raised on {new Date(appeal.created_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}</p>
       <Input aria-label="Appeal review reason" placeholder="Reason for this appeal decision"
         value={reasons[appeal.appeal_id] || ''}
         onChange={(event) => setReasons((current) => ({ ...current, [appeal.appeal_id]: event.target.value }))} />

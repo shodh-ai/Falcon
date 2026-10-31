@@ -10,6 +10,7 @@ import { useHrEntity } from '@/context/HrEntityContext';
 
 type GatePass = {
   pass_id: string;
+  created_at?: string | null;
   employee_name: string;
   employee_email: string;
   dept_name: string | null;
@@ -63,6 +64,7 @@ export default function HrGatePassesPage() {
                 <p className="text-sm text-muted-foreground">{row.employee_email}{row.dept_name ? ` · ${row.dept_name}` : ''}</p>
                 <p className="text-sm">Out: {time(row.out_time)} · Expected return: {time(row.expected_in_time)}</p>
                 <p className="whitespace-pre-wrap text-sm">{row.reason}</p>
+                <p className="text-xs text-muted-foreground">Raised on {row.created_at ? time(row.created_at) : 'Not recorded'}</p>
                 <HrStatusBadge status={row.status} />
               </div>
               {row.status === 'PENDING' ? <p className="max-w-xs text-sm text-muted-foreground">Awaiting reporting-officer approval. HR cannot finalize this pass yet.</p>

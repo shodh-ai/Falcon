@@ -4,7 +4,7 @@ export type PublishedSlot = {
   timetable_id: string; day_of_week: number; start_time: string; end_time: string;
   course_code: string; course_name: string; room: string | null; section?: string | null;
   awaiting_confirmation?: boolean;
-  display_status?: 'CLASS' | 'PRACTICAL' | 'EXTRA_CLASS' | 'CANCELLED' | 'RESCHEDULED';
+  display_status?: 'CLASS' | 'PRACTICAL' | 'EXTRA_CLASS' | 'CANCELLED' | 'RESCHEDULED' | 'EVENT_EXEMPTED';
 };
 export const timetableMinutes = (time: string) => {
   const [hours, minutes] = time.split(':').map(Number);
@@ -16,6 +16,7 @@ export function timetableBoundaries(slots: PublishedSlot[]) {
 const display = (minutes: number) => `${Math.floor(minutes / 60) % 12 || 12}:${String(minutes % 60).padStart(2, '0')} ${minutes >= 720 ? 'PM' : 'AM'}`;
 const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const slotStyle = {
+  EVENT_EXEMPTED: 'border-teal-300 bg-teal-50 text-teal-950',
   CLASS: 'border-blue-200 bg-blue-50 text-blue-950',
   PRACTICAL: 'border-emerald-200 bg-emerald-50 text-emerald-950',
   EXTRA_CLASS: 'border-amber-300 bg-amber-50 text-amber-950',
@@ -44,7 +45,7 @@ export function PublishedTimetableGrid({ slots, selectedId, onSelect, weekStart 
   return <div className="overflow-x-auto" aria-label="Weekly published timetable">
     <div className="min-w-[830px] p-3">
       <div className="mb-3 flex flex-wrap gap-2 text-xs" aria-label="Class colour key">
-        {(['CLASS', 'PRACTICAL', 'EXTRA_CLASS', 'CANCELLED', 'RESCHEDULED'] as const).map(status =>
+        {(['CLASS', 'PRACTICAL', 'EXTRA_CLASS', 'CANCELLED', 'RESCHEDULED', 'EVENT_EXEMPTED'] as const).map(status =>
           <span key={status} className={`rounded-md border px-2 py-1 font-semibold ${slotStyle[status]}`}>{status.replace('_', ' ').toLowerCase()}</span>)}
       </div>
       <div className="grid border-l border-t border-slate-200 text-xs" style={{ gridTemplateColumns: `64px repeat(${teachingDays.length}, minmax(0, 1fr))` }}>

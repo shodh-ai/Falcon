@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import { usePathname, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
+import { AttendanceReopeningPanel } from '@/components/faculty/AttendanceReopeningPanel';
 import { BookOpen, Check, Send, X } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { cn } from '@/lib/utils';
@@ -52,6 +53,7 @@ type FacultyClass = {
   attendance_locked?: boolean;
   awaiting_confirmation?: boolean;
   cancelled?: boolean;
+  event_exemption?: {event_title:string;event_id:string} | null;
 };
 
 function isExtraClass(slotId: string | null | undefined) {
@@ -241,7 +243,7 @@ function MarkAttendanceContent() {
 
   useEffect(() => {
     if (!selectedCourseId) return;
-    if (selectedClass?.cancelled) {
+    if (selectedClass?.cancelled || selectedClass?.event_exemption) {
       setStudents([]);
       setUnmappedCourseStudents([]);
       setRosterLoading(false);
@@ -309,7 +311,7 @@ function MarkAttendanceContent() {
     return () => {
       cancelled = true;
     };
-  }, [api, selectedCourseId, selectedDate, selectedTimetableId, selectedClass?.timetable_id, selectedClass?.is_practical, selectedClass?.cancelled, rosterRefresh]);
+  }, [api, selectedCourseId, selectedDate, selectedTimetableId, selectedClass?.timetable_id, selectedClass?.is_practical, selectedClass?.cancelled, selectedClass?.event_exemption, rosterRefresh]);
 
   async function openBatchEditor(target: PracticalBatchSlot) {
     setBatchTarget(target);
@@ -594,6 +596,7 @@ function MarkAttendanceContent() {
                       )}
                     >
                       <p className="font-semibold text-sgvu-navy">{c.course_code}</p>
+                      {c.event_exemption ? <Badge className="ml-2 bg-teal-700">Event exempted</Badge> : null}
                       {c.cancelled ? <Badge variant="destructive" className="ml-2">Cancelled</Badge> : null}
                       {isExtraClass(c.timetable_id) ? <span className="text-xs font-semibold text-amber-800">Approved extra class</span> : null}
                       <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{c.course_name}</p>
@@ -601,7 +604,7 @@ function MarkAttendanceContent() {
                         {String(c.start_time).slice(0, 5)}–{String(c.end_time).slice(0, 5)} · {c.student_count} students
                       </p>
                       <p className={cn('mt-2 text-xs font-medium', c.has_saved_attendance ? 'text-emerald-700' : 'text-amber-800')}>
-                        {c.cancelled ? 'No attendance needed · class cancelled' : c.awaiting_confirmation ? 'Awaiting department confirmation' : c.has_saved_attendance === true ? 'Attendance recorded'
+                        {c.event_exemption ? 'Event coordinator records attendance' : c.cancelled ? 'No attendance needed · class cancelled' : c.awaiting_confirmation ? 'Awaiting department confirmation' : c.has_saved_attendance === true ? 'Attendance recorded'
                           : c.has_saved_attendance === false ? c.attendance_locked ? 'Not recorded · date locked' : 'Attendance pending'
                           : 'Attendance status unavailable'}
                       </p>
@@ -618,6 +621,8 @@ function MarkAttendanceContent() {
           >
             {!selectedClass ? (
               <FacultyEmptyState description="Select a class from the list to load the roster." />
+            ) : selectedClass.event_exemption ? (
+              <p role="status" className="rounded-lg border border-teal-200 bg-teal-50 p-4 text-sm text-teal-900">Exempted for event: {selectedClass.event_exemption.event_title}. Workload remains counted. The approved coordinator marks attendance in <Link className="underline" href="/faculty/event-attendance">Mark Event Attendance</Link>.</p>
             ) : selectedClass.cancelled ? (
               <p role="status" className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-900">
                 This dated class was cancelled. There is no attendance to mark for this session.
@@ -668,6 +673,7 @@ function MarkAttendanceContent() {
                   </div>
                 ) : null}
 
+                {locked && selectedTimetableId && <AttendanceReopeningPanel courseId={selectedCourseId || undefined} sessionKey={selectedTimetableId} date={selectedDate} />}
                 {locked && !hasSavedAttendance ? (
                   <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
                     This date is locked and no attendance was recorded for this session. Students are not counted as absent.

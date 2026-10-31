@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useAuthedApi } from "@/lib/api";
 type Pass = {
   pass_id: string;
+  created_at?:string | null;
   out_time: string;
   expected_in_time: string;
   reason: string;
@@ -61,7 +62,7 @@ export function PrincipalGatePasses() {
                   {new Date(row.out_time).toLocaleString("en-IN")} -{" "}
                   {new Date(row.expected_in_time).toLocaleString("en-IN")}
                 </p>
-                <p>{row.reason}</p>
+                <p>{row.reason}</p><p className="text-xs text-muted-foreground">Raised on {row.created_at ? new Date(row.created_at).toLocaleString('en-IN',{timeZone:'Asia/Kolkata'}) : 'Not recorded'}</p>
               </div>
               <div className="flex gap-2">
                 <button

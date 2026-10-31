@@ -18,6 +18,7 @@ import { HrShift } from '../../entities/hr-shift.entity';
 import { HrEmployeeProfile } from '../../entities/hr-employee-profile.entity';
 import { HrDailyAttendance } from '../../entities/hr-daily-attendance.entity';
 import { HrController } from './hr.controller';
+import { GatePassVerificationController } from './gate-pass-verification.controller';
 import { HrApiPolicyController } from './hr-api-policy.controller';
 import { HrApiPolicyService } from './hr-api-policy.service';
 import { HrService } from './hr.service';
@@ -75,7 +76,7 @@ import { NotificationsModule } from '../../core/notifications/notifications.modu
       HrDailyAttendance,
     ]),
   ],
-  controllers: [HrController,HrApiPolicyController],
+  controllers: [HrController,HrApiPolicyController,GatePassVerificationController],
   providers: [
     HrApiPolicyService,
     HrService,

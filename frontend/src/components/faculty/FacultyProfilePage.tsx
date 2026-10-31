@@ -55,6 +55,8 @@ type WeeklyWorkload = {
   scheduled_minutes: number;
   cancelled_sessions: number;
   cancelled_minutes: number;
+  event_exempted_sessions?: number;
+  event_exempted_minutes?: number;
   extra_sessions: number;
   extra_minutes: number;
   effective_sessions: number;
@@ -117,6 +119,7 @@ export function WeeklyWorkloadPanel({ api }: {
             <FacultyStatCard label="Assigned sessions" value={formatTeachingDuration(week.scheduled_minutes / 60)} sub={`${week.scheduled_sessions} classes before cancellations and extras`} />
             <FacultyStatCard label="Approved cancellations" value={`− ${formatTeachingDuration(week.cancelled_minutes / 60)}`} sub={`${week.cancelled_sessions} classes`} />
             <FacultyStatCard label="Approved extra classes" value={`+ ${formatTeachingDuration(week.extra_minutes / 60)}`} sub={`${week.extra_sessions} classes`} />
+            <FacultyStatCard label="Event-exempted classes" value={String(week.event_exempted_sessions ?? 0)} sub="Included in workload · coordinator records attendance" />
             <FacultyStatCard label="Adjusted workload" value={formatTeachingDuration(week.effective_minutes / 60)} sub={`${week.effective_sessions} classes this week`} />
           </div>
           {week.unmatched_cancellations > 0 && (

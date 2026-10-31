@@ -728,7 +728,7 @@ export class HrService {
   async listHrGatePassReviews(tenantId: string, entityId: number, actorUserId: string) {
     const hrAdmin = await this.workflowRouting.getHrAdmin(tenantId);
     return this.users.manager.query(
-      `SELECT pass.pass_id, pass.staff_user_id, pass.out_time, pass.expected_in_time,
+      `SELECT pass.pass_id, pass.staff_user_id, pass.out_time, pass.expected_in_time, pass.created_at,
               pass.reason, pass.status, employee.name AS employee_name,
               employee.official_email AS employee_email, department.dept_name,
               (pass.status = 'PENDING_HR' AND $3::uuid = $4::uuid

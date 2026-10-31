@@ -42,6 +42,7 @@ type Request = {
   end_time?: string | null;
   status: string;
   reason: string | null;
+  applied_at?: string;
   current_approver_name?: string | null;
   effective_chain?: string[] | null;
 };
@@ -254,6 +255,7 @@ export function MyLeavesPanel({ allowDemoFallback = true, enableTeachingProxy = 
             <span className="mb-1.5 flex items-center gap-1 font-medium text-sgvu-navy">
               <Paperclip className="h-3.5 w-3.5" /> Supporting document (optional)
             </span>
+            <span className="mb-2 block text-xs text-muted-foreground">Attach evidence for this request, such as a medical certificate or an event/duty letter. Your reporting officer can review it with the request. This does not replace documents in your HR vault.</span>
             <Input type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={(e: ChangeEvent<HTMLInputElement>) => setAttachment(e.target.files?.[0] ?? null)} />
           </label>
           <div className="sm:col-span-2">
@@ -285,6 +287,7 @@ export function MyLeavesPanel({ allowDemoFallback = true, enableTeachingProxy = 
                       {r.start_time && r.end_time ? ` · ${r.start_time.slice(0, 5)}–${r.end_time.slice(0, 5)}` : ''}
                     </p>
                     {r.reason ? <p className="mt-0.5 text-xs text-muted-foreground truncate max-w-md">{r.reason}</p> : null}
+                    <p className="mt-1 text-xs text-muted-foreground">Raised on {r.applied_at ? new Date(r.applied_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }) : 'Not recorded'}</p>
                     {r.current_approver_name && <p className="mt-1 text-xs text-muted-foreground">Awaiting {r.current_approver_name}</p>}
                     {r.effective_chain?.length ? <p className="text-xs text-muted-foreground">Approval path: {r.effective_chain.join(' → ')}</p> : null}
                   </div>

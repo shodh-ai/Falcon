@@ -27,6 +27,9 @@ interface ProfileMenuProps {
   profileHref?: string;
 }
 
+import { getSubdomainFromClient } from '@/lib/tenant';
+import { departmentDisplayName } from '@/lib/department-display';
+
 export function ProfileMenu({ profileHref }: ProfileMenuProps) {
   const { user, logout } = useAuth();
   const router = useRouter();
@@ -40,6 +43,8 @@ export function ProfileMenu({ profileHref }: ProfileMenuProps) {
   const [idCardOpen, setIdCardOpen] = useState(false);
 
   const headerDisplayName = (() => {
+    if (getSubdomainFromClient() === 'sgvu' && String(workspaceRole).toLowerCase() === 'hod' &&
+      departmentDisplayName(user?.department) === 'Gyan Vihar School of Pharmacy') return 'HOD Pharma';
     const roleCandidates = [
       workspaceRole,
       user?.primaryRole,

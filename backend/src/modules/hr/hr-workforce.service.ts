@@ -33,6 +33,7 @@ import {
 import { canAccessTeamApprovals } from './utils/reporting-officer.util';
 import { workforceStatusPathForRoles } from './utils/workforce-portal-links.util';
 import { finalHrReviewSql, hrRequestScopeSql } from './hr-final-review.sql';
+import { assertWorkforceMonthlyApprovalLimit } from './workforce-monthly-limits';
 
 export type ApplyWorkforceRequestDto = {
   request_type: StaffRequestType;
@@ -1150,6 +1151,9 @@ export class HrWorkforceService {
     rejectingUserId: string,
     rejectingLevel?: string | null,
   ): Promise<string | null> {
+    const [fixedRoute] = await manager.query(`SELECT approver_ids FROM hr_department_request_routes
+      WHERE tenant_id=$1 AND leave_id=$2 AND policy='REGULARIZATION_HOD_HR'`, [tenantId, leaveId]);
+    if (fixedRoute) return fixedRoute.approver_ids[0] === rejectingUserId ? fixedRoute.approver_ids[1] : null;
     const [configured] = await manager.query<Array<{
       dept_id: number; hod_user_id: string | null; principal_user_id: string | null;
       dean_user_id: string | null; higher_officer_id: string | null;
@@ -1384,6 +1388,11 @@ export class HrWorkforceService {
     idempotencyKey?: string,
     decisionReason?: string,
   ): Promise<StaffLeaveRequest> {
+    if (action === 'APPROVE' && row.status === 'HR_APPROVED' &&
+        (row.request_type === 'REGULARIZATION' || row.request_type === 'LEAVE')) {
+      await assertWorkforceMonthlyApprovalLimit(manager, row.tenant_id,
+        row.staff_user_id, row.leave_id);
+    }
     const updated = await manager.query<StaffLeaveRequest[]>(
       `UPDATE staff_leave_requests
        SET status = $1, current_step_order = $2,
@@ -1475,11 +1484,11 @@ export class HrWorkforceService {
     expected: { status: string; stepOrder: number; approverUserId: string | null },
     actorUserId: string,
   ) {
-    const [departmentRoute] = await manager.query<Array<{ leave_id: string }>>(
-      `SELECT leave_id FROM hr_department_request_routes
+    const [departmentRoute] = await manager.query<Array<{ leave_id: string; policy?: string }>>(
+      `SELECT leave_id,policy FROM hr_department_request_routes
        WHERE tenant_id=$1 AND leave_id=$2`, [row.tenant_id, row.leave_id],
     );
-    if (departmentRoute) return; // Explicit department confirmation may repeat after a policy change.
+    if (departmentRoute && departmentRoute.policy !== 'REGULARIZATION_HOD_HR') return;
     const previous = await manager.query<Array<{ actor_user_id: string }>>(
       `SELECT actor_user_id FROM hr_staff_request_decisions
        WHERE tenant_id = $1 AND leave_id = $2 AND action = 'APPROVE'`,
@@ -1898,10 +1907,11 @@ export class HrWorkforceService {
     row: StaffLeaveRequest,
   ): Promise<string | null> {
     if (!row.workflow_id) {
-      const [route] = await this.dataSource.query<Array<{ leave_id: string }>>(
-        `SELECT leave_id FROM hr_department_request_routes WHERE tenant_id=$1 AND leave_id=$2`,
+      const [route] = await this.dataSource.query<Array<{ leave_id: string; policy?: string; current_index?: number }>>(
+        `SELECT leave_id,policy,current_index FROM hr_department_request_routes WHERE tenant_id=$1 AND leave_id=$2`,
         [tenantId, row.leave_id],
       );
+      if (route?.policy === 'REGULARIZATION_HOD_HR') return route.current_index === 0 ? 'DEPT_HEAD' : 'HR_EXECUTIVE';
       if (route) return 'DEPARTMENT_OFFICE';
       return row.current_step_order === 1
         ? 'REPORTING_MANAGER'

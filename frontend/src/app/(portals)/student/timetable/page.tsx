@@ -42,6 +42,7 @@ type TimetableSlot = {
   session_date: string | null;
   attendance_status: 'PRESENT' | 'ABSENT' | 'PENDING' | null;
   cancelled?: boolean;
+  event_exemption?: {event_id:string;event_title:string} | null;
 };
 
 type WeekTimetableResponse = {
@@ -167,7 +168,8 @@ function SlotButton({
           <span className="font-medium text-muted-foreground">{slot.course_code}</span>
           {slot.is_extra_class && <Badge variant="outline">Approved extra class</Badge>}
           {batch && <Badge variant="secondary">{batch}</Badge>}
-          {slot.cancelled && <Badge variant="destructive">Cancelled</Badge>}
+          {slot.event_exemption && <Badge className="bg-teal-700">Event exempted</Badge>}
+                          {slot.cancelled && <Badge variant="destructive">Cancelled</Badge>}
           {slot.is_virtual && <Badge variant="outline">Online</Badge>}
         </div>
         <p className="mt-1.5 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
@@ -352,6 +354,7 @@ export default function TimetablePage() {
                 <DialogTitle>{selectedSlot.course_name}</DialogTitle>
               </DialogHeader>
               <div className="space-y-4 text-sm">
+                {selectedSlot.event_exemption && <p className="rounded-lg bg-teal-50 p-3 text-teal-900">Exempted for event: {selectedSlot.event_exemption.event_title}. Attendance is recorded by the event coordinator.</p>}
                 {selectedSlot.cancelled && (
                   <p role="status" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-900">
                     This class was cancelled. No attendance is expected for this session.
